@@ -310,12 +310,26 @@ async def update_ai_model(request: Request, db=Depends(get_database)):
     # value we store in installed.json matches the model the export actually
     # produces, mirroring ``download_ai_model``.
     imgsz = ((imgsz + 16) // 32) * 32
+    # Family routing: a face-family update must rebuild the SECONDARY face
+    # pass (face_enabled + face_model_path) just like ``download_ai_model``
+    # does, otherwise the new bytes land on disk but the running detector
+    # still points at the pre-update file. The family flag comes from the
+    # catalog entry by default (matching download_ai_model) and can be
+    # overridden by the caller for parity with that endpoint.
+    is_face_model = bool(body.get('is_face_model'))
+    if 'is_face_model' not in body:
+        is_face_model = str(info.get('labels') or '').endswith('face.names')
     # Audit-log gate (audit-trail finding): same shape as
     # ``download_ai_model`` so the admin actions for the matching
     # model endpoint is traceable.
     write_audit_log(request, db, 'update', 'settings.ai.model',
-                    details={'model_id': model_name, 'switch_active': False, 'imgsz': imgsz})
-    return await run_in_threadpool(_do_download_model, model_name, False, imgsz)
+                    details={'model_id': model_name, 'switch_active': False, 'configure_face': is_face_model, 'imgsz': imgsz})
+    # ``switch_active=False`` because an update is in-place: we never want
+    # an update to overwrite the PRIMARY object slot with a face-family
+    # model, nor to silently swap an object model that was previously
+    # active. ``configure_face`` follows family routing so a face update
+    # rewires the secondary face pass to the freshly-exported bytes.
+    return await run_in_threadpool(_do_download_model, model_name, False, imgsz, is_face_model)
 
 
 @router.delete('/api/settings/ai/models/{model_id}')

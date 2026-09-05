@@ -410,7 +410,14 @@ function bindModelCardActions() {
           result = await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify(payload) });
         } else if (action === 'update') {
           btn.textContent = 'Updating\u2026';
-          result = await api('/api/settings/ai/update-model', { method: 'POST', body: JSON.stringify({ model: modelName, imgsz: modelImgsz || undefined }) });
+          // Pass the family so the backend can route the rebuilt model to
+          // the correct slot: face-family updates must rewire the secondary
+          // face pass (face_model_path), otherwise the new ONNX lands on
+          // disk but the running detector keeps pointing at the pre-update
+          // file. The backend falls back to the catalog-derived label file
+          // if this flag is omitted, so omitting it still does the right
+          // thing for the canonical catalog entries.
+          result = await api('/api/settings/ai/update-model', { method: 'POST', body: JSON.stringify({ model: modelName, imgsz: modelImgsz || undefined, is_face_model: isFace }) });
           delete modelUpdateMap[modelId];
         } else if (action === 'delete') {
           btn.textContent = 'Deleting\u2026';

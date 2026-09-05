@@ -21,7 +21,8 @@
 
     <div class="settings-tabs" role="tablist" aria-label="ONNX sections">
       <button class="settings-tab" type="button" role="tab" id="tab-status" aria-controls="panel-status" data-tab="status" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">🔍</span><span class="settings-tab-label">Status</span></button>
-      <button class="settings-tab" type="button" role="tab" id="tab-models" aria-controls="panel-models" data-tab="models" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">📦</span><span class="settings-tab-label">Models</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-object-models" aria-controls="panel-object-models" data-tab="object-models" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">📦</span><span class="settings-tab-label">Object Models</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-face-models" aria-controls="panel-face-models" data-tab="face-models" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">👤</span><span class="settings-tab-label">Face Models</span></button>
       <button class="settings-tab" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" data-tab="settings" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">⚙️</span><span class="settings-tab-label">Settings</span></button>
     </div>
 
@@ -57,7 +58,7 @@
 
     </div><!-- /panel-status -->
 
-    <div class="settings-panel" id="panel-models" role="tabpanel" aria-labelledby="tab-models" data-panel="models" hidden>
+    <div class="settings-panel" id="panel-object-models" role="tabpanel" aria-labelledby="tab-object-models" data-panel="object-models" hidden>
 
     <div id="modelUpdatesMessage" class="muted" style="margin-bottom:12px"></div>
 
@@ -73,6 +74,14 @@
       <p id="objectModelsEmpty" class="muted" hidden>No object models available.</p>
     </section>
 
+    <div class="button-row" style="margin-top:16px">
+      <button id="checkModelUpdatesBtn" class="btn-info" type="button">Check for Updates</button>
+    </div>
+
+    </div><!-- /panel-object-models -->
+
+    <div class="settings-panel" id="panel-face-models" role="tabpanel" aria-labelledby="tab-face-models" data-panel="face-models" hidden>
+
     <section class="card" id="faceModelsCard">
       <div class="settings-section-header">
         <div class="settings-section-icon">👤</div>
@@ -85,11 +94,7 @@
       <p id="faceModelsEmpty" class="muted" hidden>No face models yet - download one above to enable face detection.</p>
     </section>
 
-    <div class="button-row" style="margin-top:16px">
-      <button id="checkModelUpdatesBtn" class="btn-info" type="button">Check for Updates</button>
-    </div>
-
-    </div><!-- /panel-models -->
+    </div><!-- /panel-face-models -->
 
     <div class="settings-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings" hidden>
 

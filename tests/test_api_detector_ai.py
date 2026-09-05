@@ -583,6 +583,52 @@ def test_do_download_model_binds_face_labels_and_keypoints(tmp_path, monkeypatch
     assert reload_calls[-1]['keypoint_count'] == 0
 
 
+def test_update_ai_model_routes_face_updates_to_face_slot(tmp_path, monkeypatch):
+    """Updating a face-family model must pass the face-routing flag through to
+    the re-export helper; otherwise the new ONNX is downloaded but the active
+    face detector still points at the stale file."""
+    app, _ = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        import app.api.settings_ai_router as ai_router
+
+        catalog = dict(ai_router.YOLO_MODELS)
+        catalog['facetest'] = {
+            'pt': 'facetest.pt', 'onnx': 'facetest.onnx', 'label': 'Face Test',
+            'approx_mb': 6, 'input_size': 640,
+            'labels': 'models/face.names', 'keypoint_count': 5,
+            'description': 'synthetic face entry',
+        }
+        monkeypatch.setattr(ai_router, 'YOLO_MODELS', catalog)
+        monkeypatch.setattr(ai_router, '_read_installed_models', lambda: {'facetest': {'imgsz': 640, 'path': 'models/facetest.onnx'}})
+        monkeypatch.setattr(ai_router, 'write_audit_log', lambda *args, **kwargs: None)
+
+        captured = {}
+
+        def fake_download_model(model_name, switch_active, imgsz, configure_face=False):
+            captured['args'] = (model_name, switch_active, imgsz, configure_face)
+            return {'ok': True, 'status': {'face_enabled': True, 'face_model_path': f'models/{model_name}-{imgsz}.onnx'}}
+
+        monkeypatch.setattr(ai_router, '_do_download_model', fake_download_model)
+
+        status, _headers, body = client.request(
+            '/api/settings/ai/update-model',
+            method='POST',
+            json_body={'model': 'facetest', 'imgsz': 640, 'is_face_model': True},
+            headers={'X-CSRF-Token': csrf},
+        )
+
+        assert status == 200
+        assert captured['args'] == ('facetest', False, 640, True)
+        assert body['status']['face_enabled'] is True
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_export_yolo_onnx_fetches_weights_url(tmp_path, monkeypatch):
     """A catalog entry with a ``weights_url`` (weights Ultralytics can't resolve
     by name) pre-fetches the ``.pt`` into ``models/`` before the export runs."""
