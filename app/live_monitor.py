@@ -641,9 +641,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # axis -- motion is already gated separately.
     _confirm_frames = live_settings.get('detection_confirm_frames', 2)
     _confirm_window = live_settings.get('detection_confirm_window', _confirm_frames)
+    # Optional spatial-persistence lever (0 = off): when set, a label is
+    # confirmed only if its box has persisted in roughly the same place across
+    # the confirmation window, filtering noise whose false detections jump
+    # around the frame each cycle (rain/snow streaks, IR sensor noise, foliage).
+    _confirm_iou = live_settings.get('detection_confirm_iou', 0.0)
     object_detections = confirm_object_detections(
         camera_id, object_detections,
         required_frames=_confirm_frames, window_frames=_confirm_window,
+        location_iou=_confirm_iou,
     )
     # Stamp a stable track id on each confirmed detection so the same object
     # keeps one identity across cycles (foundation for de-dup / dwell / overlay

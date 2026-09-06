@@ -313,6 +313,44 @@ Defaults: `2` / `3`
 
 ---
 
+### Confirm Location (IoU)
+
+An optional *spatial* requirement layered on top of Confirm Frames. By default
+the confirmation gate only counts how many recent cycles contained the object's
+**label** - so a label that keeps reappearing anywhere in frame is confirmed
+even if each appearance is in a completely different spot. Confirm Location adds
+the missing "same place" check: a label is confirmed only when its box overlaps
+a same-label box from the confirmation window by at least this
+[IoU](https://en.wikipedia.org/wiki/Jaccard_index) (Intersection-over-Union).
+
+- **`0`** (default) - off. Label-only confirmation, the historical behavior.
+- **`0.1`-`0.3`** - require the object to persist in roughly the same place. A
+  genuine subject barely moves between cycles at the 2-4 Hz detection cadence,
+  so a modest overlap is easy to clear.
+
+**Why this helps with rain, snow, and night-vision noise.** On an IR / low-light
+camera, rain and snow streaks, sensor noise, and wind-blown foliage make the
+object detector emit weak, *jittery* boxes - a spurious `cat` or `person` that
+lands in a different part of the frame each cycle. Those ghosts can still satisfy
+label-only confirmation (the label repeats), but they never overlap themselves
+from one cycle to the next, so a small Confirm Location threshold filters them
+out while leaving a real, stationary-ish subject untouched.
+
+- Only applies when Confirm Frames is above `1`; `face` detections and any
+  detection without a box bypass the spatial test and fall back to label-only
+  confirmation.
+- Pairs well with raising [Motion Pixel Threshold](#motion-pixel-threshold) to
+  `40`-`60` on IR cameras and setting a sensible per-object **Confidence**
+  threshold on the Zones page.
+
+**Tuning tip:** If a camera fires false `cat` / `person` alerts in rain or at
+night, set Confirm Location to `0.2` (with Confirm Frames `2`-`3`). Lower it
+toward `0.1` if a fast-moving real subject is occasionally suppressed.
+
+Default: `0` (off)
+
+---
+
 ### Periodic Scan Interval (s)
 
 How often a full YOLO scan runs regardless of pixel-diff motion. Set to `0` to disable.

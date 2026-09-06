@@ -649,6 +649,16 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     # every detection.
     if detection_confirm_window < detection_confirm_frames:
         detection_confirm_window = detection_confirm_frames
+    # Optional spatial-persistence requirement for the confirmation gate: a
+    # label only confirms when its box overlaps a same-label box from the
+    # window by at least this IoU (0 = off, label-only confirmation). Capped
+    # below 1.0 -- a pixel-perfect match every cycle would confirm nothing.
+    try:
+        detection_confirm_iou = float(merged.get('detection_confirm_iou', 0.0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='detection_confirm_iou must be a number.') from exc
+    if not 0.0 <= detection_confirm_iou <= 0.9:
+        raise HTTPException(status_code=400, detail='detection_confirm_iou must be between 0.0 and 0.9.')
     motion_frame_width = _int_field(merged, 'motion_frame_width', 320, 40, 640)
     motion_frame_height = _int_field(merged, 'motion_frame_height', 240, 30, 480)
     ingest_frame_fps = _int_field(merged, 'ingest_frame_fps', 4, 1, 30)
@@ -662,4 +672,4 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     # Shadow suppression is tri-state ('on'/'off'/'auto'); legacy bool True/False
     # is migrated to 'on'/'off'. Unknown values fall back to 'on'.
     motion_shadow_suppression = _normalize_shadow_suppression(merged.get('motion_shadow_suppression'), 'on')
-    return {'snapshot_refresh_ms': snapshot_refresh_ms, 'detection_status_refresh_ms': detection_status_refresh_ms, 'detection_interval_seconds': detection_interval_seconds, 'event_debounce_seconds': event_debounce_seconds, 'background_detection_enabled': background_detection_enabled, 'always_run_object_detection': always_run_object_detection, 'object_detection_region_boost': object_detection_region_boost, 'object_detection_tiling': object_detection_tiling, 'detection_history_minutes': detection_history_minutes, 'motion_algorithm': motion_algorithm, 'motion_denoise': motion_denoise, 'motion_shadow_suppression': motion_shadow_suppression, 'motion_pixel_threshold': motion_pixel_threshold, 'motion_gate_fraction': round(motion_gate_fraction, 6), 'motion_scale_fraction': round(motion_scale_fraction, 4), 'motion_background_alpha': round(motion_background_alpha, 4), 'motion_frame_width': motion_frame_width, 'motion_frame_height': motion_frame_height, 'ingest_frame_fps': ingest_frame_fps, 'snapshot_quality': snapshot_quality, 'periodic_scan_interval_seconds': periodic_scan_interval_seconds, 'detection_confirm_frames': detection_confirm_frames, 'detection_confirm_window': detection_confirm_window}
+    return {'snapshot_refresh_ms': snapshot_refresh_ms, 'detection_status_refresh_ms': detection_status_refresh_ms, 'detection_interval_seconds': detection_interval_seconds, 'event_debounce_seconds': event_debounce_seconds, 'background_detection_enabled': background_detection_enabled, 'always_run_object_detection': always_run_object_detection, 'object_detection_region_boost': object_detection_region_boost, 'object_detection_tiling': object_detection_tiling, 'detection_history_minutes': detection_history_minutes, 'motion_algorithm': motion_algorithm, 'motion_denoise': motion_denoise, 'motion_shadow_suppression': motion_shadow_suppression, 'motion_pixel_threshold': motion_pixel_threshold, 'motion_gate_fraction': round(motion_gate_fraction, 6), 'motion_scale_fraction': round(motion_scale_fraction, 4), 'motion_background_alpha': round(motion_background_alpha, 4), 'motion_frame_width': motion_frame_width, 'motion_frame_height': motion_frame_height, 'ingest_frame_fps': ingest_frame_fps, 'snapshot_quality': snapshot_quality, 'periodic_scan_interval_seconds': periodic_scan_interval_seconds, 'detection_confirm_frames': detection_confirm_frames, 'detection_confirm_window': detection_confirm_window, 'detection_confirm_iou': round(detection_confirm_iou, 4)}

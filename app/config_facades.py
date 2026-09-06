@@ -95,6 +95,15 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     # false positives).
     'detection_confirm_frames': 2,
     'detection_confirm_window': 3,
+    # Optional spatial-persistence lever for the confirmation gate. ``0.0`` =
+    # off (label-only confirmation, the historical behavior). When raised, a
+    # label confirms only if its box overlaps a same-label box from the
+    # confirmation window by at least this IoU, so a detection must persist in
+    # roughly the SAME place -- not merely repeat the label somewhere in frame.
+    # Recommended for cameras plagued by rain/snow, IR sensor noise, or
+    # wind-blown foliage, whose false detections jump around the frame each
+    # cycle; try ``0.2``.
+    'detection_confirm_iou': 0.0,
     'background_detection_enabled': True,
     # When True (default), object (YOLO) inference runs every detection cycle
     # regardless of the motion gate -- maximum recall (a still/slow/low-contrast

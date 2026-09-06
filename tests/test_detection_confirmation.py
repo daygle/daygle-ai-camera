@@ -38,6 +38,10 @@ def _det(label: str) -> dict:
     return {'label': label, 'confidence': 0.9, 'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}}
 
 
+def _det_at(label: str, x: float, y: float, w: float = 0.1, h: float = 0.1) -> dict:
+    return {'label': label, 'confidence': 0.9, 'box': {'x': x, 'y': y, 'width': w, 'height': h}}
+
+
 def test_required_one_is_pass_through_no_state(ds):
     import app.state as _state
     detections = [_det('cat'), _det('person')]
@@ -99,3 +103,49 @@ def test_window_resize_preserves_recent_cycles(ds):
     out = ds.confirm_object_detections('cam-1', [_det('cat')], required_frames=2, window_frames=4)
     assert [d['label'] for d in out] == ['cat']
     assert _state.live_detection_confirm_history['cam-1'].maxlen == 4
+
+
+def test_location_iou_off_is_label_only(ds):
+    # location_iou defaults to 0.0 => a label that repeats in a DIFFERENT place
+    # each cycle still confirms (historical behavior preserved).
+    assert ds.confirm_object_detections(
+        'cam-1', [_det_at('cat', 0.1, 0.1)], required_frames=2, window_frames=3,
+    ) == []
+    out = ds.confirm_object_detections(
+        'cam-1', [_det_at('cat', 0.8, 0.8)], required_frames=2, window_frames=3,
+    )
+    assert [d['label'] for d in out] == ['cat']
+
+
+def test_location_iou_suppresses_jittery_ghost(ds):
+    # A rain-ghost 'cat' that lands in a different corner each cycle never
+    # overlaps itself, so with a spatial requirement it is never confirmed even
+    # though the label repeats every cycle.
+    kwargs = dict(required_frames=2, window_frames=3, location_iou=0.2)
+    assert ds.confirm_object_detections('cam-1', [_det_at('cat', 0.05, 0.05)], **kwargs) == []
+    assert ds.confirm_object_detections('cam-1', [_det_at('cat', 0.80, 0.05)], **kwargs) == []
+    assert ds.confirm_object_detections('cam-1', [_det_at('cat', 0.05, 0.80)], **kwargs) == []
+
+
+def test_location_iou_confirms_stationary_subject(ds):
+    # A real subject that stays in roughly the same place overlaps itself, so it
+    # confirms on the second consecutive cycle exactly like the label-only gate.
+    kwargs = dict(required_frames=2, window_frames=3, location_iou=0.2)
+    assert ds.confirm_object_detections('cam-1', [_det_at('cat', 0.40, 0.40)], **kwargs) == []
+    out = ds.confirm_object_detections('cam-1', [_det_at('cat', 0.41, 0.41)], **kwargs)
+    assert [d['label'] for d in out] == ['cat']
+
+
+def test_location_iou_exempts_boxless_and_face(ds):
+    # A detection with no box, and any 'face', bypass the spatial test and fall
+    # back to label-only confirmation.
+    kwargs = dict(required_frames=2, window_frames=3, location_iou=0.5)
+    boxless = {'label': 'cat', 'confidence': 0.9}
+    ds.confirm_object_detections('cam-1', [boxless], **kwargs)
+    out = ds.confirm_object_detections('cam-1', [boxless], **kwargs)
+    assert [d['label'] for d in out] == ['cat']
+    # 'face' passes on the very first cycle regardless of spatial history.
+    out_face = ds.confirm_object_detections(
+        'cam-2', [_det_at('face', 0.1, 0.1)], **kwargs,
+    )
+    assert [d['label'] for d in out_face] == ['face']
