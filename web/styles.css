@@ -6698,3 +6698,216 @@ button.secondary:disabled, a.secondary:disabled {
   padding: 0 5px;
   margin-left: 6px;
 }
+
+/* =====================================================================
+   ONNX model library page (onnx.html) - hero, tabs, and library layout
+   ===================================================================== */
+.onnx-hero {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+.onnx-hero-copy { flex: 1 1 420px; min-width: 0; }
+.onnx-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.onnx-hero-meta span { display: inline-flex; align-items: center; gap: 7px; }
+.onnx-meta-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.onnx-meta-dot-object { background: var(--accent); box-shadow: 0 0 8px rgba(71, 214, 255, .5); }
+.onnx-meta-dot-face { background: #a78bfa; box-shadow: 0 0 8px rgba(167, 139, 250, .5); }
+.onnx-meta-dot-neutral { background: var(--muted); }
+.onnx-hero-mark {
+  position: relative;
+  width: 108px;
+  height: 108px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+}
+.onnx-hero-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid rgba(71, 214, 255, .35);
+}
+.onnx-hero-ring-back {
+  inset: 0;
+  border-color: rgba(167, 139, 250, .28);
+  animation: onnx-ring-drift 9s ease-in-out infinite alternate;
+}
+.onnx-hero-ring-front {
+  inset: 12px;
+  border-style: dashed;
+  animation: onnx-ring-spin 26s linear infinite;
+}
+.onnx-hero-core {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  font-weight: 900;
+  font-size: 18px;
+  color: #0c4a6e;
+  background: linear-gradient(135deg, var(--accent), #7dd3fc);
+  box-shadow: 0 8px 28px rgba(71, 214, 255, .28);
+}
+@keyframes onnx-ring-spin { to { transform: rotate(360deg); } }
+@keyframes onnx-ring-drift {
+  from { transform: scale(1) translateY(0); }
+  to { transform: scale(1.08) translateY(-4px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .onnx-hero-ring-back,
+  .onnx-hero-ring-front { animation: none; }
+}
+:root.light .onnx-hero-ring { border-color: rgba(2, 132, 199, .3); }
+:root.light .onnx-hero-ring-back { border-color: rgba(124, 58, 237, .25); }
+:root.light .onnx-hero-core {
+  color: #fff;
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  box-shadow: 0 8px 24px rgba(2, 132, 199, .25);
+}
+
+/* Tabs with a two-line label (title + small description) */
+.settings-tab-copy {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  line-height: 1.15;
+}
+.settings-tab-copy .settings-tab-label { font-size: 14px; }
+.settings-tab-copy small {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.settings-tab[aria-selected="true"] .settings-tab-copy small { color: var(--accent); }
+.onnx-tabs .settings-tab-icon { font-size: 18px; }
+.onnx-tab-icon-object { color: var(--accent); }
+.onnx-tab-icon-face { color: #a78bfa; }
+:root.light .onnx-tab-icon-object { color: #0284c7; }
+:root.light .onnx-tab-icon-face { color: #7c3aed; }
+
+/* Library header above each model card grid */
+.model-library-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--panel);
+}
+.model-library-toolbar-object { border-left: 3px solid var(--accent); }
+.model-library-toolbar-face { border-left: 3px solid #a78bfa; }
+:root.light .model-library-toolbar-face { border-left-color: #7c3aed; }
+.model-library-toolbar-copy { min-width: 0; }
+.model-library-kicker {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.model-library-toolbar-copy h2 { margin: 0 0 4px; font-size: 20px; font-weight: 900; }
+.model-library-toolbar-copy p { margin: 0; font-size: 13px; color: var(--muted); max-width: 56ch; }
+.model-library-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.model-library-count {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.model-update-check-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+}
+.model-update-check-btn .button-icon { font-size: 15px; line-height: 1; }
+.model-update-check-btn.is-checking .button-icon { display: inline-block; animation: model-check-spin 1s linear infinite; }
+@keyframes model-check-spin { to { transform: rotate(360deg); } }
+.model-library-message {
+  min-height: 20px;
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.model-library-message:empty { display: none; }
+.model-library-message.is-loading { color: var(--muted); }
+.model-library-message.is-success { color: var(--success); }
+.model-library-message.is-error { color: var(--danger); }
+
+/* The card that hosts each model-card grid */
+.model-library-card { display: grid; gap: 14px; }
+.model-library-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.model-library-card-header h2 { margin: 2px 0 0; font-size: 16px; font-weight: 900; }
+.model-library-tip { font-size: 12px; color: var(--muted); }
+.model-library-empty { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+@media (max-width: 640px) {
+  .model-library-toolbar { flex-direction: column; align-items: stretch; }
+  .model-library-toolbar-actions { justify-content: space-between; }
+}
+
+/* =====================================================================
+   ArcFace embedding-model page (arcface.html) - same library language
+   ===================================================================== */
+.arcface-toolbar { border-left: 3px solid #a78bfa; }
+.arcface-hero-copy { flex: 1 1 420px; min-width: 0; }
+.arcface-hero-mark .onnx-hero-core {
+  color: #fff;
+  background: linear-gradient(135deg, #a78bfa, #7c3aed);
+  box-shadow: 0 8px 28px rgba(167, 139, 250, .3);
+}
+:root.light .arcface-hero-mark .onnx-hero-core {
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+  box-shadow: 0 8px 24px rgba(124, 58, 237, .25);
+}
+.arcface-tab-icon { color: #a78bfa; }
+:root.light .arcface-tab-icon { color: #7c3aed; }
+.arcface-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  background: rgba(139, 92, 246, .12);
+  border: 1px solid rgba(139, 92, 246, .3);
+  color: #a78bfa;
+}
+:root.light .arcface-badge {
+  background: rgba(124, 58, 237, .08);
+  border-color: rgba(124, 58, 237, .22);
+  color: #7c3aed;
+}

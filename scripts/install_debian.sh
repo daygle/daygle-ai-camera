@@ -112,10 +112,6 @@ echo "Installing ONNX Runtime variant: ${INSTALL_VARIANT}"
 python3 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/scripts/install_python_deps.sh" "${APP_DIR}/.venv/bin/python" "${APP_DIR}/requirements.txt"
 
-# Install optional ONNX simplifier used by some model export workflows.
-echo "Installing optional ONNX tooling..."
-"${APP_DIR}/.venv/bin/python" -m pip install --no-cache-dir onnxsim
-
 # Minimal bootstrap config
 if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
   cat > "${CONFIG_DIR}/config.yaml" <<EOF

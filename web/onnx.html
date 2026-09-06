@@ -11,19 +11,37 @@
 </head>
 <body>
   <main class="shell page-stack">
-    <header class="hero">
-      <div>
-        <p class="eyebrow">Intelligence</p>
-        <h1>ONNX</h1>
-        <p class="muted">Configure ONNX object detection and face detection, install models, and reload the detector. The object model and face model run side by side on the same frames.</p>
+    <header class="hero onnx-hero">
+      <div class="onnx-hero-copy">
+        <p class="eyebrow">AI model workspace</p>
+        <h1>ONNX model library</h1>
+        <p class="muted">Choose the models that power detection on your cameras. Object detection and face detection run as separate passes, so you can tune each one independently.</p>
+        <div class="onnx-hero-meta" aria-label="Model library overview">
+          <span><i class="onnx-meta-dot onnx-meta-dot-object"></i>Object pass · people, vehicles, animals</span>
+          <span><i class="onnx-meta-dot onnx-meta-dot-face"></i>Face pass · faces only</span>
+          <span><i class="onnx-meta-dot onnx-meta-dot-neutral"></i>Downloads are exported locally</span>
+        </div>
+      </div>
+      <div class="onnx-hero-mark" aria-hidden="true">
+        <span class="onnx-hero-ring onnx-hero-ring-back"></span>
+        <span class="onnx-hero-ring onnx-hero-ring-front"></span>
+        <span class="onnx-hero-core">AI</span>
       </div>
     </header>
 
-    <div class="settings-tabs" role="tablist" aria-label="ONNX sections">
-      <button class="settings-tab" type="button" role="tab" id="tab-status" aria-controls="panel-status" data-tab="status" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">🔍</span><span class="settings-tab-label">Status</span></button>
-      <button class="settings-tab" type="button" role="tab" id="tab-object-models" aria-controls="panel-object-models" data-tab="object-models" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">📦</span><span class="settings-tab-label">Object Models</span></button>
-      <button class="settings-tab" type="button" role="tab" id="tab-face-models" aria-controls="panel-face-models" data-tab="face-models" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">👤</span><span class="settings-tab-label">Face Models</span></button>
-      <button class="settings-tab" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" data-tab="settings" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">⚙️</span><span class="settings-tab-label">Settings</span></button>
+    <div class="settings-tabs onnx-tabs" role="tablist" aria-label="ONNX sections">
+      <button class="settings-tab" type="button" role="tab" id="tab-status" aria-controls="panel-status" data-tab="status" aria-selected="true">
+        <span class="settings-tab-icon" aria-hidden="true">⌁</span><span class="settings-tab-copy"><span class="settings-tab-label">Overview</span><small>Live health</small></span>
+      </button>
+      <button class="settings-tab" type="button" role="tab" id="tab-object-models" aria-controls="panel-object-models" data-tab="object-models" aria-selected="false" tabindex="-1">
+        <span class="settings-tab-icon onnx-tab-icon-object" aria-hidden="true">◈</span><span class="settings-tab-copy"><span class="settings-tab-label">Object models</span><small>Everyday detection</small></span>
+      </button>
+      <button class="settings-tab" type="button" role="tab" id="tab-face-models" aria-controls="panel-face-models" data-tab="face-models" aria-selected="false" tabindex="-1">
+        <span class="settings-tab-icon onnx-tab-icon-face" aria-hidden="true">◉</span><span class="settings-tab-copy"><span class="settings-tab-label">Face models</span><small>Face detection</small></span>
+      </button>
+      <button class="settings-tab" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" data-tab="settings" aria-selected="false" tabindex="-1">
+        <span class="settings-tab-icon" aria-hidden="true">⚙</span><span class="settings-tab-copy"><span class="settings-tab-label">Settings</span><small>Runtime tuning</small></span>
+      </button>
     </div>
 
     <div class="settings-panel" id="panel-status" role="tabpanel" aria-labelledby="tab-status" data-panel="status">
@@ -59,41 +77,61 @@
     </div><!-- /panel-status -->
 
     <div class="settings-panel" id="panel-object-models" role="tabpanel" aria-labelledby="tab-object-models" data-panel="object-models" hidden>
-
-    <div id="modelUpdatesMessage" class="muted" style="margin-bottom:12px"></div>
-
-    <section class="card" id="objectModelsCard">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">📦</div>
-        <div>
-          <h2>Object Detection Models</h2>
-          <p class="settings-section-subtitle">Detects everyday objects (person, car…) - these labels are what zones and alerts use. Larger models are more accurate but use more CPU.</p>
+      <section class="model-library-toolbar model-library-toolbar-object" aria-labelledby="objectLibraryTitle">
+        <div class="model-library-toolbar-copy">
+          <span class="model-library-kicker">Primary detector</span>
+          <h2 id="objectLibraryTitle">Object models</h2>
+          <p>Models for people, vehicles, animals, and the everyday objects used by your zones and alerts.</p>
         </div>
-      </div>
-      <div id="objectModelList" class="model-card-grid"></div>
-      <p id="objectModelsEmpty" class="muted" hidden>No object models available.</p>
-    </section>
+        <div class="model-library-toolbar-actions">
+          <span class="model-library-count" id="objectModelCount">Loading models…</span>
+          <button id="checkObjectModelUpdatesBtn" class="btn-info model-update-check-btn" type="button">
+            <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
+          </button>
+        </div>
+      </section>
+      <div id="objectModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
 
-    <div class="button-row" style="margin-top:16px">
-      <button id="checkModelUpdatesBtn" class="btn-info" type="button">Check for Updates</button>
-    </div>
-
+      <section class="card model-library-card" id="objectModelsCard">
+        <div class="model-library-card-header">
+          <div>
+            <span class="model-library-kicker">Available catalog</span>
+            <h2>Choose an object model</h2>
+          </div>
+          <span class="model-library-tip">Larger models trade speed for accuracy</span>
+        </div>
+        <div id="objectModelList" class="model-card-grid"></div>
+        <p id="objectModelsEmpty" class="model-library-empty" hidden>No object models available.</p>
+      </section>
     </div><!-- /panel-object-models -->
 
     <div class="settings-panel" id="panel-face-models" role="tabpanel" aria-labelledby="tab-face-models" data-panel="face-models" hidden>
-
-    <section class="card" id="faceModelsCard">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">👤</div>
-        <div>
-          <h2>Face Detection Models</h2>
-          <p class="settings-section-subtitle">An extra detector for faces, running at the same time as object detection. Download one and enable it under Settings → Face Detection.</p>
+      <section class="model-library-toolbar model-library-toolbar-face" aria-labelledby="faceLibraryTitle">
+        <div class="model-library-toolbar-copy">
+          <span class="model-library-kicker">Parallel detector</span>
+          <h2 id="faceLibraryTitle">Face models</h2>
+          <p>Models that look for faces only. They run alongside your object model and never replace it.</p>
         </div>
-      </div>
-      <div id="faceModelList" class="model-card-grid"></div>
-      <p id="faceModelsEmpty" class="muted" hidden>No face models yet - download one above to enable face detection.</p>
-    </section>
+        <div class="model-library-toolbar-actions">
+          <span class="model-library-count" id="faceModelCount">Loading models…</span>
+          <button id="checkFaceModelUpdatesBtn" class="btn-info model-update-check-btn" type="button">
+            <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
+          </button>
+        </div>
+      </section>
+      <div id="faceModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
 
+      <section class="card model-library-card" id="faceModelsCard">
+        <div class="model-library-card-header">
+          <div>
+            <span class="model-library-kicker">Available catalog</span>
+            <h2>Choose a face model</h2>
+          </div>
+          <span class="model-library-tip">Enable your selection in Settings</span>
+        </div>
+        <div id="faceModelList" class="model-card-grid"></div>
+        <p id="faceModelsEmpty" class="model-library-empty" hidden>No face models yet — download one to enable face detection.</p>
+      </section>
     </div><!-- /panel-face-models -->
 
     <div class="settings-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings" hidden>

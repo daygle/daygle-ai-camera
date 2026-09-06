@@ -11,17 +11,30 @@
 </head>
 <body>
   <main class="shell page-stack">
-    <header class="hero">
-      <div>
-        <p class="eyebrow">Intelligence</p>
-        <h1>ArcFace</h1>
-        <p class="muted">Face-embedding models for identity recognition. Download, select, and manage embedding models used to identify enrolled people on cameras.</p>
+    <header class="hero arcface-hero">
+      <div class="arcface-hero-copy">
+        <p class="eyebrow">Identity workspace</p>
+        <h1>ArcFace embedding models</h1>
+        <p class="muted">Face-embedding models for identity recognition. Download, select, and manage the embedding models used to identify enrolled people on your cameras. Both models are Apache-2.0 licensed (commercial use permitted).</p>
+        <div class="onnx-hero-meta" aria-label="Recognition overview">
+          <span><i class="onnx-meta-dot onnx-meta-dot-face"></i>512-d embeddings · 112×112 aligned crops</span>
+          <span><i class="onnx-meta-dot onnx-meta-dot-neutral"></i>Recognition stays off until you enable it</span>
+        </div>
+      </div>
+      <div class="onnx-hero-mark arcface-hero-mark" aria-hidden="true">
+        <span class="onnx-hero-ring onnx-hero-ring-back"></span>
+        <span class="onnx-hero-ring onnx-hero-ring-front"></span>
+        <span class="onnx-hero-core arcface-hero-core">◉</span>
       </div>
     </header>
 
     <div class="settings-tabs" role="tablist" aria-label="ArcFace sections">
-      <button class="settings-tab" type="button" role="tab" id="tab-status" aria-controls="panel-status" data-tab="status" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">🧠</span><span class="settings-tab-label">Status</span></button>
-      <button class="settings-tab" type="button" role="tab" id="tab-models" aria-controls="panel-models" data-tab="models" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">📦</span><span class="settings-tab-label">Models</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-status" aria-controls="panel-status" data-tab="status" aria-selected="true">
+        <span class="settings-tab-icon" aria-hidden="true">🧠</span><span class="settings-tab-copy"><span class="settings-tab-label">Status</span><small>Recognition health</small></span>
+      </button>
+      <button class="settings-tab" type="button" role="tab" id="tab-models" aria-controls="panel-models" data-tab="models" aria-selected="false" tabindex="-1">
+        <span class="settings-tab-icon arcface-tab-icon" aria-hidden="true">📦</span><span class="settings-tab-copy"><span class="settings-tab-label">Embedding models</span><small>Download &amp; manage</small></span>
+      </button>
     </div>
 
     <div class="settings-panel" id="panel-status" role="tabpanel" aria-labelledby="tab-status" data-panel="status">
@@ -30,7 +43,7 @@
       <div class="settings-section-header">
         <div class="settings-section-icon">🧠</div>
         <div>
-          <h2>Status</h2>
+          <h2>Recognition status</h2>
           <p class="settings-section-subtitle">Current recognition state, active embedding model, and enrolment counts.</p>
         </div>
       </div>
@@ -41,17 +54,32 @@
 
     <div class="settings-panel" id="panel-models" role="tabpanel" aria-labelledby="tab-models" data-panel="models" hidden>
 
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">📦</div>
-        <div>
-          <h2>Embedding Models</h2>
-          <p class="settings-section-subtitle">Download a face-embedding model. ArcFace R100 is Apache-2.0 licensed (commercial use permitted).</p>
+      <section class="model-library-toolbar model-library-toolbar-face arcface-toolbar" aria-labelledby="faceLibraryTitle">
+        <div class="model-library-toolbar-copy">
+          <span class="model-library-kicker">Identity models</span>
+          <h2 id="faceLibraryTitle">Embedding models</h2>
+          <p>Each model turns an aligned face crop into a 512-number faceprint. Enrolments are compatible between models that share the same embedding space.</p>
         </div>
-      </div>
-      <div id="arcfaceModelsMessage" class="muted"></div>
-      <div id="arcfaceModelList" class="model-card-grid"></div>
-    </section>
+        <div class="model-library-toolbar-actions">
+          <span class="model-library-count" id="arcfaceModelCount">Loading models…</span>
+          <button id="checkArcfaceModelUpdatesBtn" class="btn-info model-update-check-btn" type="button">
+            <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
+          </button>
+        </div>
+      </section>
+      <div id="arcfaceModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
+
+      <section class="card model-library-card" id="arcfaceModelsCard">
+        <div class="model-library-card-header">
+          <div>
+            <span class="model-library-kicker">Available catalog</span>
+            <h2>Choose an embedding model</h2>
+          </div>
+          <span class="model-library-tip">Enable recognition in Settings → Face Recognition</span>
+        </div>
+        <div id="arcfaceModelsMessage" class="muted" hidden></div>
+        <div id="arcfaceModelList" class="model-card-grid"></div>
+      </section>
 
     </div><!-- /panel-models -->
   </main>

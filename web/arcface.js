@@ -4,6 +4,10 @@
 const arcfaceStatusPanel = document.getElementById('arcfaceStatusPanel');
 const arcfaceModelList = document.getElementById('arcfaceModelList');
 const arcfaceModelsMessage = document.getElementById('arcfaceModelsMessage');
+const arcfaceModelCount = document.getElementById('arcfaceModelCount');
+const arcfaceModelsCard = document.getElementById('arcfaceModelsCard');
+const arcfaceModelUpdatesMessage = document.getElementById('arcfaceModelUpdatesMessage');
+const checkArcfaceModelUpdatesBtn = document.getElementById('checkArcfaceModelUpdatesBtn');
 
 function yesNo(value) {
   return value ? 'Yes' : 'No';
@@ -70,16 +74,21 @@ async function loadStatus() {
   }
 }
 
-// Mirrors the ONNX models page card format (app/web/onnx.js): an active/
-// installed/available card state, a status badge, a size indicator, and a
-// Download / Use / Update / Delete action set.
+// Mirrors the ONNX models page card format (web/onnx.js): an active/
+// installed/available card state, a status badge, license/dimension badges,
+// a size indicator, and a Download / Use / Refresh / Delete action set.
 function renderModels(models) {
   if (!models.length) {
     arcfaceModelList.innerHTML = '';
+    arcfaceModelCount.textContent = '0 installed · 0 available';
+    arcfaceModelsMessage.hidden = false;
     arcfaceModelsMessage.textContent = 'No embedding models available.';
     return;
   }
-  arcfaceModelsMessage.textContent = '';
+  arcfaceModelsMessage.hidden = true;
+  arcfaceModelsCard.hidden = false;
+  const installedCount = models.filter((m) => m.installed).length;
+  arcfaceModelCount.textContent = `${installedCount} installed · ${models.length} available`;
   const maxMb = Math.max(1, ...models.map((m) => m.approx_mb || 0));
   arcfaceModelList.innerHTML = models.map((model) => {
     const id = escapeHtml(model.id);
@@ -98,18 +107,21 @@ function renderModels(models) {
     const sizeMb = `~${escapeHtml(String(model.approx_mb))} MB`;
     const barWidth = Math.min(100, Math.round(((model.approx_mb || 0) / maxMb) * 100));
 
-    const updateBtn = `<button class="btn-warning model-action-btn" data-action="update" data-model-id="${id}" title="Re-download this model's file (repair / refresh)">↻ Update</button>`;
+    // Update = re-download the trusted catalog file (repair / refresh).
+    // These are fixed pre-built files with no version feed, so unlike the
+    // ONNX page there is no "update available" state to discover.
+    const refreshBtn = `<button class="btn-warning model-action-btn" data-action="update" data-model-id="${id}" title="Re-download this model's file (repair / refresh)">↻ Refresh</button>`;
     let actionsHtml;
     if (!isInstalled) {
       actionsHtml = `<button class="btn-info model-action-btn" data-action="download" data-model-id="${id}">⬇ Download (~${escapeHtml(String(model.approx_mb))} MB)</button>`;
     } else if (isActive) {
       // The active model can't be deleted (recognition points at it); offer a
       // refresh only, matching the ONNX page's "In Use" state.
-      actionsHtml = `<button class="btn-success model-action-btn" disabled>✓ In Use</button>${updateBtn}`;
+      actionsHtml = `<button class="btn-success model-action-btn" disabled>✓ In Use</button>${refreshBtn}`;
     } else {
       actionsHtml = `
         <button class="btn-success model-action-btn" data-action="select" data-model-id="${id}">▶ Use</button>
-        ${updateBtn}
+        ${refreshBtn}
         <button class="btn-danger model-action-btn" data-action="delete" data-model-id="${id}">✕ Delete</button>`;
     }
 
@@ -126,7 +138,11 @@ function renderModels(models) {
           </div>
         </div>
         <p class="model-card-desc">${escapeHtml(model.description)}</p>
-        <p class="muted">License: ${escapeHtml(model.license)} · ${escapeHtml(String(model.dim))}-d</p>
+        <div class="model-card-meta">
+          <span class="arcface-badge" title="Output embedding dimension">${escapeHtml(String(model.dim))}-d embeddings</span>
+          <span class="arcface-badge" title="Model input size">${escapeHtml(String(model.input_size))}×${escapeHtml(String(model.input_size))} input</span>
+          <span class="model-badge" title="License">⚖ ${escapeHtml(model.license)}</span>
+        </div>
         <div class="model-card-message model-card-message-hidden"></div>
         <div class="model-card-actions">${actionsHtml}</div>
       </div>`;
@@ -145,8 +161,64 @@ async function loadModels() {
     const body = await api('/api/settings/face-recognition/embedding-models');
     renderModels(body.models || []);
   } catch (err) {
+    arcfaceModelsMessage.hidden = false;
     arcfaceModelsMessage.textContent = err.message || 'Failed to load models.';
   }
+}
+
+// Parity with the ONNX page's per-tab "Check for updates" affordance. The
+// ArcFace catalog ships fixed pre-built files with no version feed, so this
+// verifies install/active state against the server and tells the operator
+// exactly what a refresh does, instead of pretending to compare versions.
+function setUpdateCheckButtonState(isChecking) {
+  if (!checkArcfaceModelUpdatesBtn) return;
+  checkArcfaceModelUpdatesBtn.disabled = isChecking;
+  checkArcfaceModelUpdatesBtn.classList.toggle('is-checking', isChecking);
+  const label = checkArcfaceModelUpdatesBtn.querySelector('.model-update-check-label');
+  if (label) label.textContent = isChecking ? 'Checking…' : 'Check for updates';
+}
+
+async function checkForModelUpdates() {
+  setUpdateCheckButtonState(true);
+  arcfaceModelUpdatesMessage.textContent = 'Checking the embedding-model catalog…';
+  arcfaceModelUpdatesMessage.className = 'model-library-message is-loading';
+  try {
+    const [body] = await Promise.all([
+      api('/api/settings/face-recognition/embedding-models'),
+      loadStatus(),
+    ]);
+    const models = body.models || [];
+    applyModelsPayload(body);
+    const installed = models.filter((m) => m.installed);
+    const active = models.find((m) => m.active);
+    let message;
+    let isError = false;
+    if (!models.length) {
+      message = 'The embedding-model catalog is empty.';
+      isError = true;
+    } else if (!installed.length) {
+      message = 'No embedding models installed yet. Download one below to get started.';
+    } else if (!active) {
+      message = `${installed.length} model${installed.length === 1 ? '' : 's'} installed, but none is selected. Press Use on a card to select it.`;
+    } else {
+      message = `${installed.length} model${installed.length === 1 ? '' : 's'} installed and ${active.label} is selected. Use ↻ Refresh on a card to re-download a model file if it looks damaged.`;
+    }
+    arcfaceModelUpdatesMessage.textContent = message;
+    arcfaceModelUpdatesMessage.className = `model-library-message ${isError ? 'is-error' : 'is-success'}`;
+    window.showToast(message, isError);
+  } catch (err) {
+    if (window.daygleAuth?.redirecting) return;
+    const message = `Update check failed: ${err.message}`;
+    arcfaceModelUpdatesMessage.textContent = message;
+    arcfaceModelUpdatesMessage.className = 'model-library-message is-error';
+    window.showToast(message, true);
+  } finally {
+    setUpdateCheckButtonState(false);
+  }
+}
+
+if (checkArcfaceModelUpdatesBtn) {
+  checkArcfaceModelUpdatesBtn.addEventListener('click', checkForModelUpdates);
 }
 
 const MODEL_ACTIONS = {

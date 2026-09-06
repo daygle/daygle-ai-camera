@@ -86,17 +86,28 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
    is safe to switch an existing virtual environment between CPU and GPU.
 
    When a variant-specific lock is present, the helper installs from it with
-   `--require-hashes` instead of resolving `requirements.txt` directly. A
-   hash-pinned `requirements.cpu.lock.txt` (Linux / Python 3.11+) is committed;
-   the installer applies a narrowly scoped compatibility flag for the known
-   `ai-edge-litert` / `backports-strenum` Python 3.13 metadata issue. Regenerate
-   it after changing `requirements.txt` with
-   `./scripts/lock_python_deps.sh` or, for the cross-platform committed lock:
+   `--require-hashes` instead of resolving `requirements.txt` directly. The
+   committed `requirements.cpu.lock.txt` is the reproducible CPU/Linux lock;
+   GPU installs intentionally resolve the GPU ONNX Runtime requirement at
+   install time and then use the separately pinned CUDA userspace file described
+   in the Tesla P4 runbook. Regenerate the CPU lock after changing
+   `requirements.txt` with:
 
    ```bash
-   uv pip compile requirements.txt --generate-hashes \
-     --output-file requirements.cpu.lock.txt \
-     --python-version 3.11 --python-platform linux
+   ./scripts/lock_python_deps.sh
+   ```
+
+   To regenerate a lock explicitly for a selected variant, use
+   `DAYGLE_ONNXRUNTIME_VARIANT=cpu` or `DAYGLE_ONNXRUNTIME_VARIANT=gpu` with the
+   same script. The generated GPU lock is local deployment output unless it is
+   reviewed and committed for a specific supported GPU platform.
+
+   `onnxsim` is intentionally not part of the base server install. The model
+   exporter detects it at runtime and skips optional graph simplification when
+   it is absent. Install it only on hosts that need simplified ONNX exports:
+
+   ```bash
+   pip install --no-cache-dir onnxsim
    ```
 
 4. Create the bootstrap config:
@@ -206,10 +217,16 @@ storage:
 Important bootstrap values:
 
 - `server.host` and `server.port` - Uvicorn listen address and port
+- `server.tunnel_loopback_only` - optionally bind to `127.0.0.1` when a tunnel is active
+- `system.gpu_temp_warn_c` and `system.gpu_temp_critical_c` - GPU health-card thresholds
+- `cloudflare_tunnel.binary` - the `cloudflared` executable name or path
 - `auth.enabled` - whether authentication is enabled
 - `storage.database` - SQLite database path
 
-All other app settings are stored in SQLite and managed by the web UI.
+The dashboard stores most runtime settings in SQLite and applies them as
+runtime overrides. Settings omitted from `config.yaml` use the defaults in
+`app/settings.py`; the example file is deliberately a small bootstrap subset,
+not a complete dump of every dashboard field.
 
 ## Remote access with Cloudflare Tunnel
 

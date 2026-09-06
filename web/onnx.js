@@ -10,7 +10,10 @@ const objectModelsCard = document.getElementById('objectModelsCard');
 const faceModelsCard = document.getElementById('faceModelsCard');
 const objectModelsEmpty = document.getElementById('objectModelsEmpty');
 const faceModelsEmpty = document.getElementById('faceModelsEmpty');
-const modelUpdatesMessage = document.getElementById('modelUpdatesMessage');
+const objectModelCount = document.getElementById('objectModelCount');
+const faceModelCount = document.getElementById('faceModelCount');
+const objectModelUpdatesMessage = document.getElementById('objectModelUpdatesMessage');
+const faceModelUpdatesMessage = document.getElementById('faceModelUpdatesMessage');
 let modelUpdateMap = {};
 // Track per-card message timeouts so rapid actions don't clear new messages
 const modelMessageTimeouts = {};
@@ -250,11 +253,14 @@ function renderModelList(models) {
     faceModelList.innerHTML = '';
     objectModelsEmpty.hidden = false;
     faceModelsEmpty.hidden = false;
-    modelUpdatesMessage.textContent = 'No models available.';
+    objectModelCount.textContent = '0 models';
+    faceModelCount.textContent = '0 models';
     return;
   }
   const objectModels = models.filter((m) => m.family !== 'face');
   const faceModels = models.filter((m) => m.family === 'face');
+  objectModelCount.textContent = `${objectModels.filter((m) => m.installed).length} installed · ${objectModels.length} available`;
+  faceModelCount.textContent = `${faceModels.filter((m) => m.installed).length} installed · ${faceModels.length} available`;
 
   // Object models card (PRIMARY)
   objectModelsCard.hidden = false;
@@ -485,43 +491,61 @@ async function loadModels() {
     faceModelsEmpty.hidden = false;
     objectModelsEmpty.textContent = 'Could not load the model list.';
     faceModelsEmpty.textContent = 'Could not load the model list.';
-    modelUpdatesMessage.textContent = 'Could not load model list.';
+    objectModelUpdatesMessage.textContent = 'Could not load model list.';
+    faceModelUpdatesMessage.textContent = 'Could not load model list.';
   }
 }
 
-async function checkForModelUpdates() {
-  const btn = document.getElementById('checkModelUpdatesBtn');
-  btn.disabled = true;
-  btn.textContent = 'Checking\u2026';
-  modelUpdatesMessage.textContent = '';
+function updateCheckButton(button, isChecking) {
+  if (!button) return;
+  button.disabled = isChecking;
+  button.classList.toggle('is-checking', isChecking);
+  const label = button.querySelector('.model-update-check-label');
+  if (label) label.textContent = isChecking ? 'Checking…' : 'Check for updates';
+}
+
+async function checkForModelUpdates(family) {
+  const buttonId = family === 'face' ? 'checkFaceModelUpdatesBtn' : 'checkObjectModelUpdatesBtn';
+  const messageEl = family === 'face' ? faceModelUpdatesMessage : objectModelUpdatesMessage;
+  const btn = document.getElementById(buttonId);
+  updateCheckButton(btn, true);
+  messageEl.textContent = 'Checking the model catalog…';
+  messageEl.className = 'model-library-message is-loading';
   try {
     const result = await api('/api/settings/ai/check-model-updates');
     modelUpdateMap = {};
-    for (const m of result.models || []) modelUpdateMap[m.id] = m;
-    let msg;
+    for (const model of result.models || []) modelUpdateMap[model.id] = model;
+    const familyModels = (lastLoadedModels || []).filter((model) =>
+      family === 'face' ? model.family === 'face' : model.family !== 'face'
+    );
+    const installedCount = familyModels.filter((model) => model.installed).length;
+    const updateCount = familyModels.filter((model) => modelUpdateMap[model.id]?.update_available).length;
+    let message;
     let isError = false;
     if (result.error) {
-      msg = `Update check failed: ${result.error}`;
+      message = `Update check failed: ${result.error}`;
       isError = true;
-    } else if (result.any_updates) {
-      msg = 'Updates are available for one or more installed models.';
-    } else if ((result.models || []).length === 0) {
-      msg = 'No models installed yet.';
+    } else if (!installedCount) {
+      message = family === 'face'
+        ? 'No face models installed yet. Download one to enable face detection.'
+        : 'No object models installed yet.';
+    } else if (updateCount) {
+      message = `${updateCount} ${family} model${updateCount === 1 ? '' : 's'} ready to update.`;
     } else {
-      msg = 'All installed models are up to date.';
+      message = `All installed ${family} models are up to date.`;
     }
-    modelUpdatesMessage.textContent = msg;
-    window.showToast(msg, isError);
+    messageEl.textContent = message;
+    messageEl.className = `model-library-message ${isError ? 'is-error' : 'is-success'}`;
+    window.showToast(message, isError);
     await loadModels();
   } catch (error) {
-    // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
-    const msg = `Update check failed: ${error.message}`;
-    modelUpdatesMessage.textContent = msg;
-    window.showToast(msg, true);
+    const message = `Update check failed: ${error.message}`;
+    messageEl.textContent = message;
+    messageEl.className = 'model-library-message is-error';
+    window.showToast(message, true);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Check for Updates';
+    updateCheckButton(btn, false);
   }
 }
 
@@ -579,7 +603,8 @@ aiForm.addEventListener('submit', async (event) => {
 document.getElementById('checkModelBtn').addEventListener('click', () => runAction('checkModelBtn', '/api/settings/ai/check-model', 'Checking model'));
 document.getElementById('reloadDetectorBtn').addEventListener('click', () => runAction('reloadDetectorBtn', '/api/settings/ai/reload', 'Reloading detector'));
 document.getElementById('testDetectorBtn').addEventListener('click', () => runAction('testDetectorBtn', '/api/settings/ai/test-detector', 'Testing detector'));
-document.getElementById('checkModelUpdatesBtn').addEventListener('click', checkForModelUpdates);
+document.getElementById('checkObjectModelUpdatesBtn').addEventListener('click', () => checkForModelUpdates('object'));
+document.getElementById('checkFaceModelUpdatesBtn').addEventListener('click', () => checkForModelUpdates('face'));
 
 // Group the ONNX cards into Status / Models / Settings tabs. Shared
 // implementation (ARIA tabs + URL-hash deep-linking) lives in utils.js.
