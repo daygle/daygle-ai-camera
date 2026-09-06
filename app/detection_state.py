@@ -163,12 +163,46 @@ def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
     return {str(detection.get('label') or '').strip().lower() for detection in detections if str(detection.get('label') or '').strip()}
 
 
+def _box_iou(box_a: Any, box_b: Any) -> float:
+    """Intersection-over-union of two normalized ``{x,y,width,height}`` boxes.
+
+    Returns ``0.0`` when either box is missing/degenerate. Kept local to the
+    confirmation gate so it stays self-contained; it mirrors the tracker's IoU
+    but does not depend on the object-tracking module.
+    """
+    if not isinstance(box_a, dict) or not isinstance(box_b, dict):
+        return 0.0
+    try:
+        ax1 = float(box_a.get('x') or 0.0)
+        ay1 = float(box_a.get('y') or 0.0)
+        ax2 = ax1 + max(0.0, float(box_a.get('width') or 0.0))
+        ay2 = ay1 + max(0.0, float(box_a.get('height') or 0.0))
+        bx1 = float(box_b.get('x') or 0.0)
+        by1 = float(box_b.get('y') or 0.0)
+        bx2 = bx1 + max(0.0, float(box_b.get('width') or 0.0))
+        by2 = by1 + max(0.0, float(box_b.get('height') or 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+    iw = ix2 - ix1
+    ih = iy2 - iy1
+    if iw <= 0 or ih <= 0:
+        return 0.0
+    intersection = iw * ih
+    union = (ax2 - ax1) * (ay2 - ay1) + (bx2 - bx1) * (by2 - by1) - intersection
+    return intersection / union if union > 0 else 0.0
+
+
 def confirm_object_detections(
     camera_id: str,
     detections: list[dict[str, Any]],
     *,
     required_frames: Any,
     window_frames: Any,
+    location_iou: Any = 0.0,
 ) -> list[dict[str, Any]]:
     """Temporal N-of-M confirmation gate for object detections.
 
@@ -187,6 +221,20 @@ def confirm_object_detections(
 
     Labels are compared case-insensitively on the raw detector label, matching
     what the downstream zone/alert pipeline consumes.
+
+    ``location_iou`` (0.0 = off, the default) adds an optional *spatial*
+    persistence requirement on top of the label count. When set above zero a
+    detection is confirmed only if a same-label box overlapping its own box by
+    at least this IoU has appeared in ``required_frames`` of the last
+    ``window_frames`` cycles -- i.e. the object has to persist in roughly the
+    *same place*, not merely produce the same label somewhere in frame. This
+    targets noise sources whose false detections jump around the frame between
+    cycles (rain and snow streaks, IR/low-light sensor noise, wind-blown
+    foliage): a genuine cat/person barely moves at the 2-4 Hz detection cadence
+    and clears the overlap easily, while a rain-ghost ``cat`` that lands in a
+    different spot each cycle never accrues the spatial streak. A detection with
+    no usable box, and the ``face`` label, bypass the spatial test and fall back
+    to label-only confirmation.
     """
     try:
         required = int(required_frames)
@@ -203,12 +251,28 @@ def confirm_object_detections(
     # A window smaller than the requirement can never confirm anything; clamp it
     # up so ``required`` of ``window`` is always satisfiable.
     window = max(required, window)
+    try:
+        loc_iou = float(location_iou)
+    except (TypeError, ValueError):
+        loc_iou = 0.0
+    # Clamp to the same band the settings validator enforces. An IoU of exactly
+    # 1.0 would demand a pixel-perfect box match every cycle (nothing would ever
+    # confirm), so the spatial lever is capped well below that.
+    loc_iou = min(0.9, max(0.0, loc_iou))
 
-    labels_now = {
-        str(detection.get('label') or '').strip().lower()
-        for detection in detections
-        if str(detection.get('label') or '').strip()
-    }
+    # Each cycle stores ``label -> [boxes seen this cycle]``. The set of keys is
+    # exactly the old per-cycle label set (so the label-count logic below is
+    # unchanged), while the box lists power the optional spatial check.
+    cycle_boxes: dict[str, list[dict[str, Any]]] = {}
+    for detection in detections:
+        label = str(detection.get('label') or '').strip().lower()
+        if not label:
+            continue
+        boxes = cycle_boxes.setdefault(label, [])
+        box = detection.get('box')
+        if isinstance(box, dict):
+            boxes.append(box)
+    labels_now = set(cycle_boxes.keys())
     with _state.live_detection_confirm_lock:
         history = _state.live_detection_confirm_history.get(camera_id)
         if history is None or history.maxlen != window:
@@ -216,11 +280,12 @@ def confirm_object_detections(
             # setting change doesn't reset every camera's confirmation state.
             history = deque(history or [], maxlen=window)
             _state.live_detection_confirm_history[camera_id] = history
-        history.append(labels_now)
-        counts: dict[str, int] = {}
-        for cycle_labels in history:
-            for label in cycle_labels:
-                counts[label] = counts.get(label, 0) + 1
+        history.append(cycle_boxes)
+        history_cycles = list(history)
+    counts: dict[str, int] = {}
+    for cycle_labels in history_cycles:
+        for label in cycle_labels:
+            counts[label] = counts.get(label, 0) + 1
     confirmed = {label for label, count in counts.items() if count >= required}
     if labels_now and not confirmed:
         logger.debug(
@@ -228,17 +293,37 @@ def confirm_object_detections(
             '(need %d of last %d cycles): %s',
             camera_id, len(detections), required, window, sorted(labels_now),
         )
-    # ``face`` is exempt from the persistence gate: faces flicker far more
-    # than objects (small targets, pose changes), so 2-of-3 confirmation
-    # dropped a disproportionate share of them and delayed every face alert
-    # by a full window. Face noise is already bounded downstream (Face
-    # Confidence threshold, per-rule minimums, cooldowns, one-alert-per-track).
-    return [
-        detection
-        for detection in detections
-        if str(detection.get('label') or '').strip().lower() == 'face'
-        or str(detection.get('label') or '').strip().lower() in confirmed
-    ]
+
+    def _spatially_confirmed(label: str, box: Any) -> bool:
+        """How many recent cycles hold a same-label box overlapping ``box``."""
+        streak = 0
+        for cycle_labels in history_cycles:
+            cycle_label_boxes = cycle_labels.get(label)
+            if cycle_label_boxes and any(_box_iou(box, prior) >= loc_iou for prior in cycle_label_boxes):
+                streak += 1
+        return streak >= required
+
+    def _keep(detection: dict[str, Any]) -> bool:
+        label = str(detection.get('label') or '').strip().lower()
+        # ``face`` is exempt from the persistence gate: faces flicker far more
+        # than objects (small targets, pose changes), so 2-of-3 confirmation
+        # dropped a disproportionate share of them and delayed every face alert
+        # by a full window. Face noise is already bounded downstream (Face
+        # Confidence threshold, per-rule minimums, cooldowns, one-alert-per-track).
+        if label == 'face':
+            return True
+        if label not in confirmed:
+            return False
+        if loc_iou <= 0.0:
+            return True
+        box = detection.get('box')
+        if not isinstance(box, dict):
+            # No usable geometry to evaluate spatially: fall back to the
+            # label-only confirmation already satisfied above.
+            return True
+        return _spatially_confirmed(label, box)
+
+    return [detection for detection in detections if _keep(detection)]
 
 
 def confirm_motion_detections(

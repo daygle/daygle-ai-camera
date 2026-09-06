@@ -53,6 +53,7 @@ const FIELD_LABELS = {
   event_debounce_seconds: 'Event Merge Window (s)',
   detection_confirm_frames: 'Confirm Frames',
   detection_confirm_window: 'Confirm Window',
+  detection_confirm_iou: 'Confirm Location (IoU)',
   detection_history_minutes: 'Detection History (min)',
   background_detection_enabled: 'Background Detection',
   periodic_scan_interval_seconds: 'Periodic Scan Interval (s)',
@@ -203,6 +204,7 @@ const FORM_DEFAULTS = {
     event_debounce_seconds: 10,
     detection_confirm_frames: 2,
     detection_confirm_window: 3,
+    detection_confirm_iou: 0,
     background_detection_enabled: 'true',
     always_run_object_detection: 'true',
     object_detection_region_boost: 'false',
@@ -309,6 +311,7 @@ const FIELD_TYPES = {
   number: new Set([
     'detection_interval_seconds', 'event_debounce_seconds', 'detection_history_minutes',
     'motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha',
+    'detection_confirm_iou',
     'session_timeout_hours',
   ]),
   csv: new Set(['vehicle_labels', 'trusted_proxies']),
