@@ -715,6 +715,30 @@ function isMotionOnlyEventItem(item) {
   return _hasOnlyGenericLabels(item.detections);
 }
 
+// A single continuous clip can produce both a typed (object/sound) event and a
+// bare motion-only event on the same recording. The dashboard keeps them as
+// separate rows so each stays filterable under its Type tab, but the typed row
+// already represents the clip (and carries a motion badge), so in the combined
+// "All" view the motion-only row reads as a duplicate. Flag every motion-only
+// item whose recordingId also has a typed row; the dashboard hides flagged rows
+// in the All view while the Motion-detections tab still shows them. Mutates and
+// returns the same array (callers rely on the same item references).
+function markSupersededMotionRows(items) {
+  if (!Array.isArray(items)) return items;
+  const recordingsWithTypedRow = new Set();
+  for (const item of items) {
+    if (item && item.recordingId && !item.isMotionOnly) {
+      recordingsWithTypedRow.add(item.recordingId);
+    }
+  }
+  for (const item of items) {
+    if (item && item.isMotionOnly && item.recordingId && recordingsWithTypedRow.has(item.recordingId)) {
+      item.supersededByTypedRow = true;
+    }
+  }
+  return items;
+}
+
 // ─── Shared recording helpers (recordings list + timeline) ────────────────
 // The /api/recordings and /api/recordings/timeline endpoints return the same
 // recording shape, so the recordings list and the timeline page share these
@@ -1434,7 +1458,7 @@ window.daygleUi = {
   DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
   isMotionOnlyRecording, isContinuousOnlyRecording, motionConfidenceFor, recordingHasMotion,
-  isMotionOnlyEvent, isMotionOnlyEventItem,
+  isMotionOnlyEvent, isMotionOnlyEventItem, markSupersededMotionRows,
   // Shared recording readers (recordings list + timeline).
   isSoundRecording, recordingTriggerType, recordingTriggerLabel, recordingZoneNames, recordingDetectionSummary, recordingEventPills, cameraLabel,
   renderTimeSelect, timeSelectValue, setTimeSelectValue,
