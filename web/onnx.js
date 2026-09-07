@@ -148,8 +148,8 @@ function renderStatus(status) {
   // Two separate status cards mirroring how detection actually runs:
   // the PRIMARY object detector card, and the parallel face pass card.
   // Only rows that can tell the operator something they don't already know
-  // are shown: Status (whose failure states carry the detail the old
-  // Model Exists / Detector Loaded / ONNX Runtime Installed rows used to
+  // are shown: Object Detection (whose failure states carry the detail the
+  // old Model Exists / Detector Loaded / ONNX Runtime Installed rows used to
   // spell out), plus what is running and how (Model, Resolution, Precision,
   // Device). The backend is always ONNX -- the validator rejects every other
   // backend -- so that row was pure noise and is gone.
@@ -160,7 +160,7 @@ function renderStatus(status) {
     'model failed': 'Model failed',
   }[String(status.mode || '').toLowerCase()] || displayValue(status.mode, 'Unknown');
   const objectRows = [
-    safeHtml`<div><span>Status</span><strong class="ai-mode ${String(status.mode || '').toLowerCase().replace(/\s+/g, '-')}">${statusText}</strong></div>`,
+    safeHtml`<div><span>Object Detection</span><strong class="ai-mode ${String(status.mode || '').toLowerCase().replace(/\s+/g, '-')}">${statusText}</strong></div>`,
     modelRow,
     safeHtml`<div><span>Resolution</span><strong>${status.model_input_size || 'N/A'}</strong></div>`,
     safeHtml`<div><span>Precision</span><strong>${precisionText}</strong></div>`,
