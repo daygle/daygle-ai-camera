@@ -182,7 +182,7 @@ function buildEventItems() {
   // with no recordingId are distinct system events ("Event #id") and never merge.
   const itemType = (item) => (item.isSound ? 'sound' : item.isMotionOnly ? 'motion' : 'object');
   const seenRecording = new Map();
-  return eventItems.filter((item) => {
+  const deduped = eventItems.filter((item) => {
     const recId = item.recordingId;
     if (!recId) return true;
     const groupKey = `${recId}|${itemType(item)}`;
@@ -195,13 +195,21 @@ function buildEventItems() {
     return true;
   }).filter((item) => item.createdAt)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  // Flag motion-only rows whose recording also has a typed (object/sound) row so
+  // ``applyFilter`` can hide the redundant duplicate in the combined "All" view
+  // while the Motion-detections tab still shows it. Shared with utils.js so the
+  // motion-vs-object boundary stays defined in one place.
+  return markSupersededMotionRows(deduped);
 }
 
 function applyFilter(items) {
   if (activeFilter === 'object-detections') return items.filter((i) => !i.isSound && !i.isMotionOnly);
   if (activeFilter === 'motion-detections') return items.filter((i) => i.isMotionOnly);
   if (activeFilter === 'sound-detections') return items.filter((i) => i.isSound);
-  return items;
+  // Default "All": hide a motion-only row when the same recording already has an
+  // object/sound row, so one clip is not listed as two near-identical rows. The
+  // motion row is still reachable via the Motion-detections tab above.
+  return items.filter((i) => !(i.isMotionOnly && i.supersededByTypedRow));
 }
 
 function recordingLink(recordingId, label) {
