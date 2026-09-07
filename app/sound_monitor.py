@@ -20,6 +20,7 @@ Pool-C reach (resolved lazily via lazy imports inside function bodies):
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from datetime import datetime, timezone
@@ -106,6 +107,24 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
         notify_thread.start()
 
 
+def _sound_rules_fingerprint(enabled_rules: list[dict[str, Any]]) -> str:
+    """Canonical fingerprint of a camera's enabled sound rules.
+
+    ``apply_sound_settings`` compares this against a running detector's stored
+    fingerprint to decide whether that detector is still valid (see the
+    idempotency note in its docstring). Rules are plain JSON-able dicts after
+    ``_normalize_camera_sound_settings``, so a canonical JSON dump is a stable
+    identity for the rule set; sorting by class makes it insensitive to
+    client-side rule ordering, which UI saves can permute without changing
+    behavior. Stored on each detector as ``sound_rules_fingerprint``.
+    """
+    normalized = sorted(
+        ({key: value for key, value in rule.items()} for rule in enabled_rules),
+        key=lambda item: str(item.get('class') or ''),
+    )
+    return json.dumps(normalized, sort_keys=True, default=str)
+
+
 def _make_sound_detect_callback(camera_id: str):
     def _callback(class_id: str, rule_name: str, confidence: float, meta: dict[str, Any]) -> None:
         _on_sound_detected(camera_id, class_id, rule_name, confidence, meta)
@@ -114,6 +133,15 @@ def _make_sound_detect_callback(camera_id: str):
 
 def apply_sound_settings(*, prime: bool = False) -> None:
     """Start one SoundDetector per RTSP camera that has sound detection enabled.
+
+    Idempotent for unchanged cameras: every camera / zones / sounds settings
+    save funnels ``apply_cameras_settings`` into here, and the old
+    stop-everything-then-restart-everything behavior turned each save into a
+    full sound-monitor outage -- dropped rolling audio buffers, reset
+    last-detected status, and one "Sound monitor started" log line per
+    camera (the repeated log spam operators reported). A running detector
+    whose enabled-rule fingerprint is unchanged (``_sound_rules_fingerprint``)
+    is now left running; only new, changed, or dead detectors are restarted.
 
     Bug 7 follow-up: ``prime=False`` (default) is a no-op for the per-camera
     ``prime_rtsp_prebuffer`` side effect -- it still stops existing detectors
@@ -144,9 +172,14 @@ def apply_sound_settings(*, prime: bool = False) -> None:
     SoundDetector set + status surface aligned with the current config.
     """
     with _state._sound_detectors_lock:
-        for det in list(_state._sound_detectors.values()):
-            det.stop()
-        _state._sound_detectors.clear()
+        existing: dict[str, SoundDetector] = dict(_state._sound_detectors)
+
+    # Pass 1 -- classify each configured camera as keep / restart / disable.
+    # Cameras removed from the config have no entry here and are torn down by
+    # the stop pass below (apply_cameras_settings prunes their status row via
+    # _cleanup_camera_runtime_state).
+    keep_ids: set[str] = set()
+    to_start: list[tuple[str, dict[str, Any], str, list[dict[str, Any]], str]] = []
     for cam in list(_state.cameras_config):
         cam_id = str(cam.get('id') or '')
         stream_url = build_stream_url(cam)
@@ -162,9 +195,34 @@ def apply_sound_settings(*, prime: bool = False) -> None:
             with _state._sound_statuses_lock:
                 _state._sound_statuses[cam_id] = {'state': 'disabled', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None}
             continue
+        fingerprint = _sound_rules_fingerprint(enabled_rules)
+        current = existing.get(cam_id)
+        if current is not None and getattr(current, 'sound_rules_fingerprint', None) == fingerprint and current.running:
+            # Unchanged rules on a live detector: leave it alone. No stop, no
+            # start, no status reset (its last-detected state stays intact),
+            # no log line. A DEAD worker thread is restarted even when the
+            # fingerprint matches, preserving the old apply-as-recovery
+            # semantics.
+            keep_ids.add(cam_id)
+            continue
+        to_start.append((cam_id, cam, stream_url, enabled_rules, fingerprint))
+
+    # Pass 2 -- stop everything that is not kept: configs that changed,
+    # cameras disabled or removed, and detectors whose worker died.
+    with _state._sound_detectors_lock:
+        for cam_id, det in list(_state._sound_detectors.items()):
+            if cam_id in keep_ids:
+                continue
+            det.stop()
+            _state._sound_detectors.pop(cam_id, None)
+
+    # Pass 3 -- (re)start the new / changed detectors.
+    for cam_id, cam, stream_url, enabled_rules, fingerprint in to_start:
         if prime:
             _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=cam_id, recording_config=_state.camera_event_recording_config(cam))
         det = SoundDetector(on_detect=_make_sound_detect_callback(cam_id), rules=enabled_rules, source='ingest', sample_duration_seconds=1.0, audio_segment_provider=lambda after, _cid=cam_id: _state.recording_service.audio_segments_after(_cid, after))
+        # Idempotency marker for the next apply: see _sound_rules_fingerprint.
+        det.sound_rules_fingerprint = fingerprint
         det.start()
         with _state._sound_detectors_lock:
             _state._sound_detectors[cam_id] = det
