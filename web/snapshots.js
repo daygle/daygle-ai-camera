@@ -457,7 +457,7 @@ async function loadSnapshots() {
   try {
     const data = await api('/api/snapshots?limit=500');
     allSnapshots = Array.isArray(data) ? data : [];
-  } catch (err) {
+  } catch (_err) {
     allSnapshots = [];
     if (els.gallery) els.gallery.innerHTML = '<p class="muted empty-state">Could not load snapshots.</p>';
     if (typeof showToast === 'function') showToast('Failed to load snapshots.', true);

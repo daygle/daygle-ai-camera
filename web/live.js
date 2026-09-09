@@ -61,6 +61,7 @@ const pageMode = document.querySelector('[data-live-page]')?.dataset.livePage ||
 const isZonesPage = pageMode === 'zones';
 const DEFAULT_SNAPSHOT_REFRESH_MS = 500;
 const DEFAULT_DETECTION_STATUS_REFRESH_MS = 2000;
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for zones.js (zones page script)
 const CLOSE_DRAFT_DISTANCE_PX = 20;
 let refreshTimer;
 let detectionStatusTimer;
@@ -69,6 +70,7 @@ let detectionStatusRefreshMs = DEFAULT_DETECTION_STATUS_REFRESH_MS;
 // CSRF token is now shared via window.daygleAuth (set by loadAuth() via
 // setApiAuth from web/utils.js), so there's no page-local `csrfToken`.
 let cameras = [];
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for zones.js (zones page script)
 let availableLabels = [];
 let selectedCamera = null;
 // Motion-lane trigger reference: the minimum changed-pixel percentage needed
@@ -202,6 +204,7 @@ function stopLiveRaf() {
   }
 }
 
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for zones.js (zones page script)
 function cameraDetection() {
   selectedCamera.detection ||= { zones: [] };
   selectedCamera.detection.zones ||= [];
@@ -212,14 +215,17 @@ function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value));
 }
 
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for zones.js (zones page script)
 function normalizePoint(point) {
   return { x: clamp(Number(point?.x) || 0), y: clamp(Number(point?.y) || 0) };
 }
 
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for zones.js (zones page script)
 function roundCoord(value) {
   return Math.round(clamp(value) * 10000) / 10000;
 }
 
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for zones.js (zones page script)
 function normalizeLabelList(value) {
   const source = Array.isArray(value) ? value : String(value || '').split(',');
   const seen = new Set();

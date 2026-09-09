@@ -193,6 +193,7 @@ function projectDetections(prevDetections, curDetections, prevTime, curTime, tar
 // samples so the overlay follows objects smoothly. `track` is the array
 // produced server-side: [{ t, detections: [{ label, confidence, box }] }],
 // assumed sorted ascending by t.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for playback pages (app/recordings/timeline/live)
 function sampleTrackAtTime(track, t) {
   if (!Array.isArray(track) || !track.length) return [];
   const time = Number.isFinite(t) ? t : 0;
@@ -266,6 +267,7 @@ function sampleTrackAtTime(track, t) {
 // drawDetectionBoxesOnCanvas to avoid triggering forced layout twice.
 let _lastKnownDims = null;
 
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for playback pages (app/recordings/timeline/live)
 function resizeOverlayCanvas(canvas, referenceEl) {
   if (!canvas || !referenceEl) return;
   const dpr = window.devicePixelRatio || 1;
@@ -303,6 +305,7 @@ function _readElementDims(referenceEl) {
 // Draws detection bounding boxes onto canvas. referenceEl is the <video> or <img>
 // whose display size and intrinsic dimensions are used for coordinate mapping.
 // Assumes the canvas has already been cleared by the caller.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for playback pages (app/recordings/timeline/live)
 function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
   if (!canvas || !referenceEl || !detections?.length) return;
   const ctx = _getCachedContext(canvas);

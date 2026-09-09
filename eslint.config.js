@@ -21,15 +21,13 @@
 //
 // The cross-script bindings are therefore declared EXPLICITLY in
 // WEB_SHARED_GLOBALS below (each name verified to be defined by the listed
-// source script). With the manifest in place, `no-undef` is an ERROR again
-// for web/ - a genuinely undefined name (typo, renamed helper) fails lint
-// instead of hiding inside a warning baseline. `no-unused-vars` stays a
-// warning: helpers consumed only from later scripts legitimately read as
-// unused in single-file analysis.
-//
-// Maintenance rule: when a web/ script starts referencing a helper defined
-// in an earlier script, ADD the name to WEB_SHARED_GLOBALS in the same PR.
-// A missing entry surfaces immediately as a no-undef error.
+// source script). Both no-undef and no-unused-vars are ERRORS for web/:
+// helpers consumed by other scripts carry an explicit
+// "ESLint: exported for later/earlier scripts" marker at their definition
+// (see utils.js timeAgo, overlay.js playback helpers, live.js/zones.js page
+// hooks), and deliberately-ignored catch bindings follow the `_err`
+// convention. A warning here is therefore never expected - fix the code or
+// add a justified marker, never bump a count.
 
 import js from '@eslint/js';
 import globals from 'globals';
@@ -152,11 +150,11 @@ export default [
       },
     },
     rules: {
-      // Helpers consumed only from later scripts read as unused in
-      // single-file analysis; still surfaced for eventual module conversion.
-      // no-undef is intentionally NOT relaxed: WEB_SHARED_GLOBALS above
-      // covers the cross-script bindings, so a genuine typo now errors.
-      'no-unused-vars': 'warn',
+      // Strict: unused vars are bugs or stale code. Cross-script exports
+      // carry a documented "ESLint: exported ..." disable marker at their
+      // definition; deliberately-ignored catches are named (_err) via
+      // caughtErrorsIgnorePattern. Any failure here is actionable.
+      'no-unused-vars': ['error', { caughtErrorsIgnorePattern: '^_' }],
       // WEB_SHARED_GLOBALS names are declared with top-level const/let/function
       // in their defining scripts (that lexical binding IS the cross-script
       // sharing mechanism), so this rule fires a false positive in every

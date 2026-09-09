@@ -276,7 +276,7 @@ async function loadEvents() {
   try {
     const data = await api(`/api/events?${params.toString()}`);
     allEvents = Array.isArray(data) ? data : [];
-  } catch (err) {
+  } catch (_err) {
     allEvents = [];
     if (els.eventFeed) els.eventFeed.innerHTML = '<p class="muted empty-state">Could not load events.</p>';
     if (typeof showToast === 'function') showToast('Failed to load events.', true);

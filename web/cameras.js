@@ -268,7 +268,7 @@ function wireEditFormHandlers(index) {
   // Form submit
   form.addEventListener('submit', async function(e) {
     e.preventDefault();
-    var data = collectFormData(form, index);
+    var data = collectFormData(form);
     var camerasBefore = cameras.slice();
     var editTargetBefore = cameras[index];
 
@@ -347,7 +347,7 @@ function wireEditFormHandlers(index) {
   }
 }
 
-function collectFormData(form, index) {
+function collectFormData(form) {
   var getVal = function(name) { var el = form.querySelector('[name="' + name + '"]'); return el ? el.value : ''; };
   var getName = function(name) { return getVal(name).trim(); };
   var getInt = function(name, def) { var v = parseInt(getVal(name), 10); return isNaN(v) ? def : v; };
@@ -400,7 +400,7 @@ function formatCameraEndpoint(camera) {
       host = parsed.hostname || '';
       port = parsed.port ? ':' + parsed.port : '';
       path = parsed.pathname || '';
-    } catch (err) {
+    } catch (_err) {
       return 'Manual stream URL';
     }
   }
@@ -692,7 +692,7 @@ async function fetchCameraResolutions() {
       } else {
         cameraFps[camera.id] = null;
       }
-    } catch (err) {
+    } catch (_err) {
       delete cameraResolutions[camera.id];
       delete cameraFps[camera.id];
     }
@@ -770,7 +770,7 @@ async function updateHealthStats() {
     }
     // Keep an open inline editor intact during the periodic health refresh.
     if (!document.querySelector('.camera-edit-row')) renderGrid();
-  } catch (e) {
+  } catch (_err) {
     // silently ignore
   }
 }

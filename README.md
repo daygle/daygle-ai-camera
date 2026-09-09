@@ -384,11 +384,11 @@ npm test
 `npm test` runs the `tests/*.test.js` suites with the Node.js built-in test
 runner (per-suite invocations like
 `node --test tests/test_motion_boundary_js.test.js` also work). ESLint
-enforces the recommended correctness rules on `web/` and `tests/`, with
-`no-undef` as an error: cross-script globals are declared explicitly in
-`WEB_SHARED_GLOBALS` (`eslint.config.js`). The remaining warnings are the
-known `no-unused-vars` baseline (helpers consumed only from later scripts)
-and are pinned in CI with `--max-warnings`.
+enforces the recommended correctness rules as errors on `web/` and `tests/`:
+cross-script globals are declared explicitly in `WEB_SHARED_GLOBALS`
+(`eslint.config.js`), cross-file helpers carry an explicit export marker,
+and ignored catches follow the `catch (_err)` convention - so `npm run lint`
+gates with zero warnings and no `--max-warnings` pin.
 
 ## Troubleshooting
 

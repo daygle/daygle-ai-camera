@@ -1162,6 +1162,7 @@ function formatUserTime(date) {
   return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
 function timeAgo(isoString) {
   if (!isoString) return '';
   const date = new Date(isoString);
@@ -1233,10 +1234,10 @@ function daygleSinceParamForRange(range) {
 // layout land in one place.
 //
 // renderRuleExpandFields is the shared field set (email recipients + four
-// time pickers). renderRuleExpandRow wraps it in a table row for the
-// object/sound rule tables; the zones page Motion card embeds the same
+// time pickers). The zones page Motion card embeds the same
 // fields directly in a div so Motion's advanced settings match the object
-// rules without living in the table.
+// rules without living in a table row.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts (sounds/zones rule editors)
 function renderRuleExpandFields(prefix, key, rule) {
   return `
     <label class="sound-rule-field sound-rule-email-field">
@@ -1259,17 +1260,6 @@ function renderRuleExpandFields(prefix, key, rule) {
       <span>Email/Push to</span>
       ${renderTimeSelect(rule.notify_end, `data-${prefix}-notify-end`, key)}
     </label>`;
-}
-
-function renderRuleExpandRow(prefix, key, rule, expanded) {
-  return `
-    <tr class="rule-expand-row" ${expanded ? '' : 'hidden'}>
-      <td colspan="9">
-        <div class="rule-expand-body">
-          ${renderRuleExpandFields(prefix, key, rule)}
-        </div>
-      </td>
-    </tr>`;
 }
 
 function formatUserClock(seconds) {

@@ -1505,6 +1505,7 @@ function addFullFrameZone() {
   markZoneUnsaved();
 }
 
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for earlier scripts (live.js hooks)
 function bindZoneDrawing() {
   if (!liveEls.zoneOverlay) return;
   liveEls.zoneOverlay.addEventListener('pointerdown', (event) => {

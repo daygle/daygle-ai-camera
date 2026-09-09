@@ -41,12 +41,11 @@ jobs:
       run: pytest
 
   # Dashboard frontend (web/) and its node:test suites. ESLint enforces the
-  # recommended correctness rules; no-undef is an ERROR for web/ (the
-  # cross-script globals are declared explicitly in WEB_SHARED_GLOBALS,
-  # eslint.config.js). The remaining warnings are the known
-  # no-unused-vars baseline (helpers consumed only from later scripts) and
-  # are pinned with --max-warnings so new ones fail CI and fixed ones
-  # tighten the pin.
+  # recommended correctness rules as ERRORS for web/: cross-script globals
+  # are declared in WEB_SHARED_GLOBALS (eslint.config.js), cross-script
+  # exports carry an explicit "ESLint: exported ..." marker, and ignored
+  # catches follow the _err convention - so plain `eslint .` gates with no
+  # warning baseline or --max-warnings pin needed.
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -58,6 +57,6 @@ jobs:
     - name: Install dependencies
       run: npm ci
     - name: Lint with ESLint
-      run: npm run lint -- --max-warnings=51
+      run: npm run lint
     - name: Test dashboard scripts with node:test
       run: npm test

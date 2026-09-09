@@ -23,7 +23,7 @@ async function loadFaceMode() {
     const objectSettings = await api('/api/settings/objects');
     const override = objectSettings?.labels?.face;
     frForm.face_mode.value = override || 'inherit';
-  } catch (err) {
+  } catch (_err) {
     // Non-fatal: leave the select on its default rather than blocking the page.
     frForm.face_mode.value = 'inherit';
   }

@@ -540,7 +540,7 @@ async function loadSystemResources() {
   try {
     const res = await api('/api/system/resources');
     renderSystemResources(res);
-  } catch (error) {
+  } catch (_err) {
     // Non-admins get 403 on this admin-gated endpoint; leave the placeholder
     // dashes in place and stay quiet rather than flashing an error toast.
     if (window.daygleAuth?.redirecting) return;

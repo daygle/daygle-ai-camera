@@ -74,26 +74,6 @@ function soundEnabled(camera) {
   return sound.enabled === true && enabledSoundRules(camera).length > 0;
 }
 
-function hasRtspConfig(camera) {
-  return Boolean(camera?.stream_url || camera?.rtsp_url || camera?.host);
-}
-
-function cameraSoundReason(camera, status) {
-  const sound = soundConfig(camera);
-  if (sound.enabled !== true) return 'Sound disabled';
-  if (!enabledSoundRules(camera).length) return 'No enabled sound rules';
-  if (!hasRtspConfig(camera)) return 'No RTSP stream configured';
-  if (status.running) return 'Running';
-  return displayValue(status.detector_status || status.state, 'Not running');
-}
-
-function cameraLabel(camera) {
-  const name = String(camera?.name || '').trim();
-  const id = String(camera?.id || '').trim();
-  if (name && id) return `${name} (${id})`;
-  return name || id || 'Unknown camera';
-}
-
 function renderOverall(status, enabledCameras) {
   const backend = status.backend || 'none';
   statusPanel.className = `status-panel yamnet-status-grid ${backendTone(backend)}`;

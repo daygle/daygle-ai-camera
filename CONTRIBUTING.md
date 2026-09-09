@@ -49,14 +49,14 @@ The repository carries two independent suites and CI (`.github/workflows/python-
 - **Python (`tests/`)**: intentionally not ruff-gated yet (the "Pool-A"
   preload pattern reads as unused imports; see the comment in `ruff.toml`).
 - **JS (`web/` + `tests/`)**: ESLint recommended rules (`eslint.config.js`).
-  `no-undef` is an **error** for `web/`: the cross-script globals are
-  declared explicitly in `WEB_SHARED_GLOBALS` (`eslint.config.js`) - when a
-  script starts using a helper from an earlier-loaded script, add the name
-  there in the same PR. CI pins the remaining `no-unused-vars` baseline
-  (helpers consumed only from later scripts) with `--max-warnings=51`. The
-  pin decays as warnings are fixed - when a corrected file drops the count,
-  tighten the pin in `.github/workflows/python-app.yml`. The long-term goal
-  is module conversion, which removes the baseline entirely.
+  `no-undef` and `no-unused-vars` are both **errors** for `web/` - there is
+  no warning baseline and no `--max-warnings` pin in CI. Cross-script
+  globals are declared explicitly in `WEB_SHARED_GLOBALS`
+  (`eslint.config.js`): when a script starts using a helper from an
+  earlier-loaded script, add the name there in the same PR. A helper
+  defined in one file but consumed by another carries an explicit
+  "ESLint: exported for later/earlier scripts" marker at its definition.
+  Deliberately-ignored catch bindings follow the `catch (_err)` convention.
 
 ## Commit and PR conventions
 
