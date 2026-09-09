@@ -14,6 +14,33 @@ from app.config_facades import get_camera_config
 router = APIRouter()
 
 
+@router.get('/healthz')
+def healthz():
+    """Unauthenticated liveness probe for process monitors.
+
+    Serves the same contract as the authenticated ``/api/status`` response
+    (the fields the dashboard consumes) so monitors get extra diagnostics for
+    free, and deliberately reports no camera or AI state: it answers the only
+    question a liveness probe asks -- is the HTTP server up? -- without
+    exposing camera names, stream configuration, or detector errors to an
+    unauthenticated caller. Camera/AI health belongs to the authenticated
+    ``/api/status`` and the Cameras page.
+
+    PUBLIC_PATHS in ``app/state.py`` bypasses authentication for this path so
+    systemd timers, uptime monitors, and the Docker HEALTHCHECK can call it
+    without a session. Do not add per-camera or model state here.
+    """
+    return {
+        'status': 'ok',
+        'service': 'daygle-ai-camera',
+        'ai_backend': None,
+        'ai_available': None,
+        'ai_error': None,
+        'ai_mode': None,
+        'live_detection': {},
+    }
+
+
 @router.get('/api/status')
 def status(camera_id: str | None = None, cameras_config=Depends(get_cameras_config)):
     if not cameras_config:

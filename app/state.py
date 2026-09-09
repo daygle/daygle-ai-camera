@@ -62,7 +62,10 @@ _MOTION_SCENE_RESET_FRAMES: int = 4
 # Middleware / auth constants (moved from app.main so app.middleware can
 # import them at module top-level without a circular import).
 PUBLIC_PREFIXES: tuple[str, ...] = ('/static/',)
-PUBLIC_PATHS: frozenset[str] = frozenset({'/favicon.ico', '/login', '/setup'})
+# '/healthz' is the unauthenticated liveness probe for systemd timers,
+# uptime monitors, and the Docker HEALTHCHECK; it must stay free of session
+# and admin gating (see tests/test_healthz.py and docs/operations.md).
+PUBLIC_PATHS: frozenset[str] = frozenset({'/favicon.ico', '/healthz', '/login', '/setup'})
 ADMIN_PATHS: frozenset[str] = frozenset({
     '/onnx', '/yamnet-tflite', '/ai', '/cameras', '/settings',
     '/users', '/zones', '/sounds', '/objects', '/audit', '/camera-log',

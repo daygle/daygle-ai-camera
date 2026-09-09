@@ -2,6 +2,31 @@
 
 This guide summarizes the admin pages and operational checks that help keep Daygle AI Camera healthy after installation.
 
+## Liveness monitoring (/healthz)
+
+Daygle exposes an unauthenticated liveness endpoint at `GET /healthz` for
+systemd timers, uptime monitors, and the Docker HEALTHCHECK. It answers with
+`200 {"status": "ok", ...}` while the HTTP server is accepting requests and
+deliberately exposes no camera names, stream configuration, or detector
+state - that belongs to the authenticated `/api/status` and the dashboard.
+
+Example checks:
+
+```bash
+curl -fsS http://127.0.0.1:8080/healthz
+```
+
+systemd watchdog-style probe (via a timer or an external monitor):
+
+```yaml
+# Example Uptime-Kuma / generic HTTP monitor settings
+# URL: http://<server>:8080/healthz
+# Accepted status: 200
+```
+
+The Docker image ships a `HEALTHCHECK` that probes this endpoint every 30
+seconds, so `docker ps` reports `healthy` / `unhealthy` based on it.
+
 ## Camera health
 
 Use **Cameras** (`/cameras`) to review each configured camera and the camera health summary. The health endpoint tracks online and offline state so administrators can quickly identify streams that need attention.
@@ -16,7 +41,7 @@ Use **Camera Log** (`/camera-log`) to investigate operational issues. The log in
 - `detection_backoff` and `detection_recovered` events.
 - `capture_failed` events.
 - `prebuffer_fallback`, `prebuffer_short_preroll`, `prebuffer_degenerate`, and `prebuffer_restart` recording events. A `prebuffer_short_preroll` warning means an event clip captured less pre-event footage than configured because the rolling buffer had not filled yet (common right after saving recording settings, a camera reconnect, or the camera first coming online); it recovers on its own once the buffer refills.
-- `audio_mux_disk_full` warnings mean an event clip was saved **without audio** because the audio mux hit `No space left on device`. The video is always kept. The usual cause is a genuinely full (or inode-exhausted) recordings filesystem — free up space and future clips get sound again. Check the diagnostic's `free_bytes`/`free_inodes` and `write_probe` details: if they show ample space and a live write that *succeeded*, the `-28` came from inside ffmpeg rather than the disk, and the `stderr_origin` field names the originating error. The audio is now assembled into a single track before muxing (rather than one delayed ffmpeg input per second), which removes the large filtergraph that previously provoked spurious end-of-stream `-28` errors on healthy disks. While the disk stays full the diagnostic is emitted at most once per camera per 30 minutes.
+- `audio_mux_disk_full` warnings mean an event clip was saved **without audio** because the audio mux hit `No space left on device`. The video is always kept. The usual cause is a genuinely full (or inode-exhausted) recordings filesystem - free up space and future clips get sound again. Check the diagnostic's `free_bytes`/`free_inodes` and `write_probe` details: if they show ample space and a live write that *succeeded*, the `-28` came from inside ffmpeg rather than the disk, and the `stderr_origin` field names the originating error. The audio is now assembled into a single track before muxing (rather than one delayed ffmpeg input per second), which removes the large filtergraph that previously provoked spurious end-of-stream `-28` errors on healthy disks. While the disk stays full the diagnostic is emitted at most once per camera per 30 minutes.
 
 Filter by camera ID, event type, or severity when investigating a specific stream. The newest diagnostic events are listed first.
 
