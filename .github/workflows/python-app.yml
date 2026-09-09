@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# Rapid successive pushes to a PR branch cancel the superseded run instead of
+# queueing duplicate matrix jobs (2 Python versions x full dep install).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest

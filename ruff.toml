@@ -10,7 +10,10 @@
 # importing the module under test) that reads as F401 "imported but unused".
 # Enforcing F there would require annotating ~45 intentional imports; that is
 # deferred to keep this change focused on production code.
-target-version = "py310"
+# Keep in sync with the project's Python floor (README + CI matrix + Docker
+# base image): 3.11. Ruff uses this to apply version-aware linting (e.g. flag
+# syntax renamed/removed in newer Pythons).
+target-version = "py311"
 
 [lint]
 select = ["F"]
