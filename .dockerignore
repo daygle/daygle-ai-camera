@@ -1,0 +1,25 @@
+# Keep the build context small and secret-free: local runtime data, virtual
+# environments, downloaded models, and git history never belong in an image.
+.git
+.gitignore
+.venv
+venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.coverage
+coverage
+data
+node_modules
+models/*.onnx
+models/*.pt
+docs/
+tests/
+.github/
+docker-compose.yml
+Dockerfile
+.dockerignore
+CONTRIBUTING.md
+config.yaml
+*.sqlite3

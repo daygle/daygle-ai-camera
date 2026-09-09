@@ -1,0 +1,59 @@
+# Daygle AI Camera - Docker Compose deployment.
+#
+# Usage (CPU build):
+#     docker compose up -d --build
+#     docker compose logs -f
+#
+# GPU build (Tesla P4 / Pascal -- the image pins CUDA 12.4-era ONNX Runtime
+# wheels; see docs/tesla-p4-gpu-setup.md for the driver-side requirements):
+#     docker compose build --build-arg ORT_VARIANT=gpu
+#     docker compose up -d
+# and uncomment the "gpus" block below.
+#
+# The service exposes only the dashboard port; all runtime state (config.yaml,
+# SQLite database, recordings, snapshots, downloaded models) lives in the
+# "daygle-data" volume and survives container replacement. Provide the
+# optional Cloudflare Tunnel token via an env_file rather than committing it.
+
+services:
+  daygle-ai-camera:
+    build:
+      context: .
+      args:
+        ORT_VARIANT: cpu
+    image: daygle-ai-camera:latest
+    container_name: daygle-ai-camera
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - daygle-data:/data
+      # Persist the auto-downloaded ONNX model across container replacement.
+      # Without this the model re-downloads on every new container.
+      - daygle-models:/app/models
+    # Cameras frequently live on the LAN; host networking is an alternative
+    # if your cameras cannot be reached from the Docker bridge subnet:
+    #   network_mode: host
+    environment:
+      # Optional: headless Cloudflare Tunnel (takes precedence over the UI).
+      # Prefer an env_file: DAYGLE_CLOUDFLARED_TOKEN=ey...
+      # DAYGLE_CLOUDFLARED_TOKEN: ""
+    # Uncomment on GPU hosts (requires the NVIDIA container toolkit and the
+    # Pascal-compatible driver on the host):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  daygle-data:
+  daygle-models:
