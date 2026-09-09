@@ -1732,9 +1732,9 @@ ultralytics==8.4.131 \
     --hash=sha256:19ce4e38546c2d1c8b97c6e39a053eb62df38dc21b12945d5274015ad00ae0c6 \
     --hash=sha256:548ab7ed5ee53551d8e46334fc45c751746eef7f3273869e2f2357f23edb7f25
     # via -r requirements.txt
-ultralytics-platform==0.1.14 \
-    --hash=sha256:c7cf1f3dbc1e9847629e6e3b121285fddff5cef49b2ed7f82711d8faea6260b3 \
-    --hash=sha256:d36d503ac6ffeda65f4125903b65aef224b83e73d073fb2de9e9081c7ed49451
+ultralytics-platform==0.1.21 \
+    --hash=sha256:d408a2274800b51cca543aef21e96f6405c022df3d6c81dc4559375980c4eed1 \
+    --hash=sha256:f1c8a0ccfef543c0cc573b264e0bdd29605d3b67a21aee56ffe02ea611099c8d
     # via ultralytics
 ultralytics-thop==2.1.6 \
     --hash=sha256:0ec2df8ebd3db35795e1f80cdc8bce6734446dbe989bca1b0c89396353f0f08c \
