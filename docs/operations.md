@@ -22,7 +22,7 @@ Filter by camera ID, event type, or severity when investigating a specific strea
 
 ## Settings layout
 
-**Settings** (`/settings`) is organised into four tabs:
+**Settings** (`/settings`) is organised into five tabs:
 
 - **Detection & Live** - live refresh rates, detection interval, event merge window, background detection, and (under *Advanced Motion Tuning*) the low-level motion-gate values documented in [motion-detection.md](motion-detection.md).
 - **Recording** - event clip timing (pre/post-event, keep-recording-after-motion, max clip length), retention/auto-purge, and storage directories.

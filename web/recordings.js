@@ -42,7 +42,7 @@ const els = {
 // /api/auth/me - no page-local state to maintain.
 let recordingRefreshTimer = null;
 let activeRecording = null;
-let overlayResizeObserver = null;
+let overlayResizeObserver;
 // Estimated frame duration (seconds) derived from the video element, used
 // to project detection boxes one frame ahead of the VFC mediaTime.
 let _frameDuration = 1 / 30; // default 30fps, updated on each VFC frame

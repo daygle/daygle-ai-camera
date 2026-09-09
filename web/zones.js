@@ -1286,7 +1286,7 @@ function bindZoneControls(zones) {
         if (!restorePreviousZoneShape(index)) {
           selectedZoneIndex = index;
           renderZones();
-          liveEls.status.textContent = 'Drag a corner dot or click a mid-edge \"+\" to reshape this zone.';
+          liveEls.status.textContent = 'Drag a corner dot or click a mid-edge "+" to reshape this zone.';
         }
       }
     });

@@ -21,3 +21,5 @@ data/*
 .claude/
 .freebuff/
 temp_*/
+node_modules/
+coverage/

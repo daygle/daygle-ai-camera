@@ -328,10 +328,30 @@ Admins can also use **Settings → System → Software Updates**. A successful b
 
 ## Tests
 
+The backend and the dashboard frontend each have their own suite.
+
+Backend (Python 3.11+, includes a coverage report):
+
 ```bash
 python -m compileall app
 python -m pytest
 ```
+
+Frontend (`web/` dashboard scripts, requires Node.js 22+ and one
+`npm install` for the lint/test tooling):
+
+```bash
+npm install
+npm run lint
+npm test
+```
+
+`npm test` runs the `tests/*.test.js` suites with the Node.js built-in test
+runner (per-suite invocations like
+`node --test tests/test_motion_boundary_js.test.js` also work). ESLint
+enforces the recommended correctness rules on `web/` and `tests/`; the
+remaining `no-undef`/`no-unused-vars` findings in `web/` are the known
+cross-script-globals baseline and are pinned in CI with `--max-warnings`.
 
 ## Troubleshooting
 
@@ -350,3 +370,13 @@ python -m pytest
 
 - Application logs: `data/logs/app.log`
 - Service logs: `journalctl -u daygle-ai-camera -f`
+
+## License
+
+Daygle AI Camera is released under the [MIT License](LICENSE).
+
+Note that bundled detection models carry their own upstream licenses, which are
+independent of this project's license: the YOLO face weights are GPL-3.0
+(see `docs/ai-detection.md`) and the ArcFace embedding models are Apache-2.0
+(see `docs/face-recognition.md`). Both are downloaded on demand and are not
+redistributed in this repository.

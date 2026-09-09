@@ -662,9 +662,9 @@ function renderDetectionStatus(summary) {
   const faceChips = summary.faceChips || [];
   const faceKnown = summary.faceEnabled != null;
   if (liveEls.faceLane) liveEls.faceLane.classList.toggle('sense-lane-alerted', faceChips.length > 0 && alerted);
-  let faceStateText = '-';
-  let faceStateClass = 'sense-badge-idle';
-  let faceBodyHtml = '';
+  let faceStateText;
+  let faceStateClass;
+  let faceBodyHtml;
   if (faceChips.length) {
     faceStateText = 'Detected';
     faceStateClass = 'sense-badge-face';

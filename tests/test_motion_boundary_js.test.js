@@ -11,7 +11,7 @@
 // Run with:
 //   node --test tests/test_motion_boundary_js.test.js
 // Or, from the repo root:
-//   node --test tests/
+//   npm test          (runs all *.test.js suites; see package.json)
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

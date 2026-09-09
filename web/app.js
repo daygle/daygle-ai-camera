@@ -65,7 +65,7 @@ let activeRecording = null;
 let overlayEnabled = true;
 let overlayRafId = null;
 let overlayVfcHandle = null;
-let overlayResizeObserver = null;
+let overlayResizeObserver;
 let _frameDuration = 1 / 30; // default 30fps, updated on each VFC frame
 
 // daygleSinceParamForRange() is provided by web/utils.js: it converts the

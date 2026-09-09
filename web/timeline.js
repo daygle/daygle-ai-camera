@@ -119,7 +119,7 @@ let activeRecording = null;
 let overlayEnabled = true;
 let overlayRafId = null;
 let overlayVfcHandle = null;
-let overlayResizeObserver = null;
+let overlayResizeObserver;
 // Estimated frame duration (seconds) used to project detection boxes one
 // frame ahead of the VFC mediaTime or currentTime.
 let _frameDuration = 1 / 30; // default 30fps, updated on each VFC frame

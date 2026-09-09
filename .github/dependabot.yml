@@ -91,6 +91,28 @@ updates:
     # (e.g. bcrypt>=5.0,<6.0) still let Dependabot propose only safe interim
     # bumps.
 
+  # --- npm (web/ frontend lint+test tooling) ------------------------------
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      # Wednesday keeps npm bumps away from the Monday pip and Tuesday
+      # github-actions waves.
+      day: "wednesday"
+    open-pull-requests-limit: 3
+    rebase-strategy: "auto"
+    # Everything in package.json is a devDependency (lint/test tooling only);
+    # group them so tooling bumps arrive as one reviewable PR.
+    groups:
+      npm-dev:
+        dependency-type: "development"
+    labels:
+      - "dependencies"
+      - "javascript"
+    commit-message:
+      prefix: "deps(npm)"
+      include: "scope"
+
   # --- GitHub Actions ------------------------------------------------------
   - package-ecosystem: "github-actions"
     directory: "/"

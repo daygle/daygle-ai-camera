@@ -315,7 +315,7 @@ function renderCard(m) {
     const barWidth = Math.min(100, Math.round((m.approx_mb / maxMb) * 100));
 
     // Action buttons
-    let actionsHtml = '';
+    let actionsHtml;
     if (!isInstalled) {
       actionsHtml = `
         <div class="model-download-row">

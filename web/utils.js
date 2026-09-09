@@ -298,7 +298,7 @@ async function refreshDaygleAuth() {
   if (!response.ok) {
     return window.daygleAuth?.user ? { user: window.daygleAuth.user, csrfToken: window.daygleAuth.csrfToken, expiresAt: window.daygleAuth.expiresAt || '' } : null;
   }
-  let payload = null;
+  let payload;
   try { payload = await response.json(); } catch (_err) { return null; }
   const user = payload?.user || null;
   const csrfToken = payload?.csrf_token || '';

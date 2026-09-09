@@ -6,8 +6,8 @@
 //
 // Naming convention: lowerCamelCase key that describes the icon purpose.
 //   remove - trash / delete
-//   chevronDown / chevronUp - expand / collapse indicator (12 px)
-//   grip - drag handle (14 px)
+//   chevronDown / chevronUp - expand / collapse indicator (12 px)
+//   grip - drag handle (14 px)
 //   edit - pencil
 //   viewLive - play-button icon used in inline CTA links
 
