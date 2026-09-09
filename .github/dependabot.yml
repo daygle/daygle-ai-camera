@@ -80,6 +80,23 @@ updates:
       - dependency-name: "pydantic-core"
       # mpmath is a sympy/torch-chain transitive in the hash lock.
       - dependency-name: "mpmath"
+      # The committed hash lock (requirements.cpu.lock.txt) is a DERIVED
+      # artifact: `uv pip compile requirements.txt --generate-hashes` output,
+      # regenerated only via scripts/lock_python_deps.sh after
+      # requirements.txt changes. Dependabot scans every requirements*.txt as
+      # an INDEPENDENT manifest, so without these rules it proposes piecemeal
+      # lock-only bumps (previously anyio, ultralytics-platform, triton,
+      # polars-runtime-32) that edit one pin outside a resolver run: the new
+      # pin's own transitive requirements are NOT pulled into the lock, so a
+      # --require-hashes install can fail or silently drift from
+      # requirements.txt. Ignore the known lock-only transitives and extend
+      # this list if a new lock-only PR ever appears. Policy (see
+      # CONTRIBUTING.md): the lock moves ONLY via a full lock regeneration;
+      # requirements.txt bumps regenerate it in the same PR.
+      - dependency-name: "anyio"
+      - dependency-name: "triton"
+      - dependency-name: "polars*"
+      - dependency-name: "ultralytics-platform"
     # Exact-pinned entries (e.g. ultralytics==8.4.113) still get Dependabot
     # PRs -- an exact pin does not stop Dependabot on its own; it simply
     # proposes a new pin at the latest release. That is intended here:
