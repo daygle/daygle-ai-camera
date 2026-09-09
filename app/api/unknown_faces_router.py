@@ -3,7 +3,7 @@
 Endpoints for reviewing, assigning, and dismissing unknown face captures
 that were detected but not matched to any enrolled person.
 
-Admin-only — managing biometric data is an admin operation.
+Admin-only - managing biometric data is an admin operation.
 """
 from __future__ import annotations
 
@@ -56,8 +56,8 @@ async def assign_unknown_face(
     """Assign an unknown face to an enrolled person (or create a new person).
 
     Body:
-      {"person_id": 123}            — assign to existing person
-      {"name": "New Person"}        — create new person + assign
+      {"person_id": 123}            - assign to existing person
+      {"name": "New Person"}        - create new person + assign
     """
     require_admin(request)
     try:

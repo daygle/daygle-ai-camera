@@ -9,7 +9,7 @@ Stored under the ``face_detection_rules`` key in the settings database as::
     {"rules": [<rule>, ...]}
 
 The live pipeline reads rules via :func:`enabled_rules_for_label` and
-:func:`effective_face_detection_rules` — both reach ``app.state.database``
+:func:`effective_face_detection_rules` - both reach ``app.state.database``
 at call time to avoid stale caches.
 """
 
@@ -114,7 +114,7 @@ def _normalize_recipients_field(value: Any) -> str:
     elif isinstance(value, str):
         stripped = value.strip()
         if stripped.startswith('['):
-            # Corrupted Python list repr — strip brackets and quotes
+            # Corrupted Python list repr - strip brackets and quotes
             parts = [s.strip().strip("'\"") for s in stripped.strip('[]').split(',')]
         else:
             parts = stripped.split(',')
@@ -180,7 +180,7 @@ def validate_face_detection_rules(payload: dict[str, Any]) -> dict[str, Any]:
         if not rule['id']:
             continue
         if rule['id'] in seen_ids:
-            continue  # duplicate id — first entry wins
+            continue  # duplicate id - first entry wins
         seen_ids.add(rule['id'])
         validated.append(rule)
     return {'rules': validated}
@@ -316,7 +316,7 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
         # the synthetic UNKNOWN_RULE_ID if the name is missing.
         person_name = str(detection.get('person_name') or '').strip() or None
         if person_name is None:
-            # Unknown face — handled by unknown_face_alerts(), skip here
+            # Unknown face - handled by unknown_face_alerts(), skip here
             continue
         # Zone-scoped rules only fire inside their zone: the live pipeline
         # stamps face detections with their containing zone before calling.
