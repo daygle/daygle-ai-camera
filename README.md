@@ -22,6 +22,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 - Audit log of admin actions, camera diagnostics, and an in-browser application log viewer
 - Database backup / restore (database-only or full with media and model assets) and over-the-air updates
 - Debian install script with a systemd service bundle
+- Optional Docker / Docker Compose packaging (CPU image by default, Pascal/Tesla P4 GPU build supported)
 
 ## Documentation
 
@@ -123,6 +124,40 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
    ```
 
 6. Open <http://127.0.0.1:8080/> and complete the first-run setup.
+
+### Docker / Docker Compose
+
+A container image is provided for deployments that prefer Docker over the
+Debian service. The CPU variant is the default; a Pascal-compatible GPU build
+(Tesla P4) is available via a build argument.
+
+```bash
+# CPU image
+docker compose up -d --build
+
+# or without compose
+docker build -t daygle-ai-camera .
+docker run -d --name daygle-ai-camera -p 8080:8080 -v daygle-data:/data daygle-ai-camera
+
+# GPU (Tesla P4 / Pascal) build
+docker compose build --build-arg ORT_VARIANT=gpu
+docker compose up -d
+```
+
+Notes:
+
+- All runtime state (config.yaml, SQLite database, recordings, snapshots,
+  downloaded models) lives in the `daygle-data` volume and survives container
+  replacement.
+- The image runs as a non-root user and uses the same `python -m app.server`
+  entrypoint as the systemd service; `DAYGLE_CONFIG` points at
+  `/data/config.yaml`.
+- GPU builds additionally require the NVIDIA container toolkit and a
+  host driver still supporting Pascal (sm_61); see
+  [docs/tesla-p4-gpu-setup.md](docs/tesla-p4-gpu-setup.md) and uncomment the
+  GPU reservation in `docker-compose.yml`.
+- The image ships a HEALTHCHECK that probes the unauthenticated `/healthz`
+  endpoint every 30 seconds.
 
 ### Debian service install
 
@@ -349,9 +384,11 @@ npm test
 `npm test` runs the `tests/*.test.js` suites with the Node.js built-in test
 runner (per-suite invocations like
 `node --test tests/test_motion_boundary_js.test.js` also work). ESLint
-enforces the recommended correctness rules on `web/` and `tests/`; the
-remaining `no-undef`/`no-unused-vars` findings in `web/` are the known
-cross-script-globals baseline and are pinned in CI with `--max-warnings`.
+enforces the recommended correctness rules on `web/` and `tests/`, with
+`no-undef` as an error: cross-script globals are declared explicitly in
+`WEB_SHARED_GLOBALS` (`eslint.config.js`). The remaining warnings are the
+known `no-unused-vars` baseline (helpers consumed only from later scripts)
+and are pinned in CI with `--max-warnings`.
 
 ## Troubleshooting
 
