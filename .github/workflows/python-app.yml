@@ -35,10 +35,12 @@ jobs:
       run: pytest
 
   # Dashboard frontend (web/) and its node:test suites. ESLint enforces the
-  # recommended correctness rules; the remaining no-undef/no-unused-vars
-  # findings in web/ are the known cross-script-globals baseline (see
-  # eslint.config.js) and are pinned with --max-warnings so new ones fail CI
-  # and fixed ones tighten the pin.
+  # recommended correctness rules; no-undef is an ERROR for web/ (the
+  # cross-script globals are declared explicitly in WEB_SHARED_GLOBALS,
+  # eslint.config.js). The remaining warnings are the known
+  # no-unused-vars baseline (helpers consumed only from later scripts) and
+  # are pinned with --max-warnings so new ones fail CI and fixed ones
+  # tighten the pin.
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -50,6 +52,6 @@ jobs:
     - name: Install dependencies
       run: npm ci
     - name: Lint with ESLint
-      run: npm run lint -- --max-warnings=971
+      run: npm run lint -- --max-warnings=51
     - name: Test dashboard scripts with node:test
       run: npm test
