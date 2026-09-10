@@ -386,7 +386,13 @@ function renderChips() {
 }
 
 function renderDropdownOptions() {
-  if (!groupMembersOptions || !availableLabels.length) return;
+  if (!groupMembersOptions) return;
+  // Explain an empty list instead of opening a blank dropdown (matches the
+  // wording of the #objectsEmpty message on the same page).
+  if (!availableLabels.length) {
+    groupMembersOptions.innerHTML = '<div class="multi-select-empty">No labels are available yet. Install and load an ONNX model on the ONNX page first.</div>';
+    return;
+  }
   const filter = (groupMembersFilter?.value || '').trim().toLowerCase();
   const filtered = filter
     ? availableLabels.filter((label) => label.includes(filter))

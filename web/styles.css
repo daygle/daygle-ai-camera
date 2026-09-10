@@ -9,6 +9,12 @@
   --danger: #ff5c8a;
   --success: #49e6a3;
   --border: rgba(255,255,255,0.09);
+  --surface: #0d1524;
+  --hover: rgba(255,255,255,0.06);
+  /* Used by the Unknown Faces review cards (fallbacks there were light-theme
+     values that made card text unreadable in dark mode). */
+  --card-bg: #0d1524;
+  --muted-bg: #131c2e;
 }
 
 /* ─── Light mode ──────────────────────────────────────────────────────── */
@@ -23,9 +29,23 @@
   --danger: #dc2626;
   --success: #059669;
   --border: rgba(0, 0, 0, 0.10);
+  --surface: #ffffff;
+  --hover: rgba(0, 0, 0, 0.04);
+  --card-bg: #ffffff;
+  --muted-bg: #f3f4f6;
 }
 :root.light body {
   background: var(--bg);
+}
+
+/* Object Groups "Member Labels" picker (/objects): while its dropdown is
+   open, the owning card must paint above sibling cards. backdrop-filter on
+   .card creates a stacking context, so without this lift the open list is
+   trapped underneath the cards that follow it on the page. :has() keeps the
+   open/close handling in CSS with no JS class juggling. */
+.card:has(.multi-select-dropdown:not([hidden])) {
+  position: relative;
+  z-index: 5;
 }
 :root.light .card {
   background: var(--panel);
