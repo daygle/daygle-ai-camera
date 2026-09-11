@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import date, datetime
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -31,6 +32,23 @@ _REDACT_AUDIT_KEY_REGEX = re.compile(
     re.IGNORECASE,
 )
 _REDACTED_PLACEHOLDER = '***'
+
+
+def parse_log_date(raw: str | None, field_name: str) -> "date | None":
+    """Parse a date-only filter (shared by the camera-log and app-log routes).
+
+    Accepts only strict ``YYYY-MM-DD`` strings; anything else raises
+    ``HTTPException(400)`` naming the query field, so malformed input can
+    never reach ``journalctl`` arguments or lexical SQL comparisons.
+    """
+    if not raw:
+        return None
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', raw):
+        raise HTTPException(status_code=400, detail=f'{field_name} must be YYYY-MM-DD.')
+    try:
+        return datetime.strptime(raw, '%Y-%m-%d').date()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f'{field_name} must be a valid date.') from exc
 
 
 def _redact_audit_details(details: Any) -> Any:

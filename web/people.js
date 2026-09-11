@@ -7,7 +7,7 @@ const peopleList = document.getElementById('peopleList');
 const peopleEmpty = document.getElementById('peopleEmpty');
 const peopleMessage = document.getElementById('peopleMessage');
 
-function formatDate(value) {
+function formatFaceDate(value) {
   if (!value) return '';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
@@ -124,7 +124,7 @@ async function showFaces(card) {
             ${thumb}
             <figcaption class="face-thumb-caption">
               <span class="muted">Face #${faceId}</span>
-              <span class="face-thumb-date muted">${escapeHtml(formatDate(face.created_at))}</span>
+              <span class="face-thumb-date muted">${escapeHtml(formatFaceDate(face.created_at))}</span>
             </figcaption>
             <button class="btn-danger model-action-btn face-thumb-delete" type="button" data-action="delete-face" data-face-id="${faceId}">Delete</button>
           </figure>`;

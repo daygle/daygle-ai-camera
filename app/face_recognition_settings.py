@@ -16,6 +16,8 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from app.utils import normalize_bool_setting as _coerce_bool
+
 # The persisted recognition settings and their defaults. ``model_id`` tags every
 # embedding a run produces so the matcher only ever compares vectors from the
 # same model (see app/db/persons.py); changing the model means re-enrolling.
@@ -43,14 +45,6 @@ DEFAULT_FACE_RECOGNITION_CONFIG: dict[str, Any] = {
 }
 
 _ALLOWED_KEYS = frozenset(DEFAULT_FACE_RECOGNITION_CONFIG)
-
-
-def _coerce_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
-    return bool(value)
 
 
 def validate_face_recognition_settings(payload: dict[str, Any]) -> dict[str, Any]:

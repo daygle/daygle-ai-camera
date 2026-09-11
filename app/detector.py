@@ -6,6 +6,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from app.utils import normalize_bool_setting
+
 logger = logging.getLogger('daygle.ai')
 
 try:
@@ -1074,7 +1076,7 @@ def create_face_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector | None:
         execution_mode=str(ai_config.get('execution_mode', 'parallel') or 'parallel').lower(),
         confidence_only_nms=_resolve_confidence_only_nms(ai_config.get('confidence_only_nms'), nms_free),
         precision=str(ai_config.get('precision', 'fp32') or 'fp32').strip().lower(),
-        use_io_binding=_coerce_bool(ai_config.get('use_io_binding', False)),
+        use_io_binding=normalize_bool_setting(ai_config.get('use_io_binding'), False),
         # YOLO-face exports are YOLOv8-pose models with a 5-point facial
         # landmark head; an explicit setting overrides the default.
         keypoint_count=keypoint_count_setting if keypoint_count_setting is not None else 5,
@@ -1114,23 +1116,9 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         execution_mode=str(ai_config.get("execution_mode", "parallel") or "parallel").lower(),
         confidence_only_nms=_resolve_confidence_only_nms(ai_config.get("confidence_only_nms"), nms_free),
         precision=str(ai_config.get("precision", "fp32") or "fp32").strip().lower(),
-        use_io_binding=_coerce_bool(ai_config.get("use_io_binding", False)),
+        use_io_binding=normalize_bool_setting(ai_config.get("use_io_binding"), False),
         keypoint_count=_optional_int("keypoint_count") or 0,
     )
-
-
-def _coerce_bool(value: Any) -> bool:
-    """Tri-state tolerant bool coercion for settings form values.
-
-    Mirrors the str -> bool pattern used for ``enabled`` in
-    ``validate_ai_settings`` so callers can pass ``'yes'`` / ``'on'`` /
-    ``'true'`` from HTML forms AND ``True`` / ``False`` from the API.
-    """
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
-    return bool(value)
 
 
 def _resolve_confidence_only_nms(value: Any, nms_free: bool) -> bool:

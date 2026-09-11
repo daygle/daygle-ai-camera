@@ -35,12 +35,10 @@ function buildEditFormHtml(camera, index) {
   const isRtsp = backend === 'rtsp';
   const rowId = 'edit-row-' + index;
   const formId = 'edit-form-' + index;
-  const escapeAttr = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
   return '<tr class="camera-edit-row" id="' + rowId + '"><td colspan="6"><div class="camera-edit-panel">' +
     '<div class="cam-edit-head">' +
-      '<span class="cam-edit-head-title">Editing <strong>' + escapeAttr(camera.name || camera.id || ('Camera ' + (index + 1))) + '</strong></span>' +
-      (camera.id ? '<span class="cam-edit-head-id">ID · ' + escapeAttr(camera.id) + '</span>' : '') +
+      '<span class="cam-edit-head-title">Editing <strong>' + escapeHtml(camera.name || camera.id || ('Camera ' + (index + 1))) + '</strong></span>' +
+      (camera.id ? '<span class="cam-edit-head-id">ID · ' + escapeHtml(camera.id) + '</span>' : '') +
     '</div>' +
     '<div class="modal-tabs" role="tablist">' +
       '<button class="modal-tab active" data-tab="connection" data-form="' + formId + '" type="button" role="tab" aria-selected="true">Connection</button>' +
@@ -56,8 +54,8 @@ function buildEditFormHtml(camera, index) {
         '<div class="cam-edit-section">' +
           '<h4 class="cam-edit-section-title">Identity</h4>' +
           '<div class="form-grid">' +
-            '<label><span>Camera Name</span><input name="name" placeholder="e.g. Front Door" required value="' + escapeAttr(camera.name || '') + '" /></label>' +
-            '<label><span>Camera ID</span><input name="id" placeholder="e.g. front-door" value="' + escapeAttr(camera.id || '') + '" /></label>' +
+            '<label><span>Camera Name</span><input name="name" placeholder="e.g. Front Door" required value="' + escapeHtml(camera.name || '') + '" /></label>' +
+            '<label><span>Camera ID</span><input name="id" placeholder="e.g. front-door" value="' + escapeHtml(camera.id || '') + '" /></label>' +
           '</div>' +
         '</div>' +
         '<div class="cam-edit-section">' +
@@ -72,14 +70,14 @@ function buildEditFormHtml(camera, index) {
           '</div>' +
           '<div class="cam-rtsp-fields"' + (isRtsp ? '' : ' hidden') + '>' +
             '<div class="form-grid">' +
-              '<label class="full-width"><span>Stream URL</span><input name="stream_url" placeholder="rtsp://user:pass@192.168.1.100:554/stream1" value="' + escapeAttr(camera.stream_url || '') + '" /></label>' +
+              '<label class="full-width"><span>Stream URL</span><input name="stream_url" placeholder="rtsp://user:pass@192.168.1.100:554/stream1" value="' + escapeHtml(camera.stream_url || '') + '" /></label>' +
             '</div>' +
           '</div>' +
           '<div class="cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '>' +
             '<div class="form-grid">' +
-              '<label><span>Host / IP</span><input name="host" placeholder="192.168.1.100" value="' + escapeAttr(camera.host || '') + '" /></label>' +
+              '<label><span>Host / IP</span><input name="host" placeholder="192.168.1.100" value="' + escapeHtml(camera.host || '') + '" /></label>' +
               '<label><span>Port</span><input name="port" type="number" min="1" max="65535" placeholder="554" value="' + (camera.port || 554) + '" /></label>' +
-              '<label><span>Username</span><input name="username" placeholder="admin" autocomplete="off" value="' + escapeAttr(camera.username || '') + '" /></label>' +
+              '<label><span>Username</span><input name="username" placeholder="admin" autocomplete="off" value="' + escapeHtml(camera.username || '') + '" /></label>' +
               '<label class="full-width"><span>Password</span><input name="password" type="password" autocomplete="new-password" placeholder="' + (camera.has_password ? '(saved - type to change)' : '(No Password)') + '" /></label>' +
             '</div>' +
           '</div>' +
@@ -87,8 +85,8 @@ function buildEditFormHtml(camera, index) {
         '<div class="cam-edit-section">' +
           '<h4 class="cam-edit-section-title">Streams</h4>' +
           '<div class="form-grid">' +
-            '<label class="full-width cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '><span>Detection Stream Path</span><input name="path" placeholder="e.g. stream1" value="' + escapeAttr(camera.path || '') + '" /></label>' +
-            '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeAttr(camera.recording_stream_path || '') + '" /></label>' +
+            '<label class="full-width cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '><span>Detection Stream Path</span><input name="path" placeholder="e.g. stream1" value="' + escapeHtml(camera.path || '') + '" /></label>' +
+            '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeHtml(camera.recording_stream_path || '') + '" /></label>' +
           '</div>' +
           '<p class="form-help muted">Recording Stream Path is optional and points to a higher-resolution stream used for recordings. Leave empty to use the primary stream for both detection and recording.</p>' +
         '</div>' +

@@ -3,34 +3,19 @@
 
 from __future__ import annotations
 
-import re
-from datetime import date, datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.auth_gates import require_admin
 from app.deps import get_database
-from app.request_helpers import write_audit_log
+from app.request_helpers import parse_log_date, write_audit_log
 from app.utils import local_day_bounds_to_utc
 
 router = APIRouter()
-_DATE_FORMAT = '%Y-%m-%d'
-
-
-def _parse_log_date(raw: str | None, field_name: str) -> date | None:
-    if not raw:
-        return None
-    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', raw):
-        raise HTTPException(status_code=400, detail=f'{field_name} must be YYYY-MM-DD.')
-    try:
-        return datetime.strptime(raw, _DATE_FORMAT).date()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f'{field_name} must be a valid date.') from exc
 
 
 def _validate_date_range(date_from: str | None, date_to: str | None) -> tuple[str | None, str | None]:
-    parsed_from = _parse_log_date(date_from, 'date_from')
-    parsed_to = _parse_log_date(date_to, 'date_to')
+    parsed_from = parse_log_date(date_from, 'date_from')
+    parsed_to = parse_log_date(date_to, 'date_to')
     if parsed_from and parsed_to and parsed_from > parsed_to:
         raise HTTPException(status_code=400, detail='date_from must not be after date_to.')
     return (

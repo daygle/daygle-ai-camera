@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.auth_gates import require_admin
+from app.request_helpers import parse_log_date
 from app.utils import local_day_bounds_to_utc
 
 router = APIRouter()
@@ -29,7 +30,6 @@ _PRIORITY_LABEL: dict[str, str] = {
 
 # Maps UI level names to journalctl -p values (inclusive of more-severe levels).
 _SERVICE = 'daygle-ai-camera'
-_DATE_FORMAT = '%Y-%m-%d'
 
 # Benign uvicorn protocol noise: a browser's HTTPS-first attempt (or a proxy
 # health check) sends a TLS handshake to the plain-HTTP port, which uvicorn
@@ -65,21 +65,9 @@ def _is_noise(entry: dict) -> bool:
 _LEVEL_PREFIX_PATTERN = re.compile(r'^[A-Z]+:(\S+:)?\s*')
 
 
-def _parse_log_date(raw: str | None, field_name: str) -> date | None:
-    """Parse a date-only filter before it can reach journalctl."""
-    if not raw:
-        return None
-    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', raw):
-        raise HTTPException(status_code=400, detail=f'{field_name} must be YYYY-MM-DD.')
-    try:
-        return datetime.strptime(raw, _DATE_FORMAT).date()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f'{field_name} must be a valid date.') from exc
-
-
 def _log_date_range(date_from: str | None, date_to: str | None) -> tuple[date | None, date | None]:
-    parsed_from = _parse_log_date(date_from, 'date_from')
-    parsed_to = _parse_log_date(date_to, 'date_to')
+    parsed_from = parse_log_date(date_from, 'date_from')
+    parsed_to = parse_log_date(date_to, 'date_to')
     if parsed_from and parsed_to and parsed_from > parsed_to:
         raise HTTPException(status_code=400, detail='date_from must not be after date_to.')
     return parsed_from, parsed_to

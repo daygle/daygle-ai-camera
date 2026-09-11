@@ -22,6 +22,7 @@ from typing import Any
 
 import app.state as _state
 from app.config_facades import effective_face_recognition_config
+from app.utils import normalize_bool_setting as _coerce_bool
 
 logger = logging.getLogger('daygle.ai')
 
@@ -56,12 +57,6 @@ def effective_face_detection_rules() -> dict[str, Any]:
     if stored and isinstance(stored, dict):
         return stored
     return dict(_DEFAULT_RULES)
-
-
-def _coerce_bool(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'} if value else default
 
 
 def _coerce_optional_float(value: Any) -> float | None:

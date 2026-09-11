@@ -24,18 +24,9 @@ import threading
 from typing import Any
 
 from app.face_recognition import FaceEmbedder, FaceMatcher, MatchResult
+from app.utils import normalize_bool_setting as _coerce_bool
 
 logger = logging.getLogger('daygle.ai')
-
-
-def _coerce_bool(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    if isinstance(value, str):
-        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
-    return bool(value)
 
 
 class FaceRecognitionService:

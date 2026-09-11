@@ -20,16 +20,12 @@ function setMessage(text, isError = false) {
   if (text) window.showToast?.(text, isError);
 }
 
-function escapeAttr(value) {
-  return escapeHtml(value ?? '');
-}
-
 function roleLabel(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return normalized === 'admin' ? 'Admin' : 'Viewer';
 }
 
-function formatDate(value) {
+function formatLastLogin(value) {
   if (!value) return 'Never';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Unknown';
@@ -50,16 +46,16 @@ function buildEditForm(user) {
             <span>Editing <strong>${escapeHtml(user.username)}</strong></span>
             <span class="user-edit-id">User ID · ${escapeHtml(user.id)}</span>
           </div>
-          <form id="${formId}" class="user-edit-form form-grid" data-user-id="${escapeAttr(user.id)}" autocomplete="off">
-            <label><span>Username</span><input name="username" required value="${escapeAttr(user.username)}" /></label>
-            <label><span>First Name</span><input name="first_name" value="${escapeAttr(user.first_name)}" /></label>
-            <label><span>Last Name</span><input name="last_name" value="${escapeAttr(user.last_name)}" /></label>
-            <label><span>Email</span><input name="email" type="email" value="${escapeAttr(user.email)}" /></label>
+          <form id="${formId}" class="user-edit-form form-grid" data-user-id="${escapeHtml(user.id)}" autocomplete="off">
+            <label><span>Username</span><input name="username" required value="${escapeHtml(user.username)}" /></label>
+            <label><span>First Name</span><input name="first_name" value="${escapeHtml(user.first_name)}" /></label>
+            <label><span>Last Name</span><input name="last_name" value="${escapeHtml(user.last_name)}" /></label>
+            <label><span>Email</span><input name="email" type="email" value="${escapeHtml(user.email)}" /></label>
             <label><span>Role</span><select name="role"><option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>Viewer</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option></select></label>
             <label><span>Account Status</span><select name="is_active"><option value="true" ${user.is_active ? 'selected' : ''}>Active</option><option value="false" ${!user.is_active ? 'selected' : ''}>Disabled</option></select></label>
             <label class="user-password-field"><span>New Password <small>(optional)</small></span><input name="password" type="password" placeholder="Leave blank to keep current" autocomplete="new-password" /></label>
             <div class="user-edit-footer">
-              <button class="secondary user-cancel-edit" type="button" data-id="${escapeAttr(user.id)}">Cancel</button>
+              <button class="secondary user-cancel-edit" type="button" data-id="${escapeHtml(user.id)}">Cancel</button>
               <button type="submit">Save User</button>
             </div>
           </form>
@@ -74,15 +70,15 @@ function renderUserRow(user) {
   const active = Boolean(user.is_active);
   const roleClass = user.role === 'admin' ? 'user-role-admin' : 'user-role-viewer';
   return `
-    <tr class="user-row${active ? '' : ' user-row-disabled'}" data-user-id="${escapeAttr(user.id)}">
+    <tr class="user-row${active ? '' : ' user-row-disabled'}" data-user-id="${escapeHtml(user.id)}">
       <td class="user-account-cell"><strong>${username}</strong><span>${name}</span>${user.email ? `<small>${escapeHtml(user.email)}</small>` : ''}</td>
       <td><span class="user-role-pill ${roleClass}">${roleLabel(user.role)}</span></td>
       <td><span class="user-status-pill ${active ? 'user-status-active' : 'user-status-disabled'}"><span class="user-status-dot"></span>${active ? 'Active' : 'Disabled'}</span></td>
-      <td class="user-last-login">${escapeHtml(formatDate(user.last_login_at))}</td>
+      <td class="user-last-login">${escapeHtml(formatLastLogin(user.last_login_at))}</td>
       <td class="user-actions-cell"><div class="user-actions">
-        <button class="secondary user-edit-btn" type="button" data-id="${escapeAttr(user.id)}" title="Edit user" aria-label="Edit ${username}">${ICONS.edit}</button>
-        <button class="secondary user-toggle-btn" type="button" data-id="${escapeAttr(user.id)}" title="${active ? 'Disable user' : 'Enable user'}" aria-label="${active ? 'Disable' : 'Enable'} ${username}">${ICONS.power}</button>
-        <button class="secondary user-reset-btn" type="button" data-id="${escapeAttr(user.id)}" title="Reset password" aria-label="Reset password for ${username}">Reset</button>
+        <button class="secondary user-edit-btn" type="button" data-id="${escapeHtml(user.id)}" title="Edit user" aria-label="Edit ${username}">${ICONS.edit}</button>
+        <button class="secondary user-toggle-btn" type="button" data-id="${escapeHtml(user.id)}" title="${active ? 'Disable user' : 'Enable user'}" aria-label="${active ? 'Disable' : 'Enable'} ${username}">${ICONS.power}</button>
+        <button class="secondary user-reset-btn" type="button" data-id="${escapeHtml(user.id)}" title="Reset password" aria-label="Reset password for ${username}">Reset</button>
       </div></td>
     </tr>`;
 }
