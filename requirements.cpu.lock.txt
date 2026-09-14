@@ -1219,9 +1219,9 @@ onnxruntime==1.20.1 \
     --hash=sha256:f6243e34d74423bdd1edf0ae9596dd61023b260f546ee17d701723915f06a9f7 \
     --hash=sha256:fb44b08e017a648924dbe91b82d89b0c105b1adcfe31e90d1dc06b8677ad37be
     # via -r requirements.txt
-onnxscript==0.7.1 \
-    --hash=sha256:309fb86484b11fa4ded90dba580e0d63f1a0827588e521cecaf2eeddb46d6e86 \
-    --hash=sha256:544763b7fdef49940cdd9412ff5135cbae96d59ac6bc1921457f21280f40f4b7
+onnxscript==0.7.2 \
+    --hash=sha256:2c664f6383d10f332a4d47b2876dcab16dba84909fe703656b19abc281fda165 \
+    --hash=sha256:d0e7121c6a1eefd608058928e111cbdb76709f70d269ff0d07aee493bd1d13c9
     # via -r requirements.txt
 opencv-python==5.0.0.93 \
     --hash=sha256:08d5d91d967b58d6db86073b2ad3eaef88ca4ebdfd45c9059bf59f5ded0c7ad2 \
