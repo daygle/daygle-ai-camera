@@ -379,11 +379,30 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
     """
     zone_id = str(zone.get('id') or zone.get('name') or id(zone))
     try:
+        # A stale/corrupt mask must never be treated as evidence. In particular,
+        # slicing a mask with the configured coordinates can produce an empty
+        # array when a camera resolution or motion-frame size changed between
+        # producers; ``np.mean(empty)`` is NaN, which bypasses normal threshold
+        # comparisons and can leak NaN confidence into an event payload.
+        if getattr(diff_mask, 'ndim', None) != 2:
+            return 0.0
+        if diff_mask.shape != (_state._MOTION_FRAME_H, _state._MOTION_FRAME_W):
+            logger.debug(
+                'Ignoring pixel-motion mask for zone %r with shape %s; expected (%d, %d)',
+                zone_id, getattr(diff_mask, 'shape', None),
+                _state._MOTION_FRAME_H, _state._MOTION_FRAME_W,
+            )
+            return 0.0
         bounds = _zone_pixel_bounds(diff_mask, zone)
         if bounds is None:
             return 0.0
         px1, py1, px2, py2 = bounds
-        result = float(np.mean(diff_mask[py1:py2, px1:px2]))
+        region = diff_mask[py1:py2, px1:px2]
+        if region.size == 0:
+            return 0.0
+        result = float(np.mean(region))
+        if not np.isfinite(result):
+            return 0.0
         _zone_pixel_motion_errors.discard(zone_id)
         return result
     except (TypeError, ValueError, IndexError, AttributeError) as exc:

@@ -32,6 +32,38 @@ from typing import Any
 _GLOBAL_EVICT_INTERVAL_SECONDS = 60.0
 
 
+def _positive_int(value: Any, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f'{name} must be a positive integer')
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'{name} must be a positive integer') from exc
+    if parsed < 1:
+        raise ValueError(f'{name} must be a positive integer')
+    return parsed
+
+
+def _positive_float(value: Any, name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'{name} must be a positive number') from exc
+    if parsed <= 0:
+        raise ValueError(f'{name} must be a positive number')
+    return parsed
+
+
+def _non_negative_float(value: Any, name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'{name} must be a non-negative number') from exc
+    if parsed < 0:
+        raise ValueError(f'{name} must be a non-negative number')
+    return parsed
+
+
 class IPRateLimiter:
     """Per-IP exponential-backoff rate limiter.
 
@@ -71,10 +103,12 @@ class IPRateLimiter:
         max_delay: float = 300.0,
         global_evict_interval: float = _GLOBAL_EVICT_INTERVAL_SECONDS,
     ) -> None:
-        self.max_attempts = max_attempts
-        self.window_seconds = window_seconds
-        self.base_delay = base_delay
-        self.max_delay = max_delay
+        self.max_attempts = _positive_int(max_attempts, 'max_attempts')
+        self.window_seconds = _positive_float(window_seconds, 'window_seconds')
+        self.base_delay = _non_negative_float(base_delay, 'base_delay')
+        self.max_delay = _non_negative_float(max_delay, 'max_delay')
+        if self.max_delay < self.base_delay:
+            raise ValueError('max_delay must be greater than or equal to base_delay')
         # ip_address -> [attempt_timestamp, ...]  (newest appended)
         self._attempts: dict[str, list[float]] = {}
         self._lock = threading.Lock()
@@ -139,27 +173,33 @@ class IPRateLimiter:
             return snapshot
 
     def apply_config(self, config: dict[str, Any]) -> None:
-        """Update rate-limiter parameters at runtime from a config dict.
+        """Atomically apply validated runtime rate-limiter settings.
 
-        Accepted keys (with defaults):
-
-        - ``rate_limit_max_attempts`` (5)
-        - ``rate_limit_window_seconds`` (60)
-        - ``rate_limit_base_delay`` (2.0)
-        - ``rate_limit_max_delay`` (300.0)
-
-        Missing keys leave the current value unchanged.  Values are
-        coerced to the expected types so callers can pass values from
-        the auth-settings endpoint without pre-processing.
+        Missing keys retain their current values. Validation happens before
+        acquiring the lock's mutation section, so a bad settings update cannot
+        leave the limiter partially reconfigured while request threads are
+        reading it.
         """
-        if 'rate_limit_max_attempts' in config:
-            self.max_attempts = int(config['rate_limit_max_attempts'])
-        if 'rate_limit_window_seconds' in config:
-            self.window_seconds = float(config['rate_limit_window_seconds'])
-        if 'rate_limit_base_delay' in config:
-            self.base_delay = float(config['rate_limit_base_delay'])
-        if 'rate_limit_max_delay' in config:
-            self.max_delay = float(config['rate_limit_max_delay'])
+        with self._lock:
+            max_attempts = self.max_attempts
+            window_seconds = self.window_seconds
+            base_delay = self.base_delay
+            max_delay = self.max_delay
+            if 'rate_limit_max_attempts' in config:
+                max_attempts = _positive_int(config['rate_limit_max_attempts'], 'rate_limit_max_attempts')
+            if 'rate_limit_window_seconds' in config:
+                window_seconds = _positive_float(config['rate_limit_window_seconds'], 'rate_limit_window_seconds')
+            if 'rate_limit_base_delay' in config:
+                base_delay = _non_negative_float(config['rate_limit_base_delay'], 'rate_limit_base_delay')
+            if 'rate_limit_max_delay' in config:
+                max_delay = _non_negative_float(config['rate_limit_max_delay'], 'rate_limit_max_delay')
+            if max_delay < base_delay:
+                raise ValueError('rate_limit_max_delay must be greater than or equal to rate_limit_base_delay')
+            self.max_attempts = max_attempts
+            self.window_seconds = window_seconds
+            self.base_delay = base_delay
+            self.max_delay = max_delay
+            self._evict_stale(None)
 
     def clear(self) -> None:
         """Reset all state (used in tests)."""

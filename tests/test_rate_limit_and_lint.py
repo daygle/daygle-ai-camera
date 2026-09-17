@@ -140,6 +140,42 @@ class IPRateLimiterMemoryTests(unittest.TestCase):
         limiter.get_wait_seconds('probe-ip')
         self.assertEqual(list(limiter._attempts.keys()), ['new-ip'])
 
+    def test_runtime_config_is_applied_atomically(self):
+        limiter = IPRateLimiter(max_attempts=5, window_seconds=60, base_delay=2, max_delay=10)
+        limiter.record_failure('ip-a')
+        limiter.apply_config({
+            'rate_limit_max_attempts': '3',
+            'rate_limit_window_seconds': '30',
+            'rate_limit_base_delay': '1.5',
+            'rate_limit_max_delay': '12',
+        })
+        self.assertEqual(limiter.max_attempts, 3)
+        self.assertEqual(limiter.window_seconds, 30.0)
+        self.assertEqual(limiter.base_delay, 1.5)
+        self.assertEqual(limiter.max_delay, 12.0)
+        self.assertIn('ip-a', limiter._attempts)
+
+    def test_invalid_runtime_config_does_not_partially_update(self):
+        limiter = IPRateLimiter(max_attempts=5, window_seconds=60, base_delay=2, max_delay=10)
+        with self.assertRaises(ValueError):
+            limiter.apply_config({
+                'rate_limit_max_attempts': 1,
+                'rate_limit_base_delay': 8,
+                'rate_limit_max_delay': 4,
+            })
+        self.assertEqual(
+            (limiter.max_attempts, limiter.window_seconds, limiter.base_delay, limiter.max_delay),
+            (5, 60.0, 2.0, 10.0),
+        )
+
+    def test_constructor_rejects_invalid_limits(self):
+        with self.assertRaises(ValueError):
+            IPRateLimiter(max_attempts=0)
+        with self.assertRaises(ValueError):
+            IPRateLimiter(window_seconds=0)
+        with self.assertRaises(ValueError):
+            IPRateLimiter(base_delay=3, max_delay=2)
+
 
 class SlidingWindowRateLimiterTests(unittest.TestCase):
 

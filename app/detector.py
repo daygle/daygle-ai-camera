@@ -663,7 +663,11 @@ class OnnxYoloDetector:
                 "opencv-python-headless is not installed. Install requirements.txt or run pip install opencv-python-headless."
             ) from exc
 
+        if image.ndim != 3 or image.shape[2] != 3:
+            raise ValueError(f"Expected a color image with shape HxWx3, got {getattr(image, 'shape', None)}")
         original_height, original_width = image.shape[:2]
+        if original_height <= 0 or original_width <= 0:
+            raise ValueError("Image dimensions must be greater than zero")
         scale = min(self.input_width / original_width, self.input_height / original_height)
         resized_width = int(round(original_width * scale))
         resized_height = int(round(original_height * scale))
@@ -799,6 +803,15 @@ class OnnxYoloDetector:
             raise ValueError(
                 f"Unexpected NMS-free output shape: {tuple(np.asarray(output).shape)}. Expected [1, N, 6]."
             )
+        # Discard malformed model rows before casting class ids or doing any
+        # geometry. A corrupt/partially-written output can contain NaN/Inf;
+        # letting those through produces invalid coordinates or confidence
+        # values that later break JSON serialization and event persistence.
+        finite_rows = np.isfinite(predictions).all(axis=1)
+        if not np.any(finite_rows):
+            return []
+        predictions = predictions[finite_rows]
+
         # Slice into structured arrays. ``class_ids`` is cast to int32 once so
         # the per-box label lookup below doesn't repeatedly coerce floats.
         boxes = predictions[:, :4]  # [x1, y1, x2, y2] in input-space
@@ -908,10 +921,27 @@ class OnnxYoloDetector:
         confidence: float | None = None,
     ) -> list[dict[str, Any]]:
         """Postprocess YOLOv8/YOLO11 output (shape: [1, 4+nc, 8400]) with NMS."""
-        predictions = np.squeeze(output)
+        predictions = np.asarray(output)
+        # Remove only the optional batch dimension. ``np.squeeze`` also removes
+        # the anchor dimension when a fixed/exported model returns exactly one
+        # candidate (e.g. ``[1, 5, 1]``), turning a valid detection into a
+        # one-dimensional array that the old path rejected. Normalize that
+        # degenerate case to one row before applying the usual orientation
+        # check.
+        if predictions.ndim == 3 and predictions.shape[0] == 1:
+            predictions = predictions[0]
+        if predictions.ndim == 1:
+            predictions = predictions.reshape(1, -1)
         if predictions.ndim != 2:
             raise ValueError(f"Unsupported YOLO output shape: {output.shape}")
-        if predictions.shape[0] < predictions.shape[1]:
+        # YOLO grid exports are commonly either ``[features, candidates]``
+        # (e.g. ``[84, 8400]``) or the degenerate single-candidate
+        # ``[features, 1]``. Normalize both to ``[candidates, features]``.
+        # The explicit second condition is needed because ``[5, 1]`` does not
+        # satisfy the usual ``rows < columns`` heuristic.
+        if predictions.shape[0] < predictions.shape[1] or (
+            predictions.shape[1] < 5 and predictions.shape[0] >= 5
+        ):
             predictions = predictions.T
 
         n_cols = predictions.shape[1]
@@ -946,6 +976,18 @@ class OnnxYoloDetector:
             else:
                 objectness = None
                 class_scores = predictions[:, 4:]
+
+        # Reject malformed model rows before argmax/scaling. NaN/Inf values can
+        # otherwise survive vectorized post-processing and leak into normalized
+        # boxes or event JSON. This is fail-closed: an invalid prediction is not
+        # evidence of an object.
+        finite_rows = np.isfinite(predictions).all(axis=1)
+        if not np.any(finite_rows):
+            return []
+        predictions = predictions[finite_rows]
+        class_scores = class_scores[finite_rows]
+        if objectness is not None:
+            objectness = objectness[finite_rows]
 
         class_ids = np.argmax(class_scores, axis=1)
         raw_scores = class_scores[np.arange(len(class_ids)), class_ids]
