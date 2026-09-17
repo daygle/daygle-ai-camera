@@ -527,7 +527,7 @@ async function checkForModelUpdates(family) {
       isError = true;
     } else if (!installedCount) {
       message = family === 'face'
-        ? 'No face models installed yet. Download one to enable face detection.'
+        ? 'No face models installed yet. Download one, then enable Face Detection under AI Settings.'
         : 'No object models installed yet.';
     } else if (updateCount) {
       message = `${updateCount} ${family} model${updateCount === 1 ? '' : 's'} ready to update.`;

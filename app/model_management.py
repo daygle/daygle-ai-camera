@@ -733,12 +733,18 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
     ai_settings = effective_ai_config()
     rel_path = _relative_model_path(destination)
     # Face-family downloads never take over the PRIMARY object-detector slot:
-    # they are wired into the secondary face pass instead (face_enabled +
-    # face_model_path), leaving the active COCO/object model untouched.
+    # they are wired into the secondary face pass instead (face_model_path),
+    # leaving the active COCO/object model untouched. They must also NOT flip
+    # the pass on or off: pointing the pass at a model and enabling it are
+    # separate decisions. ``ai_settings`` already carries the persisted
+    # ``face_enabled`` value (re-coerced by ``validate_ai_settings``), so a
+    # download/update keeps the operator's choice -- downloading a model while
+    # the pass is disabled leaves it disabled, and an already-enabled pass
+    # starts using the fresh file. Operators turn Face Detection on explicitly
+    # via AI Settings or the "Use" action on an installed face card.
     if configure_face:
         updated = validate_ai_settings({
             **ai_settings,
-            'face_enabled': True,
             'face_model_path': rel_path,
         })
         _state.database.set_setting('ai', updated, utc_now())
@@ -748,7 +754,13 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
         if callable(rebuild_face_detector):
             rebuild_face_detector(updated)
             reloaded = True
-        return {'ok': True, 'message': f"Exported {info['label']} ONNX to {rel_path} and enabled it as the Face Detection model.", 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': detector_status(updated)}
+        face_is_enabled = bool(updated.get('face_enabled'))
+        message = (
+            f"Exported {info['label']} ONNX to {rel_path} and set it as the Face Detection model."
+            if face_is_enabled
+            else f"Exported {info['label']} ONNX to {rel_path}. Enable Face Detection in AI Settings to use it."
+        )
+        return {'ok': True, 'message': message, 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': detector_status(updated)}
     is_active = _same_model_path(ai_settings.get('model_path'), rel_path)
     if switch_active or is_active:
         # Persist the resolution actually used for this export. The model

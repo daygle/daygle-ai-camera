@@ -310,12 +310,13 @@ async def update_ai_model(request: Request, db=Depends(get_database)):
     # value we store in installed.json matches the model the export actually
     # produces, mirroring ``download_ai_model``.
     imgsz = ((imgsz + 16) // 32) * 32
-    # Family routing: a face-family update must rebuild the SECONDARY face
-    # pass (face_enabled + face_model_path) just like ``download_ai_model``
-    # does, otherwise the new bytes land on disk but the running detector
-    # still points at the pre-update file. The family flag comes from the
-    # catalog entry by default (matching download_ai_model) and can be
-    # overridden by the caller for parity with that endpoint.
+    # Family routing: a face-family update must point the SECONDARY face
+    # pass (face_model_path) at the freshly-exported file just like
+    # ``download_ai_model`` does, otherwise the new bytes land on disk but
+    # the running detector still points at the pre-update file. The family
+    # flag comes from the catalog entry by default (matching
+    # download_ai_model) and can be overridden by the caller for parity
+    # with that endpoint.
     is_face_model = bool(body.get('is_face_model'))
     if 'is_face_model' not in body:
         is_face_model = str(info.get('labels') or '').endswith('face.names')

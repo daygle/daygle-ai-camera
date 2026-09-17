@@ -53,11 +53,9 @@ def events(
     db=Depends(get_database),
 ):
     user = require_user(request)
-    # Viewers are capped at 10000 rows regardless of the requested limit;
-    # admins get exactly what they asked for (fetching more than requested
-    # and slicing it back down would just burn a bigger DB query).
-    fetch_limit = limit if str(user.get('role') or '').strip().lower() == 'admin' else min(limit, 10000)
-    events = db.search_events(label=label, limit=fetch_limit, alerted_only=alerted_only, with_recording=with_recording, since=since)
+    # ``limit`` arrives pre-clamped to 10000 by FastAPI (``le=10000``), so both
+    # roles fetch at most what was requested -- no fetch-more-then-slice waste.
+    events = db.search_events(label=label, limit=limit, alerted_only=alerted_only, with_recording=with_recording, since=since)
     scoped = [_scope_event_recordings(event, user) for event in events]
     return [event for event in scoped if event is not None]
 

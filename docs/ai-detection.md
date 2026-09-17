@@ -204,8 +204,11 @@ Large - alongside the COCO models on the Models tab. Downloading one works
 exactly like any other model: its source weights are fetched, exported to ONNX
 through the same Ultralytics pipeline, and the active AI settings are bound to
 `models/face.names` and `keypoint_count = 5` automatically. No manual settings
-edit is needed. Switching back to a COCO model resets `labels_path` to
-`models/coco.names` and `keypoint_count` to `0`.
+edit is needed. Downloading or updating a face model does **not** turn Face
+Detection on or off: the pass keeps whatever enabled state it already had. To
+start using a downloaded face model, enable **Face Detection** in AI Settings
+(or press **Use** on its card). Switching back to a COCO model resets
+`labels_path` to `models/coco.names` and `keypoint_count` to `0`.
 
 Pick a size the same way you would for object detection: Nano for low-power
 hosts, Medium/Large for IR or night-vision cameras where small or low-contrast

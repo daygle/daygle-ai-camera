@@ -1256,6 +1256,14 @@ input[type="file"] { padding: 10px; }
   }
   .nav-dropdown-item { padding: 11px 12px; min-height: 44px; }
   .hero { flex-direction: column; align-items: stretch; }
+  /* A horizontal hero's flex-basis (420px on .onnx-hero-copy /
+     .arcface-hero-copy) reserves WIDTH; once the hero stacks vertically that
+     same basis applies to the HEIGHT axis, inflating the text block to 420px
+     tall and leaving a large dead gap above the decorative mark (the "big
+     gap" on the ONNX / ArcFace pages on phones). Collapse the basis so each
+     stacked row is content-sized. */
+  .onnx-hero-copy,
+  .arcface-hero-copy { flex-basis: auto; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .recording-timeline-layout { grid-template-columns: 1fr; }
   .form-grid, .user-row, .status-panel { grid-template-columns: 1fr; }

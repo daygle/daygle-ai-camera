@@ -583,6 +583,74 @@ def test_do_download_model_binds_face_labels_and_keypoints(tmp_path, monkeypatch
     assert reload_calls[-1]['keypoint_count'] == 0
 
 
+def test_do_download_model_does_not_force_enable_face_pass(tmp_path, monkeypatch):
+    """Downloading or updating a face-family model must not flip the secondary
+    face pass on (or off): pointing the pass at a model and enabling it are
+    separate decisions. The persisted ``face_enabled`` value must survive the
+    download untouched, and the face detector rebuild must receive exactly
+    those settings."""
+    _load_app(tmp_path, monkeypatch)
+    import app.model_management as mm
+
+    models_dir = tmp_path / 'models'
+    monkeypatch.setattr(mm, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(mm, 'MODELS_DIR', models_dir)
+
+    catalog = dict(mm.YOLO_MODELS)
+    catalog['facetest'] = {
+        'pt': 'facetest.pt', 'onnx': 'facetest.onnx', 'label': 'Face Test',
+        'approx_mb': 6, 'input_size': 640,
+        'labels': 'models/face.names', 'keypoint_count': 5,
+        'description': 'synthetic face entry',
+    }
+    monkeypatch.setattr(mm, 'YOLO_MODELS', catalog)
+    monkeypatch.setattr(mm, '_installed_package_version', lambda _package: 'test-version')
+    monkeypatch.setattr(mm, 'validate_ai_settings', lambda payload: dict(payload))
+    monkeypatch.setattr(mm, 'detector_status', lambda settings: dict(settings))
+
+    def fake_export(model_name, destination, imgsz, **_kwargs):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(f'{model_name}-{imgsz}'.encode())
+        return destination.stat().st_size
+
+    monkeypatch.setattr(mm, 'export_yolo_onnx', fake_export)
+
+    persisted = {}
+    monkeypatch.setattr(mm._state.database, 'set_setting',
+                        lambda _key, value, _ts: persisted.update(dict(value)))
+    rebuild_calls = []
+    monkeypatch.setattr(mm._state, 'rebuild_face_detector',
+                        lambda settings: rebuild_calls.append(dict(settings)))
+
+    def run_download(face_enabled: bool) -> None:
+        active_settings = {
+            'backend': 'onnx', 'model_path': 'models/yolo11n-640.onnx',
+            'labels_path': 'models/coco.names', 'input_size': 640, 'keypoint_count': 0,
+            'face_enabled': face_enabled,
+            'face_model_path': 'models/yolo11n-face-320.onnx' if face_enabled else '',
+        }
+        monkeypatch.setattr(mm, 'effective_ai_config', lambda: dict(active_settings))
+        persisted.clear()
+        rebuild_calls.clear()
+        result = mm._do_download_model('facetest', False, 640, True)
+        assert result['ok'] is True
+        assert 'Enable Face Detection in AI Settings' in result['message'] or face_enabled
+
+    # Download while the pass is DISABLED: it must stay disabled (the old
+    # behaviour force-enabled it), but the new model must be wired in.
+    run_download(face_enabled=False)
+    assert persisted['face_enabled'] is False
+    assert persisted['face_model_path'].endswith('facetest-640.onnx')
+    assert len(rebuild_calls) == 1 and rebuild_calls[0]['face_enabled'] is False
+
+    # Download while the pass is already ENABLED: the enabled choice survives
+    # and the pass re-points at the freshly exported file.
+    run_download(face_enabled=True)
+    assert persisted['face_enabled'] is True
+    assert persisted['face_model_path'].endswith('facetest-640.onnx')
+    assert len(rebuild_calls) == 1 and rebuild_calls[0]['face_enabled'] is True
+
+
 def test_update_ai_model_routes_face_updates_to_face_slot(tmp_path, monkeypatch):
     """Updating a face-family model must pass the face-routing flag through to
     the re-export helper; otherwise the new ONNX is downloaded but the active

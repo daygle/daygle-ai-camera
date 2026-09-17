@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase, mock
+from unittest import main as unittest_main  # for direct ``python tests/...`` runs
 
 from app.api.web_router import _safe_return_to
 from app.auth import AuthService
@@ -613,4 +614,4 @@ class SafeReturnToTests(TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    unittest_main()

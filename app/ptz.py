@@ -55,7 +55,7 @@ def _wssec_header(username: str, password: str) -> str:
         # analyzers; it must not be copied to password-storage code.
         #
         # The algorithm token is assembled from character codes so that
-        # GitHub default‑setup CodeQL (which ignores ``# codeql[rule-id]``
+        # GitHub default-setup CodeQL (which ignores ``# codeql[rule-id]``
         # suppression comments) does not detect the call.  The behaviour
         # is identical to ``hashlib.new('sha1', ...)``.
         hashlib.new(

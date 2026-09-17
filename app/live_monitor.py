@@ -148,6 +148,21 @@ def _below_threshold_object_reason(
     return max(candidates, key=lambda item: item['confidence'])
 
 
+def _parse_motion_override(raw_value: Any, fallback: Any, cast=float) -> Any:
+    """Cast a per-camera motion override, keeping ``fallback`` if the cast fails.
+
+    One malformed override (e.g. a bad ``motion_pixel_threshold`` merged from a
+    hand-edited config.yaml) must never break the detection cycle, so a cast
+    failure silently keeps the validated global value. Used for every numeric
+    override on the ~4 Hz hot path so each stays a single inline branch instead
+    of a hand-rolled try/except per field.
+    """
+    try:
+        return cast(raw_value)
+    except (TypeError, ValueError):
+        return fallback
+
+
 def _camera_has_direct_frame_source(camera_id: str) -> bool:
     """Return True when the configured camera can provide a frame directly.
 
@@ -282,15 +297,26 @@ def _prune_frame_motion_state() -> None:
 def live_alert_monitor_loop() -> None:
     _last_prune = 0.0
     while not _state.live_alert_monitor_stop.is_set():
-        live_settings = effective_live_config()
-        run_live_alert_monitor_once(live_settings)
-        _check_cameras_health()
-        now = time.time()
-        if now - _last_prune > 300:
-            _prune_frame_motion_state()
-            purge_camera_diagnostics_by_policy()
-            _last_prune = now
-        interval = max(0.1, float(live_settings.get('detection_interval_seconds', 0.5)))
+        try:
+            live_settings = effective_live_config()
+            run_live_alert_monitor_once(live_settings)
+            _check_cameras_health()
+            now = time.time()
+            if now - _last_prune > 300:
+                _prune_frame_motion_state()
+                purge_camera_diagnostics_by_policy()
+                _last_prune = now
+            interval = max(0.1, float(live_settings.get('detection_interval_seconds', 0.5)))
+        except Exception as exc:
+            # The monitor thread is the single background source for detection,
+            # camera-health tracking, and offline/recovery alerts. A transient
+            # failure (e.g. SQLite briefly locked by a settings write while
+            # ``effective_live_config`` or ``_check_cameras_health`` reads a
+            # setting) must not kill the loop: that would silently disable all
+            # background detection until the next service restart. Log and
+            # retry on a short delay instead.
+            logger.warning('Live alert monitor cycle failed; retrying: %s', exc)
+            interval = 1.0
         _state.live_alert_monitor_stop.wait(interval)
 
 def start_live_alert_monitor() -> None:
@@ -454,30 +480,22 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             _state._frame_motion_mog2.clear()
             _state._frame_motion_mog2_meta.clear()
     _cam_motion_nest = settings.get('motion') if isinstance(settings.get('motion'), dict) else {}
+    # Flat per-camera key wins (including the present-but-None case, which
+    # falls through to the legacy nested ``settings['motion']`` dict exactly
+    # as before); a parsed value that fails its cast keeps the validated
+    # global default via _parse_motion_override.
     _cam_pt = settings.get('motion_pixel_threshold') if settings.get('motion_pixel_threshold') is not None else _cam_motion_nest.get('pixel_threshold')
     if _cam_pt is not None:
-        try:
-            _pixel_threshold = float(_cam_pt)
-        except (TypeError, ValueError):
-            pass  # Keep the validated global pixel threshold.
+        _pixel_threshold = _parse_motion_override(_cam_pt, _pixel_threshold)
     _cam_gf = settings.get('motion_gate_fraction') if settings.get('motion_gate_fraction') is not None else _cam_motion_nest.get('gate_fraction')
     if _cam_gf is not None:
-        try:
-            _gate_fraction = float(_cam_gf)
-        except (TypeError, ValueError):
-            pass  # Keep the validated global motion gate.
+        _gate_fraction = _parse_motion_override(_cam_gf, _gate_fraction)
     _cam_sf = settings.get('motion_scale_fraction') if settings.get('motion_scale_fraction') is not None else _cam_motion_nest.get('scale_fraction')
     if _cam_sf is not None:
-        try:
-            _scale_fraction = float(_cam_sf)
-        except (TypeError, ValueError):
-            pass  # Keep the validated global motion scale.
+        _scale_fraction = _parse_motion_override(_cam_sf, _scale_fraction)
     _cam_ba = settings.get('motion_background_alpha') if settings.get('motion_background_alpha') is not None else _cam_motion_nest.get('background_alpha')
     if _cam_ba is not None:
-        try:
-            _background_alpha = float(_cam_ba)
-        except (TypeError, ValueError):
-            pass  # Keep the validated global background alpha.
+        _background_alpha = _parse_motion_override(_cam_ba, _background_alpha)
     # Per-camera engine / post-processing overrides (flat key, else legacy nested).
     _cam_algo = settings.get('motion_algorithm') if settings.get('motion_algorithm') is not None else _cam_motion_nest.get('algorithm')
     if _cam_algo is not None:
@@ -911,11 +929,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # whether a recording attaches, so an alert-only camera is throttled to one
     # event per window like a recording camera is.
     #
-    # A still-dwell alert is the one exception: it fires ONCE per still streak
-    # by construction, and its label's debounce window has been continuously
-    # refreshed by the very cycles that built the streak -- so the normal gate
-    # would swallow it forever. Bypass the gate for the cycle that crosses the
-    # threshold so the dwell alert always becomes an event.
     # A still-dwell alert bypasses the debounce gate: it fires ONCE per still
     # streak by construction, and its label's debounce window has been
     # continuously refreshed by the very cycles that built the streak - so the

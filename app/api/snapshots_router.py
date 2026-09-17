@@ -43,10 +43,9 @@ def snapshots(
     recording is outside the viewer's scope is hidden entirely).
     """
     user = require_user(request)
-    # Same fetch-limit rule as /api/events: viewers capped at 10000 rows,
-    # admins get exactly the requested limit (no fetch-more-then-slice waste).
-    fetch_limit = limit if str(user.get('role') or '').strip().lower() == 'admin' else min(limit, 10000)
-    snapshot_list = db.list_snapshots(limit=fetch_limit, since=since)
+    # ``limit`` arrives pre-clamped to 10000 by FastAPI (``le=10000``), so both
+    # roles fetch at most what was requested -- no fetch-more-then-slice waste.
+    snapshot_list = db.list_snapshots(limit=limit, since=since)
     scoped = [_scope_event_recordings(event, user) for event in snapshot_list]
     return [event for event in scoped if event is not None]
 
