@@ -396,9 +396,6 @@ const DETECTION_CLOCK_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fi
 // capture, no triggering detection).
 const DETECTION_CONTINUOUS_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
 
-// Same icon, scaled up for row-level list rendering (recordings row icon).
-const MOTION_RUNNING_ROW_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>';
-
 // Generic trigger labels are not concrete object classes - they describe
 // the trigger condition that caused the recording/event/alert instead of
 // naming a recognised object ('motion', 'alert', 'object', 'human', and
@@ -1221,9 +1218,6 @@ function daygleSinceParamForRange(range) {
   return ''; // 'all' - no since filter
 }
 
-// Seconds-of-day → wall clock (e.g. 37800 → "10:30" or "10:30 am"). Honours
-// the user's timeFormat preference so timeline ticks match the rest of the
-// app instead of being hardcoded to 24h.
 // ─── Shared rule expand-row template (zones.js + sounds.js) ──────────────
 // Both zone object rules and sound rules have an expandable row that
 // contains an email-recipients field plus four time-picker fields
@@ -1262,6 +1256,9 @@ function renderRuleExpandFields(prefix, key, rule) {
     </label>`;
 }
 
+// Seconds-of-day → wall clock (e.g. 37800 → "10:30" or "10:30 am"). Honours
+// the user's timeFormat preference so timeline ticks match the rest of the
+// app instead of being hardcoded to 24h.
 function formatUserClock(seconds) {
   if (!Number.isFinite(Number(seconds))) return '';
   const safeSeconds = Math.max(0, Number(seconds));
@@ -1443,7 +1440,7 @@ window.daygleUi = {
   handleSessionLoss, defaultReturnTo,
   // UI helpers
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
-  detectionPill, motionPill, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON, MOTION_RUNNING_ROW_ICON,
+  detectionPill, motionPill, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON,
   // Face-identity pills + filters (recordings + snapshots)
   DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,

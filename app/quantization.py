@@ -140,7 +140,7 @@ def int8_quantization_available() -> bool:
         # Parent package isn't installed; ``find_spec`` raises on the
         # ``onnxruntime`` -> ``onnxruntime.quantization`` resolution.
         try:
-            import onnxruntime.quantization  # noqa: F401
+            import onnxruntime.quantization  # noqa: F401 -- importability probe
             return True
         except ImportError:
             return False

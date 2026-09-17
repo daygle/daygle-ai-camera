@@ -172,7 +172,6 @@ const SEGMENT_COLORS = [
 // `GENERIC_TRIGGER_LABELS` resolves to the same set the recordings list,
 // the dashboard activity feed and the playback modal use so the
 // motion-vs-object boundary lives in one place.
-const GENERIC_TIMELINE_LABELS = GENERIC_TRIGGER_LABELS;
 
 // DETECTION_EYE_ICON, SOUND_CLASS_IDS, isSoundLabel and detectionPill() all
 // live in web/utils.js now (loaded before this script). Existing call sites
@@ -315,10 +314,10 @@ function drawClipOverlay(vfcMediaTime) {
   // recorded before the detection existed.
   if (!shouldRenderOverlayForTime(activeRecording, playerTime)) return;
   const allEventDetections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
-  const hasSpecificEvent = allEventDetections.some((d) => !GENERIC_TIMELINE_LABELS.has(String(d.label || '').toLowerCase()));
+  const hasSpecificEvent = allEventDetections.some((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()));
   const eventDetections = filterByConfiguredLabels(
     hasSpecificEvent
-      ? allEventDetections.filter((d) => !GENERIC_TIMELINE_LABELS.has(String(d.label || '').toLowerCase()))
+      ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
       : allEventDetections
   );
   if (!eventDetections.length) return;
@@ -505,7 +504,7 @@ function recordingDetectionLabels(recording) {
   if (triggerLabel && (!configuredLabels || configuredLabels.has(triggerLabel))) labels.add(triggerLabel);
 
   const uniqueLabels = Array.from(labels);
-  const specificLabels = uniqueLabels.filter((label) => !GENERIC_TIMELINE_LABELS.has(label));
+  const specificLabels = uniqueLabels.filter((label) => !GENERIC_TRIGGER_LABELS.has(label));
   return specificLabels.length ? specificLabels : uniqueLabels;
 }
 
@@ -520,15 +519,15 @@ function recordingTypeLabel(recording) {
 
   if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human' || triggerType === 'object') {
     // Prefer concrete object labels for timeline chips/segments, fall back to generic motion.
-    if (triggerLabel && !GENERIC_TIMELINE_LABELS.has(triggerLabel)) return triggerLabel;
-    const firstSpecificDetection = detectionLabels.find((label) => !GENERIC_TIMELINE_LABELS.has(label));
+    if (triggerLabel && !GENERIC_TRIGGER_LABELS.has(triggerLabel)) return triggerLabel;
+    const firstSpecificDetection = detectionLabels.find((label) => !GENERIC_TRIGGER_LABELS.has(label));
     if (firstSpecificDetection) return firstSpecificDetection;
     return 'motion';
   }
   if (triggerType === 'continuous' || triggerType === 'none' || triggerType === 'off') {
     return triggerType;
   }
-  if (triggerLabel && !GENERIC_TIMELINE_LABELS.has(triggerLabel)) return triggerLabel;
+  if (triggerLabel && !GENERIC_TRIGGER_LABELS.has(triggerLabel)) return triggerLabel;
   return triggerLabel || triggerType;
 }
 
@@ -778,7 +777,6 @@ function filteredRecordings() {
 function renderSummary(payload, totalRecordingCount) {
   const recordings = payload.recordings || [];
   const totalSeconds = recordings.reduce((sum, recording) => sum + Number(recording.timeline_duration_seconds || recording.duration_seconds || 0), 0);
-  const clipLabel = totalRecordingCount > recordings.length ? `${recordings.length} of ${totalRecordingCount}` : `${recordings.length}`;
 
   // Separate object, motion-only and sound trigger counts.
   const objectTriggers = new Set();
@@ -800,17 +798,7 @@ function renderSummary(payload, totalRecordingCount) {
 
   // The top stats grid (Clips / Coverage / Triggers / Camera) is the single
   // source of truth for these numbers; the inline summary panel that used to
-  // repeat them here was removed to cut the duplication. Kept optional so any
-  // future markup that re-adds #timelineSummary still renders.
-  if (els.timelineSummary) {
-    els.timelineSummary.innerHTML = `
-      <div><span>Camera</span><strong>${escapeHtml(payload.camera?.name || payload.camera?.id || 'Unknown')}</strong></div>
-      <div><span>Day</span><strong>${escapeHtml(formatUserDate(payload.day || ''))}</strong></div>
-      <div><span>Clips</span><strong>${escapeHtml(clipLabel)}</strong></div>
-      <div><span>Coverage</span><strong>${escapeHtml(formatDuration(totalSeconds))}</strong></div>
-      <div class="wide"><span>Triggers</span><strong>${recordings.length ? `${objectTriggers.size} objects / ${motionTriggers.size} motion / ${soundTriggers.size} sounds` : 'none'}</strong></div>
-    `;
-  }
+  // repeat them here was removed to cut the duplication.
   // Also feed the top stats grid.
   if (els.statClips) {
     els.statClips.textContent = String(recordings.length);

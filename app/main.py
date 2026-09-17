@@ -1,9 +1,7 @@
 from __future__ import annotations
 import logging
 import logging.handlers
-# codeql[py/unused-import] -- re-exported for tests via main.subprocess
 import subprocess  # noqa: F401 -- tests monkeypatch via main.subprocess
-# codeql[py/unused-import] -- re-exported for tests via main.threading.Thread
 import threading  # noqa: F401 -- tests monkeypatch via main.threading.Thread
 import app.state as _state
 from contextlib import asynccontextmanager
@@ -12,13 +10,10 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from app.alerts import AlertEngine
-# codeql[py/unused-import] -- utc_now used as main.utc_now() in tests
 from app.auth import AuthService, utc_now  # noqa: F401 -- utc_now used as main.utc_now() in tests
 from app.database import EventDatabase
 from app.detector import create_detector
-# codeql[py/unused-import] -- tests monkeypatch via main.EmailAlertService
 from app.email_alerts import EmailAlertService  # noqa: F401 -- tests monkeypatch via main.EmailAlertService
-# codeql[py/unused-import] -- tests monkeypatch via main.PushNotificationService
 from app.push_notifications import PushNotificationService  # noqa: F401 -- tests monkeypatch via main.PushNotificationService
 from app.recordings import RecordingService
 from app.settings import load_settings
@@ -37,7 +32,6 @@ from app.live_monitor import start_live_alert_monitor, stop_live_alert_monitor
 from app.sound_monitor import apply_sound_settings, stop_sound_monitor
 
 _logger = logging.getLogger('daygle.ai')
-logger = logging.getLogger('daygle.ai')
 
 
 def _configure_file_logging() -> None:

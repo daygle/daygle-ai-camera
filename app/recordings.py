@@ -25,7 +25,6 @@ logger = logging.getLogger('daygle.ai')
 class RecordingService:
     """Event recording facade with policy selection and generated test footage."""
 
-    VALID_SOURCES = {'camera', 'upload', 'rtsp'}
     PLAYBACK_FORMAT = 'mp4'
     GENERIC_TRIGGER_LABELS = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
     # A prebuffer render is "degenerate" when it produced far less video than the
@@ -220,8 +219,7 @@ class RecordingService:
 
     def should_record(self, detections: list[dict[str, Any]], recording_config: dict[str, Any] | None = None) -> tuple[bool, str, str | None]:
         config = recording_config or self.recording_config
-        labels = [str(detection.get('label') or '').lower() for detection in detections]
-        labels = [label for label in labels if label]
+        labels = [label for label in (str(detection.get('label') or '').strip().lower() for detection in detections) if label]
 
         def preferred_label(candidates: list[dict[str, Any]], *, allow_motion: bool = False) -> str | None:
             sorted_candidates = sorted(candidates, key=lambda detection: float(detection.get('confidence') or 0), reverse=True)
@@ -235,17 +233,18 @@ class RecordingService:
             return None
 
         if bool(config.get('continuous')):
-            return True, 'continuous', labels[0] if labels else None
+            # Prefer the strongest concrete label over a generic trigger word
+            # so an always-on chunk that caught an object records what it saw.
+            return True, 'continuous', preferred_label(detections) or (labels[0] if labels else None)
         # Non-continuous recording is gated per detection: a detection records
         # only when its zone/sound rule marked it alert_triggered (the rule's
         # record_on_detect flag). Detections without a matching record rule
         # must not start a recording.
         alert_detections = [detection for detection in detections if detection.get('alert_triggered') and detection.get('label')]
-        alert_labels = [str(detection.get('label') or '').lower() for detection in alert_detections]
+        alert_labels = [str(detection.get('label') or '').strip().lower() for detection in alert_detections]
         if alert_labels:
             if alert_labels[0] == 'motion':
-                specific_label = preferred_label(detections)
-                return True, 'alert', specific_label or 'motion'
+                return True, 'alert', preferred_label(detections) or 'motion'
             return True, 'alert', alert_labels[0]
         return False, 'none', None
 

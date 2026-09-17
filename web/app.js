@@ -48,8 +48,8 @@ const els = {
 let configuredLabels = null;
 
 // SOUND_CLASS_IDS, isSoundLabel, GENERIC_TRIGGER_LABELS, DETECTION_EYE_ICON,
-// DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON, detectionPill() and
-// motionPill() are provided by web/utils.js (loaded before this script).
+// DETECTION_MOTION_ICON, detectionPill() and motionPill() are provided by
+// web/utils.js (loaded before this script).
 
 let events = [];
 let activeFilter = 'all';
@@ -68,13 +68,13 @@ let overlayVfcHandle = null;
 let overlayResizeObserver;
 let _frameDuration = 1 / 30; // default 30fps, updated on each VFC frame
 
-// daygleSinceParamForRange() is provided by web/utils.js: it converts the
-// active UI range preset ('today' / '7d' / '30d' / 'all') into a `since`
-// ISO bound that is the START OF THE LOCAL DAY expressed in UTC. The backend
-// compares stored UTC timestamps lexically (created_at >= ?), so a bound
-// based on the UTC date string would silently drop events/alerts fired
-// between local midnight and UTC midnight for timezones ahead of UTC (the
-// same "Today shows 1 of 6" bug that hit the alerts page).
+// daygleSinceParamForRange() is provided by web/utils.js (loaded before this
+// script): it converts the active UI range preset ('today' / '7d' / '30d' /
+// 'all') into a `since` ISO bound that is the START OF THE LOCAL DAY expressed
+// in UTC. The backend compares stored UTC timestamps lexically (created_at >= ?),
+// so a bound based on the UTC date string would silently drop events fired
+// between local midnight and UTC midnight for timezones ahead of UTC (the same
+// "Today shows 1 of 6" bug that hit the alerts page).
 function getSinceParam() {
   return daygleSinceParamForRange(activeRange);
 }
@@ -724,9 +724,8 @@ function renderRecordingDetails(recording) {
     detectionBadges = motionPill(motionConfidenceFor(recording));
   } else if (isSound) {
     detectionLabel = 'Sound';
-    const soundDetections = recordingDetectionSummary(recording);
-    detectionBadges = soundDetections.length
-      ? soundDetections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
+    detectionBadges = detections.length
+      ? detections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
       : 'none';
   } else {
     detectionLabel = 'Detections';

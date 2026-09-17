@@ -92,11 +92,10 @@ function recordingCameraName(recording) {
 // so every page shares identical auth and error semantics.
 
 // detectionPill(), motionPill(), isSoundLabel(), SOUND_CLASS_IDS,
-// DETECTION_EYE_ICON, DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON and
-// GENERIC_TRIGGER_LABELS now live in web/utils.js (loaded before this
-// script) so the same rendering is shared with the dashboard and the
-// timeline page. Keeping only the local helpers that are specific to this
-// page (e.g. recording-selection logic).
+// DETECTION_EYE_ICON, DETECTION_MOTION_ICON and GENERIC_TRIGGER_LABELS now
+// live in web/utils.js (loaded before this script) so the same rendering is
+// shared with the dashboard and the timeline page. Keeping only the local
+// helpers that are specific to this page (e.g. recording-selection logic).
 
 // A recording is "motion-only" when:
 //  * it isn't a sound recording (sound already has its own visual treatment),
@@ -105,15 +104,10 @@ function recordingCameraName(recording) {
 //    are stripped), and
 //  * the trigger type wasn't the always-on / disabled placeholders
 //    ('continuous', 'none', 'off') so we don't accidentally label
-//    always-on clips as motion recordings.  // isMotionOnlyRecording + motionConfidenceFor live in web/utils.js so the
-  // recordings list, the timeline page and
-  // the dashboard activity feed all share the same boundary.
-
-// cameraLabel() is provided by web/utils.js (loaded before this script).
-// The unified version handles both cameraLabel(recording) and
-// cameraLabel(cameraName, cameraId) calling conventions.
-// The yamnet-tflite page keeps its own local cameraLabel(camera) because
-// it receives camera config objects (not recordings) with a different shape.
+//    always-on clips as motion recordings.
+// isMotionOnlyRecording + motionConfidenceFor live in web/utils.js so the
+// recordings list, the timeline page and the dashboard activity feed all
+// share the same boundary.
 
 // `recordingHasMotion` was added to the shared utility bundle after older
 // recordings-page assets may already have been cached. Prefer the shared
