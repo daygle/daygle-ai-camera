@@ -958,7 +958,8 @@ class OnnxYoloDetector:
         # detection. Only take this path when the output width is consistent
         # with the declared head (``>= 4 + nc``); a mismatch (wrong labels file
         # for the model) falls through to the plain-detection heuristic below.
-        if self._keypoint_count > 0 and n_labels > 0 and n_cols >= 4 + n_labels:
+        keypoint_count = getattr(self, '_keypoint_count', 0)
+        if keypoint_count > 0 and n_labels > 0 and n_cols >= 4 + n_labels:
             objectness = None
             class_scores = predictions[:, 4:4 + n_labels]
         else:
