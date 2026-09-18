@@ -166,6 +166,9 @@ class OnnxYoloDetector:
         self.session: Any | None = None
         self.input_name: str | None = None
         self.output_names: list[str] = []
+        self.output_shape: tuple[Any, ...] | None = None
+        self.model_type = "unknown"
+        self.active_providers: list[str] = []
         self._gpu_mem_limit = gpu_mem_limit
         self.unavailable_reason: str | None = None
         self._device = device.lower() if device else "auto"
@@ -377,7 +380,10 @@ class OnnxYoloDetector:
                     providers=self._build_providers(requested_use_cuda),
                 )
             self.input_name = self.session.get_inputs()[0].name
-            self.output_names = [output.name for output in self.session.get_outputs()]
+            session_outputs = self.session.get_outputs()
+            self.output_names = [output.name for output in session_outputs]
+            self.output_shape = tuple(getattr(session_outputs[0], "shape", ())) if session_outputs else None
+            self.model_type = self._model_type_from_output_shape(self.output_shape)
             self.active_providers = self.session.get_providers()
             # Surface a silent GPU->CPU fallback prominently. When CUDA was
             # requested (``device=cuda``, or ``auto`` on a host where ORT
@@ -436,6 +442,17 @@ class OnnxYoloDetector:
             # raises an ORT type-mismatch, so ``_preprocess`` casts to match.
             input_type = getattr(model_input, 'type', None)
             self._input_dtype = np.float16 if input_type == 'tensor(float16)' else np.float32
+            logger.info(
+                "Detector startup diagnostics: model_path=%s model_type=%s "
+                "active_providers=%s precision=%s nms_free=%s "
+                "output_shape=%s",
+                self.model_path,
+                self.model_type,
+                self.active_providers,
+                self.active_precision,
+                self.model_type == "nms_free" if self.model_type != "unknown" else self._nms_free,
+                self.output_shape,
+            )
             # Warm-up: ORT lazily builds kernels + allocations on the first
             # ``run``, spiking latency on the first live frame after every
             # (re)load. Run one throwaway inference on a zero tensor so the hot
@@ -700,6 +717,24 @@ class OnnxYoloDetector:
         if model_dtype != np.float32:
             tensor = tensor.astype(model_dtype)
         return np.ascontiguousarray(tensor), scale, float(left), float(top), original_width, original_height
+
+    @staticmethod
+    def _model_type_from_output_shape(output_shape: Any) -> str:
+        """Classify a loaded ONNX output shape without consulting its filename."""
+        if not output_shape:
+            return "unknown"
+        try:
+            dims = tuple(int(dim) for dim in output_shape)
+        except (TypeError, ValueError):
+            return "unknown"
+        if any(dim <= 0 for dim in dims):
+            return "unknown"
+        shape_nms_free = OnnxYoloDetector._looks_nms_free(np.empty(dims, dtype=np.float32))
+        if shape_nms_free is True:
+            return "nms_free"
+        if shape_nms_free is False:
+            return "grid_nms"
+        return "unknown"
 
     @staticmethod
     def _looks_nms_free(output: np.ndarray) -> bool | None:

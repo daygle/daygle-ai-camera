@@ -78,6 +78,34 @@ def test_boost_is_noop_without_mask_or_detect_frame():
     assert rd.detect_with_region_boost(_NoDetectFrame(), frame, _mask_with_blob(), base) == base
 
 
+def test_region_and_tile_failures_log_coordinates_and_tracebacks(caplog):
+    frame = np.zeros((100, 160, 3), dtype=np.uint8)
+    base = []
+
+    class _FailingDetector:
+        def detect_frame(self, image, confidence=None):
+            raise RuntimeError("inference failed")
+
+    with caplog.at_level("DEBUG", logger="daygle.ai"):
+        rd.detect_with_region_boost(_FailingDetector(), frame, _mask_with_blob(), base)
+        rd.detect_with_tiling(_FailingDetector(), frame, base, cols=2, rows=2)
+
+    crop_records = [r for r in caplog.records if "Region-boost detector failed" in r.getMessage()]
+    tile_records = [r for r in caplog.records if "Tiled detector failed" in r.getMessage()]
+    assert crop_records and tile_records
+    assert all(record.exc_info for record in crop_records + tile_records)
+    assert all("pixels=" in record.getMessage() and "normalized=" in record.getMessage()
+               for record in crop_records + tile_records)
+
+
+def test_dedup_keeps_nearby_same_label_boxes_below_iou_threshold():
+    dets = [
+        {'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.4, 'width': 0.1, 'height': 0.1}},
+        {'label': 'person', 'confidence': 0.8, 'box': {'x': 0.18, 'y': 0.4, 'width': 0.1, 'height': 0.1}},
+    ]
+    assert len(rd._dedup_by_iou(dets, 0.5)) == 2
+
+
 def test_dedup_prefers_higher_confidence_same_label():
     dets = [
         {'label': 'person', 'confidence': 0.6, 'box': {'x': 0.5, 'y': 0.5, 'width': 0.2, 'height': 0.2}},
@@ -122,7 +150,7 @@ def test_tiling_recovers_small_object_and_remaps():
         assert 0.0 <= b['x'] <= 1.0 and b['width'] < 0.2  # remapped smaller than a full tile
 
 
-def test_tiling_drops_large_tile_detections():
+def test_tiling_drops_large_tile_detections(caplog):
     frame = np.zeros((720, 1280, 3), dtype=np.uint8)
 
     class _BigDetector:
@@ -130,8 +158,12 @@ def test_tiling_drops_large_tile_detections():
             # An object filling the whole tile -> remaps large -> must be dropped.
             return [{'label': 'car', 'confidence': 0.9, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
 
-    out = rd.detect_with_tiling(_BigDetector(), frame, [], cols=2, rows=2, confidence=0.3)
+    with caplog.at_level("DEBUG", logger="daygle.ai"):
+        out = rd.detect_with_tiling(_BigDetector(), frame, [], cols=2, rows=2, confidence=0.3)
     assert out == []  # all tile detections were too large and dropped
+    drops = [r for r in caplog.records if "Dropping large tiled detection" in r.getMessage()]
+    assert len(drops) == 4
+    assert all("detection_area_frac=" in r.getMessage() for r in drops)
 
 
 def test_tiling_noop_without_detect_frame():
