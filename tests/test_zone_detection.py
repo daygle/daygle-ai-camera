@@ -599,6 +599,47 @@ def test_filter_for_camera_zones_monitor_objects_filter_to_zone():
     assert len(filtered) == 1
 
 
+def test_filter_for_camera_zones_preserves_track_id():
+    """The live overlay renders each box's stable tracker id beside its label,
+    so ``filter_detections_for_camera_zones`` must pass the ``track_id``
+    annotation through unmodified on every path that keeps a detection (zones
+    match, zone-less camera-label fallback, face-scope keep, motion axis)."""
+    from app import zone_detection as zd
+    settings = {
+        'id': 'cam-1',
+        'detection': {
+            'object_labels': ['person'],
+            'zones': [
+                {'id': 'porch', 'enabled': True, 'monitor_objects': True, 'monitor_motion': True,
+                 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'object_labels': ['person']},
+            ],
+        },
+    }
+    detections = [{
+        'label': 'person',
+        'confidence': 0.9,
+        'box': {'x': 0.4, 'y': 0.4, 'width': 0.2, 'height': 0.2},
+        'track_id': 7,
+        'track_age': 3,
+    }]
+    # Zones path.
+    filtered = zd.filter_detections_for_camera_zones(
+        detections, settings, zone_monitor_key='monitor_objects'
+    )
+    assert filtered and filtered[0]['track_id'] == 7
+    # Zone-less camera-label fallback path.
+    zoneless = zd.filter_detections_for_camera_zones(
+        detections, {'id': 'cam-1', 'detection': {'object_labels': ['person']}},
+        zone_monitor_key='monitor_objects',
+    )
+    assert zoneless and zoneless[0]['track_id'] == 7
+    # Motion axis pass-through.
+    motion_axis = zd.filter_detections_for_camera_zones(
+        detections, settings, zone_monitor_key='monitor_motion'
+    )
+    assert motion_axis and motion_axis[0]['track_id'] == 7
+
+
 def test_filter_for_camera_zones_no_zones_camera_labels_fallback(monkeypatch):
     """When the monitor_axis yields no zones, the camera-level object_labels
     allow-list still filters detections (so a zone-less camera can still

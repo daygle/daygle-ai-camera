@@ -510,7 +510,9 @@ def test_mux_reports_inode_exhaustion_at_preflight(tmp_path, monkeypatch, caplog
         lambda _path: types.SimpleNamespace(free=10 ** 12),
     )
     # ...but the inode table is exhausted.
-    monkeypatch.setattr(recordings_module.os, 'statvfs', _fake_statvfs(free_inodes=0))
+    # raising=False: os.statvfs does not exist on Windows; the fake must be
+    # *installed* there so the POSIX-only inode logic stays testable.
+    monkeypatch.setattr(recordings_module.os, 'statvfs', _fake_statvfs(free_inodes=0), raising=False)
 
     def boom(*a, **k):
         raise AssertionError('ffmpeg must not run when inodes are exhausted')
@@ -545,7 +547,7 @@ def test_mux_staging_enospc_reports_inode_exhaustion(tmp_path, monkeypatch, capl
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
     monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
     monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
-    monkeypatch.setattr(recordings_module.os, 'statvfs', _fake_statvfs(free_inodes=12))
+    monkeypatch.setattr(recordings_module.os, 'statvfs', _fake_statvfs(free_inodes=12), raising=False)
 
     def enospc_copy(_src, _dst):
         raise OSError(errno.ENOSPC, 'No space left on device')
@@ -581,7 +583,7 @@ def test_mux_enospc_falls_back_to_disk_full_when_inodes_are_fine(tmp_path, monke
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
     monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
     monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
-    monkeypatch.setattr(recordings_module.os, 'statvfs', _fake_statvfs(free_inodes=1_000_000))
+    monkeypatch.setattr(recordings_module.os, 'statvfs', _fake_statvfs(free_inodes=1_000_000), raising=False)
 
     def fake_run(command, *_args, **_kwargs):
         return subprocess.CompletedProcess(

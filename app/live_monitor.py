@@ -650,6 +650,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     detections = filter_detections_by_motion_mode(detections, diff_mask, object_settings)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     object_detections = filter_detections_for_camera(detections, settings)
+    # Stamp a stable track id on each detection BEFORE the confirmation gate so
+    # the tracker's ``track_displacement`` annotation (net box motion over the
+    # recent cycles) is available to the still/moving filter: a stationary
+    # track overrides the motion mask, which otherwise flaps a large parked
+    # object to "moving" whenever background change inside its big box crosses
+    # the threshold (a parked car reading the road behind it). Moving the
+    # tracker ahead of confirmation is annotation-only -- it never adds or
+    # drops detections -- so it does not influence what the gate counts.
+    object_detections = update_object_tracks(camera_id, object_detections)
     # Temporal confirmation gate: require an object label to persist across
     # several detection cycles before it can raise an alert or a recording.
     # Defaults to 2 (2-of-3), pairing with the always-on detector to filter
@@ -669,11 +678,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         required_frames=_confirm_frames, window_frames=_confirm_window,
         location_iou=_confirm_iou,
     )
-    # Stamp a stable track id on each confirmed detection so the same object
-    # keeps one identity across cycles (foundation for de-dup / dwell / overlay
-    # continuity). Additive: it only annotates the dicts, so alerts/recordings
-    # are unchanged, and the ids thread through to the history + recording rows.
-    object_detections = update_object_tracks(camera_id, object_detections)
+    # (Track ids were stamped earlier, before the confirmation gate, so the
+    # motion-mode filter could read ``track_displacement``; the ids still
+    # thread through to the history + recording rows from there.)
     # Face recognition (Stage 2c): annotate each ``face`` detection in place with
     # the recognised person (or mark it unknown), amortised across the stable
     # track id. A no-op unless recognition is enabled with a loaded model and the

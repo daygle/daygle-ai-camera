@@ -50,6 +50,24 @@ test('overlayMotionStateTag returns null without a classification', () => {
 });
 
 
+test('overlayTrackIdTag renders the tracker identity for positive integer ids', () => {
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  assert.deepEqual(plain(sandbox.overlayTrackIdTag({ track_id: 12 })), { text: '#12', color: '#49e6a3' });
+  assert.deepEqual(plain(sandbox.overlayTrackIdTag({ track_id: 1 })), { text: '#1', color: '#49e6a3' });
+});
+
+
+test('overlayTrackIdTag returns null without a usable id', () => {
+  // Legacy events / pre-tracker samples carry no id; junk values must not
+  // render either (0 and negatives are not valid tracker ids).
+  assert.equal(sandbox.overlayTrackIdTag({ label: 'person' }), null);
+  assert.equal(sandbox.overlayTrackIdTag({ track_id: 0 }), null);
+  assert.equal(sandbox.overlayTrackIdTag({ track_id: -3 }), null);
+  assert.equal(sandbox.overlayTrackIdTag({ track_id: 'junk' }), null);
+  assert.equal(sandbox.overlayTrackIdTag(null), null);
+});
+
+
 test('sampleTrackAtTime interpolates through a short missed sample', () => {
   const sampled = sandbox.sampleTrackAtTime(track, 1.5);
   assert.equal(sampled.length, 1);

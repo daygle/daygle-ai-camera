@@ -15,6 +15,18 @@ the background model over ``1 / motion_background_alpha`` frames, so a parked
 car naturally reads as *still*; a subject that keeps moving lands on fresh
 pixels every frame and stays *moving*.
 
+The mask alone is not the whole story: a large stationary box contains lots of
+non-subject pixels (road, fence, foliage behind the car), so unrelated
+background change inside the box can cross the moving threshold and make a
+parked car read as *moving* for stretches. When the object tracker has enough
+history on a track, its **net box displacement across recent cycles overrides
+the mask**: a track whose box has stayed put is ``still`` regardless of what
+the pixels inside it are doing, and a track that has swept across the frame is
+``moving`` even when the mask is quiet or unavailable. The mask remains the
+sole signal until the track has accumulated enough cycles
+(``_TRACK_DISPLACEMENT_MIN_AGE``), so brand-new tracks and single-frame
+detections behave exactly as before.
+
 When no diff mask is available (periodic scan on a quiet frame, first frame
 after a camera (re)connect, or a motion-gate error) the detection is
 classified ``still``: no pixel change was measured, so treating it as a still
@@ -92,6 +104,16 @@ _STILL_ALERT_MAX_MINUTES = 1440
 # floor below keeps a lone noise pixel from flipping a huge box.
 _MOVING_BOX_FRACTION = 0.01
 _MOVING_MIN_CHANGED_PIXELS = 2
+
+# Track-displacement override of the mask verdict (see module docstring). The
+# tracker annotates each detection with ``track_displacement``: the net
+# normalized box-center motion across its recent history, or ``None`` while
+# the track is too young to trust. A displacement of a hundredth of the frame
+# (~13 px at 720p, ~6 px at 320-wide detector input) is well above detector
+# box jitter for a parked subject and far below any real traverse, so the
+# override only fires on clear-cut cases and the mask keeps everything else.
+_TRACK_DISPLACEMENT_STILL = 0.01
+_TRACK_DISPLACEMENT_MIN_AGE = 3
 
 
 def normalize_mode(value: Any, default: str = MODE_ANY) -> str:
@@ -363,6 +385,7 @@ def update_still_dwell_alerts(
 def detection_motion_state(
     detection: dict[str, Any],
     diff_mask: Any,
+    track_displacement: float | None = None,
 ) -> str:
     """Classify one detection as ``moving`` or ``still``.
 
@@ -370,7 +393,23 @@ def detection_motion_state(
     ``detect_frame_motion`` (or ``None`` when no change was measured / the
     mask is unavailable). ``None`` maps to ``still``: no pixel change was
     measured, so the subject is treated as still (see module docstring).
+
+    ``track_displacement`` is the tracker's net normalized box-center motion
+    for this detection's track (``None`` while the track is too young to
+    trust). When the tracker has enough history it OVERRIDES the mask verdict:
+    a stationary track is ``still`` even if background change inside its large
+    box crosses the mask threshold (the parked-car flap), and a traversing
+    track is ``moving`` even when the mask reads quiet. The mask is the sole
+    signal for young tracks, so first-seen detections behave exactly as
+    before.
     """
+    if track_displacement is not None:
+        try:
+            if float(track_displacement) <= _TRACK_DISPLACEMENT_STILL:
+                return MODE_STILL
+            return MODE_MOVING
+        except (TypeError, ValueError):
+            pass  # corrupt annotation -> fall through to mask classification
     if diff_mask is None:
         return MODE_STILL
     box = detection.get('box')
@@ -426,9 +465,17 @@ def filter_detections_by_motion_mode(
     classification so the live view and timeline can show it. Motion-zone
     detections never pass through this filter and stay untagged.
 
+    The filter reads the tracker's per-detection ``track_displacement``
+    annotation when it is present (the production pipeline stamps it by
+    running tracking before this filter): a stationary track's history
+    overrides the mask verdict, and detections without the annotation classify
+    from the mask exactly as before.
+
     Fast path: when no label is restricted and there is no diff mask, no pixel
     change was measured so every detection is ``still`` by definition; the
-    annotation is stamped without per-box numpy work.
+    annotation is stamped without per-box numpy work. The fast path also
+    honours a displacement override, since a track that has swept the frame is
+    ``moving`` even with no mask available this cycle.
     """
     if not detections:
         return detections
@@ -450,13 +497,16 @@ def filter_detections_by_motion_mode(
         if motion_mode_for_label(label, resolved) != MODE_ANY:
             restricted_labels.add(label)
     if not restricted_labels and diff_mask is None:
-        return [{**detection, 'motion_state': MODE_STILL} for detection in detections]
+        return [
+            {**detection, 'motion_state': detection_motion_state(detection, None, detection.get('track_displacement'))}
+            for detection in detections
+        ]
 
     filtered: list[dict[str, Any]] = []
     for detection in detections:
         label = canonical_label(detection.get('label'))
         mode = MODE_ANY if label == 'face' else (motion_mode_for_label(label, resolved) if label else MODE_ANY)
-        state = detection_motion_state(detection, diff_mask)
+        state = detection_motion_state(detection, diff_mask, detection.get('track_displacement'))
         if mode == MODE_ANY or mode == state:
             filtered.append({**detection, 'motion_state': state})
     return filtered
@@ -481,6 +531,10 @@ def still_dwell_candidates(
     tracker so the alert works regardless of the label's detection mode, while
     the normal alert/record pipeline keeps honouring "Moving Only".
 
+    The tracker's ``track_displacement`` annotation is honoured here too, so a
+    parked car accrues its dwell streak from the track history even when the
+    mask inside its large box misreads background motion as "moving".
+
     Returns an empty list when nothing has a still-alert threshold, so the hot
     path skips all per-box classification work in the common case.
     """
@@ -495,6 +549,6 @@ def still_dwell_candidates(
         label = canonical_label(detection.get('label'))
         if not label or label not in thresholds:
             continue
-        if detection_motion_state(detection, diff_mask) == MODE_STILL:
+        if detection_motion_state(detection, diff_mask, detection.get('track_displacement')) == MODE_STILL:
             candidates.append({**detection, 'motion_state': MODE_STILL})
     return candidates

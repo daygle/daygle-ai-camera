@@ -753,7 +753,9 @@ function ingestServerTrackDetections(payload) {
   liveAiTrackPrevCaptureMs = liveAiTrackCaptureMs;
   liveAiTrackDetections = (payload.detections || [])
     .filter((d) => d && d.box && !d.motion_event && String(d.label || '').trim().toLowerCase() !== 'motion')
-    .map((d) => ({ label: d.label, confidence: d.confidence, box: d.box, motion_state: d.motion_state }));
+    // track_id rides along so the overlay can show each object's stable
+    // identity; motion_state shows the still/moving classification.
+    .map((d) => ({ label: d.label, confidence: d.confidence, box: d.box, motion_state: d.motion_state, track_id: d.track_id }));
   liveAiTrackCaptureMs = performance.now();
   drawLiveOverlay();
 }

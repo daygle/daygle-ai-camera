@@ -16,7 +16,17 @@ returns the SAME detections, each annotated with:
 
 - ``track_id``   -- stable integer id for this object on this camera,
 - ``track_age``  -- how many cycles this track has been seen (1 on first sight),
-- ``track_new``  -- ``True`` only on the cycle a track first appears.
+- ``track_new``  -- ``True`` only on the cycle a track first appears,
+- ``track_displacement`` -- normalized (0-1 frame) Chebyshev distance between
+  the current box center and the most recent up-to
+  ``TRACK_DISPLACEMENT_HISTORY`` box centers of the same track. ``None`` until
+  the track has ``TRACK_DISPLACEMENT_MIN_AGE`` cycles of box history. The
+  still/moving classifier (``app/object_settings.py``) reads this to override
+  the motion-mask verdict: a track whose box has not moved is *still* even when
+  background motion inside its large box crosses the mask threshold, and a
+  track that has swept across the frame is *moving* even when the mask is
+  unavailable. Tracks that predate a process restart re-accumulate history and
+  report ``None`` (mask-only classification) until then.
 
 It never drops or reorders detections, so every existing consumer keeps working;
 callers that don't care about tracking can ignore the extra keys.
@@ -27,6 +37,54 @@ import time
 from typing import Any
 
 import app.state as _state
+
+
+# Displacement history knobs. ``TRACK_DISPLACEMENT_HISTORY`` bounds how many
+# recent box centers are kept per track (memory + staleness); measuring over a
+# window rather than consecutive cycles makes the verdict robust to per-cycle
+# jitter while still responding within a few cycles. ``MIN_AGE`` is the number
+# of matched cycles required before a displacement is considered trustworthy.
+# ``TRACK_STILL_DISPLACEMENT`` is the normalized distance below which a track
+# counts as stationary (the classification threshold lives in
+# ``app/object_settings.py``; this copy is for the tracker-side docstring).
+TRACK_DISPLACEMENT_HISTORY = 8
+TRACK_DISPLACEMENT_MIN_AGE = 3
+TRACK_STILL_DISPLACEMENT = 0.01
+
+
+def _center_of(box: dict[str, Any]) -> tuple[float, float] | None:
+    """Return the normalized center ``(cx, cy)`` of a detection box, or None."""
+    try:
+        x = float(box.get("x") or 0.0)
+        y = float(box.get("y") or 0.0)
+        w = float(box.get("width") or 0.0)
+        h = float(box.get("height") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return (x + w / 2.0, y + h / 2.0)
+
+
+def _recent_displacement(track: dict[str, Any]) -> float | None:
+    """Net normalized motion of a track over its recent center history.
+
+    Returns the largest axis distance between the current box center and any
+    of the last ``TRACK_DISPLACEMENT_HISTORY`` centers, or ``None`` when the
+    track has not accumulated enough history yet (brand-new track, or a legacy
+    track rebuilt after a restart).
+    """
+    centers = track.get("centers")
+    if not isinstance(centers, list) or len(centers) < max(2, TRACK_DISPLACEMENT_MIN_AGE):
+        return None
+    recent = centers[-TRACK_DISPLACEMENT_HISTORY:]
+    last_x, last_y = recent[-1]
+    displacement = 0.0
+    for center in recent:
+        try:
+            cx, cy = float(center[0]), float(center[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        displacement = max(displacement, abs(cx - last_x), abs(cy - last_y))
+    return displacement
 
 
 def _iou(box_a: dict[str, Any], box_b: dict[str, Any]) -> float:
@@ -71,7 +129,8 @@ def update_object_tracks(
     highest-IoU unmatched track of its label (>= ``iou_threshold``) or opens a
     new track. Tracks unseen for more than ``max_age`` consecutive cycles are
     dropped. Returns the same detection dicts, annotated with ``track_id`` /
-    ``track_age`` / ``track_new`` (see module docstring)."""
+    ``track_age`` / ``track_new`` / ``track_displacement`` (see module
+    docstring)."""
     if not detections:
         # Still age out existing tracks on an empty cycle so a track that left
         # the frame is retired instead of lingering forever.
@@ -109,7 +168,16 @@ def update_object_tracks(
                         best_iou = score
                         best_track = track
             if best_track is not None:
+                # Extend the bounded center history with THIS cycle's center;
+                # the previous center is already stored from the cycle that
+                # observed it (append-on-observe, never append-on-match, or
+                # the history double-counts and shifts the age gate).
                 best_track["box"] = box if isinstance(box, dict) else best_track["box"]
+                centers = best_track.setdefault("centers", [])
+                new_center = _center_of(box) if isinstance(box, dict) else None
+                if new_center is not None:
+                    centers.append(new_center)
+                del centers[:-TRACK_DISPLACEMENT_HISTORY]
                 best_track["hits"] += 1
                 best_track["misses"] = 0
                 best_track["last_ts"] = now
@@ -117,6 +185,7 @@ def update_object_tracks(
                 detection["track_id"] = best_track["id"]
                 detection["track_age"] = best_track["hits"]
                 detection["track_new"] = False
+                detection["track_displacement"] = _recent_displacement(best_track)
             else:
                 track_id = state["next_id"]
                 state["next_id"] += 1
@@ -124,6 +193,7 @@ def update_object_tracks(
                     "id": track_id,
                     "label": label,
                     "box": box if isinstance(box, dict) else {},
+                    "centers": [_center_of(box)] if isinstance(box, dict) else [],
                     "hits": 1,
                     "misses": 0,
                     "first_ts": now,
@@ -133,6 +203,9 @@ def update_object_tracks(
                 detection["track_id"] = track_id
                 detection["track_age"] = 1
                 detection["track_new"] = True
+                # One center is not motion evidence; the classifier falls back
+                # to the motion mask until the track has enough history.
+                detection["track_displacement"] = None
 
         # Age out tracks that were not matched this cycle.
         survivors = []

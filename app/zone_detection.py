@@ -547,6 +547,11 @@ def filter_detections_for_camera_zones(
     raw_zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True)]
     zones = [zone for zone in raw_zones if zone.get(zone_monitor_key, True)]
     camera_labels = set(normalize_label_list(detection_settings.get('object_labels', [])))
+    # Track-id preservation: the live overlay renders each box's stable track
+    # id beside its label so operators can verify tracker/classifier behavior
+    # (and two same-label objects never look like one). Detection dicts pass
+    # through this filter on the ~4 Hz hot path, so the id rides along with the
+    # dict itself -- no reconstruction needed.
     # Face scoping: when the camera defines zones carrying an enabled ``face``
     # rule (including face-only zones with ``monitor_objects`` off), a ``face``
     # detection must land geometrically inside one of them -- its confidence
@@ -594,7 +599,7 @@ def filter_detections_for_camera_zones(
                 detection
                 for detection in detections
                 if detection_label_in_allowed(detection.get('label'), camera_labels)
-            ]
+            ]  # dict pass-through carries track_id
         # No zones and no camera labels: keep legacy "accept all" behavior so a
         # camera with object detection enabled but unconfigured still records
         # and alerts. Log the fallback once per call to aid debugging.
@@ -631,6 +636,7 @@ def filter_detections_for_camera_zones(
             for zone, labels in zones_with_labels
         ):
             matched.append(detection)
+    # Detection dicts (with their track_id annotation) pass through unchanged.
     return matched
 
 

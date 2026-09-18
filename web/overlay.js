@@ -34,14 +34,27 @@ function overlayColorForDetection(detection) {
 
 // The moving/still tag shown beside an object's box label. The classification
 // is computed server-side (app/object_settings.py) from the Layer-1 motion
-// diff mask: a box overlapping changed pixels is "moving", a box absorbed into
-// the background is "still". Returns null for motion-zone boxes and for any
-// detection that has no classification (e.g. legacy events), which draw the
-// label alone.
+// diff mask and the tracker's net box displacement: a stationary track is
+// "still" even when background change inside its box reads moving, and a
+// traversing track is "moving" even when the mask is quiet. Returns null for
+// motion-zone boxes and for any detection that has no classification (e.g.
+// legacy events), which draw the label alone.
 function overlayMotionStateTag(detection) {
   const state = detection?.motion_state;
   if (state !== 'moving' && state !== 'still') return null;
   return { text: state[0].toUpperCase() + state.slice(1), color: MOTION_STATE_COLORS[state] };
+}
+
+// The stable tracker identity tag ("#12") shown after the state tag. The id is
+// assigned server-side (app/object_tracking.py) and persists across cycles for
+// the same physical object, so an operator can verify that two same-label
+// objects keep separate identities (and that a parked car is not "the same
+// car" as the one driving past it). Returns null when the detection carries
+// no usable id (legacy events, motion-zone boxes, pre-tracker samples).
+function overlayTrackIdTag(detection) {
+  const trackId = detection?.track_id;
+  if (!Number.isInteger(trackId) || trackId <= 0) return null;
+  return { text: '#' + trackId, color: MOTION_STATE_COLORS.moving };
 }
 
 function _getCachedContext(canvas) {
@@ -372,15 +385,27 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
     // classified, so someone watching the feed sees the same decision the
     // Objects page filter is making. Same dark backing as the label pill;
     // colored text tells the state at a glance.
+    // Second pill: how the still/moving classifier classified this object.
+    // Third pill (when the tracker stamped an id): the object's stable
+    // identity, so same-label objects are visibly distinct. Both use the
+    // same dark backing as the label pill; colored text tells them apart.
+    let pillX = dx + labelWidth + 4;
     const stateTag = overlayMotionStateTag(detection);
     if (stateTag) {
-      const stateWidth = _measureTextWidth(ctx, stateTag.text);
-      const statePillWidth = stateWidth + 12;
-      const stateX = dx + labelWidth + 4;
+      const statePillWidth = _measureTextWidth(ctx, stateTag.text) + 12;
       ctx.fillStyle = OVERLAY_LABEL_BACKGROUND;
-      ctx.fillRect(stateX, labelY, statePillWidth, labelHeight);
+      ctx.fillRect(pillX, labelY, statePillWidth, labelHeight);
       ctx.fillStyle = stateTag.color;
-      ctx.fillText(stateTag.text, stateX + 6, labelY + labelHeight / 2);
+      ctx.fillText(stateTag.text, pillX + 6, labelY + labelHeight / 2);
+      pillX += statePillWidth + 4;
+    }
+    const trackTag = overlayTrackIdTag(detection);
+    if (trackTag) {
+      const trackPillWidth = _measureTextWidth(ctx, trackTag.text) + 12;
+      ctx.fillStyle = OVERLAY_LABEL_BACKGROUND;
+      ctx.fillRect(pillX, labelY, trackPillWidth, labelHeight);
+      ctx.fillStyle = trackTag.color;
+      ctx.fillText(trackTag.text, pillX + 6, labelY + labelHeight / 2);
     }
   }
 }

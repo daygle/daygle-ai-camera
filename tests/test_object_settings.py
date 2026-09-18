@@ -316,6 +316,81 @@ def test_filter_empty_detections():
 
 
 # ---------------------------------------------------------------------------
+# track-displacement override (detection_motion_state 3rd arg)
+# ---------------------------------------------------------------------------
+
+
+def test_displacement_override_marks_parked_car_still():
+    # Regression for the parked-car flap: a large stationary box full of
+    # background change (mask says moving) must read still when the tracker's
+    # net box displacement is ~zero.
+    parked = _det('car', x=0.55, y=0.25, w=0.3, h=0.2)
+    assert os.detection_motion_state(parked, _mask_all_changed(), 0.0) == 'still'
+    assert os.detection_motion_state(parked, _mask_changed_inside_box(), 0.005) == 'still'
+
+
+def test_displacement_threshold_boundary_counts_as_still():
+    parked = _det('car')
+    # Exactly at the threshold is still (<=); just over it is moving.
+    assert os.detection_motion_state(parked, _mask_all_changed(), os._TRACK_DISPLACEMENT_STILL) == 'still'
+    assert os.detection_motion_state(parked, _mask_none_changed(), os._TRACK_DISPLACEMENT_STILL + 0.001) == 'moving'
+
+
+def test_displacement_override_marks_traversing_track_moving():
+    # A track that has swept the frame is moving even with NO mask available
+    # this cycle (periodic scan / motion-gate error would otherwise say still).
+    car = _det('car', x=0.1, y=0.5, w=0.15, h=0.1)
+    assert os.detection_motion_state(car, None, 0.3) == 'moving'
+    assert os.detection_motion_state(car, _mask_none_changed(), 0.2) == 'moving'
+
+
+def test_young_track_falls_back_to_mask_verdict():
+    car = _det('car')
+    # None displacement (too young) -> mask decides, exactly as before.
+    assert os.detection_motion_state(car, _mask_changed_inside_box(), None) == 'moving'
+    assert os.detection_motion_state(car, _mask_none_changed(), None) == 'still'
+    assert os.detection_motion_state(car, None, None) == 'still'
+
+
+def test_displacement_junk_value_falls_back_to_mask():
+    car = _det('car')
+    assert os.detection_motion_state(car, _mask_changed_inside_box(), 'junk') == 'moving'
+
+
+def test_filter_honours_track_displacement():
+    # Moving-only cars: two boxes, both full of mask change, but one track is
+    # parked (displacement ~0) and one is traversing. The parked one is
+    # dropped by the override even though the mask alone would keep both.
+    settings = {'default_mode': 'any', 'labels': {'car': 'moving'}}
+    parked = {**_det('car', x=0.55, y=0.25, w=0.3, h=0.2), 'track_displacement': 0.0}
+    traversing = {**_det('car', x=0.2, y=0.5, w=0.15, h=0.1), 'track_displacement': 0.25}
+    out = os.filter_detections_by_motion_mode(
+        [parked, traversing], _mask_all_changed(), settings,
+    )
+    assert [d['box'] for d in out] == [traversing['box']]
+    assert out[0]['motion_state'] == 'moving'
+
+
+def test_filter_fast_path_honours_displacement_without_mask():
+    # No restricted labels would normally mean the no-mask fast path stamps
+    # everything still; a traversing track must still read moving there.
+    settings = {'default_mode': 'any', 'labels': {}}
+    moving_person = {**_det('person'), 'track_displacement': 0.4}
+    out = os.filter_detections_by_motion_mode([moving_person], None, settings)
+    assert len(out) == 1
+    assert out[0]['motion_state'] == 'moving'
+
+
+def test_still_dwell_candidates_honour_displacement():
+    # A parked car with a noisy mask still accrues its dwell streak because
+    # the candidate picker classifies via the displacement override too.
+    parked = {**_det('car', x=0.55, y=0.25, w=0.3, h=0.2), 'track_displacement': 0.0}
+    candidates = os.still_dwell_candidates([parked], _mask_all_changed(), {'still_alerts': {'car': 5}})
+    assert len(candidates) == 1
+    assert candidates[0]['motion_state'] == 'still'
+
+
+# ---------------------------------------------------------------------------
 # still_alerts normalization + thresholds
 # ---------------------------------------------------------------------------
 
