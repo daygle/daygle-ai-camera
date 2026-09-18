@@ -10,7 +10,7 @@ from app.auth_gates import require_admin, require_user
 from app.deps import get_database
 from app.request_helpers import write_audit_log
 from app.media_utils import safe_storage_path
-from app.live_snapshot import render_live_snapshot_jpeg_overlay
+from app.live_snapshot import filter_object_priority_detections, render_live_snapshot_jpeg_overlay
 
 router = APIRouter()
 
@@ -99,7 +99,7 @@ def event_snapshot(
         raise HTTPException(status_code=404, detail='Event snapshot not found')
     raw_bytes = snapshot_path.read_bytes()
     if boxes:
-        overlay_detections = [
+        overlay_detections = filter_object_priority_detections([
             {
                 'label': detection.get('label'),
                 'confidence': detection.get('confidence'),
@@ -109,9 +109,10 @@ def event_snapshot(
                     'width': detection.get('width'),
                     'height': detection.get('height'),
                 },
+                'motion_event': detection.get('motion_event', False),
             }
             for detection in (event.get('detections') or [])
-        ]
+        ])
         image_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
     else:
         image_bytes = raw_bytes

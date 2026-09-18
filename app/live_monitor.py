@@ -67,6 +67,7 @@ from app.zone_schema import label_matches
 from app.zone_detection import (
     detection_matches_zone,
     filter_detections_for_camera,
+    filter_motion_detections_by_objects,
     normalize_detection_boxes_for_frame,
     zone_alert_detections,
     zone_detection_alert_rule_names,
@@ -652,6 +653,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     detections = filter_detections_by_motion_mode(detections, diff_mask, object_settings)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     object_detections = filter_detections_for_camera(detections, settings)
+    # Object detector boxes are authoritative over generic motion boxes. This
+    # suppresses only motion regions explained by a concrete object that the
+    # camera actually accepts; unrelated motion remains available for
+    # motion-only rules and recordings.
+    motion_detections = filter_motion_detections_by_objects(motion_detections, object_detections)
     # Stamp a stable track id on each detection BEFORE the confirmation gate so
     # the tracker's ``track_displacement`` annotation (net box motion over the
     # recent cycles) is available to the still/moving filter: a stationary

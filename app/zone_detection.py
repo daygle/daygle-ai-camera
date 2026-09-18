@@ -856,6 +856,74 @@ def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[di
     return False
 
 
+def filter_motion_detections_by_objects(
+    motion_detections: list[dict[str, Any]],
+    object_detections: list[dict[str, Any]],
+    *,
+    min_motion_overlap: float = 0.15,
+) -> list[dict[str, Any]]:
+    """Use object detections as the authoritative label over generic motion.
+
+    A motion box is a fallback signal. When a concrete object box covers a
+    meaningful part of that motion box, keeping both creates a misleading
+    second ``Motion`` subject (and can make motion appear to replace the
+    object). Motion boxes that do not overlap an object remain available for
+    motion-only recording and alerts.
+
+    ``min_motion_overlap`` is measured against the motion box, not the object
+    box: an object may be much smaller than a configured zone while still
+    explaining the changed pixels inside it.
+    """
+    if not motion_detections or not object_detections:
+        return motion_detections
+    try:
+        threshold = min(1.0, max(0.0, float(min_motion_overlap)))
+    except (TypeError, ValueError):
+        threshold = 0.15
+
+    def _area(box: Any) -> float:
+        if not isinstance(box, dict):
+            return 0.0
+        try:
+            return max(0.0, float(box.get('width') or 0)) * max(0.0, float(box.get('height') or 0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _overlap_ratio(motion_box: Any, object_box: Any) -> float:
+        motion_area = _area(motion_box)
+        object_area = _area(object_box)
+        if motion_area <= 0 or object_area <= 0:
+            return 0.0
+        try:
+            mx1 = float(motion_box.get('x') or 0)
+            my1 = float(motion_box.get('y') or 0)
+            mx2 = mx1 + float(motion_box.get('width') or 0)
+            my2 = my1 + float(motion_box.get('height') or 0)
+            ox1 = float(object_box.get('x') or 0)
+            oy1 = float(object_box.get('y') or 0)
+            ox2 = ox1 + float(object_box.get('width') or 0)
+            oy2 = oy1 + float(object_box.get('height') or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        intersection = max(0.0, min(mx2, ox2) - max(mx1, ox1)) * max(0.0, min(my2, oy2) - max(my1, oy1))
+        return intersection / motion_area
+
+    concrete_boxes = [
+        detection.get('box')
+        for detection in object_detections
+        if isinstance(detection, dict)
+        and detection.get('box')
+        and str(detection.get('label') or '').strip().lower() not in {'', 'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
+        and not detection.get('motion_event')
+    ]
+    if not concrete_boxes:
+        return motion_detections
+    return [
+        motion for motion in motion_detections
+        if not any(_overlap_ratio(motion.get('box'), object_box) >= threshold for object_box in concrete_boxes)
+    ]
+
+
 def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame: dict[str, Any]) -> list[dict[str, Any]]:
     width = float(frame.get('width') or 0)
     height = float(frame.get('height') or 0)

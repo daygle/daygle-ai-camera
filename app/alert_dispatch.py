@@ -88,7 +88,7 @@ from app.config_facades import (
     effective_push_notification_settings,
 )
 from app.email_alerts import EmailAlertService, EmailAlertError
-from app.live_snapshot import render_live_snapshot_jpeg_overlay
+from app.live_snapshot import filter_object_priority_detections, render_live_snapshot_jpeg_overlay
 from app.media_utils import safe_storage_path
 from app.push_notifications import PushNotificationService, PushNotificationError
 
@@ -357,7 +357,7 @@ def deliver_email_alerts(
                 raw_bytes = snap_path.read_bytes()
                 db_detections = event.get('detections') or []
                 _email_min_conf = compute_minimum_rule_confidence()
-                overlay_detections = [
+                overlay_detections = filter_object_priority_detections([
                     {
                         'label': d.get('label'),
                         'confidence': d.get('confidence'),
@@ -367,10 +367,11 @@ def deliver_email_alerts(
                             'width': d.get('width', 0),
                             'height': d.get('height', 0),
                         },
+                        'motion_event': d.get('motion_event', False),
                     }
                     for d in db_detections
                     if float(d.get('confidence') or 0) >= _email_min_conf
-                ]
+                ])
                 snapshot_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
         except Exception as exc:
             logger.debug('Failed to annotate snapshot for email alert event %s: %s', event_id, exc)

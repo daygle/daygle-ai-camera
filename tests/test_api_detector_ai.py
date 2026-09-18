@@ -142,7 +142,6 @@ def test_ai_settings_save_missing_model_path_is_rejected_and_preserves_previous(
 
 def test_live_snapshot_renderer_can_hide_object_overlay(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
     mods = _m()
 
     frame = {'width': 1280, 'height': 720, 'frame_number': 7, 'timestamp': 1_700_000_000}
@@ -166,7 +165,6 @@ def test_live_snapshot_renderer_can_hide_object_overlay(tmp_path, monkeypatch):
 
 def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
     mods = _m()
 
     cv2 = pytest.importorskip('cv2')
@@ -189,6 +187,49 @@ def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path
     decoded = cv2.imdecode(np.frombuffer(overlaid, dtype=np.uint8), cv2.IMREAD_COLOR)
     assert decoded is not None
     assert int(decoded.sum()) > 0
+
+
+def test_object_priority_hides_overlapping_motion_but_keeps_unrelated_motion(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    from app.live_snapshot import filter_object_priority_detections
+
+    car = {
+        'label': 'car',
+        'confidence': 0.91,
+        'box': {'x': 0.30, 'y': 0.30, 'width': 0.30, 'height': 0.25},
+    }
+    overlapping_motion = {
+        'label': 'motion',
+        'motion_event': True,
+        'confidence': 0.82,
+        'box': {'x': 0.30, 'y': 0.30, 'width': 0.30, 'height': 0.25},
+    }
+    unrelated_motion = {
+        'label': 'motion',
+        'motion_event': True,
+        'confidence': 0.71,
+        'box': {'x': 0.80, 'y': 0.10, 'width': 0.10, 'height': 0.10},
+    }
+
+    filtered = filter_object_priority_detections([car, overlapping_motion, unrelated_motion])
+
+    assert filtered == [car, unrelated_motion]
+
+
+def test_object_priority_leaves_motion_only_detections_unchanged(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    from app.live_snapshot import filter_object_priority_detections
+
+    detections = [
+        {
+            'label': 'motion',
+            'motion_event': True,
+            'confidence': 0.82,
+            'box': {'x': 0.1, 'y': 0.2, 'width': 0.3, 'height': 0.2},
+        }
+    ]
+
+    assert filter_object_priority_detections(detections) == detections
 
 
 def test_export_yolo_onnx_uses_ultralytics_export(tmp_path, monkeypatch):

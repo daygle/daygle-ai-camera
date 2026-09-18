@@ -3,7 +3,11 @@ import unittest
 import numpy as np
 
 import app.state as state
-from app.zone_detection import _zone_pixel_motion_fraction, zone_motion_detections
+from app.zone_detection import (
+    _zone_pixel_motion_fraction,
+    filter_motion_detections_by_objects,
+    zone_motion_detections,
+)
 
 
 class MotionPipelineTests(unittest.TestCase):
@@ -37,6 +41,16 @@ class MotionPipelineTests(unittest.TestCase):
 
         self.assertEqual(_zone_pixel_motion_fraction(stale_mask, settings['detection']['zones'][0]), 0.0)
         self.assertEqual(zone_motion_detections(settings, diff_mask=stale_mask), [])
+
+    def test_object_detection_suppresses_overlapping_motion_box(self):
+        car = {'label': 'car', 'box': {'x': 0.2, 'y': 0.2, 'width': 0.4, 'height': 0.3}}
+        motion = {'label': 'motion', 'motion_event': True, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.4, 'height': 0.3}}
+        assert filter_motion_detections_by_objects([motion], [car]) == []
+
+    def test_object_detection_does_not_suppress_unrelated_motion_box(self):
+        car = {'label': 'car', 'box': {'x': 0.2, 'y': 0.2, 'width': 0.2, 'height': 0.2}}
+        motion = {'label': 'motion', 'motion_event': True, 'box': {'x': 0.7, 'y': 0.7, 'width': 0.1, 'height': 0.1}}
+        assert filter_motion_detections_by_objects([motion], [car]) == [motion]
 
     def test_zone_motion_fraction_is_finite_for_valid_mask(self):
         zone = {'x': 0, 'y': 0, 'width': 1, 'height': 1}

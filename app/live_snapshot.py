@@ -27,6 +27,73 @@ from typing import Any
 from app.zone_schema import rectangle_zone_points
 
 
+_GENERIC_OVERLAY_LABELS = frozenset({'', 'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'})
+
+
+def _box_overlap_ratio(outer: Any, inner: Any) -> float:
+    """Return the intersection area as a fraction of ``outer``'s area."""
+    if not isinstance(outer, dict) or not isinstance(inner, dict):
+        return 0.0
+    try:
+        ox = float(outer.get('x') or 0)
+        oy = float(outer.get('y') or 0)
+        ow = max(0.0, float(outer.get('width') or 0))
+        oh = max(0.0, float(outer.get('height') or 0))
+        ix = float(inner.get('x') or 0)
+        iy = float(inner.get('y') or 0)
+        iw = max(0.0, float(inner.get('width') or 0))
+        ih = max(0.0, float(inner.get('height') or 0))
+    except (TypeError, ValueError):
+        return 0.0
+    outer_area = ow * oh
+    if outer_area <= 0 or iw <= 0 or ih <= 0:
+        return 0.0
+    intersection = max(0.0, min(ox + ow, ix + iw) - max(ox, ix)) * max(0.0, min(oy + oh, iy + ih) - max(oy, iy))
+    return intersection / outer_area
+
+
+def filter_object_priority_detections(
+    detections: list[dict[str, Any]],
+    *,
+    min_motion_overlap: float = 0.15,
+) -> list[dict[str, Any]]:
+    """Hide generic motion overlays when a concrete object explains them.
+
+    Motion remains a useful fallback: a motion box is removed only when its
+    changed-pixel region overlaps a concrete object box. Unrelated motion boxes
+    remain visible, and this helper affects rendering only (not motion alerts or
+    recording decisions).
+    """
+    if not detections:
+        return detections
+    try:
+        threshold = min(1.0, max(0.0, float(min_motion_overlap)))
+    except (TypeError, ValueError):
+        threshold = 0.15
+    object_boxes = [
+        detection.get('box')
+        for detection in detections
+        if isinstance(detection, dict)
+        and detection.get('box')
+        and str(detection.get('label') or '').strip().lower() not in _GENERIC_OVERLAY_LABELS
+        and not detection.get('motion_event')
+    ]
+    if not object_boxes:
+        return detections
+    return [
+        detection
+        for detection in detections
+        if not (
+            isinstance(detection, dict)
+            and (
+                detection.get('motion_event')
+                or str(detection.get('label') or '').strip().lower() == 'motion'
+            )
+            and any(_box_overlap_ratio(detection.get('box'), object_box) >= threshold for object_box in object_boxes)
+        )
+    ]
+
+
 def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, Any]], *, overlay: bool, camera_name: str='Camera', zones: list[dict[str, Any]] | None=None) -> str:
     width = int(frame.get('width') or 1280)
     height = int(frame.get('height') or 720)
@@ -57,7 +124,7 @@ def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, A
             zone_markup.append(f'''<g class="monitor-zone"><polygon points="{' '.join(svg_points)}" /><text x="{label_x:.1f}" y="{label_y:.1f}">{zone_name}</text></g>''')
     detection_markup: list[str] = []
     if overlay:
-        for detection in detections:
+        for detection in filter_object_priority_detections(detections):
             box = detection.get('box') or {}
             x = max(0, float(box.get('x') or 0) * width)
             y = max(0, float(box.get('y') or 0) * height)
@@ -75,6 +142,7 @@ def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, A
 
 
 def render_live_snapshot_jpeg_overlay(image_bytes: bytes, detections: list[dict[str, Any]]) -> bytes:
+    detections = filter_object_priority_detections(detections)
     if not detections:
         return image_bytes
     try:
