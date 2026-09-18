@@ -576,6 +576,7 @@ def test_requested_gpu_running_on_cpu_warns(monkeypatch, tmp_path, caplog):
 
     class _Output:
         name = 'output'
+        shape = [1, 84, 8400]
 
     class _SessionOptions:
         graph_optimization_level = None
@@ -612,7 +613,7 @@ def test_requested_gpu_running_on_cpu_warns(monkeypatch, tmp_path, caplog):
     fake_ort.InferenceSession = _Session
     monkeypatch.setitem(sys.modules, 'onnxruntime', fake_ort)
 
-    with caplog.at_level('WARNING', logger='daygle.ai'):
+    with caplog.at_level('INFO', logger='daygle.ai'):
         det = OnnxYoloDetector(
             model_path=str(model_path),
             categories=LABELS,
@@ -620,6 +621,13 @@ def test_requested_gpu_running_on_cpu_warns(monkeypatch, tmp_path, caplog):
         )
 
     assert det.available is True
+    assert det.model_type == 'grid_nms'
+    diagnostics = [r.getMessage() for r in caplog.records if 'Detector startup diagnostics:' in r.getMessage()]
+    assert diagnostics and 'model_path=' in diagnostics[0]
+    assert 'model_type=grid_nms' in diagnostics[0]
+    assert 'active_providers=' in diagnostics[0]
+    assert 'precision=fp32' in diagnostics[0]
+    assert 'nms_free=False' in diagnostics[0]
     assert det.active_providers == ['CPUExecutionProvider']
     gpu_warnings = [
         r.getMessage() for r in caplog.records

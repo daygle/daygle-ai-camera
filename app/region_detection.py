@@ -16,7 +16,11 @@ area where subjects appear small.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+
+logger = logging.getLogger("daygle.ai")
 
 
 def _motion_region_boxes(
@@ -68,7 +72,14 @@ def _motion_region_boxes(
 
 def _dedup_by_iou(detections: list[dict[str, Any]], iou_threshold: float) -> list[dict[str, Any]]:
     """Class-aware greedy de-dup: keep the highest-confidence box, drop any
-    later same-label box overlapping it by >= ``iou_threshold``."""
+    later same-label box overlapping it by >= ``iou_threshold``.
+
+    The region/tile default remains 0.5 deliberately: it only suppresses boxes
+    with substantial overlap (roughly duplicate views of one object), while
+    nearby same-class objects whose boxes have less overlap remain separate.
+    Lowering it would make duplicate crop/tile boxes more likely to leak into
+    the event pipeline; changing it would require labeled evaluation.
+    """
     def _iou(a: dict[str, Any], b: dict[str, Any]) -> float:
         ax1, ay1 = float(a.get("x") or 0), float(a.get("y") or 0)
         ax2, ay2 = ax1 + float(a.get("width") or 0), ay1 + float(a.get("height") or 0)
@@ -139,6 +150,20 @@ def detect_with_region_boost(
         try:
             crop_detections = detector.detect_frame(crop, confidence=confidence)
         except Exception:
+            logger.debug(
+                "Region-boost detector failed for crop "
+                "normalized=(x=%.4f,y=%.4f,w=%.4f,h=%.4f) "
+                "pixels=(x1=%d,y1=%d,x2=%d,y2=%d)",
+                rx,
+                ry,
+                rw,
+                rh,
+                x1,
+                y1,
+                x2,
+                y2,
+                exc_info=True,
+            )
             continue  # a bad crop must never break the whole detection cycle
         for det in crop_detections:
             box = det.get("box") or {}
@@ -166,8 +191,12 @@ def region_boost_enabled(live_settings: dict[str, Any]) -> bool:
 # tile boundary still lands whole inside at least one tile.
 _TILE_OVERLAP = 0.2
 # Tile detections larger than this fraction of the frame are dropped: tiling
-# exists to recover SMALL subjects, and a large object is already caught by the
-# full-frame pass -- keeping big tile boxes would just fragment/duplicate it.
+# exists to recover SMALL subjects, and a large object is expected to be caught
+# by the full-frame pass -- keeping big tile boxes would just fragment/duplicate
+# it. This is intentionally unchanged pending labeled evidence: dropping a
+# large tile box can be a false negative if the full-frame pass misses it, so
+# detect_with_tiling logs every drop for diagnosis rather than changing recall
+# speculatively.
 _MAX_TILE_DET_AREA_FRAC = 0.1
 
 
@@ -255,12 +284,38 @@ def detect_with_tiling(
         try:
             tile_detections = detector.detect_frame(crop, confidence=confidence)
         except Exception:
+            logger.debug(
+                "Tiled detector failed for tile "
+                "normalized=(x=%.4f,y=%.4f,w=%.4f,h=%.4f) "
+                "pixels=(x1=%d,y1=%d,x2=%d,y2=%d)",
+                tx,
+                ty,
+                tw,
+                th,
+                x1,
+                y1,
+                x2,
+                y2,
+                exc_info=True,
+            )
             continue
         for det in tile_detections:
             box = det.get("box") or {}
             width = float(box.get("width") or 0) * tw
             height = float(box.get("height") or 0) * th
-            if width * height > max_det_area_frac:
+            tile_area_frac = width * height
+            if tile_area_frac > max_det_area_frac:
+                logger.debug(
+                    "Dropping large tiled detection "
+                    "tile=(x=%.4f,y=%.4f,w=%.4f,h=%.4f) "
+                    "detection_area_frac=%.4f threshold=%.4f",
+                    tx,
+                    ty,
+                    tw,
+                    th,
+                    tile_area_frac,
+                    max_det_area_frac,
+                )
                 continue  # large object -> leave it to the full-frame pass
             merged.append({
                 **det,

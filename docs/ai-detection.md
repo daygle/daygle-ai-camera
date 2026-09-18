@@ -156,6 +156,60 @@ touch these. Change one at a time so you can attribute any per-frame impact.
 
 ---
 
+## Region boost and tiled inference diagnostics
+
+Optional motion-region boost and whole-frame tiling are conservative recall
+helpers for small or distant objects. They keep the existing class-aware IoU
+deduplication default of `0.5`: that threshold removes substantially
+overlapping duplicate views of one object while retaining nearby same-class
+boxes with lower overlap. It has not been tuned without a labeled camera set.
+
+Tiled inference drops a tile detection whose remapped area exceeds `0.1` of the
+full frame because the full-frame pass is expected to be more reliable for a
+large object and retaining the tile box can fragment or duplicate it. This can
+be a false negative if the full-frame pass misses that object, so each drop is
+logged at debug level with the tile coordinates and measured area. Detector
+failures in either region boost or tiling are also logged at debug level with
+normalized and pixel coordinates plus a stack trace; the failed crop/tile is
+still skipped so the existing per-frame failure isolation is unchanged.
+
+## Investigating missed detections
+
+The live pipeline records detector output before downstream filtering, so a
+missing alert does not necessarily mean ONNX missed the object. The audit of
+`live_monitor.py`, `detection_state.py`, `object_settings.py`, and
+`zone_detection.py` found these higher-probability causes:
+
+- **Object post-processing:** confidence filtering and model-head NMS can remove
+  a raw box before it reaches the live pipeline. Region/tile merging adds only
+  the documented class-aware IoU deduplication; no threshold was changed in
+  this audit.
+- **Zone/rule filtering:** normalized box geometry, zone center/overlap, camera
+  or zone label allow-lists, and per-rule minimum confidence can remove a
+  detector result from alerting while it remains visible in live status. The
+  status path reports detected labels and a below-threshold reason where
+  available.
+- **Motion/object classification:** the Objects setting defaults to **Moving
+  Only**. A valid still detection is intentionally filtered unless its label is
+  configured for `any` or `still`; track displacement can override the pixel
+  mask after a track matures.
+- **Temporal confirmation:** object confirmation defaults to 2 detections in a
+  2-frame window (or the configured window), so an isolated valid detection is
+  held until it persists. Optional spatial IoU confirmation is stricter.
+- **Cooldowns:** cooldown logic runs after matching and affects repeated alert
+  delivery, not detector output or live detection status. A “missed alert” with
+  a visible detection is therefore more likely to be cooldown/rule behavior
+  than inference failure.
+- **Motion gating:** object inference normally runs every cycle because
+  `always_run_object_detection` defaults to true. If an operator disables that
+  setting, no-motion frames skip ONNX; motion-only rules remain independently
+  evaluated. Motion-gate failures fail closed for motion, but do not suppress
+  object inference when the detector is available.
+
+No speculative tuning was made in these layers. Use the live status fields,
+startup diagnostics, and debug logs to identify which stage removed a detection
+before changing thresholds or rules.
+
 ## Choosing a configuration
 
 - **CPU-only host** - start with `yolo11n` or `yolo26n` at 640. If CPU load is
