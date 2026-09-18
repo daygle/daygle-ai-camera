@@ -273,6 +273,79 @@ def test_live_stream_still_only_setting_keeps_still_person(tmp_path, monkeypatch
     assert status['detections'][0]['motion_state'] == 'still'
 
 
+def test_two_same_label_tracks_inside_cooldown_window_both_emit(tmp_path, monkeypatch):
+    """Per-track cooldown: a second car arriving while the label is still
+    cooling must get its OWN event instead of being swallowed as a duplicate.
+
+    Cycle 1 tracks car #11 (fresh everything) -> event 1. Cycle 2 tracks car
+    #12 (a different box the tracker assigns a new id) inside the 60s label
+    window -> the legacy per-label gate would suppress, but the track gate
+    sees an unanchored track and lets event 2 through. Cycle 3 sees #12 again:
+    every current track is now anchored and inside its window -> suppressed.
+    """
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    seen = {'cycle': 0}
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes, confidence=None):
+            seen['cycle'] += 1
+            if seen['cycle'] == 1:
+                box = {'x': 100, 'y': 300, 'width': 320, 'height': 200}
+            else:
+                # Far enough away that IoU vs cycle 1 is ~0: the tracker opens
+                # a NEW track id (what physically happens when a second car
+                # enters while the first is elsewhere).
+                box = {'x': 700, 'y': 300, 'width': 320, 'height': 200}
+            return [{'label': 'car', 'confidence': 0.93, 'box': box}]
+
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
+    main._state.live_detection_last_checked.clear()
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
+    settings = {
+        'id': 'camera-1',
+        'name': 'Driveway',
+        'detection': {'zones': []},
+        'recording': {'continuous': False},
+    }
+
+    main._state.live_event_last_emitted.clear()
+    main._state.live_event_track_last_emitted.clear()
+    # The tracker is per-process state keyed by camera id; other tests in this
+    # module also use 'camera-1', so a leftover track (and its cooldown anchor
+    # from a previous scenario) would make cycle 2 reuse an anchored id.
+    with main._state._object_tracks_lock:
+        main._state._object_tracks.pop('camera-1', None)
+    try:
+        # enforce_interval=False: the three cycles run back-to-back inside the
+        # 0.5s detection interval, which would otherwise silently drop cycles
+        # 2 and 3 (the throttle is a real-product feature; this test needs the
+        # debounce gate specifically).
+        event1 = mods.live_monitor.process_live_stream_alerts(b'jpeg-1', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+        assert event1 is not None
+
+        event2 = mods.live_monitor.process_live_stream_alerts(b'jpeg-2', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+        # The whole point: the second car is NOT swallowed by the first car's
+        # 60s cooldown.
+        assert event2 is not None and event2 != event1
+
+        # Cycle 3: same track as cycle 2, still inside its window -> suppressed.
+        event3 = mods.live_monitor.process_live_stream_alerts(b'jpeg-3', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+        assert event3 is None
+    finally:
+        main._state.live_event_last_emitted.clear()
+        main._state.live_event_track_last_emitted.clear()
+        with main._state._object_tracks_lock:
+            main._state._object_tracks.pop('camera-1', None)
+
+
 def test_live_stream_default_any_mode_annotates_motion_state(tmp_path, monkeypatch):
     """Even with no restricted labels, detections carry a moving/still tag."""
     event_id, status = _detect_frame_with_objects_setting(

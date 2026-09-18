@@ -128,6 +128,84 @@ def test_live_event_fresh_labels_motion_trailing_suppression():
 
 
 # ---------------------------------------------------------------------------
+# Per-track cooldown keys (label+track anchored debounce)
+# ---------------------------------------------------------------------------
+
+
+def test_track_fresh_labels_two_cars_both_fresh_when_unanchored():
+    """No remembered anchors -> every label is fresh (first event)."""
+    _state.live_event_track_last_emitted.clear()
+    try:
+        tracks = {'car': {11, 12}}
+        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, tracks) == {'car'}
+    finally:
+        _state.live_event_track_last_emitted.clear()
+
+
+def test_track_fresh_labels_second_car_fires_within_window():
+    """The regression scenario: car #11 fires, car #12 arrives 10s later. The
+    label is NOT fresh by the legacy per-label key, but it IS fresh per-track
+    because #12 has no anchor -- so the second car gets its own event."""
+    _state.live_event_track_last_emitted.clear()
+    try:
+        _ed._remember_track_event('camera-1', {'car': {11}})
+        # Same track #11 still inside its 60s window -> suppressed.
+        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11}}) == set()
+        # A NEW track #12 within the same window -> fresh.
+        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11, 12}}) == {'car'}
+        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {12}}) == {'car'}
+    finally:
+        _state.live_event_track_last_emitted.clear()
+
+
+def test_track_anchor_ages_out_and_window_elapses():
+    """Backdating an anchor past its cooldown re-arms that track, and stale
+    anchors are pruned so the map cannot grow unbounded."""
+    _state.live_event_track_last_emitted.clear()
+    try:
+        _ed._remember_track_event('camera-1', {'car': {11}})
+        with _state.live_event_last_emitted_lock:
+            _state.live_event_track_last_emitted['camera-1']['car#11'] = time.time() - 61
+        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11}}) == {'car'}
+        # Anything older than the prune horizon disappears entirely.
+        with _state.live_event_last_emitted_lock:
+            table = _state.live_event_track_last_emitted['camera-1']
+            table['car#11'] = time.time() - _ed._TRACK_COOLDOWN_PRUNE_SECONDS - 5
+        _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11}})
+        assert 'car#11' not in _state.live_event_track_last_emitted['camera-1']
+    finally:
+        _state.live_event_track_last_emitted.clear()
+
+
+def test_track_fresh_labels_requires_any_track_entitled():
+    """A label is fresh when ANY current track is entitled (new object or its
+    own window elapsed); NOT fresh only when every current track is inside its
+    window -- the same objects continuing must not re-fire."""
+    _state.live_event_track_last_emitted.clear()
+    try:
+        _ed._remember_track_event('camera-1', {'car': {11, 12}})
+        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11, 12}}) == set()
+        # Both aged out -> fresh again.
+        with _state.live_event_last_emitted_lock:
+            table = _state.live_event_track_last_emitted['camera-1']
+            table['car#11'] = time.time() - 61
+            table['car#12'] = time.time() - 61
+        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11, 12}}) == {'car'}
+    finally:
+        _state.live_event_track_last_emitted.clear()
+
+
+def test_track_anchors_do_not_leak_across_cameras():
+    _state.live_event_track_last_emitted.clear()
+    try:
+        _ed._remember_track_event('camera-1', {'car': {11}})
+        # camera-2 never emitted: its car #11 is fresh.
+        assert _ed._track_fresh_labels('camera-2', {'car': 60.0}, {'car': {11}}) == {'car'}
+    finally:
+        _state.live_event_track_last_emitted.clear()
+
+
+# ---------------------------------------------------------------------------
 # App harness (mirrors tests/support.py::_load_app)
 # ---------------------------------------------------------------------------
 

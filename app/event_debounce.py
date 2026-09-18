@@ -67,6 +67,59 @@ from app.diagnostics import log_camera_diagnostic
 # as a genuinely independent event and records normally.
 _MOTION_TRAILING_SUPPRESSION_SECONDS = 5.0
 
+# Per-track cooldown bookkeeping: an anchor older than this is dropped rather
+# than remembered, so the (camera, label, track) map cannot grow without bound
+# across days of 4 Hz traffic. Generous: tracks live ~5 cycles; only a
+# fragmented-reacquisition chain of distinct ids re-fires a label within the
+# window, and pruning older anchors costs nothing.
+_TRACK_COOLDOWN_PRUNE_SECONDS = 3600.0
+
+
+def _track_fresh_labels(camera_id: str, label_cooldowns: dict[str, float], track_ids_by_label: dict[str, set[int]]) -> set[str]:
+    """Return labels cooled down for their CURRENT track identities.
+
+    A label is fresh when at least ONE track it is currently seeing is
+    entitled to a new event: either the track has no anchor yet (a NEW object
+    of that label -- the second car entering the frame) or its own window has
+    elapsed since the last event that included it. When every current track is
+    still inside its window the label is NOT fresh -- the same objects
+    continuing are exactly what the legacy debounce suppresses. Labels with no
+    tracked ids this cycle are reported fresh so the gate's mixed-set logic
+    keeps legacy behavior for untracked detections.
+    """
+    now = time.time()
+    with _state.live_event_last_emitted_lock:
+        per_camera = _state.live_event_track_last_emitted.get(camera_id) or {}
+        # Prune stale anchors while we hold the lock (amortized O(entries)).
+        stale_cutoff = now - _TRACK_COOLDOWN_PRUNE_SECONDS
+        for label_key in [k for k, v in per_camera.items() if float(v) < stale_cutoff]:
+            del per_camera[label_key]
+        fresh: set[str] = set()
+        for label, cooldown in label_cooldowns.items():
+            track_ids = track_ids_by_label.get(label, set())
+            if not track_ids:
+                fresh.add(label)  # no tracked ids -> nothing anchors this label
+                continue
+            for track_id in track_ids:
+                anchor = per_camera.get(f'{label}#{track_id}')
+                if anchor is None or now - float(anchor) > cooldown:
+                    # New object, or this object's own window elapsed.
+                    fresh.add(label)
+                    break
+        return fresh
+
+
+def _remember_track_event(camera_id: str, track_ids_by_label: dict[str, set[int]]) -> None:
+    """Record the emission time per (label, track) so each track's own window
+    starts from the event that included it. Labels without tracked ids are
+    skipped (they are anchored by the legacy label bookkeeping)."""
+    now = time.time()
+    with _state.live_event_last_emitted_lock:
+        per_camera = _state.live_event_track_last_emitted.setdefault(camera_id, {})
+        for label, track_ids in track_ids_by_label.items():
+            for track_id in track_ids:
+                per_camera[f'{label}#{track_id}'] = now
+
 
 def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
     if debounce_seconds <= 0 or not labels:

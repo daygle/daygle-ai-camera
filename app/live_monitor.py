@@ -48,6 +48,8 @@ from app.region_detection import (
 )
 from app.detector import DetectorUnavailableError
 from app.event_debounce import (
+    _remember_track_event,
+    _track_fresh_labels,
     clear_live_camera_backoff,
     live_event_fresh_labels,
     remember_live_event,
@@ -941,12 +943,41 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # continuously refreshed by the very cycles that built the streak - so the
     # normal gate would swallow it forever. Only the crossing cycle emits, so
     # this branch is NOT a duplicate-event risk.
+    # Track-aware cooldown: two DIFFERENT objects of the same label within one
+    # cooldown window must not swallow each other's events. Classically the
+    # per-label key meant a passing car fired once and a second car arriving
+    # inside the window was suppressed as a "duplicate"; with stable track ids
+    # the event can key on identity instead. A fresh event fires when at least
+    # one CURRENT track of the firing labels is outside its window; the
+    # suppression branch only wins when EVERY track of every firing label is
+    # still inside its window (i.e. it really is the same objects continuing).
+    # Detections without track ids (motion events, no-box detections) contribute
+    # no anchors, so a mixed set keeps legacy behavior: the untracked label
+    # alone cannot justify bypassing the gate.
+    _track_ids_by_label: dict[str, set[int]] = {}
+    for _det in recording_detections:
+        _lbl = str(_det.get('label') or '').strip().lower()
+        _tid = _det.get('track_id')
+        if _lbl and isinstance(_tid, int) and _tid > 0:
+            _track_ids_by_label.setdefault(_lbl, set()).add(_tid)
     if dwell_detections:
         pass
-    elif resolved_cooldowns and not live_event_fresh_labels(camera_id, resolved_cooldowns):
+    elif (
+        resolved_cooldowns
+        and not live_event_fresh_labels(camera_id, resolved_cooldowns)
+        and not (
+            _track_ids_by_label
+            and _track_fresh_labels(camera_id, resolved_cooldowns, _track_ids_by_label)
+        )
+    ):
         debounce_seconds = max(resolved_cooldowns.values())
         extended_recording_id = extend_active_rtsp_recording(camera_id=camera_id, event_time=frame_capture_time, recording_config=camera_recording_config, detections=recording_detections)
         remember_live_event(camera_id, debounced_labels, merge=True)
+        # Anchor the suppressed cycle's tracks too: the continuing presence of
+        # the SAME objects must keep refreshing their windows (otherwise the
+        # windows would expire mid-presence and emit a spurious second event
+        # for objects that never left). A NEW object's anchor is untouched.
+        _remember_track_event(camera_id, _track_ids_by_label)
         update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
     event_time = frame_capture_time
@@ -962,6 +993,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # sees the same labels) is not suppressed and the timeline floods with
     # duplicates. ``remember_live_event`` no-ops on an empty label set.
     remember_live_event(camera_id, debounced_labels)
+    # Anchor each participating track's window at THIS emission so its own
+    # cooldown starts now; a different track of the same label can still fire
+    # immediately (its anchor is untouched).
+    _remember_track_event(camera_id, _track_ids_by_label)
     _rule_by_name = {str(r.get('name') or ''): r for r in zone_rules or []}
     for alert in triggered:
         _rule = _rule_by_name.get(str(alert.get('rule_name') or ''), {})
