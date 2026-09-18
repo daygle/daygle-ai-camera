@@ -632,6 +632,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Confidence setting (see docstring).
     detections = merge_secondary_face_detections(image, detections)
     detections = normalize_detection_boxes_for_frame(detections, frame)
+    # Stamp tracks BEFORE classifying moving/still. The displacement override is
+    # specifically what distinguishes a parked car from unrelated pixel change
+    # inside its large box; doing this after the filter makes that protection
+    # unreachable and leaves the mask verdict in charge.
+    object_detections = filter_detections_for_camera(detections, settings)
+    object_detections = update_object_tracks(camera_id, object_detections)
     # Object settings (default mode + per-label overrides + still-alert
     # thresholds) drive both the still/moving filter and the still-dwell
     # tracker below, so resolve them once per cycle rather than reading the
@@ -658,15 +664,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # camera actually accepts; unrelated motion remains available for
     # motion-only rules and recordings.
     motion_detections = filter_motion_detections_by_objects(motion_detections, object_detections)
-    # Stamp a stable track id on each detection BEFORE the confirmation gate so
-    # the tracker's ``track_displacement`` annotation (net box motion over the
-    # recent cycles) is available to the still/moving filter: a stationary
-    # track overrides the motion mask, which otherwise flaps a large parked
-    # object to "moving" whenever background change inside its big box crosses
-    # the threshold (a parked car reading the road behind it). Moving the
-    # tracker ahead of confirmation is annotation-only -- it never adds or
-    # drops detections -- so it does not influence what the gate counts.
-    object_detections = update_object_tracks(camera_id, object_detections)
+
     # Temporal confirmation gate: require an object label to persist across
     # several detection cycles before it can raise an alert or a recording.
     # Defaults to 2 (2-of-3), pairing with the always-on detector to filter
