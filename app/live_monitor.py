@@ -784,9 +784,16 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if _still_thresholds:
         # Zone-scope the still candidates (skip when there are none so we do no
         # zone work on the common empty cycle). An empty input still runs the
-        # tracker so a streak resets when its subject moves or leaves the frame.
+        # tracker so a streak resets when its subject moves or leaves the frame
+        # -- but only on a clear cycle: during PTZ/ego-motion the empty list
+        # carries no information about the subject, so the tracker pauses
+        # instead of wiping every streak (a 0.4s nudge would otherwise reset
+        # all long-dwell alerts to zero).
         _dwell_input = filter_detections_for_camera(still_candidates, settings) if still_candidates else []
-        dwell_detections = update_still_dwell_alerts(camera_id, _dwell_input, _still_thresholds)
+        dwell_detections = update_still_dwell_alerts(
+            camera_id, _dwell_input, _still_thresholds,
+            camera_motion=camera_motion['active'],
+        )
     else:
         dwell_detections = []
     if dwell_detections:
