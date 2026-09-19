@@ -2,8 +2,8 @@
 // Settings page (Settings → Detection & Live).
 //
 // The button refills #liveSettingsForm from FORM_DEFAULTS.live in
-// web/settings.js — the same map loadSettings() falls back to when the API
-// omits a key — and nothing is persisted until the user presses Save.
+// web/settings.js - the same map loadSettings() falls back to when the API
+// omits a key - and nothing is persisted until the user presses Save.
 //
 // The load-bearing invariant: FORM_DEFAULTS.live and the field names inside
 // <form id="liveSettingsForm"> must stay in exact sync. If someone adds a
@@ -12,7 +12,7 @@
 // pins the click-handler wiring so the button can't regress to a no-op.
 //
 // settings.js touches the DOM at load (requireElements, enhanceFormFieldLabels),
-// so these tests read the sources as text — the same static-analysis approach
+// so these tests read the sources as text - the same static-analysis approach
 // the Python suite uses in tests/test_audit_and_api_warnings.py
 // (StaticRound9FixesTests).
 //

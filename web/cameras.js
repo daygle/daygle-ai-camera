@@ -202,8 +202,8 @@ function buildEditFormHtml(camera, index) {
             '<label><span>Automatic Selection</span><select name="profile_source">' +
               '<option value="manual"' + ((camera.detection_profiles?.source || 'manual') === 'manual' ? ' selected' : '') + '>Manual</option>' +
               '<option value="schedule"' + (camera.detection_profiles?.source === 'schedule' ? ' selected' : '') + '>Schedule</option>' +
-              '<option value="solar"' + (camera.detection_profiles?.source === 'solar' ? ' selected' : '') + '>Solar (daily sunrise/sunset)</option>' +
-              '<option value="onvif"' + (camera.detection_profiles?.source === 'onvif' ? ' selected' : '') + '>ONVIF IR state (fallback schedule)</option>' +
+              '<option value="solar"' + (camera.detection_profiles?.source === 'solar' ? ' selected' : '') + '>Solar (Daily Sunrise/Sunset)</option>' +
+              '<option value="onvif"' + (camera.detection_profiles?.source === 'onvif' ? ' selected' : '') + '>ONVIF IR State (Fallback Schedule)</option>' +
             '</select></label>' +
             '<label><span>Day Starts</span><input name="profile_day_start" type="time" value="' + escapeHtml(camera.detection_profiles?.day_start || '07:00') + '" /></label>' +
             '<label><span>Night Starts</span><input name="profile_night_start" type="time" value="' + escapeHtml(camera.detection_profiles?.night_start || '19:00') + '" /></label>' +
@@ -230,35 +230,35 @@ function buildEditFormHtml(camera, index) {
           '</div>' +
           '<div class="form-grid">' +
             '<label><span>Background Detection</span><select name="profile_background_detection_enabled">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'background_detection_enabled') == null ? ' selected' : '') + '>Global default</option>' +
+              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'background_detection_enabled') == null ? ' selected' : '') + '>Global Default</option>' +
               '<option value="true"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'background_detection_enabled') === true ? ' selected' : '') + '>Enabled</option>' +
               '<option value="false"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'background_detection_enabled') === false ? ' selected' : '') + '>Disabled</option>' +
             '</select></label>' +
-            '<label><span>Detection Interval (s)</span><input name="profile_detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="Global default (0.5)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_interval_seconds') ?? '') + '" /></label>' +
-            '<label><span>Detection Frame Rate (fps)</span><input name="profile_ingest_frame_fps" type="number" min="1" max="30" step="1" placeholder="Global default (4)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'ingest_frame_fps') ?? '') + '" /></label>' +
-            '<label><span>Confirm Frames</span><input name="profile_detection_confirm_frames" type="number" min="1" max="10" step="1" placeholder="Global default (2)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_frames') ?? '') + '" /></label>' +
-            '<label><span>Confirm Window</span><input name="profile_detection_confirm_window" type="number" min="1" max="30" step="1" placeholder="Global default (3)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_window') ?? '') + '" /></label>' +
-            '<label><span>Confirm Location (IoU)</span><input name="profile_detection_confirm_iou" type="number" min="0" max="0.9" step="0.05" placeholder="Global default (0)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_iou') ?? '') + '" /></label>' +
+            '<label><span>Detection Interval (s)</span><input name="profile_detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="Global Default (0.5)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_interval_seconds') ?? '') + '" /></label>' +
+            '<label><span>Detection Frame Rate (fps)</span><input name="profile_ingest_frame_fps" type="number" min="1" max="30" step="1" placeholder="Global Default (4)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'ingest_frame_fps') ?? '') + '" /></label>' +
+            '<label><span>Confirm Frames</span><input name="profile_detection_confirm_frames" type="number" min="1" max="10" step="1" placeholder="Global Default (2)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_frames') ?? '') + '" /></label>' +
+            '<label><span>Confirm Window</span><input name="profile_detection_confirm_window" type="number" min="1" max="30" step="1" placeholder="Global Default (3)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_window') ?? '') + '" /></label>' +
+            '<label><span>Confirm Location (IoU)</span><input name="profile_detection_confirm_iou" type="number" min="0" max="0.9" step="0.05" placeholder="Global Default (0)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_iou') ?? '') + '" /></label>' +
             '<label><span>Always Run Object Detection</span><select name="profile_always_run_object_detection">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'always_run_object_detection') == null ? ' selected' : '') + '>Global default</option>' +
+              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'always_run_object_detection') == null ? ' selected' : '') + '>Global Default</option>' +
               '<option value="true"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'always_run_object_detection') === true ? ' selected' : '') + '>Enabled</option>' +
               '<option value="false"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'always_run_object_detection') === false ? ' selected' : '') + '>Disabled</option>' +
             '</select></label>' +
             '<label><span>Region Boost</span><select name="profile_object_detection_region_boost">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_region_boost') == null ? ' selected' : '') + '>Global default</option>' +
+              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_region_boost') == null ? ' selected' : '') + '>Global Default</option>' +
               '<option value="true"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_region_boost') === true ? ' selected' : '') + '>Enabled</option>' +
               '<option value="false"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_region_boost') === false ? ' selected' : '') + '>Disabled</option>' +
             '</select></label>' +
             '<label><span>Object Detection Tiling</span><select name="profile_object_detection_tiling">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') == null ? ' selected' : '') + '>Global default</option>' +
+              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') == null ? ' selected' : '') + '>Global Default</option>' +
               '<option value="off"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') === 'off' ? ' selected' : '') + '>Off</option>' +
               '<option value="2x2"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') === '2x2' ? ' selected' : '') + '>2 × 2</option>' +
               '<option value="3x3"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') === '3x3' ? ' selected' : '') + '>3 × 3</option>' +
               '<option value="4x4"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') === '4x4' ? ' selected' : '') + '>4 × 4</option>' +
             '</select></label>' +
-            '<label><span>Periodic Scan (s)</span><input name="profile_periodic_scan_interval_seconds" type="number" min="0" max="3600" step="1" placeholder="Global default (0)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'periodic_scan_interval_seconds') ?? '') + '" /></label>' +
-            '<label><span>Motion Frame Width</span><input name="profile_motion_frame_width" type="number" min="40" max="640" step="1" placeholder="Global default (320)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_width') ?? '') + '" /></label>' +
-            '<label><span>Motion Frame Height</span><input name="profile_motion_frame_height" type="number" min="30" max="480" step="1" placeholder="Global default (240)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_height') ?? '') + '" /></label>' +
+            '<label><span>Periodic Scan (s)</span><input name="profile_periodic_scan_interval_seconds" type="number" min="0" max="3600" step="1" placeholder="Global Default (0)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'periodic_scan_interval_seconds') ?? '') + '" /></label>' +
+            '<label><span>Motion Frame Width</span><input name="profile_motion_frame_width" type="number" min="40" max="640" step="1" placeholder="Global Default (320)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_width') ?? '') + '" /></label>' +
+            '<label><span>Motion Frame Height</span><input name="profile_motion_frame_height" type="number" min="30" max="480" step="1" placeholder="Global Default (240)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_height') ?? '') + '" /></label>' +
           '</div>' +
         '</div>' +
         '<div class="cam-edit-section">' +
@@ -273,22 +273,22 @@ function buildEditFormHtml(camera, index) {
           '<h4 class="cam-edit-section-title">Motion Detection Overrides</h4>' +
           '<p class="form-help muted">Override the global motion settings for this camera only. Leave blank to use the global defaults from Live Detection settings.</p>' +
           '<div class="form-grid">' +
-            '<label><span>Pixel Threshold <span class="info-tip" data-tip="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." title="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." tabindex="0" aria-label="Help: Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras."></span></span><input name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="Global default (30)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_pixel_threshold') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_pixel_threshold') : '') + '" /></label>' +
-            '<label><span>Gate Fraction <span class="info-tip" data-tip="Minimum fraction of pixels that must change before motion is declared." title="Minimum fraction of pixels that must change before motion is declared." tabindex="0" aria-label="Help: Minimum fraction of pixels that must change before motion is declared."></span></span><input name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="Global default (0.005)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_gate_fraction') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_gate_fraction') : '') + '" /></label>' +
-            '<label><span>Scale Fraction <span class="info-tip" data-tip="Pixel change fraction that maps to 100% motion confidence." title="Pixel change fraction that maps to 100% motion confidence." tabindex="0" aria-label="Help: Pixel change fraction that maps to 100% motion confidence."></span></span><input name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="Global default (0.03)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_scale_fraction') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_scale_fraction') : '') + '" /></label>' +
-            '<label><span>Background Alpha <span class="info-tip" data-tip="How fast the background model adapts when no motion is detected." title="How fast the background model adapts when no motion is detected." tabindex="0" aria-label="Help: How fast the background model adapts when no motion is detected."></span></span><input name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="Global default (0.05)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_background_alpha') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_background_alpha') : '') + '" /></label>' +
-            '<label><span>Motion Engine <span class="info-tip" data-tip="Background-subtraction engine for this camera. Leave on Global default unless this camera needs a different engine." title="Background-subtraction engine for this camera. Leave on Global default unless this camera needs a different engine." tabindex="0" aria-label="Help: Per-camera motion engine override."></span></span><select name="motion_algorithm">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') == null ? ' selected' : '') + '>Global default</option>' +
+            '<label><span>Pixel Threshold <span class="info-tip" data-tip="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." title="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." tabindex="0" aria-label="Help: Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras."></span></span><input name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="Global Default (30)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_pixel_threshold') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_pixel_threshold') : '') + '" /></label>' +
+            '<label><span>Gate Fraction <span class="info-tip" data-tip="Minimum fraction of pixels that must change before motion is declared." title="Minimum fraction of pixels that must change before motion is declared." tabindex="0" aria-label="Help: Minimum fraction of pixels that must change before motion is declared."></span></span><input name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="Global Default (0.005)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_gate_fraction') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_gate_fraction') : '') + '" /></label>' +
+            '<label><span>Scale Fraction <span class="info-tip" data-tip="Pixel change fraction that maps to 100% motion confidence." title="Pixel change fraction that maps to 100% motion confidence." tabindex="0" aria-label="Help: Pixel change fraction that maps to 100% motion confidence."></span></span><input name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="Global Default (0.03)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_scale_fraction') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_scale_fraction') : '') + '" /></label>' +
+            '<label><span>Background Alpha <span class="info-tip" data-tip="How fast the background model adapts when no motion is detected." title="How fast the background model adapts when no motion is detected." tabindex="0" aria-label="Help: How fast the background model adapts when no motion is detected."></span></span><input name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="Global Default (0.05)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_background_alpha') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_background_alpha') : '') + '" /></label>' +
+            '<label><span>Motion Engine <span class="info-tip" data-tip="Background-subtraction engine for this camera. Leave on Global Default unless this camera needs a different engine." title="Background-subtraction engine for this camera. Leave on Global Default unless this camera needs a different engine." tabindex="0" aria-label="Help: Per-camera motion engine override."></span></span><select name="motion_algorithm">' +
+              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') == null ? ' selected' : '') + '>Global Default</option>' +
               '<option value="mog2"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') === 'mog2' ? ' selected' : '') + '>MOG2</option>' +
               '<option value="diff"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') === 'diff' ? ' selected' : '') + '>Diff (legacy)</option>' +
             '</select></label>' +
-            '<label><span>Denoise <span class="info-tip" data-tip="Morphological denoise of the motion mask for this camera. Leave on Global default to follow the global setting." title="Morphological denoise of the motion mask for this camera. Leave on Global default to follow the global setting." tabindex="0" aria-label="Help: Per-camera denoise override."></span></span><select name="motion_denoise">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_denoise') == null ? ' selected' : '') + '>Global default</option>' +
+            '<label><span>Denoise <span class="info-tip" data-tip="Morphological denoise of the motion mask for this camera. Leave on Global Default to follow the global setting." title="Morphological denoise of the motion mask for this camera. Leave on Global Default to follow the global setting." tabindex="0" aria-label="Help: Per-camera denoise override."></span></span><select name="motion_denoise">' +
+              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_denoise') == null ? ' selected' : '') + '>Global Default</option>' +
               '<option value="true"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_denoise') === true ? ' selected' : '') + '>Enabled</option>' +
               '<option value="false"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_denoise') === false ? ' selected' : '') + '>Disabled</option>' +
             '</select></label>' +
-            '<label><span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows from motion alerts for this camera (MOG2 only). It does not filter YOLO object detections. On = always; Off = never (dark/IR scenes); Automatic = only while bright. Leave on Global default to follow the global setting." title="Reject cast shadows from motion alerts for this camera (MOG2 only). It does not filter YOLO object detections. On / Off / Automatic. Leave on Global default to follow the global setting." tabindex="0" aria-label="Help: Per-camera shadow suppression override for motion alerts only (on/off/automatic)."></span></span><select name="motion_shadow_suppression">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_shadow_suppression') == null ? ' selected' : '') + '>Global default</option>' +
+            '<label><span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows from motion alerts for this camera (MOG2 only). It does not filter YOLO object detections. On = always; Off = never (dark/IR scenes); Automatic = only while bright. Leave on Global Default to follow the global setting." title="Reject cast shadows from motion alerts for this camera (MOG2 only). It does not filter YOLO object detections. On / Off / Automatic. Leave on Global Default to follow the global setting." tabindex="0" aria-label="Help: Per-camera shadow suppression override for motion alerts only (on/off/automatic)."></span></span><select name="motion_shadow_suppression">' +
+              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_shadow_suppression') == null ? ' selected' : '') + '>Global Default</option>' +
               '<option value="on"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_shadow_suppression') === 'on' ? ' selected' : '') + '>On</option>' +
               '<option value="off"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_shadow_suppression') === 'off' ? ' selected' : '') + '>Off</option>' +
               '<option value="auto"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_shadow_suppression') === 'auto' ? ' selected' : '') + '>Automatic (Day Only)</option>' +
@@ -308,30 +308,14 @@ function buildEditFormHtml(camera, index) {
 // ─── Inline edit management ───────────────────────────────────────────────────
 
 function closeAllEditForms() {
-  gridEl.querySelectorAll('.camera-edit-row').forEach(function(row) { row.remove(); });
-  gridEl.querySelectorAll('.camera-row-editing').forEach(function(row) { row.classList.remove('camera-row-editing'); });
+  if (openCameraEditIndex === null) return;
+  openCameraEditIndex = null;
+  renderGrid();
 }
 
 function toggleEditForm(camera, index) {
-  closeAllEditForms();
-  var row = gridEl.querySelector('[data-camera-index="' + index + '"]');
-  if (!row) return;
-
-  var existing = row.nextElementSibling;
-  if (existing && existing.classList.contains('camera-edit-row')) {
-    // Already open - close it
-    existing.remove();
-    row.classList.remove('camera-row-editing');
-    return;
-  }
-
-  var formHtml = buildEditFormHtml(camera, index);
-  row.classList.add('camera-row-editing');
-  // buildEditFormHtml escapes every camera-derived attribute before creating
-  // the fragment. Route the already-sanitized string through the shared HTML
-  // helper so this DOM insertion is explicit and auditable as a safe HTML path.
-  row.insertAdjacentHTML('afterend', safeHtml([formHtml]));
-  wireEditFormHandlers(index);
+  openCameraEditIndex = openCameraEditIndex === index ? null : index;
+  renderGrid();
 }
 
 function wireEditFormHandlers(index) {
@@ -759,6 +743,7 @@ function renderCameraRow(camera, index) {
 // camera to reorder (drag is the config-order control, like the Sort By
 // select on the recordings page).
 let cameraSortState = null;
+let openCameraEditIndex = null;
 
 function cameraSortValue(camera, key) {
   switch (key) {
@@ -875,7 +860,10 @@ function renderGrid() {
     : filtered;
   var rowsHtml = sorted.map(function(cam) {
     var realIndex = cameras.indexOf(cam);
-    return renderCameraRow(cam, realIndex);
+    var row = renderCameraRow(cam, realIndex);
+    return realIndex === openCameraEditIndex
+      ? row + buildEditFormHtml(cam, realIndex)
+      : row;
   }).join('');
   var tableHtml = '<div class="cameras-table-wrap"><table class="cameras-table"><thead><tr>' +
     renderCameraSortHeader('Camera', 'camera') +
@@ -887,6 +875,7 @@ function renderGrid() {
     '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
   gridEl.innerHTML = tableHtml;
   updateFilterHint(filtered.length);
+  if (openCameraEditIndex !== null) wireEditFormHandlers(openCameraEditIndex);
 
   gridEl.querySelectorAll('.cam-edit-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
