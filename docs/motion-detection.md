@@ -514,7 +514,7 @@ This is correct behaviour - lights genuinely change a large fraction of pixels. 
 | CPU is very limited and you want minimal YOLO calls | Accuracy matters more than speed |
 | You're monitoring a restricted area where any movement is suspicious | You're monitoring a public area with lots of expected background activity |
 
-You can combine both on the same zone - the motion rule fires first (fast), and the object rule fires when YOLO confirms what was detected.
+You can combine both on the same zone - the object rule is authoritative when YOLO identifies the subject, while the motion rule remains available as a fallback for movement that has no matching object.
 
 ---
 

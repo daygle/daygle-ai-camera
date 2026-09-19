@@ -51,6 +51,25 @@ def test_different_label_does_not_reuse_track():
     assert b[0]['track_new'] is True
 
 
+def test_two_same_label_vehicles_keep_track_identity_when_result_order_changes():
+    cam = 'trk-two-cars-order'
+    _reset(cam)
+    first = ot.update_object_tracks(cam, [
+        _det('car', 0.18, 0.45, w=0.22, h=0.14),
+        _det('car', 0.62, 0.45, w=0.22, h=0.14),
+    ])
+    parked_id, moving_id = first[0]['track_id'], first[1]['track_id']
+
+    # The detector commonly changes confidence/order as two same-class cars
+    # approach. The boxes move slightly, but the returned order is reversed.
+    second = ot.update_object_tracks(cam, [
+        _det('car', 0.60, 0.45, w=0.22, h=0.14),
+        _det('car', 0.20, 0.45, w=0.22, h=0.14),
+    ])
+    assert second[0]['track_id'] == moving_id
+    assert second[1]['track_id'] == parked_id
+
+
 def test_track_retired_after_max_age_then_new_id():
     cam = 'trk-age'
     _reset(cam)

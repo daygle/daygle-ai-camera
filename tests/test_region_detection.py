@@ -68,6 +68,22 @@ def test_boost_remaps_crop_boxes_into_full_frame_and_merges():
     assert det.crop_shapes and det.crop_shapes[0][0] < 720
 
 
+def test_boost_skips_malformed_crop_boxes():
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    mask = _mask_with_blob(h=100, w=100)
+
+    class _MalformedDetector:
+        def detect_frame(self, image, confidence=None):
+            return [
+                {'label': 'person', 'confidence': 0.9, 'box': {'x': float('nan'), 'y': 0.1, 'width': 0.2, 'height': 0.2}},
+                {'label': 'person', 'confidence': 0.8, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}},
+            ]
+
+    out = rd.detect_with_region_boost(_MalformedDetector(), frame, mask, [])
+    assert len(out) == 1
+    assert out[0]['box']['x'] >= 0
+
+
 def test_boost_is_noop_without_mask_or_detect_frame():
     frame = np.zeros((100, 100, 3), dtype=np.uint8)
     base = [{'label': 'person', 'confidence': 0.5, 'box': {'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}}]

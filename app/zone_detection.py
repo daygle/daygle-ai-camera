@@ -170,6 +170,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from fastapi import HTTPException
@@ -925,30 +926,72 @@ def filter_motion_detections_by_objects(
 
 
 def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame: dict[str, Any]) -> list[dict[str, Any]]:
-    width = float(frame.get('width') or 0)
-    height = float(frame.get('height') or 0)
-    if width <= 0 or height <= 0:
+    """Normalize detector boxes without letting one malformed row kill a cycle.
+
+    Detector plugins and crop-based inference both feed this boundary. Invalid,
+    non-finite, or zero-area geometry is not useful to any downstream zone,
+    tracker, snapshot, or recording consumer, so those rows are discarded.
+    Valid normalized boxes are clipped to the frame; pixel-space boxes are
+    converted first and then receive the same clipping.
+    """
+    try:
+        width = float(frame.get('width') or 0)
+        height = float(frame.get('height') or 0)
+    except (AttributeError, TypeError, ValueError):
+        return detections
+    if not math.isfinite(width) or not math.isfinite(height) or width <= 0 or height <= 0:
         return detections
     normalized: list[dict[str, Any]] = []
     for detection in detections:
-        box = detection.get('box') or {}
+        if not isinstance(detection, dict):
+            continue
+        box = detection.get('box')
         if not isinstance(box, dict):
-            normalized.append(detection)
+            normalized_detection = dict(detection)
+            if 'confidence' in normalized_detection:
+                try:
+                    confidence = float(normalized_detection.get('confidence') or 0)
+                    normalized_detection['confidence'] = round(confidence, 3) if math.isfinite(confidence) else 0.0
+                except (TypeError, ValueError):
+                    normalized_detection['confidence'] = 0.0
+            normalized.append(normalized_detection)
             continue
-        box_x = float(box.get('x') or 0)
-        box_y = float(box.get('y') or 0)
-        box_width = float(box.get('width') or 0)
-        box_height = float(box.get('height') or 0)
-        if max(box_x, box_y, box_width, box_height) <= 1:
-            normalized.append(detection)
+        try:
+            box_x = float(box.get('x') or 0)
+            box_y = float(box.get('y') or 0)
+            box_width = float(box.get('width') or 0)
+            box_height = float(box.get('height') or 0)
+        except (TypeError, ValueError):
             continue
-        normalized.append({
+        if not all(math.isfinite(value) for value in (box_x, box_y, box_width, box_height)):
+            continue
+        if box_width <= 0 or box_height <= 0:
+            continue
+        if max(abs(box_x), abs(box_y), box_width, box_height) > 1:
+            box_x /= width
+            box_y /= height
+            box_width /= width
+            box_height /= height
+        x1 = max(0.0, min(1.0, box_x))
+        y1 = max(0.0, min(1.0, box_y))
+        x2 = max(x1, min(1.0, box_x + box_width))
+        y2 = max(y1, min(1.0, box_y + box_height))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        normalized_detection = {
             **detection,
             'box': {
-                'x': round(box_x / width, 4),
-                'y': round(box_y / height, 4),
-                'width': round(box_width / width, 4),
-                'height': round(box_height / height, 4),
+                'x': round(x1, 4),
+                'y': round(y1, 4),
+                'width': round(x2 - x1, 4),
+                'height': round(y2 - y1, 4),
             },
-        })
+        }
+        if 'confidence' in normalized_detection:
+            try:
+                confidence = float(normalized_detection.get('confidence') or 0)
+                normalized_detection['confidence'] = round(confidence, 3) if math.isfinite(confidence) else 0.0
+            except (TypeError, ValueError):
+                normalized_detection['confidence'] = 0.0
+        normalized.append(normalized_detection)
     return normalized

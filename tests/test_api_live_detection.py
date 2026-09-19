@@ -248,6 +248,18 @@ def _detect_frame_with_objects_setting(tmp_path, monkeypatch, objects_setting, d
     return event_id, status
 
 
+def test_normalize_detection_boxes_discards_malformed_rows(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    from app.zone_detection import normalize_detection_boxes_for_frame
+
+    detections = normalize_detection_boxes_for_frame([
+        {'label': 'person', 'confidence': 0.9, 'box': {'x': float('nan'), 'y': 0, 'width': 1, 'height': 1}},
+        {'label': 'person', 'confidence': 0.8, 'box': {'x': -10, 'y': -10, 'width': 200, 'height': 200}},
+    ], {'width': 100, 'height': 100})
+    assert len(detections) == 1
+    assert detections[0]['box'] == {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}
+
+
 def test_live_stream_moving_only_setting_drops_still_person(tmp_path, monkeypatch):
     """A 'moving only' person must not create an event for a still subject."""
     event_id, status = _detect_frame_with_objects_setting(

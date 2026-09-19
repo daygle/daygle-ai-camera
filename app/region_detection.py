@@ -17,6 +17,7 @@ area where subjects appear small.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 
@@ -166,14 +167,32 @@ def detect_with_region_boost(
             )
             continue  # a bad crop must never break the whole detection cycle
         for det in crop_detections:
-            box = det.get("box") or {}
+            if not isinstance(det, dict) or not isinstance(det.get("box"), dict):
+                continue
+            box = det["box"]
+            try:
+                local_x = float(box.get("x") or 0)
+                local_y = float(box.get("y") or 0)
+                local_width = float(box.get("width") or 0)
+                local_height = float(box.get("height") or 0)
+            except (TypeError, ValueError):
+                continue
+            values = (local_x, local_y, local_width, local_height)
+            if not all(math.isfinite(value) for value in values) or local_width <= 0 or local_height <= 0:
+                continue
+            local_x = max(0.0, min(1.0, local_x))
+            local_y = max(0.0, min(1.0, local_y))
+            local_x2 = max(local_x, min(1.0, local_x + local_width))
+            local_y2 = max(local_y, min(1.0, local_y + local_height))
+            if local_x2 <= local_x or local_y2 <= local_y:
+                continue
             merged.append({
                 **det,
                 "box": {
-                    "x": round(rx + float(box.get("x") or 0) * rw, 4),
-                    "y": round(ry + float(box.get("y") or 0) * rh, 4),
-                    "width": round(float(box.get("width") or 0) * rw, 4),
-                    "height": round(float(box.get("height") or 0) * rh, 4),
+                    "x": round(rx + local_x * rw, 4),
+                    "y": round(ry + local_y * rh, 4),
+                    "width": round((local_x2 - local_x) * rw, 4),
+                    "height": round((local_y2 - local_y) * rh, 4),
                 },
                 "region_boost": True,
             })
@@ -300,9 +319,27 @@ def detect_with_tiling(
             )
             continue
         for det in tile_detections:
-            box = det.get("box") or {}
-            width = float(box.get("width") or 0) * tw
-            height = float(box.get("height") or 0) * th
+            if not isinstance(det, dict) or not isinstance(det.get("box"), dict):
+                continue
+            box = det["box"]
+            try:
+                local_x = float(box.get("x") or 0)
+                local_y = float(box.get("y") or 0)
+                local_width = float(box.get("width") or 0)
+                local_height = float(box.get("height") or 0)
+            except (TypeError, ValueError):
+                continue
+            values = (local_x, local_y, local_width, local_height)
+            if not all(math.isfinite(value) for value in values) or local_width <= 0 or local_height <= 0:
+                continue
+            local_x = max(0.0, min(1.0, local_x))
+            local_y = max(0.0, min(1.0, local_y))
+            local_x2 = max(local_x, min(1.0, local_x + local_width))
+            local_y2 = max(local_y, min(1.0, local_y + local_height))
+            if local_x2 <= local_x or local_y2 <= local_y:
+                continue
+            width = (local_x2 - local_x) * tw
+            height = (local_y2 - local_y) * th
             tile_area_frac = width * height
             if tile_area_frac > max_det_area_frac:
                 logger.debug(
@@ -320,8 +357,8 @@ def detect_with_tiling(
             merged.append({
                 **det,
                 "box": {
-                    "x": round(tx + float(box.get("x") or 0) * tw, 4),
-                    "y": round(ty + float(box.get("y") or 0) * th, 4),
+                    "x": round(tx + local_x * tw, 4),
+                    "y": round(ty + local_y * th, 4),
                     "width": round(width, 4),
                     "height": round(height, 4),
                 },

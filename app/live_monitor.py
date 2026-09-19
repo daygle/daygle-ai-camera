@@ -34,6 +34,7 @@ from app.detection_status import _camera_has_live_alert_stream, update_live_dete
 from app.object_settings import (
     effective_object_settings,
     filter_detections_by_motion_mode,
+    object_detection_allowed_during_camera_motion,
     still_alert_thresholds,
     still_dwell_candidates,
     update_still_dwell_alerts,
@@ -635,7 +636,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             detections = _state.detector.detect_image(image, confidence=min_conf)
         else:
             detections = []
-    except (DetectorUnavailableError, ValueError) as exc:
+    except Exception as exc:
+        # A provider/runtime failure must only fail this camera cycle. In
+        # particular, CUDA/ORT can raise RuntimeError or TypeError after the
+        # detector was reported healthy; letting either escape kills the worker
+        # path and leaves stale live status until the next external request.
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
         update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[], motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
@@ -830,12 +835,21 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         for zone in (settings.get('detection') or {}).get('zones', [])
     )
     _zone_match_needed = has_object_zone_rules or has_face_zone_rules
-    # Detections remain visible while the camera moves, but unknown movement
-    # cannot satisfy either Moving Only or Still Only behavior and must not be
-    # passed to alerts/record-only rules.
+    # Detections remain visible while the camera moves. PTZ invalidates the
+    # moving/still classification, so permit only labels configured for Any;
+    # Moving Only and Still Only remain visible but cannot alert or record until
+    # the camera settles. The explicit marker lets AlertEngine accept this
+    # narrow PTZ-safe path without weakening its unknown-state guard globally.
     alertable_object_detections = [
-        detection for detection in object_detections
+        (
+            {**detection, 'allow_camera_motion_alert': True}
+            if detection.get('motion_state') == 'unknown'
+            and object_detection_allowed_during_camera_motion(detection, object_settings)
+            else detection
+        )
+        for detection in object_detections
         if detection.get('motion_state') != 'unknown'
+        or object_detection_allowed_during_camera_motion(detection, object_settings)
     ]
     object_alert_detections = zone_alert_detections(settings, alertable_object_detections) if _zone_match_needed else list(alertable_object_detections)
     record_only_detections = [d for d in alertable_object_detections if zone_record_on_detect(d, settings) and (not zone_object_rule_matches(settings, d, action='alert'))] if _zone_match_needed else []
@@ -929,7 +943,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
                     if detection_matches_zone(_det, zone)
                 ), None),
             }
-            for _det in object_detections
+            for _det in alertable_object_detections
         ]
     recording_detections = [{**detection, 'alert_matched': bool(zone_detection_alert_rule_names(settings, detection) & triggered_rule_names) if has_object_zone_rules else str(detection.get('label') or '').lower() in triggered_labels, 'alert_triggered': zone_record_on_detect(detection, settings)} for detection in _confident_object_detections]
     # Each motion detection is stamped with the record decision for ITS OWN

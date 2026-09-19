@@ -32,6 +32,49 @@ function overlayColorForDetection(detection) {
     : OBJECT_OVERLAY_COLOR;
 }
 
+const OVERLAY_GENERIC_LABELS = new Set(['', 'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
+
+// Keep playback tracks consistent with saved snapshots: a concrete object
+// explains an overlapping generic motion box, so motion must not become the
+// visually dominant/duplicate subject. Unrelated motion remains visible.
+// eslint-disable-next-line no-unused-vars -- exported for recordings/timeline/live playback
+function filterObjectPriorityDetections(detections, minMotionOverlap = 0.15) {
+  if (!Array.isArray(detections) || !detections.length) return detections || [];
+  const threshold = Number.isFinite(Number(minMotionOverlap))
+    ? Math.min(1, Math.max(0, Number(minMotionOverlap)))
+    : 0.15;
+  const overlapRatio = (outer, inner) => {
+    if (!outer || !inner) return 0;
+    const ox = Number(outer.x) || 0;
+    const oy = Number(outer.y) || 0;
+    const ow = Math.max(0, Number(outer.width) || 0);
+    const oh = Math.max(0, Number(outer.height) || 0);
+    const ix = Number(inner.x) || 0;
+    const iy = Number(inner.y) || 0;
+    const iw = Math.max(0, Number(inner.width) || 0);
+    const ih = Math.max(0, Number(inner.height) || 0);
+    const outerArea = ow * oh;
+    if (!(outerArea > 0) || !(iw > 0) || !(ih > 0)) return 0;
+    const intersection = Math.max(0, Math.min(ox + ow, ix + iw) - Math.max(ox, ix))
+      * Math.max(0, Math.min(oy + oh, iy + ih) - Math.max(oy, iy));
+    return intersection / outerArea;
+  };
+  const objectBoxes = detections
+    .filter((detection) => {
+      const label = String(detection?.label || '').trim().toLowerCase();
+      return detection?.box
+        && !OVERLAY_GENERIC_LABELS.has(label)
+        && detection?.motion_event !== true;
+    })
+    .map((detection) => detection.box);
+  if (!objectBoxes.length) return detections;
+  return detections.filter((detection) => {
+    const label = String(detection?.label || '').trim().toLowerCase();
+    const isMotion = detection?.motion_event === true || label === 'motion';
+    return !isMotion || !objectBoxes.some((box) => overlapRatio(detection.box, box) >= threshold);
+  });
+}
+
 // The moving/still tag shown beside an object's box label. The classification
 // is computed server-side (app/object_settings.py) from the Layer-1 motion
 // diff mask and the tracker's net box displacement: a stationary track is

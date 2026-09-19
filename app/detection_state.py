@@ -78,6 +78,7 @@ from typing import Any
 
 import app.state as _state
 from app.config_facades import effective_live_config
+from app.zone_schema import canonical_label
 
 
 try:
@@ -351,7 +352,7 @@ def confirm_object_detections(
     # unchanged), while the box lists power the optional spatial check.
     cycle_boxes: dict[str, list[dict[str, Any]]] = {}
     for detection in detections:
-        label = str(detection.get('label') or '').strip().lower()
+        label = canonical_label(detection.get('label'))
         if not label:
             continue
         boxes = cycle_boxes.setdefault(label, [])

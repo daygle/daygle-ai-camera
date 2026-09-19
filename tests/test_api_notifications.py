@@ -351,9 +351,26 @@ def test_alert_engine_stamps_motion_state_on_alerts():
     ]
     alerts = engine.process(detections, rules=rules)
     by_label = {alert['label']: alert for alert in alerts}
+    assert alerts[0]['label'] == 'person', 'concrete object alerts must precede generic motion'
     assert by_label['person']['motion_state'] == 'still'
     assert by_label['cat']['motion_state'] == 'moving'
     assert 'motion_state' not in by_label['motion']
+
+
+def test_alert_engine_accepts_explicit_ptz_safe_object_detection():
+    from app.alerts import AlertEngine
+
+    engine = AlertEngine([])
+    alerts = engine.process([
+        {
+            'label': 'car', 'confidence': 0.99, 'motion_state': 'unknown',
+            'allow_camera_motion_alert': True,
+        },
+    ], rules=[{
+        'name': 'Any car', 'enabled': True, 'object': 'car',
+        'min_confidence': 0.5, 'cooldown_seconds': 0,
+    }])
+    assert [alert['label'] for alert in alerts] == ['car']
 
 
 def test_alert_engine_rejects_unknown_camera_motion_object_state():

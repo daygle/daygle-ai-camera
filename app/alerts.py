@@ -95,10 +95,11 @@ class AlertEngine:
     def process(self, detections: list[dict[str, Any]], rules: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         effective_rules = rules if rules is not None else self.rules
         alerts: list[dict[str, Any]] = []
-        motion_detections = [detection for detection in detections if detection.get('motion_event')]
-        for motion_detection in motion_detections:
-            self._append_motion_alerts(alerts, motion_detection, effective_rules)
-
+        # Concrete object detections are more informative than the generic
+        # motion signal. Process them first so the primary alert, notification
+        # title, and alert-history ordering identify the object when both
+        # detectors fire for the same frame. Motion remains an independent
+        # fallback and is appended below when it is not explained by an object.
         for detection in detections:
             label = detection.get('label')
             if not isinstance(label, str) or not label:
@@ -106,7 +107,7 @@ class AlertEngine:
             # PTZ/ego-motion makes image-space object movement unknowable. Such
             # detections may remain visible in the live overlay, but must never
             # satisfy an object alert rule as moving or still.
-            if detection.get('motion_state') == 'unknown':
+            if detection.get('motion_state') == 'unknown' and not detection.get('allow_camera_motion_alert'):
                 continue
             label_key = self._normalize_object_label(label)
             # ``or 0`` (not a default arg): an explicitly-None confidence must
@@ -168,6 +169,12 @@ class AlertEngine:
                 if state in ('moving', 'still'):
                     alert_entry['motion_state'] = state
                 alerts.append(alert_entry)
+
+        # Evaluate generic motion after all concrete object detections. This
+        # keeps motion-only rules working while ensuring object alerts win the
+        # primary position whenever both are present.
+        for motion_detection in (detection for detection in detections if detection.get('motion_event')):
+            self._append_motion_alerts(alerts, motion_detection, effective_rules)
 
         return alerts
 

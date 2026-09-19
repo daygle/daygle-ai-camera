@@ -357,6 +357,22 @@ def test_displacement_junk_value_falls_back_to_mask():
     assert os.detection_motion_state(car, _mask_changed_inside_box(), 'junk') == 'moving'
 
 
+def test_group_mode_applies_when_partial_settings_omit_label_map():
+    assert os.motion_mode_for_label(
+        'cat', {'default_mode': 'any', 'group_modes': {'animal': 'moving'}},
+    ) == os.MODE_MOVING
+
+
+def test_any_mode_allows_object_detection_during_camera_motion():
+    detection = _det('car')
+    assert os.object_detection_allowed_during_camera_motion(
+        detection, {'default_mode': 'any', 'labels': {}},
+    ) is True
+    assert os.object_detection_allowed_during_camera_motion(
+        detection, {'default_mode': 'moving', 'labels': {}},
+    ) is False
+
+
 def test_camera_motion_marks_object_state_unknown_without_dropping_detection():
     detection = {**_det('car'), 'track_displacement': 0.4}
     out = os.filter_detections_by_motion_mode(

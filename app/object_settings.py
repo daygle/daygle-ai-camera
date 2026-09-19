@@ -242,12 +242,14 @@ def motion_mode_for_label(
             return normalize_mode(labels['face'], MODE_ANY)
         return MODE_ANY
     labels = resolved.get('labels')
-    if isinstance(labels, dict):
-        if canonical and canonical in labels:
-            return normalize_mode(labels[canonical], default_mode)
-        group_mode = _group_mode_for_label(canonical, resolved, default_mode) if canonical else None
-        if group_mode is not None:
-            return group_mode
+    if isinstance(labels, dict) and canonical and canonical in labels:
+        return normalize_mode(labels[canonical], default_mode)
+    # Group overrides are independent of the per-label map. Partial settings
+    # supplied by API callers commonly omit ``labels`` entirely; that must not
+    # disable a valid group mode.
+    group_mode = _group_mode_for_label(canonical, resolved, default_mode) if canonical else None
+    if group_mode is not None:
+        return group_mode
     return default_mode
 
 
@@ -292,6 +294,20 @@ def _normalize_threshold_map(value: Any) -> dict[str, int]:
         if minutes is not None:
             thresholds[label] = minutes
     return thresholds
+
+
+def object_detection_allowed_during_camera_motion(
+    detection: dict[str, Any],
+    settings: dict[str, Any] | None = None,
+) -> bool:
+    """Return whether a recognized object may alert while PTZ is active.
+
+    PTZ invalidates image-space moving/still evidence, so only labels configured
+    for both states (``any``) are safe to alert. This preserves object
+    recognition during a pan without pretending a Moving Only or Still Only
+    rule can be classified from a moving camera.
+    """
+    return motion_mode_for_label(detection.get('label'), settings) == MODE_ANY
 
 
 def still_alert_thresholds(settings: dict[str, Any] | None = None) -> dict[str, int]:

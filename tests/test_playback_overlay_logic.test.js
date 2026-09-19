@@ -34,6 +34,17 @@ test('motion and object detections use distinct overlay colors', () => {
 });
 
 
+test('object priority removes overlapping playback motion but keeps unrelated motion', () => {
+  const person = { label: 'person', confidence: 0.9, box: box(0.2) };
+  const overlappingMotion = { label: 'motion', motion_event: true, box: box(0.2) };
+  const unrelatedMotion = { label: 'motion', motion_event: true, box: box(0.8) };
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(sandbox.filterObjectPriorityDetections([person, overlappingMotion, unrelatedMotion]))),
+    [person, unrelatedMotion],
+  );
+});
+
+
 test('overlayMotionStateTag maps moving/still to their tag colors', () => {
   // Round-trip through JSON: values built inside the vm realm carry the sandbox
   // realm's prototypes, which deepStrictEqual rejects on reference equality.

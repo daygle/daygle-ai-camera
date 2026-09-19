@@ -694,7 +694,9 @@ function drawClipOverlay(vfcMediaTime) {
   // a track fall back to the event's static boxes.
   const track = recordingTrack();
   if (track) {
-    const tracked = filterByConfiguredLabels(sampleTrackAtTime(track, playerTime));
+    const tracked = filterObjectPriorityDetections(
+      filterByConfiguredLabels(sampleTrackAtTime(track, playerTime)),
+    );
     if (tracked.length) drawDetectionBoxesOnCanvas(els.clipOverlay, tracked, els.clipPlayer);
     return;
   }
@@ -705,11 +707,11 @@ function drawClipOverlay(vfcMediaTime) {
   if (!shouldRenderOverlayForTime(activeRecording, playerTime)) return;
   const allEventDetections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
   const hasSpecificEvent = allEventDetections.some((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()));
-  const eventDetections = filterByConfiguredLabels(
+  const eventDetections = filterObjectPriorityDetections(filterByConfiguredLabels(
     hasSpecificEvent
       ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
       : allEventDetections
-  );
+  ));
   if (!eventDetections.length) return;
   drawDetectionBoxesOnCanvas(els.clipOverlay, eventDetections, els.clipPlayer);
 }

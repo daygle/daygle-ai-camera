@@ -7,9 +7,10 @@ dwell-time, and line-crossing, and lets the playback overlay keep a consistent
 label on a moving subject.
 
 The tracker is intentionally simple and dependency-free (no Kalman filter / no
-Hungarian assignment): greedy IoU matching within the same object label. That is
-plenty for the 2-4 Hz per-camera detection cadence here, and it never blocks or
-allocates on a hot path beyond a handful of small dict/list operations.
+Hungarian assignment): globally ranked IoU matching within the same object
+label. That is plenty for the 2-4 Hz per-camera detection cadence here, and it
+never blocks or allocates on a hot path beyond a handful of small dict/list
+operations.
 
 Contract: :func:`update_object_tracks` takes the per-camera detection list and
 returns the SAME detections, each annotated with:
@@ -125,9 +126,10 @@ def update_object_tracks(
 ) -> list[dict[str, Any]]:
     """Assign/refresh stable track ids for ``detections`` on ``camera_id``.
 
-    Greedy IoU matching within the same label: each detection takes the
-    highest-IoU unmatched track of its label (>= ``iou_threshold``) or opens a
-    new track. Tracks unseen for more than ``max_age`` consecutive cycles are
+    Globally ranked IoU matching within the same label: the strongest
+    non-conflicting detection/track pairs (>= ``iou_threshold``) are assigned
+    first, or an unmatched detection opens a new track. Tracks unseen for more
+    than ``max_age`` consecutive cycles are
     dropped. Returns the same detection dicts, annotated with ``track_id`` /
     ``track_age`` / ``track_new`` / ``track_displacement`` (see module
     docstring)."""
@@ -154,20 +156,44 @@ def update_object_tracks(
         tracks: list[dict[str, Any]] = state["tracks"]
         matched_track_ids: set[int] = set()
 
-        for detection in detections:
+        # Build all viable same-label matches before mutating any track. The
+        # previous detection-by-detection greedy loop made assignment depend on
+        # detector output order: with two cars, the first car in a reordered
+        # result could claim the other car's track and inherit its moving/still
+        # history. Resolving the strongest IoUs globally for this cycle keeps
+        # track identity stable when two same-label boxes approach or cross.
+        candidates: list[tuple[float, int, int]] = []
+        for detection_index, detection in enumerate(detections):
+            box = detection.get("box")
+            if not isinstance(box, dict):
+                continue
+            label = _label_key(detection)
+            for track_index, track in enumerate(tracks):
+                if track["label"] != label:
+                    continue
+                score = _iou(box, track["box"])
+                if score >= iou_threshold:
+                    candidates.append((score, detection_index, track_index))
+        candidates.sort(reverse=True)
+        assignments: dict[int, dict[str, Any]] = {}
+        assigned_detection_indices: set[int] = set()
+        for _score, detection_index, track_index in candidates:
+            track = tracks[track_index]
+            if detection_index in assigned_detection_indices or track["id"] in matched_track_ids:
+                continue
+            assignments[detection_index] = track
+            assigned_detection_indices.add(detection_index)
+            matched_track_ids.add(track["id"])
+
+        # Apply the precomputed assignments in input order so the returned list
+        # remains in detector order; only ownership of a track is order-free.
+        matched_track_ids.clear()
+        for detection_index, detection in enumerate(detections):
             box = detection.get("box")
             label = _label_key(detection)
-            best_track = None
-            best_iou = iou_threshold
-            if isinstance(box, dict):
-                for track in tracks:
-                    if track["id"] in matched_track_ids or track["label"] != label:
-                        continue
-                    score = _iou(box, track["box"])
-                    if score >= best_iou:
-                        best_iou = score
-                        best_track = track
+            best_track = assignments.get(detection_index)
             if best_track is not None:
+                matched_track_ids.add(best_track["id"])
                 # Extend the bounded center history with THIS cycle's center;
                 # the previous center is already stored from the cycle that
                 # observed it (append-on-observe, never append-on-match, or
