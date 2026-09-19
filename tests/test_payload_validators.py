@@ -611,6 +611,25 @@ def test_validate_camera_settings_persists_profile_automation_keys(monkeypatch, 
     assert out_invalid['detection_profiles']['source'] == 'manual'
     assert out_invalid['detection_profiles']['day_start'] == 'not-a-time'
 
+    # Automation keys sent alongside the day/night dicts -- the exact shape the
+    # settings form saves (suggested solar boundaries + per-profile overrides).
+    out_full = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'detection_profiles': {
+            'active': 'day',
+            'source': 'schedule',
+            'day_start': '05:45',
+            'night_start': '20:15',
+            'day': {'motion_pixel_threshold': 30},
+            'night': {'motion_pixel_threshold': 110},
+        },
+    })
+    assert out_full['detection_profiles']['source'] == 'schedule'
+    assert out_full['detection_profiles']['day_start'] == '05:45'
+    assert out_full['detection_profiles']['night_start'] == '20:15'
+    assert out_full['detection_profiles']['day']['motion_pixel_threshold'] == 30
+    assert out_full['detection_profiles']['night']['motion_pixel_threshold'] == 110
+
 
 def test_validate_camera_settings_migrates_legacy_motion_into_both_profiles(monkeypatch, pv):
     _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')
