@@ -8,6 +8,15 @@
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="stylesheet" href="/static/model-card-messages.css" />
+  <style>
+    /* On phones the hero stacks vertically; keep the copy content-sized
+       instead of carrying the desktop 420px flex basis into its height. */
+    @media (max-width: 900px) {
+      .onnx-hero { gap: 16px; min-height: 0; }
+      .onnx-hero-copy { flex: 0 0 auto; }
+      .onnx-hero-mark { margin: 0 auto; }
+    }
+  </style>
 </head>
 <body>
   <main class="shell page-stack">

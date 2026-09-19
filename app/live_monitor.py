@@ -693,12 +693,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
 
     # Temporal confirmation gate: require an object label to persist across
     # several detection cycles before it can raise an alert or a recording.
-    # Defaults to 2 (2-of-3), pairing with the always-on detector to filter
-    # one-frame false positives; set to 1 for single-frame (pass-through)
-    # behavior. Applied to the zone/label-filtered detections so the window only
+    # Defaults to 1 for minimum first-alert latency; set to 2 with a 3-frame
+    # window when filtering one-frame false positives is more important.
+    # Applied to the zone/label-filtered detections so the window only
     # counts objects this camera actually cares about, and only to the object
     # axis -- motion is already gated separately.
-    _confirm_frames = live_settings.get('detection_confirm_frames', 2)
+    _confirm_frames = live_settings.get('detection_confirm_frames', 1)
     _confirm_window = live_settings.get('detection_confirm_window', _confirm_frames)
     # Optional spatial-persistence lever (0 = off): when set, a label is
     # confirmed only if its box has persisted in roughly the same place across

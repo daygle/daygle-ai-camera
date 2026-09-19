@@ -711,8 +711,8 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if not 0.001 <= motion_background_alpha <= 0.5:
         raise HTTPException(status_code=400, detail='motion_background_alpha must be between 0.001 and 0.5.')
     periodic_scan_interval_seconds = _int_field(merged, 'periodic_scan_interval_seconds', 0, 0, 3600)
-    detection_confirm_frames = _int_field(merged, 'detection_confirm_frames', 2, 1, 10)
-    detection_confirm_window = _int_field(merged, 'detection_confirm_window', 3, 1, 30)
+    detection_confirm_frames = _int_field(merged, 'detection_confirm_frames', 1, 1, 10)
+    detection_confirm_window = _int_field(merged, 'detection_confirm_window', 1, 1, 30)
     # A window smaller than the requirement can never confirm; clamp it up so
     # "N of the last M" is always satisfiable rather than silently blocking
     # every detection.

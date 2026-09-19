@@ -85,16 +85,13 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'detection_status_refresh_ms': 2000,
     'detection_interval_seconds': 0.5,
     'event_debounce_seconds': 10.0,
-    # Temporal confirmation gate (all object labels). ``1`` = disabled
-    # (single-frame behavior); higher requires the label to persist across
-    # ``detection_confirm_frames`` of the last ``detection_confirm_window``
-    # detection cycles before it can alert or record. Defaults to 2-of-3: it
-    # pairs with the always-on object detector (below) to suppress the one-frame
-    # false positives that running YOLO every cycle on a static scene can
-    # produce. Set to 1 for instant single-frame alerts (lower latency, more
-    # false positives).
-    'detection_confirm_frames': 2,
-    'detection_confirm_window': 3,
+    # Temporal confirmation gate (all object labels). ``1`` disables the gate
+    # and allows the first confident detection to alert or record. Higher values
+    # trade alert latency for more resistance to one-frame false positives.
+    # The low-latency default is intentionally single-frame; noisy deployments
+    # can opt into 2-of-3 from Settings or a camera profile.
+    'detection_confirm_frames': 1,
+    'detection_confirm_window': 1,
     # Optional spatial-persistence lever for the confirmation gate. ``0.0`` =
     # off (label-only confirmation, the historical behavior). When raised, a
     # label confirms only if its box overlaps a same-label box from the

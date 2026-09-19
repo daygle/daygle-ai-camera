@@ -1157,6 +1157,8 @@ def test_validate_live_settings_rejects_non_numeric_history_minutes(monkeypatch,
 def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
     _install_validator_dependencies(monkeypatch)
     out = pv.validate_live_settings({})
+    assert out['detection_confirm_frames'] == 1
+    assert out['detection_confirm_window'] == 1
     assert set(out.keys()) == {
         'snapshot_refresh_ms', 'detection_status_refresh_ms',
         'detection_interval_seconds', 'event_debounce_seconds',

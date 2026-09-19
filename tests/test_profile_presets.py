@@ -23,6 +23,27 @@ def test_builtin_presets_have_day_and_night_values():
     assert cat['builtin'] is True
     assert cat['day']['object_detection_region_boost'] is True
     assert cat['night']['object_detection_tiling'] == '2x2'
+    assert cat['day']['detection_confirm_frames'] == 2
+    assert cat['day']['detection_confirm_window'] == 3
+    assert cat['day']['detection_confirm_iou'] == 0.1
+    assert cat['night']['detection_confirm_frames'] == 2
+    assert cat['night']['detection_confirm_window'] == 3
+    assert cat['night']['detection_confirm_iou'] == 0.05
+
+
+def test_recall_profiles_do_not_add_confirmation_latency():
+    """Built-in recall profiles should alert on the first confident detection.
+
+    Low CPU intentionally remains confirmation-heavy because it trades latency
+    for reduced inference work and noise resistance.
+    """
+    for preset in list_presets(None):
+        if preset['id'] in {'low-cpu', 'cat-small-animal'}:
+            continue
+        assert preset['day']['detection_confirm_frames'] == 1
+        assert preset['day']['detection_confirm_window'] == 1
+        assert preset['night']['detection_confirm_frames'] == 1
+        assert preset['night']['detection_confirm_window'] == 1
 
 
 def test_create_preset_slugifies_and_avoids_duplicate_ids():
