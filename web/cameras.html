@@ -118,6 +118,25 @@
     </div>
   </div>
 
+  <style>
+    .camera-edit-panel .camera-edit-form {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      column-gap: 18px;
+      row-gap: 0;
+    }
+    .camera-edit-panel .camera-edit-form .modal-tab-panel,
+    .camera-edit-panel .camera-edit-form .modal-footer {
+      grid-column: 1 / -1;
+    }
+    @media (max-width: 1000px) {
+      .camera-edit-panel .camera-edit-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 600px) {
+      .camera-edit-panel .camera-edit-form { grid-template-columns: 1fr; }
+    }
+  </style>
+
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
   <script src="/static/icons.js"></script>
