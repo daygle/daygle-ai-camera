@@ -33,6 +33,13 @@ from app.profile_automation import (
     record_ir_probe,
     suggest_solar_schedule,
 )
+from app.profile_presets import (
+    create_preset,
+    custom_presets,
+    get_preset,
+    list_presets,
+    normalize_preset,
+)
 from app.ptz import probe_onvif_day_night
 from app.request_helpers import write_audit_log
 
@@ -154,6 +161,60 @@ async def update_camera(
         }
 
 
+@router.get('/api/camera-profile-presets')
+def list_camera_profile_presets(request: Request, db=Depends(get_database)):
+    """List built-in and user-created reusable Day/Night presets."""
+    require_admin(request)
+    return {'presets': list_presets(db.get_setting('camera_profile_presets'))}
+
+
+@router.post('/api/camera-profile-presets')
+async def create_camera_profile_preset(request: Request, db=Depends(get_database)):
+    require_admin(request)
+    payload = await request.json()
+    existing = list_presets(db.get_setting('camera_profile_presets'))
+    try:
+        preset = create_preset(payload, existing)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.set_setting('camera_profile_presets', custom_presets(existing) + [preset], utc_now())
+    write_audit_log(request, db, 'create', 'settings.camera_profile_preset', preset['id'], {'name': preset['name']})
+    return preset
+
+
+@router.put('/api/camera-profile-presets/{preset_id}')
+async def update_camera_profile_preset(preset_id: str, request: Request, db=Depends(get_database)):
+    require_admin(request)
+    current = get_preset(db.get_setting('camera_profile_presets'), preset_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail='Profile preset not found.')
+    if current['builtin']:
+        raise HTTPException(status_code=400, detail='Built-in profile presets cannot be modified.')
+    payload = await request.json()
+    try:
+        updated = normalize_preset({**current, **(payload if isinstance(payload, dict) else {})}, preset_id=preset_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    customs = [preset for preset in custom_presets(db.get_setting('camera_profile_presets')) if preset['id'] != preset_id]
+    db.set_setting('camera_profile_presets', customs + [updated], utc_now())
+    write_audit_log(request, db, 'update', 'settings.camera_profile_preset', preset_id, {'name': updated['name']})
+    return updated
+
+
+@router.delete('/api/camera-profile-presets/{preset_id}')
+def delete_camera_profile_preset(preset_id: str, request: Request, db=Depends(get_database)):
+    require_admin(request)
+    current = get_preset(db.get_setting('camera_profile_presets'), preset_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail='Profile preset not found.')
+    if current['builtin']:
+        raise HTTPException(status_code=400, detail='Built-in profile presets cannot be removed.')
+    remaining = [preset for preset in custom_presets(db.get_setting('camera_profile_presets')) if preset['id'] != preset_id]
+    db.set_setting('camera_profile_presets', remaining, utc_now())
+    write_audit_log(request, db, 'delete', 'settings.camera_profile_preset', preset_id)
+    return {'deleted': preset_id}
+
+
 @router.post('/api/cameras/{camera_id}/ir-state')
 async def check_camera_ir_state(camera_id: str, request: Request):
     """Check ONVIF IrCutFilter immediately without changing the profile.
@@ -200,12 +261,20 @@ async def check_camera_ir_state(camera_id: str, request: Request):
             password,
         )
     except Exception as exc:
-        status = record_ir_probe(camera_id, None, type(exc).__name__)
+        # ``probe_onvif_day_night`` already scrubs credentials from every
+        # message it raises (see ``ptz._soap``), so the detail is safe to
+        # surface; fall back to the exception class name when it is empty.
+        detail = str(exc).strip() or type(exc).__name__
+        logger.warning(
+            'IR state probe for camera %s (%s:%s) failed: %s',
+            camera_id, host, http_port, detail,
+        )
+        status = record_ir_probe(camera_id, None, detail)
         return {
             'camera_id': camera_id,
             'state': None,
             'supported': False,
-            'error': type(exc).__name__,
+            'error': detail,
             'profile_status': status,
         }
     status = record_ir_probe(camera_id, ir_state)

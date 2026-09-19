@@ -1,4 +1,5 @@
 let cameras = [];
+let cameraProfilePresets = [];
 let pendingDeleteIndex = null;
 const cameraResolutions = {};
 const cameraFps = {};
@@ -43,6 +44,12 @@ const PROFILE_MOTION_FIELDS = [
   'motion_shadow_suppression',
 ];
 const PROFILE_FIELDS = PROFILE_PERFORMANCE_FIELDS.concat(PROFILE_MOTION_FIELDS);
+
+function profilePresetOptionsHtml() {
+  return cameraProfilePresets.map(function(preset) {
+    return '<option value="' + escapeHtml(preset.id) + '">' + escapeHtml(preset.name) + (preset.builtin ? ' (Built-in)' : '') + '</option>';
+  }).join('');
+}
 
 function cameraProfileValue(camera, mode, key) {
   const profiles = camera.detection_profiles || {};
@@ -204,15 +211,24 @@ function buildEditFormHtml(camera, index) {
           '</div>' +
           '<div class="button-row">' +
             '<button type="button" class="secondary profile-suggest-btn">Suggest Sunrise/Sunset</button>' +
+            '<button type="button" class="secondary cat-profile-suggest-btn">Suggest Cat Profiles</button>' +
             '<button type="button" class="secondary ir-check-btn">Check IR State Now</button>' +
             '<span class="form-help muted profile-action-result" aria-live="polite"></span>' +
           '</div>' +
           '<p class="form-help muted">Choose which profile is active now. The motion overrides below are edited for the selected profile. Existing cameras inherit their legacy settings into both profiles.</p>' +
+          '<p class="form-help muted">Suggest Cat Profiles prepares both Day and Night for small, moving subjects. It does not change automatic selection; review and save the camera afterward.</p>' +
           '<p class="form-help muted">Runtime: <strong>' + escapeHtml(camera.profile_status?.active || camera.detection_profiles?.active || 'day') + '</strong> (' + escapeHtml(camera.profile_status?.selected_by || camera.detection_profiles?.source || 'manual') + '). ONVIF IR detection falls back to the schedule when unsupported.</p>' +
         '</div>' +
         '<div class="cam-edit-section">' +
           '<h4 class="cam-edit-section-title">Day/Night Performance</h4>' +
           '<p class="form-help muted">These settings override Live Performance for this camera and profile. Leave values at their defaults unless this camera needs different day/night resource usage.</p>' +
+          '<div class="button-row profile-preset-row">' +
+            '<label><span>Preset</span><select name="profile_preset"><option value="">Choose a preset…</option>' + profilePresetOptionsHtml() + '</select></label>' +
+            '<button type="button" class="secondary profile-apply-preset-btn">Apply Preset</button>' +
+            '<button type="button" class="secondary profile-save-preset-btn">Save Current as Preset</button>' +
+            '<button type="button" class="secondary profile-update-preset-btn" disabled>Update Preset</button>' +
+            '<button type="button" class="secondary profile-delete-preset-btn" disabled>Delete Preset</button>' +
+          '</div>' +
           '<div class="form-grid">' +
             '<label><span>Background Detection</span><select name="profile_background_detection_enabled">' +
               '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'background_detection_enabled') == null ? ' selected' : '') + '>Global default</option>' +
@@ -362,13 +378,22 @@ function wireEditFormHandlers(index) {
         var fieldName = PROFILE_PERFORMANCE_FIELDS.includes(key) ? 'profile_' + key : key;
         var field = form.querySelector('[name="' + fieldName + '"]');
         if (!field) return;
-        var value = cameraProfileValue(camera, mode, key);
+        var suggested = form.__suggestedProfiles?.[mode];
+        var value = suggested && Object.prototype.hasOwnProperty.call(suggested, key)
+          ? suggested[key]
+          : cameraProfileValue(camera, mode, key);
         field.value = value == null ? '' : String(value);
       });
     });
   }
 
   var suggestButton = form.querySelector('.profile-suggest-btn');
+  var catProfileSuggestButton = form.querySelector('.cat-profile-suggest-btn');
+  var presetSelect = form.querySelector('[name="profile_preset"]');
+  var applyPresetButton = form.querySelector('.profile-apply-preset-btn');
+  var savePresetButton = form.querySelector('.profile-save-preset-btn');
+  var updatePresetButton = form.querySelector('.profile-update-preset-btn');
+  var deletePresetButton = form.querySelector('.profile-delete-preset-btn');
   var irCheckButton = form.querySelector('.ir-check-btn');
   var profileResult = form.querySelector('.profile-action-result');
   // The suggestion and IR checks work on UNSAVED cameras too: both endpoints
@@ -415,6 +440,120 @@ function wireEditFormHandlers(index) {
         if (!window.daygleAuth?.redirecting && profileResult) profileResult.textContent = err.message || 'Suggestion unavailable.';
       } finally {
         suggestButton.disabled = false;
+      }
+    });
+  }
+  function selectedPreset() {
+    return cameraProfilePresets.find(function(preset) { return preset.id === presetSelect?.value; });
+  }
+  function syncPresetButtons() {
+    var preset = selectedPreset();
+    var editable = Boolean(preset && !preset.builtin);
+    if (updatePresetButton) updatePresetButton.disabled = !editable;
+    if (deletePresetButton) deletePresetButton.disabled = !editable;
+  }
+  function applyPendingProfiles(profiles, message) {
+    form.__suggestedProfiles = {
+      day: { ...(profiles.day || {}) },
+      night: { ...(profiles.night || {}) },
+    };
+    var activeMode = profileSelect?.value === 'night' ? 'night' : 'day';
+    PROFILE_FIELDS.forEach(function(key) {
+      var fieldName = PROFILE_PERFORMANCE_FIELDS.includes(key) ? 'profile_' + key : key;
+      var field = form.querySelector('[name="' + fieldName + '"]');
+      if (field && Object.prototype.hasOwnProperty.call(form.__suggestedProfiles[activeMode], key)) {
+        field.value = String(form.__suggestedProfiles[activeMode][key]);
+      }
+    });
+    if (profileResult) profileResult.textContent = message;
+  }
+  if (presetSelect) presetSelect.addEventListener('change', syncPresetButtons);
+  if (applyPresetButton) applyPresetButton.addEventListener('click', function() {
+    var preset = selectedPreset();
+    if (!preset) {
+      if (profileResult) profileResult.textContent = 'Choose a preset first.';
+      return;
+    }
+    if (!window.confirm('Apply the ' + preset.name + ' preset to both Day and Night profiles? Nothing is saved until you save the camera.')) return;
+    applyPendingProfiles(preset, preset.name + ' loaded. Review and save the camera.');
+  });
+  if (savePresetButton) savePresetButton.addEventListener('click', async function() {
+    var name = window.prompt('Name this Day/Night preset:');
+    if (!name || !name.trim()) return;
+    savePresetButton.disabled = true;
+    try {
+      var current = collectFormData(form).detection_profiles;
+      var created = await api('/api/camera-profile-presets', { method: 'POST', body: JSON.stringify({ name: name.trim(), day: current.day, night: current.night }) });
+      cameraProfilePresets.push(created);
+      if (presetSelect) { presetSelect.insertAdjacentHTML('beforeend', '<option value="' + escapeHtml(created.id) + '">' + escapeHtml(created.name) + '</option>'); presetSelect.value = created.id; }
+      syncPresetButtons();
+      if (profileResult) profileResult.textContent = 'Preset saved: ' + created.name + '.';
+    } catch (err) {
+      if (!window.daygleAuth?.redirecting && profileResult) profileResult.textContent = err.message || 'Could not save preset.';
+    } finally { savePresetButton.disabled = false; }
+  });
+  if (updatePresetButton) updatePresetButton.addEventListener('click', async function() {
+    var preset = selectedPreset();
+    if (!preset || preset.builtin) return;
+    if (!window.confirm('Update the ' + preset.name + ' preset with the current Day/Night values?')) return;
+    updatePresetButton.disabled = true;
+    try {
+      var current = collectFormData(form).detection_profiles;
+      var updated = await api('/api/camera-profile-presets/' + encodeURIComponent(preset.id), { method: 'PUT', body: JSON.stringify({ name: preset.name, day: current.day, night: current.night }) });
+      cameraProfilePresets = cameraProfilePresets.map(function(item) { return item.id === updated.id ? updated : item; });
+      if (profileResult) profileResult.textContent = 'Preset updated: ' + updated.name + '.';
+    } catch (err) {
+      if (!window.daygleAuth?.redirecting && profileResult) profileResult.textContent = err.message || 'Could not update preset.';
+    } finally { syncPresetButtons(); }
+  });
+  if (deletePresetButton) deletePresetButton.addEventListener('click', async function() {
+    var preset = selectedPreset();
+    if (!preset || preset.builtin || !window.confirm('Delete the ' + preset.name + ' preset?')) return;
+    deletePresetButton.disabled = true;
+    try {
+      await api('/api/camera-profile-presets/' + encodeURIComponent(preset.id), { method: 'DELETE' });
+      cameraProfilePresets = cameraProfilePresets.filter(function(item) { return item.id !== preset.id; });
+      if (presetSelect) {
+        Array.from(presetSelect.options).find(function(option) { return option.value === preset.id; })?.remove();
+        presetSelect.value = '';
+      }
+      syncPresetButtons();
+      if (profileResult) profileResult.textContent = 'Preset deleted.';
+    } catch (err) {
+      if (!window.daygleAuth?.redirecting && profileResult) profileResult.textContent = err.message || 'Could not delete preset.';
+    } finally { syncPresetButtons(); }
+  });
+  syncPresetButtons();
+
+  if (catProfileSuggestButton) {
+    catProfileSuggestButton.addEventListener('click', async function() {
+      var catPreset = cameraProfilePresets.find(function(preset) { return preset.id === 'cat-small-animal'; });
+      if (!catPreset) {
+        if (profileResult) profileResult.textContent = 'Cat / Small Animal preset is unavailable.';
+        return;
+      }
+      if (!window.confirm('Fill both Day and Night profiles with cat-focused detection settings and suggest sunrise/sunset times? Nothing is saved until you save the camera.')) return;
+      catProfileSuggestButton.disabled = true;
+      applyPendingProfiles(catPreset, 'Cat / Small Animal preset loaded. Calculating sunrise/sunset times…');
+      if (presetSelect) presetSelect.value = catPreset.id;
+      syncPresetButtons();
+      try {
+        var cameraId = form.querySelector('[name="id"]')?.value || cameras[index]?.id;
+        var locationParams = new URLSearchParams();
+        Object.keys(formLocationOverrides()).forEach(function(key) {
+          locationParams.set(key, formLocationOverrides()[key]);
+        });
+        var query = locationParams.toString();
+        var suggestion = await api('/api/cameras/' + encodeURIComponent(cameraId) + '/profile-schedule-suggestion' + (query ? '?' + query : ''));
+        form.querySelector('[name="profile_day_start"]').value = suggestion.day_start;
+        form.querySelector('[name="profile_night_start"]').value = suggestion.night_start;
+        if (profileResult) profileResult.textContent = 'Cat / Small Animal preset and sunrise/sunset times loaded. Review and save the camera.';
+      } catch (err) {
+        if (!window.daygleAuth?.redirecting && profileResult) {
+          profileResult.textContent = 'Cat / Small Animal preset loaded. Add location details to suggest sunrise/sunset times, then review and save.';
+        }
+      } finally {
+        catProfileSuggestButton.disabled = false;
       }
     });
   }
@@ -558,8 +697,8 @@ function collectFormData(form) {
     source: ['manual', 'schedule', 'onvif'].includes(getName('profile_source')) ? getName('profile_source') : 'manual',
     day_start: getName('profile_day_start') || '07:00',
     night_start: getName('profile_night_start') || '19:00',
-    day: { ...(existingProfiles.day || {}) },
-    night: { ...(existingProfiles.night || {}) },
+    day: { ...(existingProfiles.day || {}), ...(form.__suggestedProfiles?.day || {}) },
+    night: { ...(existingProfiles.night || {}), ...(form.__suggestedProfiles?.night || {}) },
   };
   profiles[activeProfile === 'night' ? 'night' : 'day'] = profile;
   return {
@@ -950,6 +1089,7 @@ async function loadCameras() {
   await window.daygleAuthReady;
   var settings = await api('/api/settings/system');
   cameras = settings.cameras || (settings.camera ? [settings.camera] : []);
+  cameraProfilePresets = settings.profile_presets || [];
   // Clear stale entries so removed cameras don't linger.
   Object.keys(cameraResolutions).forEach(function(key) { delete cameraResolutions[key]; });
   Object.keys(cameraFps).forEach(function(key) { delete cameraFps[key]; });

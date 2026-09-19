@@ -574,6 +574,26 @@ bindForm('auth', 'Login security');
 bindForm('network', 'LAN & proxy');
 bindForm('gpu', 'GPU health');
 
+// Refill the Live Performance form from FORM_DEFAULTS.live (the same source
+// loadSettings() falls back to when the API omits a key). The change only
+// lands once the user saves, so the button is safe to abandon. A server value
+// can always be recovered by reloading the page before saving.
+function bindDefaultsReset(buttonId, formName, label) {
+  document.getElementById(buttonId)?.addEventListener('click', guard(() => {
+    if (!window.confirm(`Reset ${label} to the defaults? Nothing changes until you save.`)) return;
+    fillForm(forms[formName], {}, FORM_DEFAULTS.recording);
+    setMessage(`${label} fields reset to defaults. Save to apply.`);
+  }));
+}
+
+document.getElementById('resetLiveDefaultsBtn')?.addEventListener('click', guard(() => {
+  if (!window.confirm('Reset the Live Performance form to the defaults? Nothing changes until you save.')) return;
+  fillForm(forms.live, {}, FORM_DEFAULTS.live);
+  setMessage('Live Performance fields reset to defaults. Save to apply.');
+}));
+bindDefaultsReset('resetRecordingDefaultsBtn', 'recording', 'Recording Clips');
+bindDefaultsReset('resetRetentionDefaultsBtn', 'retention', 'Retention');
+
 emailForm?.addEventListener('submit', guard(async (event) => {
   event.preventDefault();
   renderEmail(await api('/api/settings/alert-email', { method: 'PUT', body: JSON.stringify(emailPayload(emailForm)) }));

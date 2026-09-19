@@ -179,3 +179,51 @@ def test_ir_state_unknown_camera_without_host_is_400():
     with pytest.raises(HTTPException) as excinfo:
         asyncio.run(cameras_router.check_camera_ir_state("brand-new-camera", _EmptyBody()))
     assert excinfo.value.status_code == 400
+
+
+def test_ir_state_probe_failure_returns_sanitized_detail(monkeypatch):
+    """A failed probe must surface the sanitized ONVIF message, not just
+    the bare exception class name (the UI showed a useless 'OSError').
+
+    ``ptz._soap`` scrubs credentials before raising, so the detail is safe
+    to return to the client and to store in the profile status.
+    """
+
+    def failing_probe(host, http_port, username, password):
+        raise OSError(
+            "ONVIF HTTP 401 (url=http://192.0.2.50:8080/onvif/media_service): Unauthorized"
+        )
+
+    monkeypatch.setattr(cameras_router, "probe_onvif_day_night", failing_probe)
+
+    class _FakeRequestWithBody(_FakeRequest):
+        async def json(self):
+            return {"host": "192.0.2.50", "http_port": 8080}
+
+    result = asyncio.run(
+        cameras_router.check_camera_ir_state("brand-new-camera", _FakeRequestWithBody())
+    )
+    expected = "ONVIF HTTP 401 (url=http://192.0.2.50:8080/onvif/media_service): Unauthorized"
+    assert result["supported"] is False
+    assert result["state"] is None
+    assert result["error"] == expected  # detail, not the 'OSError' class name
+    assert result["profile_status"]["ir_error"] == expected
+
+
+def test_ir_state_probe_failure_falls_back_to_class_name(monkeypatch):
+    """An exception with an empty message still reports something useful."""
+
+    def failing_probe(host, http_port, username, password):
+        raise ValueError
+
+    monkeypatch.setattr(cameras_router, "probe_onvif_day_night", failing_probe)
+
+    class _FakeRequestWithBody(_FakeRequest):
+        async def json(self):
+            return {"host": "192.0.2.51"}
+
+    result = asyncio.run(
+        cameras_router.check_camera_ir_state("brand-new-camera", _FakeRequestWithBody())
+    )
+    assert result["supported"] is False
+    assert result["error"] == "ValueError"
