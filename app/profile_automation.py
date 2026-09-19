@@ -192,22 +192,11 @@ def _update_status(camera_id: str, **values: Any) -> None:
         current['camera_id'] = str(camera_id)
 
 
-def record_ir_probe(camera_id: str, ir_state: str | None, error: str | None = None) -> dict[str, Any]:
-    """Publish the result of an on-demand IR-state check for the API/UI."""
-    _update_status(
-        camera_id,
-        ir_state=ir_state,
-        ir_checked_at=datetime.now().isoformat(timespec='seconds'),
-        ir_error=error,
-    )
-    return profile_status(camera_id)
-
-
 def _select_target(camera: dict[str, Any], profiles: dict[str, Any]) -> tuple[str, str, str | None, str | None]:
     source = profiles.get('source', 'manual')
     scheduled = scheduled_profile(profiles, timezone_name=camera.get('timezone'))
-    if source == 'schedule':
-        return scheduled, 'schedule', None, None
+    if source in {'schedule', 'solar'}:
+        return scheduled, source, None, None
     if source != 'onvif' or str(camera.get('backend') or '').lower() not in {'onvif', 'rtsp'}:
         return profiles['active'], 'manual', None, None
 
@@ -253,9 +242,41 @@ def poll_camera_profiles() -> None:
         profiles = normalize_camera_detection_profiles(
             camera.get('detection_profiles'), camera,
         )
+        solar_error = None
+        solar_changed = False
+        solar_enabled = False
+        has_solar_location = (
+            camera.get('latitude') is not None
+            and camera.get('longitude') is not None
+            and bool(camera.get('timezone'))
+        )
+        if has_solar_location and profiles.get('source') != 'solar':
+            # Migrate existing cameras with coordinates into the automatic
+            # solar mode as well as newly saved cameras.
+            profiles['source'] = 'solar'
+            solar_enabled = True
+        elif not has_solar_location and profiles.get('source') == 'solar':
+            profiles['source'] = 'manual'
+        if profiles.get('source') == 'solar':
+            try:
+                suggestion = suggest_solar_schedule(
+                    camera.get('latitude'), camera.get('longitude'),
+                    str(camera.get('timezone') or 'UTC'),
+                )
+                solar_changed = (
+                    profiles.get('day_start') != suggestion['day_start']
+                    or profiles.get('night_start') != suggestion['night_start']
+                )
+                profiles['day_start'] = suggestion['day_start']
+                profiles['night_start'] = suggestion['night_start']
+            except ValueError as exc:
+                solar_error = str(exc)
+
         target, selected_by, ir_state, error = _select_target(camera, profiles)
+        if solar_error:
+            error = solar_error
         active = profiles['active']
-        if selected_by != 'manual' and target != active:
+        if selected_by != 'manual' and (target != active or solar_changed or solar_enabled):
             profiles['active'] = target
             camera['detection_profiles'] = profiles
             apply_active_camera_detection_profile(camera)
@@ -265,6 +286,8 @@ def poll_camera_profiles() -> None:
             changed[camera_id] = {
                 'target': target,
                 'source': str(profiles.get('source') or 'manual'),
+                'day_start': profiles['day_start'],
+                'night_start': profiles['night_start'],
             }
             active = target
             logger.info(
@@ -302,10 +325,13 @@ def poll_camera_profiles() -> None:
                 # automation decision is dropped without touching the camera.
                 # The next poll re-evaluates under the new source.
                 continue
-            # Splice ONLY the active-profile flip onto the live profiles so a
+            # Splice only automation-owned fields onto the live profiles so a
             # concurrent edit of profile VALUES (thresholds, intervals, ...)
             # is preserved, not overwritten by the snapshot's copies.
             current_profiles['active'] = decision['target']
+            if decision['source'] == 'solar':
+                current_profiles['day_start'] = decision['day_start']
+                current_profiles['night_start'] = decision['night_start']
             camera['detection_profiles'] = current_profiles
             apply_active_camera_detection_profile(camera)
         persisted = copy.deepcopy(live)

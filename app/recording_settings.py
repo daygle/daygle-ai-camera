@@ -175,10 +175,13 @@ def normalize_camera_detection_profiles(
     if active not in _CAMERA_MOTION_PROFILE_MODES:
         active = 'day'
     automation_source = str(raw.get('source') or 'manual').strip().lower()
-    if automation_source not in {'manual', 'schedule', 'onvif'}:
+    if automation_source not in {'manual', 'schedule', 'solar', 'onvif'}:
         automation_source = 'manual'
     day_start = normalize_hhmm(raw.get('day_start')) or '07:00'
     night_start = normalize_hhmm(raw.get('night_start')) or '19:00'
+    preset_id = str(raw.get('preset_id') or '').strip().lower()
+    if not preset_id or len(preset_id) > 64 or any(character not in 'abcdefghijklmnopqrstuvwxyz0123456789_-' for character in preset_id):
+        preset_id = None
     has_profiles = any(isinstance(raw.get(mode), dict) for mode in _CAMERA_MOTION_PROFILE_MODES)
     profiles: dict[str, dict[str, Any]] = {}
     for mode in _CAMERA_MOTION_PROFILE_MODES:
@@ -191,7 +194,7 @@ def normalize_camera_detection_profiles(
             for key in CAMERA_MOTION_PROFILE_FIELDS
             if profile_source.get(key) is not None and _normalize_profile_motion_value(key, profile_source.get(key)) is not None
         }
-    return {
+    result = {
         'active': active,
         'source': automation_source,
         'day_start': day_start,
@@ -199,6 +202,9 @@ def normalize_camera_detection_profiles(
         'day': profiles['day'],
         'night': profiles['night'],
     }
+    if preset_id:
+        result['preset_id'] = preset_id
+    return result
 
 
 def apply_active_camera_detection_profile(settings: dict[str, Any]) -> dict[str, Any]:

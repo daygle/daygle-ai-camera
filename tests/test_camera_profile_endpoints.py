@@ -1,12 +1,4 @@
-"""Regression tests for the profile-suggestion and IR-check endpoints.
-
-Both endpoints serve the Cameras page's "Suggest Sunrise/Sunset" and
-"Check IR State Now" buttons. They used to read ONLY the saved camera
-configuration, so a newly added camera (or freshly typed-but-unsaved
-lat/long) could not use either button until the camera was saved. They now
-accept explicit per-request overrides, and an unknown ``camera_id`` with
-overrides is fine.
-"""
+"""Regression tests for the Cameras page solar schedule suggestion endpoint."""
 
 from __future__ import annotations
 
@@ -39,13 +31,8 @@ def _bypass_admin(monkeypatch):
     monkeypatch.setattr(cameras_router, "require_admin", lambda request: None)
 
 
-def _restore_cameras_config(original):
-    state.cameras_config = original
-
-
 def test_suggestion_uses_query_overrides_for_unsaved_camera():
     """An unknown camera id with explicit parameters must succeed."""
-    # Sync handler (FastAPI runs it in a threadpool): call it directly.
     result = cameras_router.camera_profile_schedule_suggestion(
         "brand-new-camera",
         _FakeRequest(),
@@ -68,12 +55,10 @@ def test_suggestion_overrides_win_over_saved_camera():
         "timezone": "UTC",
     }]
     try:
-        # Baseline: no overrides -> the stored London config.
         baseline = cameras_router.camera_profile_schedule_suggestion(
             "saved-cam", _FakeRequest(),
         )
         assert baseline["timezone"] == "UTC"
-        # Sydney coordinates override the stored London ones.
         result = cameras_router.camera_profile_schedule_suggestion(
             "saved-cam",
             _FakeRequest(),
@@ -82,13 +67,12 @@ def test_suggestion_overrides_win_over_saved_camera():
         )
         assert result["timezone"] == "UTC"
         assert result["day_start"] != baseline["day_start"]
-        # Partial override: only latitude supplied, stored longitude/timezone kept.
         partial = cameras_router.camera_profile_schedule_suggestion(
             "saved-cam", _FakeRequest(), latitude=-33.8688,
         )
         assert partial["day_start"] != baseline["day_start"]
     finally:
-        _restore_cameras_config(original)
+        state.cameras_config = original
 
 
 def test_suggestion_for_unknown_camera_without_overrides_is_400():
@@ -99,131 +83,3 @@ def test_suggestion_for_unknown_camera_without_overrides_is_400():
             )
         )
     assert excinfo.value.status_code == 400
-
-
-def test_ir_state_uses_body_overrides_for_unsaved_camera(monkeypatch):
-    """An unknown camera id with a host in the body must probe that host."""
-    captured = {}
-
-    def fake_probe(host, http_port, username, password):
-        captured.update(host=host, http_port=http_port, username=username, password=password)
-        return "night"
-
-    monkeypatch.setattr(cameras_router, "probe_onvif_day_night", fake_probe)
-
-    class _FakeRequestWithBody(_FakeRequest):
-        async def json(self):
-            return {
-                "host": "192.0.2.50",
-                "http_port": 8080,
-                "username": "admin",
-                "password": "typed-password",
-            }
-
-    result = asyncio.run(
-        cameras_router.check_camera_ir_state("brand-new-camera", _FakeRequestWithBody())
-    )
-    assert result["supported"] is True
-    assert result["state"] == "night"
-    assert captured == {
-        "host": "192.0.2.50",
-        "http_port": 8080,
-        "username": "admin",
-        "password": "typed-password",
-    }
-
-
-def test_ir_state_overrides_win_over_saved_camera(monkeypatch):
-    """Supplied overrides take precedence; empty password falls back to saved."""
-    original = state.cameras_config
-    state.cameras_config = [{
-        "id": "saved-ir-cam",
-        "host": "192.0.2.10",
-        "username": "saved-user",
-        "password": "saved-password",
-        "ptz": {"http_port": 8081},
-    }]
-    captured = {}
-
-    def fake_probe(host, http_port, username, password):
-        captured.update(host=host, http_port=http_port, username=username, password=password)
-        return "day"
-
-    monkeypatch.setattr(cameras_router, "probe_onvif_day_night", fake_probe)
-
-    class _Body(dict):
-        async def json(self):
-            return dict(self)
-
-    try:
-        # Full override wins.
-        result = asyncio.run(
-            cameras_router.check_camera_ir_state(
-                "saved-ir-cam", _Body(host="192.0.2.99", username="typed-user"),
-            )
-        )
-        assert result["state"] == "day"
-        assert captured["host"] == "192.0.2.99"
-        assert captured["username"] == "typed-user"
-        assert captured["password"] == "saved-password"  # empty -> saved fallback
-        assert captured["http_port"] == 8081  # not overridden -> stored ptz value
-    finally:
-        _restore_cameras_config(original)
-
-
-def test_ir_state_unknown_camera_without_host_is_400():
-    class _EmptyBody:
-        async def json(self):
-            return {}
-
-    with pytest.raises(HTTPException) as excinfo:
-        asyncio.run(cameras_router.check_camera_ir_state("brand-new-camera", _EmptyBody()))
-    assert excinfo.value.status_code == 400
-
-
-def test_ir_state_probe_failure_returns_sanitized_detail(monkeypatch):
-    """A failed probe must surface the sanitized ONVIF message, not just
-    the bare exception class name (the UI showed a useless 'OSError').
-
-    ``ptz._soap`` scrubs credentials before raising, so the detail is safe
-    to return to the client and to store in the profile status.
-    """
-
-    def failing_probe(host, http_port, username, password):
-        raise OSError(
-            "ONVIF HTTP 401 (url=http://192.0.2.50:8080/onvif/media_service): Unauthorized"
-        )
-
-    monkeypatch.setattr(cameras_router, "probe_onvif_day_night", failing_probe)
-
-    class _FakeRequestWithBody(_FakeRequest):
-        async def json(self):
-            return {"host": "192.0.2.50", "http_port": 8080}
-
-    result = asyncio.run(
-        cameras_router.check_camera_ir_state("brand-new-camera", _FakeRequestWithBody())
-    )
-    expected = "ONVIF HTTP 401 (url=http://192.0.2.50:8080/onvif/media_service): Unauthorized"
-    assert result["supported"] is False
-    assert result["state"] is None
-    assert result["error"] == expected  # detail, not the 'OSError' class name
-    assert result["profile_status"]["ir_error"] == expected
-
-
-def test_ir_state_probe_failure_falls_back_to_class_name(monkeypatch):
-    """An exception with an empty message still reports something useful."""
-
-    def failing_probe(host, http_port, username, password):
-        raise ValueError
-
-    monkeypatch.setattr(cameras_router, "probe_onvif_day_night", failing_probe)
-
-    class _FakeRequestWithBody(_FakeRequest):
-        async def json(self):
-            return {"host": "192.0.2.51"}
-
-    result = asyncio.run(
-        cameras_router.check_camera_ir_state("brand-new-camera", _FakeRequestWithBody())
-    )
-    assert result["supported"] is False
-    assert result["error"] == "ValueError"

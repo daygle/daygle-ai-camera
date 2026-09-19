@@ -25,8 +25,16 @@ test('cat profile shortcut is removed while reusable presets remain', () => {
 
 test('camera table exposes day and night profiles and editor can collapse', () => {
   assert.match(source, /camera-profile-pill/);
+  assert.match(source, /Solar \(daily sunrise\/sunset\)/);
+  assert.match(source, /profiles\.source === 'solar' \? 'Solar'/);
+  assert.match(source, /cameraProfilePresets\.find/);
+  assert.match(source, /camera-profile-preset/);
+  assert.match(source, /activeProfile\.charAt\(0\)\.toUpperCase\(\)/);
+  assert.doesNotMatch(source, /Check IR State Now|ir-check-btn|\/ir-state/);
   assert.match(source, /renderCameraSortHeader\('Status', 'status'\) \+\s*'<th scope="col">Profiles<\/th>'/);
   assert.match(source, /cam-edit-collapse-btn/);
+  assert.match(source, /ICONS\.chevronUp/);
+  assert.doesNotMatch(source, /title="Collapse camera settings">Collapse<\/button>/);
   assert.match(source, /closeAllEditForms/);
 });
 

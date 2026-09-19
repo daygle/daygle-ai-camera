@@ -30,7 +30,6 @@ from app.ptz import send_ptz_command, VALID_COMMANDS as PTZ_VALID_COMMANDS
 from app.detection_state import clear_camera_motion, mark_camera_motion
 from app.profile_automation import (
     profile_status,
-    record_ir_probe,
     suggest_solar_schedule,
 )
 from app.profile_presets import (
@@ -40,7 +39,6 @@ from app.profile_presets import (
     list_presets,
     normalize_preset,
 )
-from app.ptz import probe_onvif_day_night
 from app.request_helpers import write_audit_log
 
 router = APIRouter()
@@ -214,77 +212,6 @@ def delete_camera_profile_preset(preset_id: str, request: Request, db=Depends(ge
     write_audit_log(request, db, 'delete', 'settings.camera_profile_preset', preset_id)
     return {'deleted': preset_id}
 
-
-@router.post('/api/cameras/{camera_id}/ir-state')
-async def check_camera_ir_state(camera_id: str, request: Request):
-    """Check ONVIF IrCutFilter immediately without changing the profile.
-
-    The JSON body may carry connection overrides (``host``, ``http_port``,
-    ``username``, ``password``) so the Cameras page can check an unsaved
-    camera straight from the edit form: an unknown ``camera_id`` is fine as
-    long as a host is supplied, and each supplied override wins over the
-    stored value (an empty/absent password falls back to the saved one, so a
-    retyped-once form does not wipe credentials for the probe).
-    """
-    require_admin(request)
-    try:
-        payload = await request.json()
-    except ValueError:
-        payload = {}
-    overrides = payload if isinstance(payload, dict) else {}
-    try:
-        cam = get_camera_config(camera_id)
-    except HTTPException:
-        # Unknown id (e.g. a new camera not yet saved): the request body must
-        # carry the connection details instead.
-        cam = {}
-    host = str(overrides.get('host') or '').strip() or (cam.get('host') or '')
-    if not host and cam.get('stream_url'):
-        host = urlsplit(cam['stream_url']).hostname or ''
-    if not host:
-        raise HTTPException(status_code=400, detail='Provide a camera host (or save the camera) to check ONVIF IR status.')
-    ptz = cam.get('ptz') if isinstance(cam.get('ptz'), dict) else {}
-    http_port = int(
-        overrides.get('http_port')
-        or ptz.get('http_port')
-        or cam.get('http_port')
-        or 80
-    )
-    username = str(overrides.get('username') or '').strip() or str(cam.get('username') or '')
-    password = str(overrides.get('password') or '').strip() or str(cam.get('password') or '')
-    try:
-        ir_state = await run_in_threadpool(
-            probe_onvif_day_night,
-            host,
-            http_port,
-            username,
-            password,
-        )
-    except Exception as exc:
-        # ``probe_onvif_day_night`` already scrubs credentials from every
-        # message it raises (see ``ptz._soap``), so the detail is safe to
-        # surface; fall back to the exception class name when it is empty.
-        detail = str(exc).strip() or type(exc).__name__
-        logger.warning(
-            'IR state probe for camera %s (%s:%s) failed: %s',
-            camera_id, host, http_port, detail,
-        )
-        status = record_ir_probe(camera_id, None, detail)
-        return {
-            'camera_id': camera_id,
-            'state': None,
-            'supported': False,
-            'error': detail,
-            'profile_status': status,
-        }
-    status = record_ir_probe(camera_id, ir_state)
-    return {
-        'camera_id': camera_id,
-        'state': ir_state,
-        'supported': ir_state in {'day', 'night'},
-        'error': None if ir_state in {'day', 'night'} else 'Camera did not report a usable IrCutFilter.',
-        'profile_status': status,
-    }
 
 
 @router.get('/api/cameras/{camera_id}/profile-schedule-suggestion')

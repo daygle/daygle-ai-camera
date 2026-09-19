@@ -631,6 +631,38 @@ def test_validate_camera_settings_persists_profile_automation_keys(monkeypatch, 
     assert out_full['detection_profiles']['night']['motion_pixel_threshold'] == 110
 
 
+def test_validate_camera_settings_auto_enables_solar_with_location(monkeypatch, pv):
+    from app.utils import normalize_bool_setting as real_bool
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok',
+                                    normalize_bool_setting=real_bool)
+    out = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'timezone': 'Australia/Sydney',
+        'latitude': -33.8688,
+        'longitude': 151.2093,
+        'detection_profiles': {
+            'source': 'manual',
+            'preset_id': 'cat-small-animal',
+        },
+    })
+    assert out['detection_profiles']['source'] == 'solar'
+    assert out['detection_profiles']['preset_id'] == 'cat-small-animal'
+
+
+def test_validate_camera_settings_leaves_solar_when_location_is_cleared(monkeypatch, pv):
+    from app.utils import normalize_bool_setting as real_bool
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok',
+                                    normalize_bool_setting=real_bool)
+    out = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'timezone': 'UTC',
+        'latitude': None,
+        'longitude': None,
+        'detection_profiles': {'source': 'solar'},
+    })
+    assert out['detection_profiles']['source'] == 'manual'
+
+
 def test_validate_camera_settings_migrates_legacy_motion_into_both_profiles(monkeypatch, pv):
     _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')
     out = pv.validate_camera_settings({

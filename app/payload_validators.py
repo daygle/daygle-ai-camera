@@ -444,12 +444,25 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
         raw_profiles = dict(current_profiles)
         raw_profiles.update({
             key: value for key, value in payload_profiles.items()
-            if key in {'active', 'source', 'day_start', 'night_start'}
+            if key in {'active', 'source', 'day_start', 'night_start', 'preset_id'}
         })
         for _profile_mode in ('day', 'night'):
             if isinstance(payload_profiles.get(_profile_mode), dict):
                 existing_mode = current_profiles.get(_profile_mode) if isinstance(current_profiles.get(_profile_mode), dict) else {}
                 raw_profiles[_profile_mode] = {**existing_mode, **payload_profiles[_profile_mode]}
+    # Cameras with a complete location should use the timezone-aware solar
+    # schedule automatically. If the location is later cleared, leave Solar
+    # mode rather than repeatedly failing to calculate sunrise/sunset.
+    has_solar_location = (
+        updated.get('latitude') is not None
+        and updated.get('longitude') is not None
+        and bool(updated.get('timezone'))
+    )
+    current_source = str(raw_profiles.get('source') or '').strip().lower()
+    if has_solar_location:
+        raw_profiles['source'] = 'solar'
+    elif current_source == 'solar':
+        raw_profiles['source'] = 'manual'
     updated['detection_profiles'] = normalize_camera_detection_profiles(raw_profiles, {**current, **updated})
     apply_active_camera_detection_profile(updated)
     return updated

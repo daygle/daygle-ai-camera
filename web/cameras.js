@@ -45,9 +45,9 @@ const PROFILE_MOTION_FIELDS = [
 ];
 const PROFILE_FIELDS = PROFILE_PERFORMANCE_FIELDS.concat(PROFILE_MOTION_FIELDS);
 
-function profilePresetOptionsHtml() {
+function profilePresetOptionsHtml(selectedId) {
   return cameraProfilePresets.map(function(preset) {
-    return '<option value="' + escapeHtml(preset.id) + '">' + escapeHtml(preset.name) + (preset.builtin ? ' (Built-in)' : '') + '</option>';
+    return '<option value="' + escapeHtml(preset.id) + '"' + (preset.id === selectedId ? ' selected' : '') + '>' + escapeHtml(preset.name) + (preset.builtin ? ' (Built-in)' : '') + '</option>';
   }).join('');
 }
 
@@ -69,7 +69,7 @@ function buildEditFormHtml(camera, index) {
     '<div class="cam-edit-head">' +
       '<span class="cam-edit-head-title">Editing <strong>' + escapeHtml(camera.name || camera.id || ('Camera ' + (index + 1))) + '</strong></span>' +
       (camera.id ? '<span class="cam-edit-head-id">ID · ' + escapeHtml(camera.id) + '</span>' : '') +
-      '<button type="button" class="secondary cam-edit-collapse-btn" data-index="' + htmlAttr(index) + '" title="Collapse camera settings">Collapse</button>' +
+      '<button type="button" class="secondary cam-edit-collapse-btn" data-index="' + htmlAttr(index) + '" title="Collapse camera settings" aria-label="Collapse camera settings">' + ICONS.chevronUp + '</button>' +
     '</div>' +
     '<div class="modal-tabs" role="tablist">' +
       '<button class="modal-tab active" data-tab="connection" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="true">Connection</button>' +
@@ -202,6 +202,7 @@ function buildEditFormHtml(camera, index) {
             '<label><span>Automatic Selection</span><select name="profile_source">' +
               '<option value="manual"' + ((camera.detection_profiles?.source || 'manual') === 'manual' ? ' selected' : '') + '>Manual</option>' +
               '<option value="schedule"' + (camera.detection_profiles?.source === 'schedule' ? ' selected' : '') + '>Schedule</option>' +
+              '<option value="solar"' + (camera.detection_profiles?.source === 'solar' ? ' selected' : '') + '>Solar (daily sunrise/sunset)</option>' +
               '<option value="onvif"' + (camera.detection_profiles?.source === 'onvif' ? ' selected' : '') + '>ONVIF IR state (fallback schedule)</option>' +
             '</select></label>' +
             '<label><span>Day Starts</span><input name="profile_day_start" type="time" value="' + escapeHtml(camera.detection_profiles?.day_start || '07:00') + '" /></label>' +
@@ -212,17 +213,16 @@ function buildEditFormHtml(camera, index) {
           '</div>' +
           '<div class="button-row">' +
             '<button type="button" class="secondary profile-suggest-btn">Suggest Sunrise/Sunset</button>' +
-            '<button type="button" class="secondary ir-check-btn">Check IR State Now</button>' +
             '<span class="form-help muted profile-action-result" aria-live="polite"></span>' +
           '</div>' +
-          '<p class="form-help muted">Choose which profile is active now. The motion overrides below are edited for the selected profile. Existing cameras inherit their legacy settings into both profiles.</p>' +
+          '<p class="form-help muted">Choose which profile is active now. Solar mode refreshes sunrise/sunset times daily using this camera’s coordinates and timezone. The motion overrides below are edited for the selected profile. Existing cameras inherit their legacy settings into both profiles.</p>' +
           '<p class="form-help muted">Runtime: <strong>' + escapeHtml(camera.profile_status?.active || camera.detection_profiles?.active || 'day') + '</strong> (' + escapeHtml(camera.profile_status?.selected_by || camera.detection_profiles?.source || 'manual') + '). ONVIF IR detection falls back to the schedule when unsupported.</p>' +
         '</div>' +
         '<div class="cam-edit-section">' +
           '<h4 class="cam-edit-section-title">Day/Night Performance</h4>' +
           '<p class="form-help muted">These settings override Live Performance for this camera and profile. Leave values at their defaults unless this camera needs different day/night resource usage.</p>' +
           '<div class="button-row profile-preset-row">' +
-            '<label><span>Preset</span><select name="profile_preset"><option value="">Choose a preset…</option>' + profilePresetOptionsHtml() + '</select></label>' +
+            '<label><span>Preset</span><select name="profile_preset"><option value="">Choose a preset…</option>' + profilePresetOptionsHtml(camera.detection_profiles?.preset_id) + '</select></label>' +
             '<button type="button" class="secondary profile-apply-preset-btn">Apply Preset</button>' +
             '<button type="button" class="secondary profile-save-preset-btn">Save Current as Preset</button>' +
             '<button type="button" class="secondary profile-update-preset-btn" disabled>Update Preset</button>' +
@@ -395,23 +395,9 @@ function wireEditFormHandlers(index) {
   var savePresetButton = form.querySelector('.profile-save-preset-btn');
   var updatePresetButton = form.querySelector('.profile-update-preset-btn');
   var deletePresetButton = form.querySelector('.profile-delete-preset-btn');
-  var irCheckButton = form.querySelector('.ir-check-btn');
   var profileResult = form.querySelector('.profile-action-result');
-  // The suggestion and IR checks work on UNSAVED cameras too: both endpoints
-  // accept the form's current values as overrides, so newly typed coordinates
-  // or host/credentials are used without saving first.
-  function formConnectionOverrides() {
-    var overrides = {};
-    var host = (form.querySelector('[name="host"]')?.value || '').trim();
-    if (host) overrides.host = host;
-    var httpPort = parseInt((form.querySelector('[name="ptz_http_port"]')?.value || '80'), 10);
-    if (Number.isFinite(httpPort)) overrides.http_port = httpPort;
-    var username = (form.querySelector('[name="username"]')?.value || '').trim();
-    if (username) overrides.username = username;
-    var password = form.querySelector('[name="password"]')?.value || '';
-    if (password) overrides.password = password;
-    return overrides;
-  }
+  // The suggestion endpoint accepts the form's current location values as
+  // overrides, so newly typed coordinates can be used without saving first.
   function formLocationOverrides() {
     var overrides = {};
     var latitude = parseFloat(form.querySelector('[name="latitude"]')?.value);
@@ -454,6 +440,7 @@ function wireEditFormHandlers(index) {
     if (deletePresetButton) deletePresetButton.disabled = !editable;
   }
   function applyPendingProfiles(profiles, message) {
+    form.__selectedPresetId = profiles.id || null;
     form.__suggestedProfiles = {
       day: { ...(profiles.day || {}) },
       night: { ...(profiles.night || {}) },
@@ -468,7 +455,10 @@ function wireEditFormHandlers(index) {
     });
     if (profileResult) profileResult.textContent = message;
   }
-  if (presetSelect) presetSelect.addEventListener('change', syncPresetButtons);
+  if (presetSelect) presetSelect.addEventListener('change', function() {
+    form.__selectedPresetId = presetSelect.value || null;
+    syncPresetButtons();
+  });
   if (applyPresetButton) applyPresetButton.addEventListener('click', function() {
     var preset = selectedPreset();
     if (!preset) {
@@ -486,6 +476,7 @@ function wireEditFormHandlers(index) {
       var current = collectFormData(form).detection_profiles;
       var created = await api('/api/camera-profile-presets', { method: 'POST', body: JSON.stringify({ name: name.trim(), day: current.day, night: current.night }) });
       cameraProfilePresets.push(created);
+      form.__selectedPresetId = created.id;
       if (presetSelect) { presetSelect.insertAdjacentHTML('beforeend', '<option value="' + escapeHtml(created.id) + '">' + escapeHtml(created.name) + '</option>'); presetSelect.value = created.id; }
       syncPresetButtons();
       if (profileResult) profileResult.textContent = 'Preset saved: ' + created.name + '.';
@@ -526,21 +517,6 @@ function wireEditFormHandlers(index) {
   });
   syncPresetButtons();
 
-  if (irCheckButton) {
-    irCheckButton.addEventListener('click', async function() {
-      irCheckButton.disabled = true;
-      if (profileResult) profileResult.textContent = 'Checking ONVIF IR state…';
-      try {
-        var cameraId = form.querySelector('[name="id"]')?.value || cameras[index]?.id;
-        var result = await api('/api/cameras/' + encodeURIComponent(cameraId) + '/ir-state', { method: 'POST', body: JSON.stringify(formConnectionOverrides()) });
-        if (profileResult) profileResult.textContent = result.supported ? ('Camera reports ' + result.state + '.') : (result.error || 'IR state unavailable; schedule fallback remains active.');
-      } catch (err) {
-        if (!window.daygleAuth?.redirecting && profileResult) profileResult.textContent = err.message || 'IR check failed.';
-      } finally {
-        irCheckButton.disabled = false;
-      }
-    });
-  }
 
   // Form submit
   form.addEventListener('submit', async function(e) {
@@ -663,7 +639,8 @@ function collectFormData(form) {
   profileValue('motion_frame_height', profileNumber('motion_frame_height', function(value) { return parseInt(value, 10); }));
   var profiles = {
     active: activeProfile === 'night' ? 'night' : 'day',
-    source: ['manual', 'schedule', 'onvif'].includes(getName('profile_source')) ? getName('profile_source') : 'manual',
+    source: ['manual', 'schedule', 'solar', 'onvif'].includes(getName('profile_source')) ? getName('profile_source') : 'manual',
+    preset_id: form.__selectedPresetId || existingProfiles.preset_id || null,
     day_start: getName('profile_day_start') || '07:00',
     night_start: getName('profile_night_start') || '19:00',
     day: { ...(existingProfiles.day || {}), ...(form.__suggestedProfiles?.day || {}) },
@@ -753,11 +730,12 @@ function renderCameraRow(camera, index) {
   var ptzEnabled = camera.ptz?.enabled === true;
   var profiles = camera.detection_profiles || {};
   var activeProfile = profiles.active === 'night' ? 'night' : 'day';
-  var profileSource = profiles.source === 'schedule' ? 'Scheduled' : profiles.source === 'onvif' ? 'ONVIF' : 'Manual';
+  var profileSource = profiles.source === 'schedule' ? 'Scheduled' : profiles.source === 'solar' ? 'Solar' : profiles.source === 'onvif' ? 'ONVIF' : 'Manual';
+  var preset = cameraProfilePresets.find(function(item) { return item.id === profiles.preset_id; });
   var profilesHtml = '<div class="camera-profile-pills">' +
     '<span class="camera-profile-pill ' + (activeProfile === 'day' ? 'is-active' : '') + '">Day</span>' +
     '<span class="camera-profile-pill ' + (activeProfile === 'night' ? 'is-active' : '') + '">Night</span>' +
-    '</div><span class="camera-profile-source">' + escapeHtml(activeProfile + ' · ' + profileSource) + '</span>';
+    '</div><span class="camera-profile-source">' + escapeHtml((activeProfile.charAt(0).toUpperCase() + activeProfile.slice(1)) + ' · ' + profileSource) + '</span>' + (preset ? '<span class="camera-profile-preset">' + escapeHtml(preset.name) + '</span>' : '');
 
   var rowHtml = '<tr data-camera-index="' + index + '" class="' + (isEnabled ? '' : 'camera-row-disabled') + '">';
   rowHtml += '<td class="cell-camera">';

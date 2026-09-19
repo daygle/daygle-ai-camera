@@ -123,6 +123,42 @@ def test_solar_schedule_rejects_missing_coordinates():
         pa.suggest_solar_schedule(None, 151.2, 'UTC')
 
 
+def test_solar_source_refreshes_saved_boundaries_and_active_profile(monkeypatch):
+    camera = {
+        'id': 'solar-cam',
+        'latitude': -33.8688,
+        'longitude': 151.2093,
+        'timezone': 'Australia/Sydney',
+        'detection_profiles': {
+            'active': 'night', 'source': 'solar',
+            'day_start': '06:00', 'night_start': '18:00',
+            'day': {'motion_pixel_threshold': 30},
+            'night': {'motion_pixel_threshold': 120},
+        },
+        'motion_pixel_threshold': 120,
+    }
+    original_configs = state.cameras_config
+    original_database = state.database
+    state.cameras_config = [camera]
+    database = _CaptureDatabase()
+    state.database = database
+    monkeypatch.setattr(pa, 'suggest_solar_schedule', lambda *args: {
+        'day_start': '05:42', 'night_start': '19:18',
+    })
+    monkeypatch.setattr(pa, 'scheduled_profile', lambda profiles, now=None, timezone_name=None: 'day')
+    try:
+        pa.poll_camera_profiles()
+        persisted = database.saved[1][0]
+        assert persisted['detection_profiles']['source'] == 'solar'
+        assert persisted['detection_profiles']['day_start'] == '05:42'
+        assert persisted['detection_profiles']['night_start'] == '19:18'
+        assert persisted['detection_profiles']['active'] == 'day'
+    finally:
+        state.cameras_config = original_configs
+        state.database = original_database
+        state._camera_profile_status.pop('solar-cam', None)
+
+
 def test_scheduled_profile_uses_day_and_night_boundaries():
     profiles = {'day_start': '07:00', 'night_start': '19:00'}
     assert pa.scheduled_profile(profiles, now=datetime(2026, 9, 19, 6, 59)) == 'night'
