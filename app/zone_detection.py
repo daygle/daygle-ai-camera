@@ -967,6 +967,22 @@ def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame:
             continue
         if box_width <= 0 or box_height <= 0:
             continue
+        is_fully_normalized = (
+            max(abs(box_x), abs(box_y), box_width, box_height) <= 1
+            and 0 <= box_x <= 1
+            and 0 <= box_y <= 1
+            and box_x + box_width <= 1
+            and box_y + box_height <= 1
+        )
+        confidence_is_safe = True
+        if 'confidence' in detection:
+            try:
+                confidence_is_safe = math.isfinite(float(detection.get('confidence') or 0))
+            except (TypeError, ValueError):
+                confidence_is_safe = False
+        if is_fully_normalized and confidence_is_safe:
+            normalized.append(detection)
+            continue
         if max(abs(box_x), abs(box_y), box_width, box_height) > 1:
             box_x /= width
             box_y /= height
