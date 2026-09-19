@@ -22,7 +22,8 @@ def test_builtin_presets_have_day_and_night_values():
     assert cat is not None
     assert cat['builtin'] is True
     assert cat['day']['object_detection_region_boost'] is True
-    assert cat['night']['object_detection_tiling'] == '2x2'
+    assert cat['day']['object_detection_tiling'] == '2x2'
+    assert cat['night']['object_detection_tiling'] == '3x3'
     assert cat['day']['detection_confirm_frames'] == 2
     assert cat['day']['detection_confirm_window'] == 3
     assert cat['day']['detection_confirm_iou'] == 0.1

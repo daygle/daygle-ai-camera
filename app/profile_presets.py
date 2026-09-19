@@ -26,7 +26,8 @@ BUILTIN_PRESETS: tuple[dict[str, Any], ...] = (
             'detection_confirm_iou': 0.1,
             'always_run_object_detection': True,
             'object_detection_region_boost': True,
-            'object_detection_tiling': 'off',
+            # Small cats in a deep driveway can be lost by the full-frame pass.
+            'object_detection_tiling': '2x2',
             'periodic_scan_interval_seconds': 15,
             'motion_frame_width': 320,
             'motion_frame_height': 240,
@@ -47,7 +48,9 @@ BUILTIN_PRESETS: tuple[dict[str, Any], ...] = (
             'detection_confirm_iou': 0.05,
             'always_run_object_detection': True,
             'object_detection_region_boost': True,
-            'object_detection_tiling': '2x2',
+            # IR frames make distant cats especially small; 3x3 keeps more
+            # pixels on the subject than 2x2 without changing daytime CPU cost.
+            'object_detection_tiling': '3x3',
             'periodic_scan_interval_seconds': 10,
             'motion_frame_width': 320,
             'motion_frame_height': 240,
