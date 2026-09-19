@@ -1,6 +1,4 @@
-// Regression tests for the Cameras → Advanced → Suggest Cat Profiles action.
-// The action must prepare both profiles, preserve the user's automatic-selection
-// choice, and only persist when the camera form is saved.
+// Regression tests for the Cameras page profile controls.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,32 +9,25 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(path.resolve(here, '../web/cameras.js'), 'utf8');
 
-test('cat suggestions define distinct day and night profiles', () => {
+test('camera profiles remain distinct day and night values', () => {
   assert.doesNotMatch(source, /const CAT_PROFILE_SUGGESTIONS = \{/);
   assert.match(source, /day: \{/);
   assert.match(source, /night: \{/);
-  // The values now come from the backend-owned preset, rather than a second
-  // CAT_PROFILE_SUGGESTIONS constant in camera code.
-  assert.match(source, /id === 'cat-small-animal'/);
-  assert.match(source, /applyPendingProfiles\(catPreset/);
+  assert.match(source, /applyPendingProfiles\(preset/);
 });
 
-test('cat suggestion action is reviewable and non-destructive before Save', () => {
-  assert.match(source, /cat-profile-suggest-btn/);
-  assert.match(source, /Nothing is saved until you save the camera/);
-  assert.match(source, /form\.__suggestedProfiles = \{/);
-  assert.match(source, /id === 'cat-small-animal'/);
-  assert.match(source, /applyPendingProfiles\(catPreset/);
-  assert.match(source, /profile_day_start.*suggestion\.day_start/);
-  assert.match(source, /profile_night_start.*suggestion\.night_start/);
-  assert.match(source, /profile-schedule-suggestion/);
-  assert.match(source, /\.\.\.\(form\.__suggestedProfiles\?\.day \|\| \{\}\)/);
-  assert.match(source, /\.\.\.\(form\.__suggestedProfiles\?\.night \|\| \{\}\)/);
+test('cat profile shortcut is removed while reusable presets remain', () => {
+  assert.doesNotMatch(source, /cat-profile-suggest-btn/);
+  assert.doesNotMatch(source, /Suggest Cat Profiles/);
+  assert.match(source, /profile-apply-preset-btn/);
+  assert.match(source, /profile-save-preset-btn/);
 });
 
-test('switching profiles displays pending cat suggestions', () => {
-  assert.match(source, /form\.__suggestedProfiles\?\.\[mode\]/);
-  assert.match(source, /suggested && Object\.prototype\.hasOwnProperty\.call\(suggested, key\)/);
+test('camera table exposes day and night profiles and editor can collapse', () => {
+  assert.match(source, /camera-profile-pill/);
+  assert.match(source, /renderCameraSortHeader\('Status', 'status'\) \+\s*'<th scope="col">Profiles<\/th>'/);
+  assert.match(source, /cam-edit-collapse-btn/);
+  assert.match(source, /closeAllEditForms/);
 });
 
 test('camera editor exposes reusable preset lifecycle actions', () => {

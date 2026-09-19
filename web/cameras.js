@@ -69,6 +69,7 @@ function buildEditFormHtml(camera, index) {
     '<div class="cam-edit-head">' +
       '<span class="cam-edit-head-title">Editing <strong>' + escapeHtml(camera.name || camera.id || ('Camera ' + (index + 1))) + '</strong></span>' +
       (camera.id ? '<span class="cam-edit-head-id">ID · ' + escapeHtml(camera.id) + '</span>' : '') +
+      '<button type="button" class="secondary cam-edit-collapse-btn" data-index="' + htmlAttr(index) + '" title="Collapse camera settings">Collapse</button>' +
     '</div>' +
     '<div class="modal-tabs" role="tablist">' +
       '<button class="modal-tab active" data-tab="connection" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="true">Connection</button>' +
@@ -81,6 +82,17 @@ function buildEditFormHtml(camera, index) {
 
       // Connection tab
       '<div class="modal-tab-panel" data-panel="connection">' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Status</h4>' +
+          '<div class="form-grid">' +
+            '<label class="full-width"><span>Camera Enabled</span>' +
+              '<select name="enabled">' +
+                '<option value="true"' + (camera.enabled !== false ? ' selected' : '') + '>Enabled</option>' +
+                '<option value="false"' + (camera.enabled === false ? ' selected' : '') + '>Disabled</option>' +
+              '</select>' +
+            '</label>' +
+          '</div>' +
+        '</div>' +
         '<div class="cam-edit-section">' +
           '<h4 class="cam-edit-section-title">Identity</h4>' +
           '<div class="form-grid">' +
@@ -119,17 +131,6 @@ function buildEditFormHtml(camera, index) {
             '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeHtml(camera.recording_stream_path || '') + '" /></label>' +
           '</div>' +
           '<p class="form-help muted">Recording Stream Path is optional and points to a higher-resolution stream used for recordings. Leave empty to use the primary stream for both detection and recording.</p>' +
-        '</div>' +
-        '<div class="cam-edit-section">' +
-          '<h4 class="cam-edit-section-title">Status</h4>' +
-          '<div class="form-grid">' +
-            '<label class="full-width"><span>Camera Enabled</span>' +
-              '<select name="enabled">' +
-                '<option value="true"' + (camera.enabled !== false ? ' selected' : '') + '>Enabled</option>' +
-                '<option value="false"' + (camera.enabled === false ? ' selected' : '') + '>Disabled</option>' +
-              '</select>' +
-            '</label>' +
-          '</div>' +
         '</div>' +
         '<div class="button-row cam-test-conn-row">' +
           '<button class="btn-info cam-test-conn-btn" data-form="' + htmlAttr(formId) + '" type="button">Test Connection</button>' +
@@ -211,12 +212,10 @@ function buildEditFormHtml(camera, index) {
           '</div>' +
           '<div class="button-row">' +
             '<button type="button" class="secondary profile-suggest-btn">Suggest Sunrise/Sunset</button>' +
-            '<button type="button" class="secondary cat-profile-suggest-btn">Suggest Cat Profiles</button>' +
             '<button type="button" class="secondary ir-check-btn">Check IR State Now</button>' +
             '<span class="form-help muted profile-action-result" aria-live="polite"></span>' +
           '</div>' +
           '<p class="form-help muted">Choose which profile is active now. The motion overrides below are edited for the selected profile. Existing cameras inherit their legacy settings into both profiles.</p>' +
-          '<p class="form-help muted">Suggest Cat Profiles prepares both Day and Night for small, moving subjects. It does not change automatic selection; review and save the camera afterward.</p>' +
           '<p class="form-help muted">Runtime: <strong>' + escapeHtml(camera.profile_status?.active || camera.detection_profiles?.active || 'day') + '</strong> (' + escapeHtml(camera.profile_status?.selected_by || camera.detection_profiles?.source || 'manual') + '). ONVIF IR detection falls back to the schedule when unsupported.</p>' +
         '</div>' +
         '<div class="cam-edit-section">' +
@@ -357,6 +356,9 @@ function wireEditFormHandlers(index) {
     });
   });
 
+  var collapseButton = panel.querySelector('.cam-edit-collapse-btn');
+  if (collapseButton) collapseButton.addEventListener('click', closeAllEditForms);
+
   // Backend toggle
   var backendSelect = form.querySelector('[name="backend"]');
   if (backendSelect) {
@@ -388,7 +390,6 @@ function wireEditFormHandlers(index) {
   }
 
   var suggestButton = form.querySelector('.profile-suggest-btn');
-  var catProfileSuggestButton = form.querySelector('.cat-profile-suggest-btn');
   var presetSelect = form.querySelector('[name="profile_preset"]');
   var applyPresetButton = form.querySelector('.profile-apply-preset-btn');
   var savePresetButton = form.querySelector('.profile-save-preset-btn');
@@ -525,38 +526,6 @@ function wireEditFormHandlers(index) {
   });
   syncPresetButtons();
 
-  if (catProfileSuggestButton) {
-    catProfileSuggestButton.addEventListener('click', async function() {
-      var catPreset = cameraProfilePresets.find(function(preset) { return preset.id === 'cat-small-animal'; });
-      if (!catPreset) {
-        if (profileResult) profileResult.textContent = 'Cat / Small Animal preset is unavailable.';
-        return;
-      }
-      if (!window.confirm('Fill both Day and Night profiles with cat-focused detection settings and suggest sunrise/sunset times? Nothing is saved until you save the camera.')) return;
-      catProfileSuggestButton.disabled = true;
-      applyPendingProfiles(catPreset, 'Cat / Small Animal preset loaded. Calculating sunrise/sunset times…');
-      if (presetSelect) presetSelect.value = catPreset.id;
-      syncPresetButtons();
-      try {
-        var cameraId = form.querySelector('[name="id"]')?.value || cameras[index]?.id;
-        var locationParams = new URLSearchParams();
-        Object.keys(formLocationOverrides()).forEach(function(key) {
-          locationParams.set(key, formLocationOverrides()[key]);
-        });
-        var query = locationParams.toString();
-        var suggestion = await api('/api/cameras/' + encodeURIComponent(cameraId) + '/profile-schedule-suggestion' + (query ? '?' + query : ''));
-        form.querySelector('[name="profile_day_start"]').value = suggestion.day_start;
-        form.querySelector('[name="profile_night_start"]').value = suggestion.night_start;
-        if (profileResult) profileResult.textContent = 'Cat / Small Animal preset and sunrise/sunset times loaded. Review and save the camera.';
-      } catch (_err) {
-        if (!window.daygleAuth?.redirecting && profileResult) {
-          profileResult.textContent = 'Cat / Small Animal preset loaded. Add location details to suggest sunrise/sunset times, then review and save.';
-        }
-      } finally {
-        catProfileSuggestButton.disabled = false;
-      }
-    });
-  }
   if (irCheckButton) {
     irCheckButton.addEventListener('click', async function() {
       irCheckButton.disabled = true;
@@ -782,6 +751,13 @@ function renderCameraRow(camera, index) {
   if (fps && fps.source === 'detected' && Number(fps.detected) > 0) fpsText = Math.round(Number(fps.detected)) + ' FPS Detected';
   else if (fps && fps.source === 'configured' && Number(fps.configured) > 0) fpsText = Math.round(Number(fps.configured)) + ' FPS configured';
   var ptzEnabled = camera.ptz?.enabled === true;
+  var profiles = camera.detection_profiles || {};
+  var activeProfile = profiles.active === 'night' ? 'night' : 'day';
+  var profileSource = profiles.source === 'schedule' ? 'Scheduled' : profiles.source === 'onvif' ? 'ONVIF' : 'Manual';
+  var profilesHtml = '<div class="camera-profile-pills">' +
+    '<span class="camera-profile-pill ' + (activeProfile === 'day' ? 'is-active' : '') + '">Day</span>' +
+    '<span class="camera-profile-pill ' + (activeProfile === 'night' ? 'is-active' : '') + '">Night</span>' +
+    '</div><span class="camera-profile-source">' + escapeHtml(activeProfile + ' · ' + profileSource) + '</span>';
 
   var rowHtml = '<tr data-camera-index="' + index + '" class="' + (isEnabled ? '' : 'camera-row-disabled') + '">';
   rowHtml += '<td class="cell-camera">';
@@ -791,6 +767,7 @@ function renderCameraRow(camera, index) {
   rowHtml += '<td class="cell-connection"><span class="chip camera-backend-chip">' + backend + '</span><span class="camera-endpoint">' + endpoint + '</span></td>';
   rowHtml += '<td class="cell-video"><strong>' + resolution + '</strong><span>' + escapeHtml(fpsText) + '</span></td>';
   rowHtml += '<td class="cell-state">' + healthHtml + '<span class="camera-enabled-label">' + (isEnabled ? 'Enabled' : 'Configuration paused') + '</span></td>';
+  rowHtml += '<td class="cell-profiles">' + profilesHtml + '</td>';
   rowHtml += '<td class="cell-ptz"><span class="camera-feature-pill ' + (ptzEnabled ? 'is-ready' : '') + '">' + (ptzEnabled ? 'PTZ Enabled' : 'Fixed') + '</span></td>';
   rowHtml += '</tr>';
   return rowHtml;
@@ -927,6 +904,7 @@ function renderGrid() {
     renderCameraSortHeader('Connection', 'connection') +
     renderCameraSortHeader('Video', 'video') +
     renderCameraSortHeader('Status', 'status') +
+    '<th scope="col">Profiles</th>' +
     renderCameraSortHeader('PTZ', 'ptz') +
     '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
   gridEl.innerHTML = tableHtml;

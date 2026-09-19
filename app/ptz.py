@@ -172,6 +172,38 @@ def _soap(url: str, body: str, username: str, password: str) -> str:
         raise OSError(f'ONVIF unexpected error (url={safe_url}): {exc.__class__.__name__}') from exc
 
 
+def _soap_soap11(url: str, body: str, username: str, password: str) -> str:
+    """Retry an ONVIF call using SOAP 1.1 for older camera firmware.
+
+    A number of cameras expose ONVIF endpoints but reject SOAP 1.2 with a
+    generic HTTP 400.  Keep the normal SOAP 1.2 request as the first choice,
+    then use this narrower compatibility request when the imaging probe gets
+    that response.
+    """
+    header = _wssec_header(username, password) if username else '<s:Header/>'
+    envelope = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"'
+        ' xmlns:trt="http://www.onvif.org/ver10/media/wsdl"'
+        ' xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl"'
+        ' xmlns:tt="http://www.onvif.org/ver10/schema">'
+        f'{header}<s:Body>{body}</s:Body></s:Envelope>'
+    )
+    req = urllib.request.Request(url, data=envelope.encode('utf-8'), method='POST')
+    req.add_header('Content-Type', 'text/xml; charset=utf-8')
+    req.add_header('SOAPAction', '"http://www.onvif.org/ver20/imaging/wsdl/GetImagingSettings"')
+    safe_url = _safe_url_for_error(url)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.read().decode('utf-8', errors='replace')
+    except urllib.error.HTTPError as exc:
+        body_bytes = exc.read(512) if exc.fp else b''
+        detail = _sanitize_error_body(body_bytes.decode(errors='replace')[:120])
+        raise OSError(f'ONVIF SOAP 1.1 HTTP {exc.code} (url={safe_url}): {detail}') from exc
+    except Exception as exc:
+        raise OSError(f'ONVIF SOAP 1.1 error (url={safe_url}): {exc.__class__.__name__}') from exc
+
+
 def _get_profile_token(host: str, http_port: int, username: str, password: str) -> str:
     key = (host, http_port)
     now = time.monotonic()
@@ -227,13 +259,20 @@ def probe_onvif_day_night(
     closed to ``None`` so the caller can use its schedule fallback.
     """
     token = _get_video_source_token(host, http_port, username, password)
-    response = _soap(
-        f'http://{host}:{http_port}/onvif/imaging_service',
+    imaging_url = f'http://{host}:{http_port}/onvif/imaging_service'
+    imaging_body = (
         '<timg:GetImagingSettings>'
         f'<timg:VideoSourceToken>{_xml_escape(token)}</timg:VideoSourceToken>'
-        '</timg:GetImagingSettings>',
-        username, password,
+        '</timg:GetImagingSettings>'
     )
+    try:
+        response = _soap(imaging_url, imaging_body, username, password)
+    except OSError as exc:
+        # Older ONVIF implementations commonly reject the SOAP 1.2 content
+        # type with HTTP 400 even though the same operation works as SOAP 1.1.
+        if 'ONVIF HTTP 400' not in str(exc):
+            raise
+        response = _soap_soap11(imaging_url, imaging_body, username, password)
     match = re.search(r'<(?:[^:>]+:)?IrCutFilter>([^<]+)</', response, re.IGNORECASE)
     if match is None:
         return None

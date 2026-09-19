@@ -2401,6 +2401,13 @@ tr.drag-over {
   letter-spacing: .05em;
   color: var(--muted);
 }
+.cam-edit-collapse-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 8px 11px;
+  border-radius: 10px;
+  font-size: 11px;
+}
 
 /* Camera editor: grouped sections with labels + dividers */
 .cam-edit-section {
@@ -2540,6 +2547,7 @@ tr.drag-over {
 .cameras-table .cell-connection { min-width: 230px; }
 .cameras-table .cell-video { min-width: 160px; }
 .cameras-table .cell-state { min-width: 150px; }
+.cameras-table .cell-profiles { min-width: 150px; }
 .cameras-table .cell-ptz { min-width: 110px; }
 .cameras-table .cell-connection,
 .cameras-table .cell-video,
@@ -2586,6 +2594,28 @@ tr.drag-over {
 .camera-status-disabled { color: var(--muted); }
 .camera-status-checking { color: #f8c55d; border-color: rgba(248,197,93,.28); background: rgba(248,197,93,.07); }
 .camera-feature-pill.is-ready { color: var(--accent); border-color: rgba(71,214,255,.3); background: rgba(71,214,255,.08); }
+.camera-profile-pills { display: flex; gap: 5px; flex-wrap: wrap; }
+.camera-profile-pill {
+  display: inline-flex;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(255,255,255,.035);
+  font-size: 10px;
+  font-weight: 800;
+}
+.camera-profile-pill.is-active {
+  color: var(--accent);
+  border-color: rgba(71,214,255,.3);
+  background: rgba(71,214,255,.08);
+}
+.camera-profile-source {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
 .cameras-table .cell-center {
   text-align: center;
 }
