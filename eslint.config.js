@@ -103,9 +103,12 @@ const WEB_SHARED_GLOBALS = {
 
   // web/overlay.js - canvas overlay helpers (recordings/timeline playback).
   drawDetectionBoxesOnCanvas: 'readonly',
+  filterObjectPriorityDetections: 'readonly',
   projectDetections: 'readonly',
   resizeOverlayCanvas: 'readonly',
-  sampleTrackAtTime: 'readonly',// web/live.js - live-view page frame: shared element handles and page
+  sampleTrackAtTime: 'readonly',
+
+  // web/live.js - live-view page frame: shared element handles and page
 // state; page scripts loaded after live.js reference these. The four mutable
 // page-state names are 'writable' (declared with `let` in their defining
 // script and reassigned by consumer scripts).
