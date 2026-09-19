@@ -434,14 +434,20 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
 
     # Manual day/night profiles are additive to the legacy flat overrides. A
     # partial profile update merges into the stored profile so older clients can
-    # continue sending only the fields they know about.
+    # continue sending only the fields they know about. The automation keys
+    # (active/source/day_start/night_start) pass through the same merge: the
+    # normalizer below validates them, so dropping them here would silently
+    # revert an 'Automatic Selection' change to 'manual' with default times.
     current_profiles = current.get('detection_profiles') if isinstance(current.get('detection_profiles'), dict) else {}
     payload_profiles = payload.get('detection_profiles') if isinstance(payload.get('detection_profiles'), dict) else None
     if payload_profiles is None:
         raw_profiles = current_profiles
     else:
         raw_profiles = dict(current_profiles)
-        raw_profiles.update({key: value for key, value in payload_profiles.items() if key == 'active'})
+        raw_profiles.update({
+            key: value for key, value in payload_profiles.items()
+            if key in {'active', 'source', 'day_start', 'night_start'}
+        })
         for _profile_mode in ('day', 'night'):
             if isinstance(payload_profiles.get(_profile_mode), dict):
                 existing_mode = current_profiles.get(_profile_mode) if isinstance(current_profiles.get(_profile_mode), dict) else {}

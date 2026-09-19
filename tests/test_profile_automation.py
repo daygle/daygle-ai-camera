@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+
+import pytest
 
 import app.profile_automation as pa
 import app.ptz as ptz
@@ -54,6 +56,47 @@ def test_effective_camera_live_settings_overlays_active_profile():
     assert settings['motion_pixel_threshold'] == 70
 
 
+def _zone_available(name: str) -> bool:
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(name)
+        return True
+    except Exception:  # Windows hosts may lack the optional tzdata package
+        return False
+
+
+def test_solar_schedule_matches_noaa_reference_times():
+    """London solstice boundaries (NOAA ground truth, civil zenith 90.833).
+
+    Regression for the missing right-ascension quadrant adjustment: without
+    it the June day window collapsed to ~4.7 hours at London's latitude.
+    """
+    june = pa.suggest_solar_schedule(51.5072, -0.1276, 'UTC', day=datetime(2026, 6, 21).date())
+    assert june['day_start'] == '03:42'
+    assert june['night_start'] == '20:21'
+    december = pa.suggest_solar_schedule(51.5072, -0.1276, 'UTC', day=datetime(2026, 12, 21).date())
+    assert december['day_start'] == '08:03'
+    assert december['night_start'] == '15:53'
+
+
+def test_solar_day_window_grows_toward_summer_solstice():
+    """Northern-hemisphere day windows must lengthen into June and shorten
+    into September; guards whole-season regressions without pinning values."""
+    def _day_length(day_: datetime) -> int:
+        suggestion = pa.suggest_solar_schedule(
+            51.5072, -0.1276, 'UTC', day=day_.date(),
+        )
+        def minutes(hhmm: str) -> int:
+            hour, minute = hhmm.split(':', 1)
+            return int(hour) * 60 + int(minute)
+        length = minutes(suggestion['night_start']) - minutes(suggestion['day_start'])
+        return length if length > 0 else length + 1440
+
+    june = _day_length(datetime(2026, 6, 21))
+    assert june > _day_length(datetime(2026, 3, 20))
+    assert june > _day_length(datetime(2026, 9, 23))
+
+
 def test_solar_schedule_suggests_local_times_from_coordinates():
     suggestion = pa.suggest_solar_schedule(
         -33.8688, 151.2093, 'UTC',
@@ -86,6 +129,23 @@ def test_scheduled_profile_handles_overnight_day_window():
     assert pa.scheduled_profile(profiles, now=datetime(2026, 9, 19, 6, 59)) == 'day'
     assert pa.scheduled_profile(profiles, now=datetime(2026, 9, 19, 7, 0)) == 'night'
     assert pa.scheduled_profile(profiles, now=datetime(2026, 9, 19, 12, 0)) == 'night'
+
+
+@pytest.mark.skipif(
+    not _zone_available('Australia/Sydney'),
+    reason='IANA tzdata package not available on this host',
+)
+def test_scheduled_profile_evaluates_in_camera_timezone():
+    profiles = {'day_start': '07:00', 'night_start': '19:00'}
+    # 21:00 UTC is 07:00 next day in Sydney (AEST, UTC+10 in September), so the
+    # camera's wall clock is exactly at day_start while the server clock in UTC
+    # would evaluate the same instant as night.
+    utc_instant = datetime(2026, 9, 19, 21, 0, tzinfo=timezone.utc)
+    assert pa.scheduled_profile(profiles, now=utc_instant, timezone_name='Australia/Sydney') == 'day'
+    assert pa.scheduled_profile(profiles, now=utc_instant, timezone_name='UTC') == 'night'
+    # Unknown/missing zones keep the legacy server-clock behaviour.
+    assert pa.scheduled_profile(profiles, now=utc_instant, timezone_name='Not/A_Zone') == 'night'
+    assert pa.scheduled_profile(profiles, now=utc_instant) == 'night'
 
 
 def test_onvif_imaging_probe_reads_ircut_filter(monkeypatch):
@@ -151,7 +211,7 @@ def test_poll_switches_runtime_profile_without_restarting_camera(monkeypatch):
 
     database = FakeDatabase()
     state.database = database
-    monkeypatch.setattr(pa, 'scheduled_profile', lambda profiles, now=None: 'night')
+    monkeypatch.setattr(pa, 'scheduled_profile', lambda profiles, now=None, timezone_name=None: 'night')
     try:
         pa.poll_camera_profiles()
         assert pa.profile_status('profile-test')['source'] == 'schedule'
