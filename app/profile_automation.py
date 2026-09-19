@@ -231,11 +231,22 @@ def _select_target(camera: dict[str, Any], profiles: dict[str, Any]) -> tuple[st
 
 
 def poll_camera_profiles() -> None:
-    """Apply any due automatic profile changes without restarting streams."""
-    configs = list(_state.cameras_config or effective_cameras_config())
-    changed = False
-    persisted: list[dict[str, Any]] = []
-    for camera in configs:
+    """Apply any due automatic profile changes without restarting streams.
+
+    Structured snapshot -> probe -> remerge -> persist: the config snapshot is
+    taken under ``_cameras_config_write_lock``, the (potentially slow) ONVIF
+    probes run WITHOUT the lock so a stalled camera cannot block camera
+    settings writes, and only the short remerge+persist section re-takes the
+    lock and re-reads live state so a concurrent API edit is never clobbered
+    by a stale whole-list write.
+    """
+    with _state._cameras_config_write_lock:
+        configs = list(_state.cameras_config or effective_cameras_config())
+    # Mutate deep COPIES, never the live list: the remerge step below decides
+    # per-camera whether automation results or a concurrent API edit wins.
+    working = [copy.deepcopy(camera) for camera in configs]
+    changed: dict[str, dict[str, Any]] = {}
+    for camera in working:
         camera_id = str(camera.get('id') or '')
         if not camera_id:
             continue
@@ -251,7 +262,10 @@ def poll_camera_profiles() -> None:
             # Keep the automation metadata authoritative even if a legacy
             # normalizer receives a partially shaped profile object.
             camera['detection_profiles']['active'] = target
-            changed = True
+            changed[camera_id] = {
+                'target': target,
+                'source': str(profiles.get('source') or 'manual'),
+            }
             active = target
             logger.info(
                 'Camera %s switched to %s profile (%s).',
@@ -267,9 +281,42 @@ def poll_camera_profiles() -> None:
             error=error,
             checked_at=datetime.now().isoformat(timespec='seconds'),
         )
-        persisted.append(copy.deepcopy(camera))
 
-    if changed and _state.database is not None:
+    if not changed or _state.database is None:
+        return
+    # Remerge: rebuild the list from LIVE state (a concurrent API edit may
+    # have replaced cameras since the snapshot), splice in only the active-
+    # profile flip per camera, then persist atomically under the write lock.
+    with _state._cameras_config_write_lock:
+        live = list(_state.cameras_config or effective_cameras_config())
+        for camera in live:
+            decision = changed.pop(str(camera.get('id') or ''), None)
+            if decision is None:
+                continue
+            current_profiles = normalize_camera_detection_profiles(
+                camera.get('detection_profiles'), camera,
+            )
+            if str(current_profiles.get('source') or 'manual') != decision['source']:
+                # A concurrent edit changed this camera's automation mode
+                # mid-poll: the operator's action wins, and the (now stale)
+                # automation decision is dropped without touching the camera.
+                # The next poll re-evaluates under the new source.
+                continue
+            # Splice ONLY the active-profile flip onto the live profiles so a
+            # concurrent edit of profile VALUES (thresholds, intervals, ...)
+            # is preserved, not overwritten by the snapshot's copies.
+            current_profiles['active'] = decision['target']
+            camera['detection_profiles'] = current_profiles
+            apply_active_camera_detection_profile(camera)
+        persisted = copy.deepcopy(live)
+        if changed:
+            # Cameras the snapshot had that live state no longer does (removed
+            # by a concurrent API save): drop their automation decisions -- a
+            # deleted camera must not be resurrected by the monitor.
+            logger.info(
+                'Skipping automatic profile persist for %d camera(s) removed during poll.',
+                len(changed),
+            )
         try:
             _state.database.set_setting('cameras', persisted, utc_now())
         except Exception as exc:  # persistence failure must not stop detection

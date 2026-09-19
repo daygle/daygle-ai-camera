@@ -105,6 +105,14 @@ cameras_config: list = []
 camera_config: dict = {}
 camera_instances: dict = {}
 _camera_instances_lock: threading.Lock = threading.Lock()
+# Serializes the read-validate-persist sections of every cameras-config DB
+# writer: the bulk/single settings API handlers and the 30s profile monitor's
+# automation persist. Without it the monitor can persist a stale whole-list
+# snapshot over a concurrent API edit (last writer wins resurrects a reverted
+# edit, or re-adds a camera the API just changed). A plain Lock (not RLock):
+# never hold it while calling apply_cameras_settings, which takes the
+# unrelated _apply_settings_lock internally.
+_cameras_config_write_lock: threading.Lock = threading.Lock()
 _camera_profile_status_lock: threading.Lock = threading.Lock()
 _camera_profile_status: dict = {}
 _camera_profile_monitor_stop: threading.Event = threading.Event()

@@ -270,3 +270,132 @@ def test_poll_passes_camera_timezone_to_schedule_evaluation(monkeypatch):
         state.cameras_config = original_configs
         state.database = original_database
         state._camera_profile_status.pop('tz-poll-test', None)
+
+
+def _schedule_camera(camera_id, **extra):
+    profiles = {
+        'active': 'day', 'source': 'schedule',
+        'day_start': '00:00', 'night_start': '00:01',
+        'day': {'motion_pixel_threshold': 30},
+        'night': {'motion_pixel_threshold': 120},
+    }
+    camera = {'id': camera_id, 'detection_profiles': profiles, 'motion_pixel_threshold': 30}
+    camera.update(extra)
+    return camera
+
+
+class _CaptureDatabase:
+    def __init__(self):
+        self.saved = None
+
+    def set_setting(self, key, value, timestamp):
+        self.saved = (key, value, timestamp)
+
+
+def test_poll_does_not_revert_concurrent_source_edit(monkeypatch):
+    """Race regression: the monitor must not persist its stale snapshot over a
+    concurrent API edit. The API edit lands between the monitor's snapshot and
+    its remerge (simulated by hooking the probe loop) and changes the camera's
+    automation source to manual -- the operator's action must win and the
+    stale flip must be dropped."""
+    camera = _schedule_camera('race-cam', name='Before')
+    original_configs = state.cameras_config
+    original_database = state.database
+    state.cameras_config = [camera]
+    database = _CaptureDatabase()
+    state.database = database
+    monkeypatch.setattr(pa, 'scheduled_profile', lambda profiles, now=None, timezone_name=None: 'night')
+
+    real_update_status = pa._update_status
+
+    def edit_during_probe(camera_id, **values):
+        real_update_status(camera_id, **values)
+        if not edit_during_probe.landed:
+            edit_during_probe.landed = True
+            # Simulate the settings API committing an edit mid-poll: source
+            # flipped to manual and the name changed.
+            camera['name'] = 'After'
+            camera['detection_profiles']['source'] = 'manual'
+
+    edit_during_probe.landed = False
+    monkeypatch.setattr(pa, '_update_status', edit_during_probe)
+    try:
+        pa.poll_camera_profiles()
+        assert edit_during_probe.landed
+        assert database.saved is not None
+        persisted = database.saved[1][0]
+        assert persisted['name'] == 'After'  # edit survived
+        assert persisted['detection_profiles']['source'] == 'manual'  # edit survived
+        assert persisted['detection_profiles']['active'] == 'day'  # stale flip dropped
+    finally:
+        state.cameras_config = original_configs
+        state.database = original_database
+        state._camera_profile_status.pop('race-cam', None)
+
+
+def test_poll_preserves_concurrent_value_edit_and_still_flips(monkeypatch):
+    """A concurrent edit of profile VALUES must survive the remerge while the
+    due active-profile flip still applies (the flip is spliced, not snapshotted)."""
+    camera = _schedule_camera('value-cam')
+    original_configs = state.cameras_config
+    original_database = state.database
+    state.cameras_config = [camera]
+    database = _CaptureDatabase()
+    state.database = database
+    monkeypatch.setattr(pa, 'scheduled_profile', lambda profiles, now=None, timezone_name=None: 'night')
+
+    real_update_status = pa._update_status
+
+    def edit_during_probe(camera_id, **values):
+        real_update_status(camera_id, **values)
+        if not edit_during_probe.landed:
+            edit_during_probe.landed = True
+            # Operator edits a night-profile VALUE mid-poll (source unchanged).
+            camera['detection_profiles']['night']['motion_pixel_threshold'] = 200
+
+    edit_during_probe.landed = False
+    monkeypatch.setattr(pa, '_update_status', edit_during_probe)
+    try:
+        pa.poll_camera_profiles()
+        assert edit_during_probe.landed
+        persisted = database.saved[1][0]
+        assert persisted['detection_profiles']['active'] == 'night'  # flip applied
+        assert persisted['detection_profiles']['night']['motion_pixel_threshold'] == 200  # edit survived
+    finally:
+        state.cameras_config = original_configs
+        state.database = original_database
+        state._camera_profile_status.pop('value-cam', None)
+
+
+def test_poll_does_not_resurrect_camera_removed_during_poll(monkeypatch):
+    """A camera deleted by a concurrent API save during the poll must not be
+    resurrected by the monitor's persist."""
+    camera = _schedule_camera('doomed-cam')
+    original_configs = state.cameras_config
+    original_database = state.database
+    state.cameras_config = [camera]
+    database = _CaptureDatabase()
+    state.database = database
+    monkeypatch.setattr(pa, 'scheduled_profile', lambda profiles, now=None, timezone_name=None: 'night')
+
+    real_update_status = pa._update_status
+
+    def remove_during_probe(camera_id, **values):
+        real_update_status(camera_id, **values)
+        if not remove_during_probe.landed:
+            remove_during_probe.landed = True
+            # Concurrent API save replaced the list without this camera.
+            state.cameras_config = [_schedule_camera('other-cam')]
+
+    remove_during_probe.landed = False
+    monkeypatch.setattr(pa, '_update_status', remove_during_probe)
+    try:
+        pa.poll_camera_profiles()
+        assert remove_during_probe.landed
+        persisted_ids = [str(cam.get('id')) for cam in database.saved[1]]
+        assert persisted_ids == ['other-cam']  # removed camera not resurrected
+    finally:
+        state.cameras_config = original_configs
+        state.database = original_database
+        state._camera_profile_status.pop('doomed-cam', None)
+        state._camera_profile_status.pop('other-cam', None)

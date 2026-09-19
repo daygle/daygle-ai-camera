@@ -101,8 +101,12 @@ async def update_cameras(
                 except Exception as exc:  # sentinel / mid-swap: rename is still safe
                     logger.debug('Could not stop workers before camera id rename: %s', exc)
             _migrate_camera_id(old['id'], new['id'])
-    db.set_setting('cameras', settings, utc_now())
-    apply_cameras_settings(settings)
+    # Serialize against the profile monitor's persist (and the other API
+    # writers) so its stale whole-list snapshot cannot resurrect a reverted
+    # edit over this one.
+    with _state._cameras_config_write_lock:
+        db.set_setting('cameras', settings, utc_now())
+        apply_cameras_settings(settings)
     write_audit_log(request, db, 'update', 'settings.cameras', details={'count': len(settings)})
     return {
         'cameras': [
@@ -122,27 +126,32 @@ async def update_camera(
     require_admin(request)
     normalized = normalize_camera_id(camera_id)
     payload = await request.json()
-    settings_list = list(effective_cameras_config())
-    for index, current in enumerate(settings_list):
-        if current.get('id') == normalized:
-            settings_list[index] = validate_camera_settings({**payload, 'id': normalized}, current=current, index=index + 1)
-            db.set_setting('cameras', settings_list, utc_now())
-            apply_cameras_settings(settings_list)
-            write_audit_log(request, db, 'update', 'settings.camera', normalized, {'camera_name': settings_list[index].get('name')})
-            return {
-                **_redact_camera(settings_list[index]),
-                'profile_status': profile_status(normalized),
-            }
-    # Upsert: a PUT to an unknown id creates the camera
-    created = validate_camera_settings({**payload, 'id': normalized}, index=len(settings_list) + 1)
-    settings_list.append(created)
-    db.set_setting('cameras', settings_list, utc_now())
-    apply_cameras_settings(settings_list)
-    write_audit_log(request, db, 'create', 'settings.camera', normalized, {'camera_name': created.get('name')})
-    return {
-        **_redact_camera(created),
-        'profile_status': profile_status(normalized),
-    }
+    # Serialize the read-validate-persist section against the other writers
+    # (bulk settings API and the profile monitor's persist): a concurrent
+    # monitor persist must not overwrite this request's edit with a stale
+    # snapshot taken before it, and two API writes must not interleave.
+    with _state._cameras_config_write_lock:
+        settings_list = list(effective_cameras_config())
+        for index, current in enumerate(settings_list):
+            if current.get('id') == normalized:
+                settings_list[index] = validate_camera_settings({**payload, 'id': normalized}, current=current, index=index + 1)
+                db.set_setting('cameras', settings_list, utc_now())
+                apply_cameras_settings(settings_list)
+                write_audit_log(request, db, 'update', 'settings.camera', normalized, {'camera_name': settings_list[index].get('name')})
+                return {
+                    **_redact_camera(settings_list[index]),
+                    'profile_status': profile_status(normalized),
+                }
+        # Upsert: a PUT to an unknown id creates the camera
+        created = validate_camera_settings({**payload, 'id': normalized}, index=len(settings_list) + 1)
+        settings_list.append(created)
+        db.set_setting('cameras', settings_list, utc_now())
+        apply_cameras_settings(settings_list)
+        write_audit_log(request, db, 'create', 'settings.camera', normalized, {'camera_name': created.get('name')})
+        return {
+            **_redact_camera(created),
+            'profile_status': profile_status(normalized),
+        }
 
 
 @router.post('/api/cameras/{camera_id}/ir-state')
