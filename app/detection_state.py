@@ -191,6 +191,11 @@ def mark_camera_motion(camera_id: str, duration_seconds: float, *, reason: str =
     until = time.monotonic() + duration + _CAMERA_MOTION_SETTLE_SECONDS
     with _state._camera_motion_lock:
         current = _state._camera_motion_state.setdefault(str(camera_id), {})
+        # A new PTZ suppression window must not inherit stale frame-wide
+        # evidence from before the command. Otherwise the first high-fraction
+        # frame after the hold expires can immediately satisfy the persistence
+        # threshold and re-trigger suppression.
+        current['high_fraction_streak'] = 0
         current['command_until'] = max(float(current.get('command_until', 0.0)), until)
         current['reason'] = reason
 
@@ -217,6 +222,7 @@ def update_camera_motion(camera_id: str, raw_motion_fraction: float) -> dict[str
     now = time.monotonic()
     with _state._camera_motion_lock:
         current = _state._camera_motion_state.setdefault(str(camera_id), {})
+        was_active = now < float(current.get('command_until', 0.0)) or now < float(current.get('auto_until', 0.0))
         if fraction >= _CAMERA_MOTION_FRACTION:
             current['high_fraction_streak'] = int(current.get('high_fraction_streak', 0)) + 1
             if (
@@ -230,6 +236,10 @@ def update_camera_motion(camera_id: str, raw_motion_fraction: float) -> dict[str
         command_until = float(current.get('command_until', 0.0))
         auto_until = float(current.get('auto_until', 0.0))
         active = now < command_until or now < auto_until
+        if active and not was_active:
+            # The frame that activates suppression belongs to the camera-motion
+            # window; do not carry its qualifying streak into the next window.
+            current['high_fraction_streak'] = 0
         if not active and current.get('reason') == 'global_motion':
             current['reason'] = None
         return {

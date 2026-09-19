@@ -58,9 +58,30 @@ def test_application_ptz_state_covers_low_pixel_change_and_stop_settles():
     cam = 'ptz-command'
     st._camera_motion_state.pop(cam, None)
     ds.mark_camera_motion(cam, 0.1)
+    assert st._camera_motion_state[cam]['high_fraction_streak'] == 0
     assert ds.update_camera_motion(cam, 0.0)['active'] is True
     ds.clear_camera_motion(cam)
     assert ds.update_camera_motion(cam, 0.0)['active'] is True
+
+
+def test_camera_motion_activation_resets_high_fraction_streak():
+    """A stale qualifying streak must not make one post-hold frame re-trigger
+    global-motion suppression."""
+    cam = 'ptz-streak-reset'
+    st._camera_motion_state.pop(cam, None)
+
+    assert ds.update_camera_motion(cam, 0.5)['active'] is False
+    assert ds.update_camera_motion(cam, 0.5)['active'] is True
+    assert st._camera_motion_state[cam]['high_fraction_streak'] == 0
+
+    # Expire the first hold. Two fresh high-fraction frames are required again;
+    # one frame after the hold must not immediately reactivate suppression.
+    with st._camera_motion_lock:
+        st._camera_motion_state[cam]['auto_until'] = 0.0
+    assert ds.update_camera_motion(cam, 0.5)['active'] is False
+    assert st._camera_motion_state[cam]['high_fraction_streak'] == 1
+    assert ds.update_camera_motion(cam, 0.5)['active'] is True
+    assert st._camera_motion_state[cam]['high_fraction_streak'] == 0
 
 
 def test_motion_confirmation_requires_two_consecutive_zone_frames():

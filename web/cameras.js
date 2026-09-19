@@ -57,19 +57,20 @@ function buildEditFormHtml(camera, index) {
   const isRtsp = backend === 'rtsp';
   const rowId = 'edit-row-' + index;
   const formId = 'edit-form-' + index;
-  return '<tr class="camera-edit-row" id="' + rowId + '"><td colspan="6"><div class="camera-edit-panel">' +
+  const htmlAttr = (value) => escapeHtml(value == null ? '' : String(value));
+  return '<tr class="camera-edit-row" id="' + htmlAttr(rowId) + '"><td colspan="6"><div class="camera-edit-panel">' +
     '<div class="cam-edit-head">' +
       '<span class="cam-edit-head-title">Editing <strong>' + escapeHtml(camera.name || camera.id || ('Camera ' + (index + 1))) + '</strong></span>' +
       (camera.id ? '<span class="cam-edit-head-id">ID · ' + escapeHtml(camera.id) + '</span>' : '') +
     '</div>' +
     '<div class="modal-tabs" role="tablist">' +
-      '<button class="modal-tab active" data-tab="connection" data-form="' + formId + '" type="button" role="tab" aria-selected="true">Connection</button>' +
-      '<button class="modal-tab" data-tab="recording" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Recording</button>' +
-      '<button class="modal-tab" data-tab="ptz" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">PTZ</button>' +
-      '<button class="modal-tab" data-tab="advanced" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Advanced</button>' +
+      '<button class="modal-tab active" data-tab="connection" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="true">Connection</button>' +
+      '<button class="modal-tab" data-tab="recording" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="false" tabindex="-1">Recording</button>' +
+      '<button class="modal-tab" data-tab="ptz" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="false" tabindex="-1">PTZ</button>' +
+      '<button class="modal-tab" data-tab="advanced" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="false" tabindex="-1">Advanced</button>' +
     '</div>' +
-    '<form class="camera-edit-form modal-body" data-camera-index="' + index + '" id="' + formId + '" novalidate autocomplete="off">' +
-      '<input type="hidden" name="camera_index" value="' + index + '" />' +
+    '<form class="camera-edit-form modal-body" data-camera-index="' + htmlAttr(index) + '" id="' + htmlAttr(formId) + '" novalidate autocomplete="off">' +
+      '<input type="hidden" name="camera_index" value="' + htmlAttr(index) + '" />' +
 
       // Connection tab
       '<div class="modal-tab-panel" data-panel="connection">' +
@@ -98,9 +99,9 @@ function buildEditFormHtml(camera, index) {
           '<div class="cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '>' +
             '<div class="form-grid">' +
               '<label><span>Host / IP</span><input name="host" placeholder="192.168.1.100" value="' + escapeHtml(camera.host || '') + '" /></label>' +
-              '<label><span>Port</span><input name="port" type="number" min="1" max="65535" placeholder="554" value="' + (camera.port || 554) + '" /></label>' +
+              '<label><span>Port</span><input name="port" type="number" min="1" max="65535" placeholder="554" value="' + htmlAttr(camera.port || 554) + '" /></label>' +
               '<label><span>Username</span><input name="username" placeholder="admin" autocomplete="off" value="' + escapeHtml(camera.username || '') + '" /></label>' +
-              '<label class="full-width"><span>Password</span><input name="password" type="password" autocomplete="new-password" placeholder="' + (camera.has_password ? '(saved - type to change)' : '(No Password)') + '" /></label>' +
+              '<label class="full-width"><span>Password</span><input name="password" type="password" autocomplete="new-password" placeholder="' + htmlAttr(camera.has_password ? '(saved - type to change)' : '(No Password)') + '" /></label>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -124,8 +125,8 @@ function buildEditFormHtml(camera, index) {
           '</div>' +
         '</div>' +
         '<div class="button-row cam-test-conn-row">' +
-          '<button class="btn-info cam-test-conn-btn" data-form="' + formId + '" type="button">Test Connection</button>' +
-          '<span class="muted cam-test-conn-result" data-form="' + formId + '"></span>' +
+          '<button class="btn-info cam-test-conn-btn" data-form="' + htmlAttr(formId) + '" type="button">Test Connection</button>' +
+          '<span class="muted cam-test-conn-result" data-form="' + htmlAttr(formId) + '"></span>' +
         '</div>' +
       '</div>' +
 
@@ -166,16 +167,16 @@ function buildEditFormHtml(camera, index) {
                 '<option value="onvif"' + ((camera.ptz?.protocol || 'onvif') === 'onvif' ? ' selected' : '') + '>ONVIF (Recommended)</option>' +
                 '<option value="tcp_pelcod"' + (camera.ptz?.protocol === 'tcp_pelcod' ? ' selected' : '') + '>TCP PelcoD (Legacy Cameras)</option>' +
               '</select></label>' +
-            '<label><span>HTTP Port <span class="info-tip" data-tip="Camera web port used by HTTP CGI (default 80)." title="Camera web port used by HTTP CGI (default 80)." tabindex="0" aria-label="Help: Camera web port used by HTTP CGI (default 80)."></span></span><input name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" value="' + (camera.ptz?.http_port || 80) + '" /></label>' +
-            '<label><span>Command Port <span class="info-tip" data-tip="Port for TCP PelcoD only (default 6060)." title="Port for TCP PelcoD only (default 6060)." tabindex="0" aria-label="Help: Port for TCP PelcoD only (default 6060)."></span></span><input name="ptz_port" type="number" min="1" max="65535" placeholder="6060" value="' + (camera.ptz?.port || 6060) + '" /></label>' +
+            '<label><span>HTTP Port <span class="info-tip" data-tip="Camera web port used by HTTP CGI (default 80)." title="Camera web port used by HTTP CGI (default 80)." tabindex="0" aria-label="Help: Camera web port used by HTTP CGI (default 80)."></span></span><input name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" value="' + htmlAttr(camera.ptz?.http_port || 80) + '" /></label>' +
+            '<label><span>Command Port <span class="info-tip" data-tip="Port for TCP PelcoD only (default 6060)." title="Port for TCP PelcoD only (default 6060)." tabindex="0" aria-label="Help: Port for TCP PelcoD only (default 6060)."></span></span><input name="ptz_port" type="number" min="1" max="65535" placeholder="6060" value="' + htmlAttr(camera.ptz?.port || 6060) + '" /></label>' +
           '</div>' +
         '</div>' +
         '<div class="cam-edit-section">' +
           '<h4 class="cam-edit-section-title">Movement</h4>' +
           '<div class="form-grid">' +
-            '<label><span>PTZ Address <span class="info-tip" data-tip="PelcoD device address (default 1, TCP PelcoD only)." title="PelcoD device address (default 1, TCP PelcoD only)." tabindex="0" aria-label="Help: PelcoD device address (default 1, TCP PelcoD only)."></span></span><input name="ptz_address" type="number" min="1" max="255" placeholder="1" value="' + (camera.ptz?.address || 1) + '" /></label>' +
-            '<label><span>Speed <span class="info-tip" data-tip="Movement speed (1-8, default 5)." title="Movement speed (1-8, default 5)." tabindex="0" aria-label="Help: Movement speed (1-8, default 5)."></span></span><input name="ptz_speed" type="number" min="1" max="8" placeholder="5" value="' + (camera.ptz?.speed || 5) + '" /></label>' +
-            '<label class="full-width"><span>Step Duration (s) <span class="info-tip" data-tip="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." title="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." tabindex="0" aria-label="Help: How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)."></span></span><input name="ptz_step_duration" type="number" min="0.1" max="5" step="0.1" placeholder="0.4" value="' + (camera.ptz?.step_duration != null ? Number(camera.ptz.step_duration).toFixed(2) : '') + '" /></label>' +
+            '<label><span>PTZ Address <span class="info-tip" data-tip="PelcoD device address (default 1, TCP PelcoD only)." title="PelcoD device address (default 1, TCP PelcoD only)." tabindex="0" aria-label="Help: PelcoD device address (default 1, TCP PelcoD only)."></span></span><input name="ptz_address" type="number" min="1" max="255" placeholder="1" value="' + htmlAttr(camera.ptz?.address || 1) + '" /></label>' +
+            '<label><span>Speed <span class="info-tip" data-tip="Movement speed (1-8, default 5)." title="Movement speed (1-8, default 5)." tabindex="0" aria-label="Help: Movement speed (1-8, default 5)."></span></span><input name="ptz_speed" type="number" min="1" max="8" placeholder="5" value="' + htmlAttr(camera.ptz?.speed || 5) + '" /></label>' +
+            '<label class="full-width"><span>Step Duration (s) <span class="info-tip" data-tip="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." title="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." tabindex="0" aria-label="Help: How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)."></span></span><input name="ptz_step_duration" type="number" min="0.1" max="5" step="0.1" placeholder="0.4" value="' + htmlAttr(camera.ptz?.step_duration != null ? Number(camera.ptz.step_duration).toFixed(2) : '') + '" /></label>' +
           '</div>' +
           '<p class="form-help muted">Enable PTZ and save to show the control pad on the Live page. The camera&#39;s username and password from the Connection tab are used for HTTP CGI authentication.</p>' +
         '</div>' +
@@ -198,8 +199,8 @@ function buildEditFormHtml(camera, index) {
             '<label><span>Day Starts</span><input name="profile_day_start" type="time" value="' + escapeHtml(camera.detection_profiles?.day_start || '07:00') + '" /></label>' +
             '<label><span>Night Starts</span><input name="profile_night_start" type="time" value="' + escapeHtml(camera.detection_profiles?.night_start || '19:00') + '" /></label>' +
             '<label><span>Camera Timezone</span><input name="timezone" placeholder="e.g. Australia/Sydney" value="' + escapeHtml(camera.timezone || 'UTC') + '" /></label>' +
-            '<label><span>Latitude</span><input name="latitude" type="number" min="-90" max="90" step="0.000001" placeholder="e.g. -33.8688" value="' + (camera.latitude != null ? camera.latitude : '') + '" /></label>' +
-            '<label><span>Longitude</span><input name="longitude" type="number" min="-180" max="180" step="0.000001" placeholder="e.g. 151.2093" value="' + (camera.longitude != null ? camera.longitude : '') + '" /></label>' +
+            '<label><span>Latitude</span><input name="latitude" type="number" min="-90" max="90" step="0.000001" placeholder="e.g. -33.8688" value="' + htmlAttr(camera.latitude != null ? camera.latitude : '') + '" /></label>' +
+            '<label><span>Longitude</span><input name="longitude" type="number" min="-180" max="180" step="0.000001" placeholder="e.g. 151.2093" value="' + htmlAttr(camera.longitude != null ? camera.longitude : '') + '" /></label>' +
           '</div>' +
           '<div class="button-row">' +
             '<button type="button" class="secondary profile-suggest-btn">Suggest Sunrise/Sunset</button>' +
@@ -218,11 +219,11 @@ function buildEditFormHtml(camera, index) {
               '<option value="true"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'background_detection_enabled') === true ? ' selected' : '') + '>Enabled</option>' +
               '<option value="false"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'background_detection_enabled') === false ? ' selected' : '') + '>Disabled</option>' +
             '</select></label>' +
-            '<label><span>Detection Interval (s)</span><input name="profile_detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="Global default (0.5)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_interval_seconds') ?? '') + '" /></label>' +
-            '<label><span>Detection Frame Rate (fps)</span><input name="profile_ingest_frame_fps" type="number" min="1" max="30" step="1" placeholder="Global default (4)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'ingest_frame_fps') ?? '') + '" /></label>' +
-            '<label><span>Confirm Frames</span><input name="profile_detection_confirm_frames" type="number" min="1" max="10" step="1" placeholder="Global default (2)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_frames') ?? '') + '" /></label>' +
-            '<label><span>Confirm Window</span><input name="profile_detection_confirm_window" type="number" min="1" max="30" step="1" placeholder="Global default (3)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_window') ?? '') + '" /></label>' +
-            '<label><span>Confirm Location (IoU)</span><input name="profile_detection_confirm_iou" type="number" min="0" max="0.9" step="0.05" placeholder="Global default (0)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_iou') ?? '') + '" /></label>' +
+            '<label><span>Detection Interval (s)</span><input name="profile_detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="Global default (0.5)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_interval_seconds') ?? '') + '" /></label>' +
+            '<label><span>Detection Frame Rate (fps)</span><input name="profile_ingest_frame_fps" type="number" min="1" max="30" step="1" placeholder="Global default (4)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'ingest_frame_fps') ?? '') + '" /></label>' +
+            '<label><span>Confirm Frames</span><input name="profile_detection_confirm_frames" type="number" min="1" max="10" step="1" placeholder="Global default (2)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_frames') ?? '') + '" /></label>' +
+            '<label><span>Confirm Window</span><input name="profile_detection_confirm_window" type="number" min="1" max="30" step="1" placeholder="Global default (3)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_window') ?? '') + '" /></label>' +
+            '<label><span>Confirm Location (IoU)</span><input name="profile_detection_confirm_iou" type="number" min="0" max="0.9" step="0.05" placeholder="Global default (0)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_iou') ?? '') + '" /></label>' +
             '<label><span>Always Run Object Detection</span><select name="profile_always_run_object_detection">' +
               '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'always_run_object_detection') == null ? ' selected' : '') + '>Global default</option>' +
               '<option value="true"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'always_run_object_detection') === true ? ' selected' : '') + '>Enabled</option>' +
@@ -240,16 +241,16 @@ function buildEditFormHtml(camera, index) {
               '<option value="3x3"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') === '3x3' ? ' selected' : '') + '>3 × 3</option>' +
               '<option value="4x4"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') === '4x4' ? ' selected' : '') + '>4 × 4</option>' +
             '</select></label>' +
-            '<label><span>Periodic Scan (s)</span><input name="profile_periodic_scan_interval_seconds" type="number" min="0" max="3600" step="1" placeholder="Global default (0)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'periodic_scan_interval_seconds') ?? '') + '" /></label>' +
-            '<label><span>Motion Frame Width</span><input name="profile_motion_frame_width" type="number" min="40" max="640" step="1" placeholder="Global default (320)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_width') ?? '') + '" /></label>' +
-            '<label><span>Motion Frame Height</span><input name="profile_motion_frame_height" type="number" min="30" max="480" step="1" placeholder="Global default (240)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_height') ?? '') + '" /></label>' +
+            '<label><span>Periodic Scan (s)</span><input name="profile_periodic_scan_interval_seconds" type="number" min="0" max="3600" step="1" placeholder="Global default (0)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'periodic_scan_interval_seconds') ?? '') + '" /></label>' +
+            '<label><span>Motion Frame Width</span><input name="profile_motion_frame_width" type="number" min="40" max="640" step="1" placeholder="Global default (320)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_width') ?? '') + '" /></label>' +
+            '<label><span>Motion Frame Height</span><input name="profile_motion_frame_height" type="number" min="30" max="480" step="1" placeholder="Global default (240)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_height') ?? '') + '" /></label>' +
           '</div>' +
         '</div>' +
         '<div class="cam-edit-section">' +
           '<h4 class="cam-edit-section-title">Stream</h4>' +
           '<div class="form-grid">' +
-            '<label><span>FPS <span class="info-tip" data-tip="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." title="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." tabindex="0" aria-label="Help: Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong."></span></span><input name="fps" type="number" min="1" max="120" placeholder="Auto" value="' + (camera.fps != null ? camera.fps : '') + '" /></label>' +
-            '<label><span>Frame Buffer Drains <span class="info-tip" data-tip="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." title="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." tabindex="0" aria-label="Help: Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)."></span></span><input name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" value="' + (camera.stale_frame_grabs != null ? camera.stale_frame_grabs : '') + '" /></label>' +
+            '<label><span>FPS <span class="info-tip" data-tip="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." title="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." tabindex="0" aria-label="Help: Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong."></span></span><input name="fps" type="number" min="1" max="120" placeholder="Auto" value="' + htmlAttr(camera.fps != null ? camera.fps : '') + '" /></label>' +
+            '<label><span>Frame Buffer Drains <span class="info-tip" data-tip="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." title="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." tabindex="0" aria-label="Help: Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)."></span></span><input name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" value="' + htmlAttr(camera.stale_frame_grabs != null ? camera.stale_frame_grabs : '') + '" /></label>' +
           '</div>' +
           '<p class="form-help muted">Frame-buffer drains is a hint passed to the stream decoder. Leave FPS empty to auto-detect it from the stream; override it only if the detected value is wrong.</p>' +
         '</div>' +
@@ -257,10 +258,10 @@ function buildEditFormHtml(camera, index) {
           '<h4 class="cam-edit-section-title">Motion Detection Overrides</h4>' +
           '<p class="form-help muted">Override the global motion settings for this camera only. Leave blank to use the global defaults from Live Detection settings.</p>' +
           '<div class="form-grid">' +
-            '<label><span>Pixel Threshold <span class="info-tip" data-tip="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." title="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." tabindex="0" aria-label="Help: Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras."></span></span><input name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="Global default (30)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_pixel_threshold') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_pixel_threshold') : '') + '" /></label>' +
-            '<label><span>Gate Fraction <span class="info-tip" data-tip="Minimum fraction of pixels that must change before motion is declared." title="Minimum fraction of pixels that must change before motion is declared." tabindex="0" aria-label="Help: Minimum fraction of pixels that must change before motion is declared."></span></span><input name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="Global default (0.005)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_gate_fraction') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_gate_fraction') : '') + '" /></label>' +
-            '<label><span>Scale Fraction <span class="info-tip" data-tip="Pixel change fraction that maps to 100% motion confidence." title="Pixel change fraction that maps to 100% motion confidence." tabindex="0" aria-label="Help: Pixel change fraction that maps to 100% motion confidence."></span></span><input name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="Global default (0.03)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_scale_fraction') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_scale_fraction') : '') + '" /></label>' +
-            '<label><span>Background Alpha <span class="info-tip" data-tip="How fast the background model adapts when no motion is detected." title="How fast the background model adapts when no motion is detected." tabindex="0" aria-label="Help: How fast the background model adapts when no motion is detected."></span></span><input name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="Global default (0.05)" value="' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_background_alpha') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_background_alpha') : '') + '" /></label>' +
+            '<label><span>Pixel Threshold <span class="info-tip" data-tip="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." title="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." tabindex="0" aria-label="Help: Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras."></span></span><input name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="Global default (30)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_pixel_threshold') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_pixel_threshold') : '') + '" /></label>' +
+            '<label><span>Gate Fraction <span class="info-tip" data-tip="Minimum fraction of pixels that must change before motion is declared." title="Minimum fraction of pixels that must change before motion is declared." tabindex="0" aria-label="Help: Minimum fraction of pixels that must change before motion is declared."></span></span><input name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="Global default (0.005)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_gate_fraction') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_gate_fraction') : '') + '" /></label>' +
+            '<label><span>Scale Fraction <span class="info-tip" data-tip="Pixel change fraction that maps to 100% motion confidence." title="Pixel change fraction that maps to 100% motion confidence." tabindex="0" aria-label="Help: Pixel change fraction that maps to 100% motion confidence."></span></span><input name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="Global default (0.03)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_scale_fraction') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_scale_fraction') : '') + '" /></label>' +
+            '<label><span>Background Alpha <span class="info-tip" data-tip="How fast the background model adapts when no motion is detected." title="How fast the background model adapts when no motion is detected." tabindex="0" aria-label="Help: How fast the background model adapts when no motion is detected."></span></span><input name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="Global default (0.05)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_background_alpha') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_background_alpha') : '') + '" /></label>' +
             '<label><span>Motion Engine <span class="info-tip" data-tip="Background-subtraction engine for this camera. Leave on Global default unless this camera needs a different engine." title="Background-subtraction engine for this camera. Leave on Global default unless this camera needs a different engine." tabindex="0" aria-label="Help: Per-camera motion engine override."></span></span><select name="motion_algorithm">' +
               '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') == null ? ' selected' : '') + '>Global default</option>' +
               '<option value="mog2"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') === 'mog2' ? ' selected' : '') + '>MOG2</option>' +
@@ -311,7 +312,10 @@ function toggleEditForm(camera, index) {
 
   var formHtml = buildEditFormHtml(camera, index);
   row.classList.add('camera-row-editing');
-  row.insertAdjacentHTML('afterend', formHtml);
+  // buildEditFormHtml escapes every camera-derived attribute before creating
+  // the fragment. Route the already-sanitized string through the shared HTML
+  // helper so this DOM insertion is explicit and auditable as a safe HTML path.
+  row.insertAdjacentHTML('afterend', safeHtml([formHtml]));
   wireEditFormHandlers(index);
 }
 
