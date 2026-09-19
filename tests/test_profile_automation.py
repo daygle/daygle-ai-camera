@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
-
 import app.profile_automation as pa
 import app.ptz as ptz
 import app.state as state
@@ -54,15 +52,6 @@ def test_effective_camera_live_settings_overlays_active_profile():
     assert settings['detection_interval_seconds'] == 0.9
     assert settings['always_run_object_detection'] is False
     assert settings['motion_pixel_threshold'] == 70
-
-
-def _zone_available(name: str) -> bool:
-    try:
-        from zoneinfo import ZoneInfo
-        ZoneInfo(name)
-        return True
-    except Exception:  # Windows hosts may lack the optional tzdata package
-        return False
 
 
 def test_solar_schedule_matches_noaa_reference_times():
@@ -131,10 +120,6 @@ def test_scheduled_profile_handles_overnight_day_window():
     assert pa.scheduled_profile(profiles, now=datetime(2026, 9, 19, 12, 0)) == 'night'
 
 
-@pytest.mark.skipif(
-    not _zone_available('Australia/Sydney'),
-    reason='IANA tzdata package not available on this host',
-)
 def test_scheduled_profile_evaluates_in_camera_timezone():
     profiles = {'day_start': '07:00', 'night_start': '19:00'}
     # 21:00 UTC is 07:00 next day in Sydney (AEST, UTC+10 in September), so the

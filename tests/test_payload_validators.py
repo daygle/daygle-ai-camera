@@ -644,6 +644,30 @@ def test_validate_camera_settings_rejects_invalid_location(monkeypatch, pv):
         pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'Not/A_Timezone'})
 
 
+def test_validate_camera_settings_rejects_unresolvable_iana_region(monkeypatch, pv):
+    """Regression: the old region-prefix fallback accepted any
+    ``Region/City``-shaped name on hosts without tzdata, deferring the failure
+    to the solar-suggestion endpoint. tzdata is a hard dependency now, so the
+    save path applies the same resolvability rule the runtime does."""
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')
+    # Real IANA region prefix, but not a real zone.
+    with pytest.raises(HTTPException):
+        pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'Australia/Nowhere'})
+    with pytest.raises(HTTPException):
+        pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'Europe/Somewhere_Orange'})
+    # Malformed keys (path traversal, bare region) are rejected, not 500s.
+    with pytest.raises(HTTPException):
+        pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'Europe/../ Pacific/Auckland'})
+    with pytest.raises(HTTPException):
+        pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'JustARegion'})
+
+
+def test_validate_camera_settings_resolves_real_zones_from_tzdata(monkeypatch, pv):
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')
+    out = pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'Europe/London'})
+    assert out['timezone'] == 'Europe/London'
+
+
 def test_validate_camera_settings_clamps_dimensions_to_min_max(monkeypatch, pv):
     """Per-spec: width [160, 7680] / height [120, 4320] / fps [1, 120].
 

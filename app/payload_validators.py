@@ -263,18 +263,16 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     if len(timezone_name) > 100 or any(character in timezone_name for character in '\r\n\x00'):
         raise HTTPException(status_code=400, detail='timezone must be a valid timezone name.')
     if timezone_name.upper() != 'UTC':
+        # The saved zone must be resolvable HERE, not just at solar-suggestion
+        # time: tzdata is a hard dependency (requirements.txt), so any zone
+        # ZoneInfo cannot resolve -- invented names like Australia/Nowhere, or
+        # malformed keys -- is rejected at save time. The old region-prefix
+        # fallback accepted exactly such names on hosts without tzdata and
+        # deferred the failure to the solar suggestion endpoint.
         try:
             ZoneInfo(timezone_name)
-        except ZoneInfoNotFoundError:
-            # Windows installations may omit tzdata; retain common IANA
-            # regions for persistence and let solar calculation report a
-            # runtime-unavailable timezone when necessary.
-            valid_region_prefixes = {
-                'Africa', 'America', 'Antarctica', 'Arctic', 'Asia',
-                'Atlantic', 'Australia', 'Europe', 'Indian', 'Pacific',
-            }
-            if timezone_name.split('/', 1)[0] not in valid_region_prefixes:
-                raise HTTPException(status_code=400, detail='timezone must be a valid timezone name.')
+        except (ZoneInfoNotFoundError, ValueError):
+            raise HTTPException(status_code=400, detail='timezone must be a valid timezone name.') from None
     updated['timezone'] = timezone_name
     for _location_key, _low, _high in (
         ('latitude', -90.0, 90.0),
