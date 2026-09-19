@@ -367,13 +367,43 @@ function wireEditFormHandlers(index) {
   var suggestButton = form.querySelector('.profile-suggest-btn');
   var irCheckButton = form.querySelector('.ir-check-btn');
   var profileResult = form.querySelector('.profile-action-result');
+  // The suggestion and IR checks work on UNSAVED cameras too: both endpoints
+  // accept the form's current values as overrides, so newly typed coordinates
+  // or host/credentials are used without saving first.
+  function formConnectionOverrides() {
+    var overrides = {};
+    var host = (form.querySelector('[name="host"]')?.value || '').trim();
+    if (host) overrides.host = host;
+    var httpPort = parseInt((form.querySelector('[name="ptz_http_port"]')?.value || '80'), 10);
+    if (Number.isFinite(httpPort)) overrides.http_port = httpPort;
+    var username = (form.querySelector('[name="username"]')?.value || '').trim();
+    if (username) overrides.username = username;
+    var password = form.querySelector('[name="password"]')?.value || '';
+    if (password) overrides.password = password;
+    return overrides;
+  }
+  function formLocationOverrides() {
+    var overrides = {};
+    var latitude = parseFloat(form.querySelector('[name="latitude"]')?.value);
+    if (Number.isFinite(latitude)) overrides.latitude = latitude;
+    var longitude = parseFloat(form.querySelector('[name="longitude"]')?.value);
+    if (Number.isFinite(longitude)) overrides.longitude = longitude;
+    var timezoneName = (form.querySelector('[name="timezone"]')?.value || '').trim();
+    if (timezoneName) overrides.timezone = timezoneName;
+    return overrides;
+  }
   if (suggestButton) {
     suggestButton.addEventListener('click', async function() {
       suggestButton.disabled = true;
       if (profileResult) profileResult.textContent = 'Calculating…';
       try {
         var cameraId = form.querySelector('[name="id"]')?.value || cameras[index]?.id;
-        var suggestion = await api('/api/cameras/' + encodeURIComponent(cameraId) + '/profile-schedule-suggestion');
+        var locationParams = new URLSearchParams();
+        Object.keys(formLocationOverrides()).forEach(function(key) {
+          locationParams.set(key, formLocationOverrides()[key]);
+        });
+        var query = locationParams.toString();
+        var suggestion = await api('/api/cameras/' + encodeURIComponent(cameraId) + '/profile-schedule-suggestion' + (query ? '?' + query : ''));
         form.querySelector('[name="profile_day_start"]').value = suggestion.day_start;
         form.querySelector('[name="profile_night_start"]').value = suggestion.night_start;
         if (profileResult) profileResult.textContent = 'Suggested ' + suggestion.day_start + ' / ' + suggestion.night_start + ' for ' + suggestion.date + '.';
@@ -390,7 +420,7 @@ function wireEditFormHandlers(index) {
       if (profileResult) profileResult.textContent = 'Checking ONVIF IR state…';
       try {
         var cameraId = form.querySelector('[name="id"]')?.value || cameras[index]?.id;
-        var result = await api('/api/cameras/' + encodeURIComponent(cameraId) + '/ir-state', { method: 'POST', body: '{}' });
+        var result = await api('/api/cameras/' + encodeURIComponent(cameraId) + '/ir-state', { method: 'POST', body: JSON.stringify(formConnectionOverrides()) });
         if (profileResult) profileResult.textContent = result.supported ? ('Camera reports ' + result.state + '.') : (result.error || 'IR state unavailable; schedule fallback remains active.');
       } catch (err) {
         if (!window.daygleAuth?.redirecting && profileResult) profileResult.textContent = err.message || 'IR check failed.';

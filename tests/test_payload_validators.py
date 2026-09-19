@@ -563,8 +563,72 @@ def test_validate_camera_settings_persists_day_night_profiles_and_projects_activ
         },
     })
     assert out['detection_profiles']['active'] == 'night'
+    assert out['detection_profiles']['source'] == 'manual'
+    assert out['detection_profiles']['day_start'] == '07:00'
+    assert out['detection_profiles']['night_start'] == '19:00'
     assert out['motion_pixel_threshold'] == 110
     assert out['motion_shadow_suppression'] == 'off'
+
+
+def test_validate_camera_settings_persists_profile_automation_keys(monkeypatch, pv):
+    """Regression: source/day_start/night_start were silently dropped by the
+    partial-merge, reverting an 'Automatic Selection' change to 'manual'."""
+    from app.utils import normalize_bool_setting as real_bool
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok',
+                                    normalize_bool_setting=real_bool)
+    out = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'detection_profiles': {
+            'active': 'day',
+            'source': 'schedule',
+            'day_start': '05:45',
+            'night_start': '20:15',
+        },
+    })
+    assert out['detection_profiles']['source'] == 'schedule'
+    assert out['detection_profiles']['day_start'] == '05:45'
+    assert out['detection_profiles']['night_start'] == '20:15'
+
+    # Partial update: only source changes, stored boundaries survive.
+    out_partial = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'detection_profiles': {'source': 'onvif'},
+    }, current={'id': 'cam-1', 'detection_profiles': {
+        'active': 'day', 'source': 'schedule',
+        'day_start': '05:45', 'night_start': '20:15',
+    }})
+    assert out_partial['detection_profiles']['source'] == 'onvif'
+    assert out_partial['detection_profiles']['day_start'] == '05:45'
+    assert out_partial['detection_profiles']['night_start'] == '20:15'
+
+    # Invalid values fall back to the normalizer defaults rather than 400s.
+    # normalize_hhmm passes unparseable times through unchanged by design (only
+    # empty -> None); scheduled_profile re-applies defaults at evaluation time.
+    out_invalid = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'detection_profiles': {'source': 'astral', 'day_start': 'not-a-time'},
+    })
+    assert out_invalid['detection_profiles']['source'] == 'manual'
+    assert out_invalid['detection_profiles']['day_start'] == 'not-a-time'
+
+    # Automation keys sent alongside the day/night dicts -- the exact shape the
+    # settings form saves (suggested solar boundaries + per-profile overrides).
+    out_full = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'detection_profiles': {
+            'active': 'day',
+            'source': 'schedule',
+            'day_start': '05:45',
+            'night_start': '20:15',
+            'day': {'motion_pixel_threshold': 30},
+            'night': {'motion_pixel_threshold': 110},
+        },
+    })
+    assert out_full['detection_profiles']['source'] == 'schedule'
+    assert out_full['detection_profiles']['day_start'] == '05:45'
+    assert out_full['detection_profiles']['night_start'] == '20:15'
+    assert out_full['detection_profiles']['day']['motion_pixel_threshold'] == 30
+    assert out_full['detection_profiles']['night']['motion_pixel_threshold'] == 110
 
 
 def test_validate_camera_settings_migrates_legacy_motion_into_both_profiles(monkeypatch, pv):
@@ -597,6 +661,30 @@ def test_validate_camera_settings_rejects_invalid_location(monkeypatch, pv):
         pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'latitude': 91})
     with pytest.raises(HTTPException):
         pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'Not/A_Timezone'})
+
+
+def test_validate_camera_settings_rejects_unresolvable_iana_region(monkeypatch, pv):
+    """Regression: the old region-prefix fallback accepted any
+    ``Region/City``-shaped name on hosts without tzdata, deferring the failure
+    to the solar-suggestion endpoint. tzdata is a hard dependency now, so the
+    save path applies the same resolvability rule the runtime does."""
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')
+    # Real IANA region prefix, but not a real zone.
+    with pytest.raises(HTTPException):
+        pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'Australia/Nowhere'})
+    with pytest.raises(HTTPException):
+        pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'Europe/Somewhere_Orange'})
+    # Malformed keys (path traversal, bare region) are rejected, not 500s.
+    with pytest.raises(HTTPException):
+        pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'Europe/../ Pacific/Auckland'})
+    with pytest.raises(HTTPException):
+        pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'JustARegion'})
+
+
+def test_validate_camera_settings_resolves_real_zones_from_tzdata(monkeypatch, pv):
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')
+    out = pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'Europe/London'})
+    assert out['timezone'] == 'Europe/London'
 
 
 def test_validate_camera_settings_clamps_dimensions_to_min_max(monkeypatch, pv):

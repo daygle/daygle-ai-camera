@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import app.profile_automation as pa
 import app.ptz as ptz
@@ -54,6 +54,57 @@ def test_effective_camera_live_settings_overlays_active_profile():
     assert settings['motion_pixel_threshold'] == 70
 
 
+def test_solar_schedule_matches_noaa_reference_times():
+    """London solstice boundaries (NOAA ground truth, civil zenith 90.833).
+
+    Regression for the missing right-ascension quadrant adjustment: without
+    it the June day window collapsed to ~4.7 hours at London's latitude.
+    """
+    june = pa.suggest_solar_schedule(51.5072, -0.1276, 'UTC', day=datetime(2026, 6, 21).date())
+    assert june['day_start'] == '03:42'
+    assert june['night_start'] == '20:21'
+    december = pa.suggest_solar_schedule(51.5072, -0.1276, 'UTC', day=datetime(2026, 12, 21).date())
+    assert december['day_start'] == '08:03'
+    assert december['night_start'] == '15:53'
+
+
+def test_solar_day_window_grows_toward_summer_solstice():
+    """Northern-hemisphere day windows must lengthen into June and shorten
+    into September; guards whole-season regressions without pinning values."""
+    def _day_length(day_: datetime) -> int:
+        suggestion = pa.suggest_solar_schedule(
+            51.5072, -0.1276, 'UTC', day=day_.date(),
+        )
+        def minutes(hhmm: str) -> int:
+            hour, minute = hhmm.split(':', 1)
+            return int(hour) * 60 + int(minute)
+        length = minutes(suggestion['night_start']) - minutes(suggestion['day_start'])
+        return length if length > 0 else length + 1440
+
+    june = _day_length(datetime(2026, 6, 21))
+    assert june > _day_length(datetime(2026, 3, 20))
+    assert june > _day_length(datetime(2026, 9, 23))
+
+
+def test_solar_day_window_shrinks_toward_june_solstice_in_south():
+    """Southern-hemisphere mirror of the northern check: Sydney's day window
+    must shorten into June and regrow by the December solstice. The quadrant
+    bug distorted the seasons per-hemisphere, so both directions are guarded."""
+    def _day_length(day_: datetime) -> int:
+        suggestion = pa.suggest_solar_schedule(
+            -33.8688, 151.2093, 'UTC', day=day_.date(),
+        )
+        def minutes(hhmm: str) -> int:
+            hour, minute = hhmm.split(':', 1)
+            return int(hour) * 60 + int(minute)
+        length = minutes(suggestion['night_start']) - minutes(suggestion['day_start'])
+        return length if length > 0 else length + 1440
+
+    june = _day_length(datetime(2026, 6, 21))
+    assert june < _day_length(datetime(2026, 3, 20))
+    assert june < _day_length(datetime(2026, 12, 21))
+
+
 def test_solar_schedule_suggests_local_times_from_coordinates():
     suggestion = pa.suggest_solar_schedule(
         -33.8688, 151.2093, 'UTC',
@@ -86,6 +137,28 @@ def test_scheduled_profile_handles_overnight_day_window():
     assert pa.scheduled_profile(profiles, now=datetime(2026, 9, 19, 6, 59)) == 'day'
     assert pa.scheduled_profile(profiles, now=datetime(2026, 9, 19, 7, 0)) == 'night'
     assert pa.scheduled_profile(profiles, now=datetime(2026, 9, 19, 12, 0)) == 'night'
+
+
+def test_scheduled_profile_evaluates_in_camera_timezone():
+    profiles = {'day_start': '07:00', 'night_start': '19:00'}
+    # 21:00 UTC is 07:00 next day in Sydney (AEST, UTC+10 in September), so the
+    # camera's wall clock is exactly at day_start while the server clock in UTC
+    # would evaluate the same instant as night.
+    utc_instant = datetime(2026, 9, 19, 21, 0, tzinfo=timezone.utc)
+    assert pa.scheduled_profile(profiles, now=utc_instant, timezone_name='Australia/Sydney') == 'day'
+    assert pa.scheduled_profile(profiles, now=utc_instant, timezone_name='UTC') == 'night'
+    # Unknown/missing zones keep the legacy server-clock behaviour.
+    assert pa.scheduled_profile(profiles, now=utc_instant, timezone_name='Not/A_Zone') == 'night'
+    assert pa.scheduled_profile(profiles, now=utc_instant) == 'night'
+
+
+def test_scheduled_profile_evaluates_dst_correctly_in_camera_timezone():
+    """Sydney in January is AEDT (UTC+11), not the AEST (UTC+10) the September
+    test exercises: 20:00 UTC is 07:00 next day under DST (day) but 06:00
+    under a DST-blind fixed offset (night)."""
+    profiles = {'day_start': '07:00', 'night_start': '19:00'}
+    dst_instant = datetime(2026, 1, 15, 20, 0, tzinfo=timezone.utc)
+    assert pa.scheduled_profile(profiles, now=dst_instant, timezone_name='Australia/Sydney') == 'day'
 
 
 def test_onvif_imaging_probe_reads_ircut_filter(monkeypatch):
@@ -151,7 +224,7 @@ def test_poll_switches_runtime_profile_without_restarting_camera(monkeypatch):
 
     database = FakeDatabase()
     state.database = database
-    monkeypatch.setattr(pa, 'scheduled_profile', lambda profiles, now=None: 'night')
+    monkeypatch.setattr(pa, 'scheduled_profile', lambda profiles, now=None, timezone_name=None: 'night')
     try:
         pa.poll_camera_profiles()
         assert pa.profile_status('profile-test')['source'] == 'schedule'
@@ -162,3 +235,38 @@ def test_poll_switches_runtime_profile_without_restarting_camera(monkeypatch):
         state.cameras_config = original_configs
         state.database = original_database
         state._camera_profile_status.pop('profile-test', None)
+
+
+def test_poll_passes_camera_timezone_to_schedule_evaluation(monkeypatch):
+    """Wiring regression: the poll loop must evaluate the schedule in the
+    camera's own timezone, not the server clock. Spies on the real
+    scheduled_profile to capture what the poll actually passes."""
+    captured = {}
+    real_scheduled = pa.scheduled_profile
+
+    def spy(profiles, now=None, timezone_name=None):
+        captured['timezone_name'] = timezone_name
+        return real_scheduled(profiles, now=now, timezone_name=timezone_name)
+
+    monkeypatch.setattr(pa, 'scheduled_profile', spy)
+    camera = {
+        'id': 'tz-poll-test',
+        'timezone': 'Australia/Sydney',
+        'detection_profiles': {
+            'source': 'schedule', 'day_start': '07:00', 'night_start': '19:00',
+        },
+    }
+    original_configs = state.cameras_config
+    original_database = state.database
+    state.cameras_config = [camera]
+    state.database = None
+    try:
+        pa.poll_camera_profiles()
+        assert captured['timezone_name'] == 'Australia/Sydney'
+        status = pa.profile_status('tz-poll-test')
+        assert status['selected_by'] == 'schedule'
+        assert status['schedule_target'] in {'day', 'night'}
+    finally:
+        state.cameras_config = original_configs
+        state.database = original_database
+        state._camera_profile_status.pop('tz-poll-test', None)

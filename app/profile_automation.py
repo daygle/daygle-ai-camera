@@ -10,8 +10,8 @@ import copy
 import logging
 import threading
 import time
-from datetime import date, datetime, timedelta, timezone
-from math import acos, asin, atan, cos, degrees, radians, sin, tan
+from datetime import date, datetime, timedelta, timezone, tzinfo
+from math import acos, asin, atan, cos, degrees, floor, radians, sin, tan
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -67,7 +67,13 @@ def suggest_solar_schedule(
         true_longitude = mean_anomaly + (1.916 * sin(radians(mean_anomaly))) + (0.020 * sin(radians(2 * mean_anomaly))) + 282.634
         true_longitude %= 360.0
         right_ascension = degrees(atan(0.91764 * tan(radians(true_longitude)))) % 360.0
-        right_ascension /= 15.0
+        # NOAA quadrant adjustment: atan() folds RA into (-90, 90], so raise RA
+        # into the same quadrant as the sun's true longitude. Without this the
+        # suggested windows are hours off for whole seasons/latitudes (London in
+        # June evaluated to a 4.7-hour day).
+        true_longitude_quadrant = floor(true_longitude / 90.0) * 90.0
+        right_ascension_quadrant = floor(right_ascension / 90.0) * 90.0
+        right_ascension = (right_ascension + true_longitude_quadrant - right_ascension_quadrant) / 15.0
         sin_declination = 0.39782 * sin(radians(true_longitude))
         cos_declination = cos(asin(sin_declination))
         cos_hour_angle = (cos(radians(90.833)) - (sin_declination * sin(radians(lat)))) / (cos_declination * cos(radians(lat)))
@@ -96,14 +102,43 @@ def suggest_solar_schedule(
     }
 
 
-def scheduled_profile(profiles: dict[str, Any], *, now: datetime | None = None) -> str:
-    """Return the schedule-selected profile for the local clock.
+def _resolve_timezone(name: Any) -> tzinfo | None:
+    """Resolve an IANA timezone name, tolerating unknown/missing tzdata zones."""
+    text = str(name or '').strip()
+    if not text:
+        return None
+    try:
+        return timezone.utc if text.upper() == 'UTC' else ZoneInfo(text)
+    except (TypeError, ValueError, ZoneInfoNotFoundError):
+        return None
 
+
+def scheduled_profile(
+    profiles: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    timezone_name: str | None = None,
+) -> str:
+    """Return the schedule-selected profile for the camera's local clock.
+
+    Boundaries are wall-clock HH:MM strings in the camera's IANA timezone, so
+    ``timezone_name`` (the camera's stored zone) converts the evaluation
+    instant before comparing. An aware ``now`` is converted into that zone; a
+    naive ``now`` is treated as already being the wall clock to evaluate.
+    Without a resolvable zone the call keeps the legacy server-clock behaviour.
     The normal case is day_start <= night_start. The comparison also handles an
     overnight day window (for example day=19:00, night=07:00) without special
     configuration.
     """
-    current = now or datetime.now()
+    zone = _resolve_timezone(timezone_name)
+    current = now
+    if zone is not None:
+        if current is None:
+            current = datetime.now(zone)
+        elif current.tzinfo is not None:
+            current = current.astimezone(zone)
+    elif current is None:
+        current = datetime.now()
     current_minutes = current.hour * 60 + current.minute
 
     def _minutes(value: Any, fallback: int) -> int:
@@ -170,7 +205,7 @@ def record_ir_probe(camera_id: str, ir_state: str | None, error: str | None = No
 
 def _select_target(camera: dict[str, Any], profiles: dict[str, Any]) -> tuple[str, str, str | None, str | None]:
     source = profiles.get('source', 'manual')
-    scheduled = scheduled_profile(profiles)
+    scheduled = scheduled_profile(profiles, timezone_name=camera.get('timezone'))
     if source == 'schedule':
         return scheduled, 'schedule', None, None
     if source != 'onvif' or str(camera.get('backend') or '').lower() not in {'onvif', 'rtsp'}:
@@ -227,7 +262,7 @@ def poll_camera_profiles() -> None:
             active=active,
             source=profiles.get('source', 'manual'),
             selected_by=selected_by,
-            schedule_target=scheduled_profile(profiles),
+            schedule_target=scheduled_profile(profiles, timezone_name=camera.get('timezone')),
             ir_state=ir_state,
             error=error,
             checked_at=datetime.now().isoformat(timespec='seconds'),

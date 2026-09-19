@@ -531,6 +531,48 @@ def test_dwell_streak_resets_on_fully_empty_frame():
     assert len(out) == 1
 
 
+def test_dwell_streaks_pause_during_camera_motion():
+    """Regression: a PTZ nudge or auto-tracking pan produced empty still
+    candidates, which hit the reset loop and wiped every long-dwell streak to
+    zero. Camera motion is not evidence the subject moved -- pause instead."""
+    os.update_still_dwell_alerts('cam-1', [_still_det('package')], {'package': 5}, now=1000.0)
+    # Camera moves for a while; streaks are paused, elapsed time keeps counting.
+    assert os.update_still_dwell_alerts('cam-1', [], {'package': 5}, now=1000.0 + 2 * 60, camera_motion=True) == []
+    assert os.update_still_dwell_alerts('cam-1', [], {'package': 5}, now=1000.0 + 4 * 60, camera_motion=True) == []
+    # Camera settles; the streak resumes from its original still_since and
+    # crosses its threshold without a fresh 5-minute wait.
+    out = os.update_still_dwell_alerts('cam-1', [_still_det('package')], {'package': 5}, now=1000.0 + 6 * 60)
+    assert len(out) == 1
+    assert out[0]['still_alert'] is True
+
+
+def test_dwell_alert_cannot_cross_entirely_during_camera_motion():
+    # The pause never completes a streak by itself: a dwell alert must be
+    # emitted by a clear cycle that actually sees the subject still.
+    os.update_still_dwell_alerts('cam-1', [_still_det('package')], {'package': 5}, now=1000.0)
+    # The whole threshold window elapses while the camera is moving.
+    assert os.update_still_dwell_alerts('cam-1', [], {'package': 5}, now=1000.0 + 10 * 60, camera_motion=True) == []
+    # First clear cycle after the motion: the still subject crosses now.
+    out = os.update_still_dwell_alerts('cam-1', [_still_det('package')], {'package': 5}, now=1000.0 + 11 * 60)
+    assert len(out) == 1
+
+
+def test_dwell_subject_lost_during_camera_motion_still_resets():
+    # The pause is not amnesia: a subject that genuinely left (or moved) while
+    # the camera was panning resets on the first clear cycle, exactly like the
+    # no-motion path.
+    os.update_still_dwell_alerts('cam-1', [_still_det('package')], {'package': 5}, now=1000.0)
+    assert os.update_still_dwell_alerts('cam-1', [], {'package': 5}, now=1000.0 + 60, camera_motion=True) == []
+    # First clear cycle: subject gone -> streak breaks.
+    assert os.update_still_dwell_alerts('cam-1', [], {'package': 5}, now=1000.0 + 120) == []
+    # A fresh still run needs a full fresh 5 minutes: no early alert from the
+    # pre-motion streak.
+    os.update_still_dwell_alerts('cam-1', [_still_det('package')], {'package': 5}, now=1000.0 + 180)
+    assert os.update_still_dwell_alerts('cam-1', [_still_det('package')], {'package': 5}, now=1000.0 + 300) == []
+    out = os.update_still_dwell_alerts('cam-1', [_still_det('package')], {'package': 5}, now=1000.0 + 480)
+    assert len(out) == 1
+
+
 # ---------------------------------------------------------------------------
 # still_dwell_candidates
 # ---------------------------------------------------------------------------

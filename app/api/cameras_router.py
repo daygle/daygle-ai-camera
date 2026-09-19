@@ -147,18 +147,41 @@ async def update_camera(
 
 @router.post('/api/cameras/{camera_id}/ir-state')
 async def check_camera_ir_state(camera_id: str, request: Request):
-    """Check ONVIF IrCutFilter immediately without changing the profile."""
+    """Check ONVIF IrCutFilter immediately without changing the profile.
+
+    The JSON body may carry connection overrides (``host``, ``http_port``,
+    ``username``, ``password``) so the Cameras page can check an unsaved
+    camera straight from the edit form: an unknown ``camera_id`` is fine as
+    long as a host is supplied, and each supplied override wins over the
+    stored value (an empty/absent password falls back to the saved one, so a
+    retyped-once form does not wipe credentials for the probe).
+    """
     require_admin(request)
-    cam = get_camera_config(camera_id)
-    host = cam.get('host') or ''
+    try:
+        payload = await request.json()
+    except ValueError:
+        payload = {}
+    overrides = payload if isinstance(payload, dict) else {}
+    try:
+        cam = get_camera_config(camera_id)
+    except HTTPException:
+        # Unknown id (e.g. a new camera not yet saved): the request body must
+        # carry the connection details instead.
+        cam = {}
+    host = str(overrides.get('host') or '').strip() or (cam.get('host') or '')
     if not host and cam.get('stream_url'):
         host = urlsplit(cam['stream_url']).hostname or ''
     if not host:
-        raise HTTPException(status_code=400, detail='Cannot determine camera host for ONVIF IR status.')
+        raise HTTPException(status_code=400, detail='Provide a camera host (or save the camera) to check ONVIF IR status.')
     ptz = cam.get('ptz') if isinstance(cam.get('ptz'), dict) else {}
-    http_port = int(ptz.get('http_port') or cam.get('http_port') or 80)
-    username = str(cam.get('username') or '')
-    password = str(cam.get('password') or '')
+    http_port = int(
+        overrides.get('http_port')
+        or ptz.get('http_port')
+        or cam.get('http_port')
+        or 80
+    )
+    username = str(overrides.get('username') or '').strip() or str(cam.get('username') or '')
+    password = str(overrides.get('password') or '').strip() or str(cam.get('password') or '')
     try:
         ir_state = await run_in_threadpool(
             probe_onvif_day_night,
@@ -187,15 +210,32 @@ async def check_camera_ir_state(camera_id: str, request: Request):
 
 
 @router.get('/api/cameras/{camera_id}/profile-schedule-suggestion')
-def camera_profile_schedule_suggestion(camera_id: str, request: Request):
+def camera_profile_schedule_suggestion(
+    camera_id: str,
+    request: Request,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    timezone: str | None = None,
+):
+    """Suggest sunrise/sunset profile times for the camera's location.
+
+    ``latitude`` / ``longitude`` / ``timezone`` query parameters override the
+    stored camera configuration per key, so the Cameras page can suggest
+    times from freshly typed coordinates before the camera is saved (an
+    unknown ``camera_id`` with explicit parameters is fine).
+    """
     require_admin(request)
-    cam = get_camera_config(camera_id)
     try:
-        return suggest_solar_schedule(
-            cam.get('latitude'),
-            cam.get('longitude'),
-            cam.get('timezone') or 'UTC',
-        )
+        cam = get_camera_config(camera_id)
+    except HTTPException:
+        cam = {}
+    if latitude is None:
+        latitude = cam.get('latitude')
+    if longitude is None:
+        longitude = cam.get('longitude')
+    timezone_name = str(timezone or '').strip() or str(cam.get('timezone') or '').strip() or 'UTC'
+    try:
+        return suggest_solar_schedule(latitude, longitude, timezone_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -314,6 +314,7 @@ def update_still_dwell_alerts(
     still_alerts: dict[str, Any] | None = None,
     *,
     now: float | None = None,
+    camera_motion: bool = False,
 ) -> list[dict[str, Any]]:
     """Advance still-dwell streaks and return detections that just crossed theirs.
 
@@ -326,6 +327,15 @@ def update_still_dwell_alerts(
     streak is dropped as soon as a cycle no longer reports the label as still
     (it moved, left the frame, or fell below the detector), so the next still
     run starts from zero and can alert again.
+
+    ``camera_motion=True`` (PTZ/ego-motion) turns the whole update into a
+    pause: the camera cannot see the subject, so no streak can cross its
+    threshold -- and, crucially, the absence of still detections is NOT
+    evidence that any streak broke (the subject did not move; the camera
+    did). Streaks are preserved untouched for that cycle and resume on the
+    first clear one, with elapsed wall-clock time counting through the pause.
+    A subject that genuinely left during the motion still resets on the first
+    clear empty cycle, exactly like the no-motion path.
 
     Dwell alerts are **label-level**: two still packages of the same class
     share one streak, so the first to cross the threshold fires the alert.
@@ -341,6 +351,15 @@ def update_still_dwell_alerts(
     else:
         thresholds = _normalize_threshold_map(still_alerts)
     if not thresholds:
+        return []
+    if camera_motion:
+        # PTZ/ego-motion: the camera cannot see the subject, so this cycle is
+        # neither evidence that a streak crossed its threshold nor that it
+        # broke. Preserve every streak untouched and resume on the first clear
+        # cycle; a subject that really left or moved resets then (the clear
+        # cycle no longer reports it still). Without this pause, a 0.4s PTZ
+        # nudge or one auto-tracking pan wiped every long-dwell streak to
+        # zero because the empty candidate list hit the reset loop.
         return []
     ts = time.time() if now is None else float(now)
     with _state._still_dwell_lock:
