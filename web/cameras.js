@@ -548,7 +548,7 @@ function wireEditFormHandlers(index) {
         form.querySelector('[name="profile_day_start"]').value = suggestion.day_start;
         form.querySelector('[name="profile_night_start"]').value = suggestion.night_start;
         if (profileResult) profileResult.textContent = 'Cat / Small Animal preset and sunrise/sunset times loaded. Review and save the camera.';
-      } catch (err) {
+      } catch (_err) {
         if (!window.daygleAuth?.redirecting && profileResult) {
           profileResult.textContent = 'Cat / Small Animal preset loaded. Add location details to suggest sunrise/sunset times, then review and save.';
         }
