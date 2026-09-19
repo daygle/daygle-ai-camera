@@ -65,6 +65,16 @@ function buildEditFormHtml(camera, index) {
   const rowId = 'edit-row-' + index;
   const formId = 'edit-form-' + index;
   const htmlAttr = (value) => escapeHtml(value == null ? '' : String(value));
+  const runtimeActive = camera.profile_status?.active || camera.detection_profiles?.active || 'day';
+  const runtimeSource = camera.detection_profiles?.source || 'manual';
+  const runtimeSourceLabel = runtimeSource === 'solar' ? 'Solar' : runtimeSource === 'schedule' ? 'Scheduled' : runtimeSource === 'onvif' ? 'ONVIF' : 'Manual';
+  const runtimeNote = runtimeSource === 'solar'
+    ? 'Solar sunrise and sunset times update daily using this camera\'s coordinates and timezone.'
+    : runtimeSource === 'onvif'
+      ? 'ONVIF IR detection falls back to the schedule when unsupported.'
+      : runtimeSource === 'schedule'
+        ? 'Scheduled times use this camera\'s timezone.'
+        : 'Manual profile selection is active.';
   return '<tr class="camera-edit-row" id="' + htmlAttr(rowId) + '"><td colspan="6"><div class="camera-edit-panel">' +
     '<div class="cam-edit-head">' +
       '<span class="cam-edit-head-title">Editing <strong>' + escapeHtml(camera.name || camera.id || ('Camera ' + (index + 1))) + '</strong></span>' +
@@ -216,13 +226,13 @@ function buildEditFormHtml(camera, index) {
             '<span class="form-help muted profile-action-result" aria-live="polite"></span>' +
           '</div>' +
           '<p class="form-help muted">Choose which profile is active now. Solar mode refreshes sunrise/sunset times daily using this camera’s coordinates and timezone. The motion overrides below are edited for the selected profile. Existing cameras inherit their legacy settings into both profiles.</p>' +
-          '<p class="form-help muted">Runtime: <strong>' + escapeHtml(camera.profile_status?.active || camera.detection_profiles?.active || 'day') + '</strong> (' + escapeHtml(camera.profile_status?.selected_by || camera.detection_profiles?.source || 'manual') + '). ONVIF IR detection falls back to the schedule when unsupported.</p>' +
+          '<p class="form-help muted">Runtime: <strong>' + escapeHtml(runtimeActive.charAt(0).toUpperCase() + runtimeActive.slice(1)) + '</strong> (' + escapeHtml(runtimeSourceLabel) + '). ' + escapeHtml(runtimeNote) + '</p>' +
         '</div>' +
         '<div class="cam-edit-section">' +
           '<h4 class="cam-edit-section-title">Day/Night Performance</h4>' +
           '<p class="form-help muted">These settings override Live Performance for this camera and profile. Leave values at their defaults unless this camera needs different day/night resource usage.</p>' +
           '<div class="button-row profile-preset-row">' +
-            '<label><span>Preset</span><select name="profile_preset"><option value="">Choose a preset…</option>' + profilePresetOptionsHtml(camera.detection_profiles?.preset_id) + '</select></label>' +
+            '<label><span>Preset</span><select name="profile_preset"><option value="">Choose a Preset…</option>' + profilePresetOptionsHtml(camera.detection_profiles?.preset_id) + '</select></label>' +
             '<button type="button" class="secondary profile-apply-preset-btn">Apply Preset</button>' +
             '<button type="button" class="secondary profile-save-preset-btn">Save Current as Preset</button>' +
             '<button type="button" class="secondary profile-update-preset-btn" disabled>Update Preset</button>' +
@@ -280,7 +290,7 @@ function buildEditFormHtml(camera, index) {
             '<label><span>Motion Engine <span class="info-tip" data-tip="Background-subtraction engine for this camera. Leave on Global Default unless this camera needs a different engine." title="Background-subtraction engine for this camera. Leave on Global Default unless this camera needs a different engine." tabindex="0" aria-label="Help: Per-camera motion engine override."></span></span><select name="motion_algorithm">' +
               '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') == null ? ' selected' : '') + '>Global Default</option>' +
               '<option value="mog2"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') === 'mog2' ? ' selected' : '') + '>MOG2</option>' +
-              '<option value="diff"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') === 'diff' ? ' selected' : '') + '>Diff (legacy)</option>' +
+              '<option value="diff"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') === 'diff' ? ' selected' : '') + '>Diff (Legacy)</option>' +
             '</select></label>' +
             '<label><span>Denoise <span class="info-tip" data-tip="Morphological denoise of the motion mask for this camera. Leave on Global Default to follow the global setting." title="Morphological denoise of the motion mask for this camera. Leave on Global Default to follow the global setting." tabindex="0" aria-label="Help: Per-camera denoise override."></span></span><select name="motion_denoise">' +
               '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_denoise') == null ? ' selected' : '') + '>Global Default</option>' +

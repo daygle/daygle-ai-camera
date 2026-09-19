@@ -2448,9 +2448,16 @@ tr.drag-over {
   align-self: center;
 }
 
-/* Camera editor: consistent two-up field grid on desktop */
+/* Camera editor: use four columns on wide screens so the settings panel is
+   compact without sacrificing readable labels. Collapse to two columns on
+   medium screens and one column on phones. */
 .camera-edit-panel .modal-tab-panel .form-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@media (max-width: 1000px) {
+  .camera-edit-panel .modal-tab-panel .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* Camera editor: segmented pill tab bar */

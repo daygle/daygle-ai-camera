@@ -27,8 +27,13 @@ test('camera table exposes day and night profiles and editor can collapse', () =
   assert.match(source, /camera-profile-pill/);
   assert.match(source, /Solar \(Daily Sunrise\/Sunset\)/);
   assert.match(source, /ONVIF IR State \(Fallback Schedule\)/);
+  assert.match(source, /Diff \(Legacy\)/);
   assert.match(source, /Global Default/);
+  assert.match(source, /Choose a Preset…/);
+  assert.doesNotMatch(source, /Choose a preset…/);
   assert.doesNotMatch(source, /Global default/);
+  assert.match(source, /Solar sunrise and sunset times update daily/);
+  assert.match(source, /runtimeSource === 'onvif'/);
   assert.match(source, /profiles\.source === 'solar' \? 'Solar'/);
   assert.match(source, /cameraProfilePresets\.find/);
   assert.match(source, /camera-profile-preset/);
