@@ -11,7 +11,7 @@ import logging
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
-from math import acos, asin, atan, cos, degrees, floor, radians, sin, tan
+from math import acos, asin, atan, cos, degrees, radians, sin, tan
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
