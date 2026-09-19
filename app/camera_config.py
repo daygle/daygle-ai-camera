@@ -45,6 +45,7 @@ from app.camera_id import camera_storage_key, normalize_camera_id  # re-export
 from app.recording_settings import (
     _migrate_legacy_camera_motion,
     _normalize_camera_sound_settings,
+    apply_active_camera_detection_profile,
     normalize_camera_ptz_settings,
     normalize_camera_recording_settings,
 )
@@ -78,6 +79,16 @@ def normalize_camera_settings(
     else:
         camera_settings['fps'] = int(raw_fps)
     camera_settings['recording_stream_path'] = str(camera_settings.get('recording_stream_path') or '').strip()
+    camera_settings['timezone'] = str(camera_settings.get('timezone') or 'UTC').strip() or 'UTC'
+    for _location_key, _low, _high in (
+        ('latitude', -90.0, 90.0),
+        ('longitude', -180.0, 180.0),
+    ):
+        try:
+            _location_value = float(camera_settings.get(_location_key))
+            camera_settings[_location_key] = round(max(_low, min(_high, _location_value)), 6)
+        except (TypeError, ValueError):
+            camera_settings[_location_key] = None
     # Match the ``fps`` handling above: an empty/whitespace string (the form's
     # blank "Auto" value, or a restored/legacy config) means "no override" ->
     # None, rather than reaching ``int('')`` and raising ValueError out of every
@@ -122,6 +133,7 @@ def normalize_camera_settings(
         ):
             if camera_settings.get(_flat_key) is None and _legacy_cam_motion.get(_short_key) is not None:
                 camera_settings[_flat_key] = _legacy_cam_motion[_short_key]
+    apply_active_camera_detection_profile(camera_settings)
     return camera_settings
 
 

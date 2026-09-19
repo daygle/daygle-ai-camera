@@ -357,6 +357,26 @@ def test_displacement_junk_value_falls_back_to_mask():
     assert os.detection_motion_state(car, _mask_changed_inside_box(), 'junk') == 'moving'
 
 
+def test_camera_motion_marks_object_state_unknown_without_dropping_detection():
+    detection = {**_det('car'), 'track_displacement': 0.4}
+    out = os.filter_detections_by_motion_mode(
+        [detection], _mask_all_changed(),
+        {'default_mode': 'moving', 'labels': {}},
+        camera_motion=True,
+    )
+    assert len(out) == 1
+    assert out[0]['motion_state'] == 'unknown'
+    assert out[0]['camera_motion'] is True
+
+
+def test_camera_motion_does_not_create_still_dwell_candidate():
+    detection = _det('car')
+    assert os.still_dwell_candidates(
+        [detection], _mask_none_changed(),
+        {'still_alerts': {'car': 5}}, camera_motion=True,
+    ) == []
+
+
 def test_filter_honours_track_displacement():
     # Moving-only cars: two boxes, both full of mask change, but one track is
     # parked (displacement ~0) and one is traversing. The parked one is

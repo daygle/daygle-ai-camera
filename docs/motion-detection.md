@@ -201,7 +201,7 @@ driveway" zone rule.
 
 All of these live under **Settings → Detection & Live → Live Performance**. The **Motion Engine**, **Denoise**, **Shadow Suppression**, **Periodic Scan Interval**, and the low-level motion tuning values (**Motion Pixel Threshold**, **Motion Gate Fraction**, **Motion Scale Fraction**, **Motion Background Alpha**, **Motion Frame Width**, and **Motion Frame Height**) are grouped under the **Advanced Motion Tuning** disclosure on that card.
 
-These are global defaults. You can override the four motion gate tuning values - **Motion Pixel Threshold**, **Motion Gate Fraction**, **Motion Scale Fraction**, and **Motion Background Alpha** - for an individual camera from **Cameras → Edit Camera → Advanced → Motion Detection Overrides**. Blank override fields use the global Live Performance value.
+These remain the global defaults. Each camera can override the detection-performance settings from **Cameras → Edit Camera → Advanced → Day/Night Performance**. The camera stores separate Day and Night values for background detection, detection interval, ingest frame rate, confirmation frames/window/IoU, always-run object detection, region boost, tiling, periodic scans, motion-frame dimensions, and all motion tuning fields. Blank profile values inherit the global Live Performance value. Profile selection can be manual, schedule-based, or driven by ONVIF IR state.
 
 ### Motion Engine
 

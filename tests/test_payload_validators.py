@@ -73,6 +73,7 @@ import sys
 from pathlib import Path
 
 import pytest  # noqa: E402  -- used below
+from fastapi import HTTPException  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -547,6 +548,55 @@ def test_validate_camera_settings_persists_per_camera_engine_overrides(monkeypat
     out_keep = pv.validate_camera_settings({'stream_url': 'rtsp://ok'}, current=current)
     assert out_keep['motion_algorithm'] == 'mog2'
     assert out_keep['motion_shadow_suppression'] == 'off'  # legacy bool migrates on preserve
+
+
+def test_validate_camera_settings_persists_day_night_profiles_and_projects_active(monkeypatch, pv):
+    from app.utils import normalize_bool_setting as real_bool
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok',
+                                    normalize_bool_setting=real_bool)
+    out = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'detection_profiles': {
+            'active': 'night',
+            'day': {'motion_pixel_threshold': 30},
+            'night': {'motion_pixel_threshold': 110, 'motion_shadow_suppression': 'off'},
+        },
+    })
+    assert out['detection_profiles']['active'] == 'night'
+    assert out['motion_pixel_threshold'] == 110
+    assert out['motion_shadow_suppression'] == 'off'
+
+
+def test_validate_camera_settings_migrates_legacy_motion_into_both_profiles(monkeypatch, pv):
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')
+    out = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'motion_pixel_threshold': 77,
+    })
+    assert out['detection_profiles']['active'] == 'day'
+    assert out['detection_profiles']['day']['motion_pixel_threshold'] == 77
+    assert out['detection_profiles']['night']['motion_pixel_threshold'] == 77
+
+
+def test_validate_camera_settings_accepts_location_and_timezone_for_solar_profiles(monkeypatch, pv):
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')
+    out = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'timezone': 'Australia/Sydney',
+        'latitude': '-33.8688',
+        'longitude': '151.2093',
+    })
+    assert out['timezone'] == 'Australia/Sydney'
+    assert out['latitude'] == -33.8688
+    assert out['longitude'] == 151.2093
+
+
+def test_validate_camera_settings_rejects_invalid_location(monkeypatch, pv):
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')
+    with pytest.raises(HTTPException):
+        pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'latitude': 91})
+    with pytest.raises(HTTPException):
+        pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'timezone': 'Not/A_Timezone'})
 
 
 def test_validate_camera_settings_clamps_dimensions_to_min_max(monkeypatch, pv):

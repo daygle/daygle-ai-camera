@@ -61,6 +61,157 @@ from app.sound_detector import DEFAULT_RULES, SOUND_CLASSES
 from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_hhmm
 
 
+CAMERA_MOTION_PROFILE_FIELDS = (
+    'background_detection_enabled',
+    'detection_interval_seconds',
+    'ingest_frame_fps',
+    'detection_confirm_frames',
+    'detection_confirm_window',
+    'detection_confirm_iou',
+    'always_run_object_detection',
+    'object_detection_region_boost',
+    'object_detection_tiling',
+    'periodic_scan_interval_seconds',
+    'motion_frame_width',
+    'motion_frame_height',
+    'motion_pixel_threshold',
+    'motion_gate_fraction',
+    'motion_scale_fraction',
+    'motion_background_alpha',
+    'motion_algorithm',
+    'motion_denoise',
+    'motion_shadow_suppression',
+)
+_CAMERA_MOTION_PROFILE_MODES = frozenset({'day', 'night'})
+
+
+def _normalize_profile_value(key: str, value: Any) -> int | float | str | bool | None:
+    """Normalize an optional per-camera live/detection profile value."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        if key == 'detection_interval_seconds':
+            return round(max(0.1, min(10.0, float(value))), 3)
+        if key == 'ingest_frame_fps':
+            return max(1, min(30, int(value)))
+        if key in {'detection_confirm_frames'}:
+            return max(1, min(10, int(value)))
+        if key in {'detection_confirm_window'}:
+            return max(1, min(30, int(value)))
+        if key == 'detection_confirm_iou':
+            return round(max(0.0, min(0.9, float(value))), 4)
+        if key == 'periodic_scan_interval_seconds':
+            return max(0, min(3600, int(value)))
+        if key == 'motion_frame_width':
+            return max(40, min(640, int(value)))
+        if key == 'motion_frame_height':
+            return max(30, min(480, int(value)))
+        if key == 'motion_pixel_threshold':
+            return max(1, min(255, int(value)))
+        if key == 'motion_gate_fraction':
+            return round(max(0.0001, min(0.5, float(value))), 6)
+        if key == 'motion_scale_fraction':
+            return round(max(0.001, min(1.0, float(value))), 6)
+        if key == 'motion_background_alpha':
+            return round(max(0.001, min(0.5, float(value))), 6)
+    except (TypeError, ValueError):
+        return None
+    if key in {
+        'background_detection_enabled', 'always_run_object_detection',
+        'object_detection_region_boost', 'motion_denoise',
+    }:
+        return normalize_bool_setting(value, True)
+    if key == 'object_detection_tiling':
+        text = str(value).strip().lower()
+        return text if text in {'off', '2x2', '3x3', '4x4'} else None
+    if key == 'motion_algorithm':
+        text = str(value).strip().lower()
+        return text if text in {'mog2', 'diff'} else None
+    if key == 'motion_shadow_suppression':
+        text = str(value).strip().lower()
+        return text if text in {'on', 'off', 'auto'} else None
+    return None
+
+
+def effective_camera_live_settings(
+    camera: dict[str, Any],
+    global_settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge the active camera Day/Night profile over global live defaults."""
+    merged = dict(global_settings)
+    profiles = normalize_camera_detection_profiles(
+        camera.get('detection_profiles'), camera,
+    )
+    active = profiles.get('active', 'day')
+    merged.update(profiles.get(active, {}))
+    merged['detection_profiles'] = profiles
+    return merged
+
+
+def _normalize_profile_motion_value(key: str, value: Any) -> int | float | str | bool | None:
+    """Backward-compatible name for the expanded profile value normalizer."""
+    return _normalize_profile_value(key, value)
+
+
+def normalize_camera_detection_profiles(
+    raw_profiles: Any,
+    legacy_settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the backward-compatible manual day/night profile structure.
+
+    Older camera rows have flat ``motion_*`` overrides only. Those overrides are
+    copied into both profiles and the active profile defaults to ``day``, so
+    normalization preserves behavior exactly. New rows may set either profile
+    field to ``None`` to inherit the global value.
+    """
+    legacy = legacy_settings if isinstance(legacy_settings, dict) else {}
+    legacy_values = {
+        key: _normalize_profile_motion_value(key, legacy.get(key))
+        for key in CAMERA_MOTION_PROFILE_FIELDS
+        if legacy.get(key) is not None
+    }
+    raw = raw_profiles if isinstance(raw_profiles, dict) else {}
+    active = str(raw.get('active') or 'day').strip().lower()
+    if active not in _CAMERA_MOTION_PROFILE_MODES:
+        active = 'day'
+    automation_source = str(raw.get('source') or 'manual').strip().lower()
+    if automation_source not in {'manual', 'schedule', 'onvif'}:
+        automation_source = 'manual'
+    day_start = normalize_hhmm(raw.get('day_start')) or '07:00'
+    night_start = normalize_hhmm(raw.get('night_start')) or '19:00'
+    has_profiles = any(isinstance(raw.get(mode), dict) for mode in _CAMERA_MOTION_PROFILE_MODES)
+    profiles: dict[str, dict[str, Any]] = {}
+    for mode in _CAMERA_MOTION_PROFILE_MODES:
+        profile_source = raw.get(mode) if isinstance(raw.get(mode), dict) else None
+        if profile_source is None and not has_profiles:
+            profile_source = legacy_values
+        profile_source = {**legacy_values, **(profile_source or {})}
+        profiles[mode] = {
+            key: _normalize_profile_motion_value(key, profile_source.get(key))
+            for key in CAMERA_MOTION_PROFILE_FIELDS
+            if profile_source.get(key) is not None and _normalize_profile_motion_value(key, profile_source.get(key)) is not None
+        }
+    return {
+        'active': active,
+        'source': automation_source,
+        'day_start': day_start,
+        'night_start': night_start,
+        'day': profiles['day'],
+        'night': profiles['night'],
+    }
+
+
+def apply_active_camera_detection_profile(settings: dict[str, Any]) -> dict[str, Any]:
+    """Normalize profiles and project the selected profile onto legacy runtime keys."""
+    legacy = dict(settings)
+    profiles = normalize_camera_detection_profiles(settings.get('detection_profiles'), legacy)
+    for key in CAMERA_MOTION_PROFILE_FIELDS:
+        settings.pop(key, None)
+    settings['detection_profiles'] = profiles
+    settings.update(profiles[profiles['active']])
+    return settings
+
+
 def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
     raw = settings if isinstance(settings, dict) else {}
     return {

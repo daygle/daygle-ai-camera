@@ -27,6 +27,7 @@ from app.detection_state import (
     confirm_object_detections,
     detect_frame_motion,
     detection_label_set,
+    update_camera_motion,
     record_live_detection_history,
 )
 from app.detection_status import _camera_has_live_alert_stream, update_live_detection_status
@@ -38,6 +39,7 @@ from app.object_settings import (
     update_still_dwell_alerts,
 )
 from app.object_tracking import update_object_tracks
+from app.recording_settings import effective_camera_live_settings
 from app.face_identity import annotate_face_identities, face_identity_metadata, unknown_face_alerts
 from app.face_detection_rules import known_face_rules_for_camera
 from app.region_detection import (
@@ -185,6 +187,7 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
     background_detection_enabled = normalize_bool_setting(live_settings.get('background_detection_enabled'), True)
     processed = 0
     for selected_config in list(_state.cameras_config):
+        camera_live_settings = effective_camera_live_settings(selected_config, live_settings)
         camera_id = str(selected_config.get('id') or 'camera')
         if selected_config.get('enabled') is False:
             continue
@@ -204,13 +207,13 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
                 # low-resolution detection stream. The chunk worker uses
                 # ``-c:v copy``, so the source resolution and FPS are preserved.
                 _state.recording_service.start_continuous_chunk_recording(stream_url=recording_stream_url or stream_url, camera_id=camera_id, recording_config=cam_rec_config, on_chunk_complete=_make_continuous_chunk_callback(camera_id))
-        if not background_detection_enabled:
+        if not background_detection_enabled or not normalize_bool_setting(camera_live_settings.get('background_detection_enabled'), True):
             continue
         with _state._live_backoff_lock:
             retry_after = _state.live_detection_retry_after.get(camera_id, 0)
         if retry_after and now < retry_after:
             continue
-        detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.5))
+        detection_interval_seconds = float(camera_live_settings.get('detection_interval_seconds', 0.5))
         with _state.live_detection_worker_lock:
             if camera_id in _state.active_live_detection_cameras:
                 continue
@@ -309,7 +312,11 @@ def live_alert_monitor_loop() -> None:
                 _prune_frame_motion_state()
                 purge_camera_diagnostics_by_policy()
                 _last_prune = now
-            interval = max(0.1, float(live_settings.get('detection_interval_seconds', 0.5)))
+            configured_intervals = [
+                float(effective_camera_live_settings(camera, live_settings).get('detection_interval_seconds', 0.5))
+                for camera in _state.cameras_config
+            ]
+            interval = max(0.1, min(configured_intervals or [float(live_settings.get('detection_interval_seconds', 0.5))]))
         except Exception as exc:
             # The monitor thread is the single background source for detection,
             # camera-health tracking, and offline/recovery alerts. A transient
@@ -371,7 +378,8 @@ def queue_live_stream_alerts(
     stream_url = build_stream_url(settings)
     if stream_url:
         _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=_state.camera_event_recording_config(settings), recording_stream_path=build_recording_stream_url(settings))
-    detection_interval_seconds = float(live_cfg.get('detection_interval_seconds', 0.5))
+    camera_live_cfg = effective_camera_live_settings(settings, live_cfg)
+    detection_interval_seconds = float(camera_live_cfg.get('detection_interval_seconds', 0.5))
     now = time.time()
     with _state.live_detection_worker_lock:
         if camera_id in _state.active_live_detection_cameras:
@@ -427,7 +435,7 @@ def merge_secondary_face_detections(image: Any, detections: list, confidence: fl
 
 def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
-    live_settings = effective_live_config()
+    live_settings = effective_camera_live_settings(settings, effective_live_config())
     detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.5))
     # Master AI toggle (ai.enabled): when disabled, skip inference and every
     # downstream effect (detections, alerts, AI-triggered recordings). This is
@@ -519,6 +527,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # latter is intentionally zero below the motion gate; the former lets the
     # live bar show real sub-gate pixel changes without making them alertable.
     motion_signal = round(min(1.0, raw_motion_fraction / max(_scale_fraction, 1e-9)), 3)
+    camera_motion = update_camera_motion(camera_id, raw_motion_fraction)
     # A motion-gate error is not evidence of motion, but it must not suppress
     # the independent object-detection path: some callers provide detector-
     # compatible input that the optional motion decoder cannot parse. Keep the
@@ -539,6 +548,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         reason='Motion sample measured.',
         detections=[],
         motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction, motion_signal=motion_signal,
+        camera_motion=camera_motion,
     )
     if not frame_has_motion:
         frame_motion_confidence = 0.0
@@ -558,6 +568,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # object-detection path remain immediate; only motion-zone actions wait for
     # confirmation, filtering one-frame stream/exposure artifacts.
     motion_detections = confirm_motion_detections(camera_id, motion_detections)
+    # A moving camera invalidates both global motion-zone detections and the
+    # object movement verdict. Keep the raw pixel telemetry above, but do not
+    # allow camera motion to create a motion-only event or recording.
+    if camera_motion['active']:
+        motion_detections = []
     # ``always_run_object_detection`` decouples object (YOLO) inference from the
     # motion gate: when set, inference runs every cycle regardless of pixel
     # motion, so a still/slow/low-contrast subject is never hidden from the
@@ -648,7 +663,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Only mode, which would otherwise starve every "still for N minutes" alert
     # (an independent axis) of the still classifications it needs. Select them
     # before the filter reassigns ``detections``.
-    still_candidates = still_dwell_candidates(detections, diff_mask, object_settings)
+    still_candidates = still_dwell_candidates(
+        detections, diff_mask, object_settings,
+        camera_motion=camera_motion['active'],
+    )
     # Per-label still/moving filter (Objects page): drop detections whose
     # label's detection mode (any/moving/still) does not allow this object's
     # motion state, so a "car moving only" rule never records a parked car.
@@ -656,7 +674,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # is moving, otherwise still (no mask -> still). Motion-zone rules (Layer
     # 3) are a separate pixel-diff axis and are unaffected. Surviving
     # detections carry a ``motion_state`` annotation for overlays/status.
-    detections = filter_detections_by_motion_mode(detections, diff_mask, object_settings)
+    detections = filter_detections_by_motion_mode(
+        detections, diff_mask, object_settings,
+        camera_motion=camera_motion['active'],
+    )
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     object_detections = filter_detections_for_camera(detections, settings)
     # Object detector boxes are authoritative over generic motion boxes. This
@@ -735,11 +756,17 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Empty unless recognition is enabled and an unknown-person face-detection
     # rule is on (global _unknown, or a zone-scoped _unknown:<zone> variant
     # created by the Zones page People card).
-    _unknown_face_alerts = unknown_face_alerts(camera_id, object_detections)
+    _unknown_face_alerts = (
+        [] if camera_motion['active'] else unknown_face_alerts(camera_id, object_detections)
+    )
     # Face detection rules (Stage 2c): per-person alert rules with email/push
     # notifications, checked after identity annotation so each face carries
-    # person_name/person_id annotations.
-    _known_face_rule_alerts = known_face_rules_for_camera(camera_id, object_detections)
+    # person_name/person_id annotations. PTZ movement suppresses these direct
+    # face-rule paths too; they do not pass through AlertEngine's unknown-state
+    # guard.
+    _known_face_rule_alerts = (
+        [] if camera_motion['active'] else known_face_rules_for_camera(camera_id, object_detections)
+    )
     # Still-dwell alerts (Objects page: "still for N minutes"): a label that
     # has been detected continuously still for its configured threshold fires
     # one dwell alert per streak, watching the same Layer-1 background-
@@ -796,8 +823,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         for zone in (settings.get('detection') or {}).get('zones', [])
     )
     _zone_match_needed = has_object_zone_rules or has_face_zone_rules
-    object_alert_detections = zone_alert_detections(settings, object_detections) if _zone_match_needed else list(object_detections)
-    record_only_detections = [d for d in object_detections if zone_record_on_detect(d, settings) and (not zone_object_rule_matches(settings, d, action='alert'))] if _zone_match_needed else []
+    # Detections remain visible while the camera moves, but unknown movement
+    # cannot satisfy either Moving Only or Still Only behavior and must not be
+    # passed to alerts/record-only rules.
+    alertable_object_detections = [
+        detection for detection in object_detections
+        if detection.get('motion_state') != 'unknown'
+    ]
+    object_alert_detections = zone_alert_detections(settings, alertable_object_detections) if _zone_match_needed else list(alertable_object_detections)
+    record_only_detections = [d for d in alertable_object_detections if zone_record_on_detect(d, settings) and (not zone_object_rule_matches(settings, d, action='alert'))] if _zone_match_needed else []
     # Keep every firing motion zone in the playback track. Retaining only the
     # strongest zone made multi-zone motion clips show a box for one region while
     # silently omitting movement elsewhere in the same frame.
@@ -866,7 +900,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
     _confident_object_detections: list[dict[str, Any]] = []
     if has_object_zone_rules:
-        for _det in object_detections:
+        for _det in alertable_object_detections:
             _zone_name = zone_name_for_detection(settings, _det)
             if _zone_name or zone_record_on_detect(_det, settings):
                 _confident_object_detections.append({**_det, 'zone_name': _zone_name or None})

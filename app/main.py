@@ -29,6 +29,7 @@ from app.camera_instance import create_camera_instances
 from app.config_facades import effective_auth_config, effective_ai_config, effective_cameras_config, effective_recording_config, effective_storage_config
 from app.diagnostics import log_camera_diagnostic
 from app.live_monitor import start_live_alert_monitor, stop_live_alert_monitor
+from app.profile_automation import start_profile_monitor, stop_profile_monitor
 from app.sound_monitor import apply_sound_settings, stop_sound_monitor
 
 _logger = logging.getLogger('daygle.ai')
@@ -201,6 +202,7 @@ async def app_lifespan(_app: FastAPI):
     except Exception:
         pass  # best-effort; failures are logged inside the helper
     start_live_alert_monitor()
+    start_profile_monitor()
     apply_sound_settings()
     tunnel_manager = _state.cloudflare_tunnel_manager
     if tunnel_manager is not None and tunnel_manager.autostart:
@@ -214,6 +216,7 @@ async def app_lifespan(_app: FastAPI):
         _state.recording_service.stop_prebuffer_workers()
         _state.recording_service.stop_all_continuous_recordings()
         stop_live_alert_monitor()
+        stop_profile_monitor()
         stop_sound_monitor()
         if _state.cloudflare_tunnel_manager is not None:
             _state.cloudflare_tunnel_manager.stop()

@@ -212,6 +212,41 @@ def test_normalize_camera_recording_settings_passes_continuous_through_normalize
     assert bs.calls == [('yes', False)]
 
 
+# -- day/night camera detection profiles ----------------------------------
+
+def test_normalize_camera_detection_profiles_migrates_legacy_overrides(rs):
+    legacy = {'motion_pixel_threshold': 88, 'motion_algorithm': 'diff'}
+    out = rs.normalize_camera_detection_profiles(None, legacy)
+    assert out['active'] == 'day'
+    assert out['day'] == out['night'] == legacy
+
+
+def test_normalize_camera_detection_profiles_rejects_invalid_values_and_keeps_active(rs):
+    out = rs.normalize_camera_detection_profiles({
+        'active': 'NIGHT',
+        'day': {'motion_pixel_threshold': 999, 'motion_algorithm': 'wavelet'},
+        'night': {'motion_gate_fraction': 0.25, 'motion_denoise': False},
+    })
+    assert out['active'] == 'night'
+    assert out['day'] == {'motion_pixel_threshold': 255}
+    assert out['night'] == {'motion_gate_fraction': 0.25, 'motion_denoise': False}
+
+
+def test_apply_active_camera_detection_profile_projects_selected_values(rs):
+    settings = {
+        'motion_pixel_threshold': 30,
+        'detection_profiles': {
+            'active': 'night',
+            'day': {'motion_pixel_threshold': 30},
+            'night': {'motion_pixel_threshold': 90, 'motion_shadow_suppression': 'off'},
+        },
+    }
+    out = rs.apply_active_camera_detection_profile(settings)
+    assert out['motion_pixel_threshold'] == 90
+    assert out['motion_shadow_suppression'] == 'off'
+    assert out['detection_profiles']['active'] == 'night'
+
+
 # -- normalize_camera_ptz_settings --------------------------------------
 
 def test_normalize_camera_ptz_settings_defaults_when_input_not_dict(rs):

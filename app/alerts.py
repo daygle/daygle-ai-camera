@@ -103,6 +103,11 @@ class AlertEngine:
             label = detection.get('label')
             if not isinstance(label, str) or not label:
                 continue
+            # PTZ/ego-motion makes image-space object movement unknowable. Such
+            # detections may remain visible in the live overlay, but must never
+            # satisfy an object alert rule as moving or still.
+            if detection.get('motion_state') == 'unknown':
+                continue
             label_key = self._normalize_object_label(label)
             # ``or 0`` (not a default arg): an explicitly-None confidence must
             # not reach float(None) and raise TypeError mid-dispatch.

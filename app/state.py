@@ -105,6 +105,10 @@ cameras_config: list = []
 camera_config: dict = {}
 camera_instances: dict = {}
 _camera_instances_lock: threading.Lock = threading.Lock()
+_camera_profile_status_lock: threading.Lock = threading.Lock()
+_camera_profile_status: dict = {}
+_camera_profile_monitor_stop: threading.Event = threading.Event()
+_camera_profile_monitor_thread: threading.Thread | None = None
 
 # ---------------------------------------------------------------------------
 # Live-detection shared state (locks + associated dicts)
@@ -172,6 +176,11 @@ _frame_motion_mog2_meta: dict = {}
 # scene change; see ``_MOTION_SCENE_RESET_FRAMES``.
 # codeql[py/unused-global-variable]
 _frame_motion_scene_streak: dict = {}
+# PTZ / camera-motion state. ``command_until`` covers movement initiated by the
+# application; ``auto_until`` is refreshed by the frame-wide motion heuristic so
+# cameras that auto-track independently of the application are covered too.
+_camera_motion_lock: threading.Lock = threading.Lock()
+_camera_motion_state: dict = {}
 # Per-camera lightweight IoU object-tracker state (app/object_tracking.py):
 # {camera_id: {'tracks': [...], 'next_id': int}}. Gives each detected object a
 # stable track id across detection cycles.

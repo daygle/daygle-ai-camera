@@ -356,6 +356,19 @@ def test_alert_engine_stamps_motion_state_on_alerts():
     assert 'motion_state' not in by_label['motion']
 
 
+def test_alert_engine_rejects_unknown_camera_motion_object_state():
+    from app.alerts import AlertEngine
+
+    engine = AlertEngine([])
+    alerts = engine.process([
+        {'label': 'car', 'confidence': 0.99, 'motion_state': 'unknown'},
+    ], rules=[{
+        'name': 'Moving car', 'enabled': True, 'object': 'car',
+        'min_confidence': 0.5, 'cooldown_seconds': 0,
+    }])
+    assert alerts == []
+
+
 def test_email_alert_mentions_state_row_and_plain_line():
     """An email for a still/moving detection must show a State row in the HTML
     table and a matching State line in the plain-text part."""
