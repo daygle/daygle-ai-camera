@@ -167,6 +167,78 @@ def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
     return {str(detection.get('label') or '').strip().lower() for detection in detections if str(detection.get('label') or '').strip()}
 
 
+# A high fraction of changed pixels across the whole thumbnail is a useful,
+# cheap PTZ signal: a pan/tilt moves the entire scene, unlike an ordinary
+# subject. It is deliberately conservative and requires persistence so a large
+# passing object does not suppress one frame of real motion.
+_CAMERA_MOTION_FRACTION = 0.35
+_CAMERA_MOTION_IMMEDIATE_FRACTION = 0.8
+_CAMERA_MOTION_REQUIRED_FRAMES = 2
+_CAMERA_MOTION_HOLD_SECONDS = 0.75
+_CAMERA_MOTION_SETTLE_SECONDS = 1.5
+
+def mark_camera_motion(camera_id: str, duration_seconds: float, *, reason: str = 'ptz_command') -> None:
+    """Mark a camera as moving for an application-issued PTZ command.
+
+    The extra settle interval covers frames arriving just after the motor stops;
+    it also makes a dropped explicit ``stop`` harmless. Auto-tracking cameras
+    are covered separately by :func:`update_camera_motion`.
+    """
+    try:
+        duration = max(0.1, min(30.0, float(duration_seconds)))
+    except (TypeError, ValueError):
+        duration = 0.4
+    until = time.monotonic() + duration + _CAMERA_MOTION_SETTLE_SECONDS
+    with _state._camera_motion_lock:
+        current = _state._camera_motion_state.setdefault(str(camera_id), {})
+        current['command_until'] = max(float(current.get('command_until', 0.0)), until)
+        current['reason'] = reason
+
+
+def clear_camera_motion(camera_id: str) -> None:
+    """End an application-issued PTZ motion command while retaining settle time."""
+    with _state._camera_motion_lock:
+        current = _state._camera_motion_state.setdefault(str(camera_id), {})
+        current['command_until'] = time.monotonic() + _CAMERA_MOTION_SETTLE_SECONDS
+        current['reason'] = 'ptz_settling'
+
+
+def update_camera_motion(camera_id: str, raw_motion_fraction: float) -> dict[str, Any]:
+    """Update and return the PTZ/camera-motion state for one analyzed frame.
+
+    This is a suppression signal, not geometric compensation. When active,
+    object movement is reported as ``unknown`` because image-space displacement
+    cannot distinguish a moving object from a moving camera.
+    """
+    try:
+        fraction = float(raw_motion_fraction)
+    except (TypeError, ValueError):
+        fraction = 0.0
+    now = time.monotonic()
+    with _state._camera_motion_lock:
+        current = _state._camera_motion_state.setdefault(str(camera_id), {})
+        if fraction >= _CAMERA_MOTION_FRACTION:
+            current['high_fraction_streak'] = int(current.get('high_fraction_streak', 0)) + 1
+            if (
+                fraction >= _CAMERA_MOTION_IMMEDIATE_FRACTION
+                or current['high_fraction_streak'] >= _CAMERA_MOTION_REQUIRED_FRAMES
+            ):
+                current['auto_until'] = now + _CAMERA_MOTION_HOLD_SECONDS
+                current['reason'] = 'global_motion'
+        else:
+            current['high_fraction_streak'] = 0
+        command_until = float(current.get('command_until', 0.0))
+        auto_until = float(current.get('auto_until', 0.0))
+        active = now < command_until or now < auto_until
+        if not active and current.get('reason') == 'global_motion':
+            current['reason'] = None
+        return {
+            'active': active,
+            'reason': current.get('reason') if active else None,
+            'motion_fraction': round(max(0.0, min(1.0, fraction)), 6),
+        }
+
+
 def _box_iou(box_a: Any, box_b: Any) -> float:
     """Intersection-over-union of two normalized ``{x,y,width,height}`` boxes.
 

@@ -455,6 +455,8 @@ def filter_detections_by_motion_mode(
     detections: list[dict[str, Any]],
     diff_mask: Any,
     settings: dict[str, Any] | None = None,
+    *,
+    camera_motion: bool = False,
 ) -> list[dict[str, Any]]:
     """Drop detections whose label's mode does not allow their motion state.
 
@@ -479,6 +481,11 @@ def filter_detections_by_motion_mode(
     """
     if not detections:
         return detections
+    # During PTZ/ego-motion, image-space displacement and local pixel masks are
+    # not evidence of object movement. Keep detections visible for diagnostics,
+    # but mark their state unknown so the alert/record path can reject them.
+    if camera_motion:
+        return [{**detection, 'motion_state': 'unknown', 'camera_motion': True} for detection in detections]
     resolved = settings if settings is not None else effective_object_settings()
     restricted_labels: set[str] = set()
     for detection in detections:
@@ -516,6 +523,8 @@ def still_dwell_candidates(
     detections: list[dict[str, Any]],
     diff_mask: Any,
     settings: dict[str, Any] | None = None,
+    *,
+    camera_motion: bool = False,
 ) -> list[dict[str, Any]]:
     """Still detections for still-alert labels, ignoring the moving/still filter.
 
@@ -538,7 +547,7 @@ def still_dwell_candidates(
     Returns an empty list when nothing has a still-alert threshold, so the hot
     path skips all per-box classification work in the common case.
     """
-    if not detections:
+    if not detections or camera_motion:
         return []
     resolved = settings if settings is not None else effective_object_settings()
     thresholds = still_alert_thresholds(resolved)

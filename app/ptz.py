@@ -42,6 +42,7 @@ _ONVIF_VELOCITY: dict[str, tuple[float, float, float]] = {
 # credential rotation) are never used indefinitely.
 _PROFILE_TOKEN_TTL = 300.0
 _profile_token_cache: dict[tuple[str, int], tuple[str, float]] = {}
+_video_source_token_cache: dict[tuple[str, int], tuple[str, float]] = {}
 
 
 def _wssec_header(username: str, password: str) -> str:
@@ -134,6 +135,7 @@ def _soap(url: str, body: str, username: str, password: str) -> str:
         ' xmlns:s="http://www.w3.org/2003/05/soap-envelope"'
         ' xmlns:trt="http://www.onvif.org/ver10/media/wsdl"'
         ' xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"'
+        ' xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl"'
         ' xmlns:tt="http://www.onvif.org/ver10/schema">'
         f'{header}'
         f'<s:Body>{body}</s:Body>'
@@ -192,6 +194,55 @@ def _get_profile_token(host: str, http_port: int, username: str, password: str) 
     logger.debug('ONVIF profile token for %s:%d → %s', host, http_port, token)
     _profile_token_cache[key] = (token, time.monotonic())
     return token
+
+
+def _get_video_source_token(host: str, http_port: int, username: str, password: str) -> str:
+    """Get and cache the ONVIF video-source token used by ImagingService."""
+    key = (host, http_port)
+    now = time.monotonic()
+    cached = _video_source_token_cache.get(key)
+    if cached is not None and now - cached[1] < _PROFILE_TOKEN_TTL:
+        return cached[0]
+    response = _soap(
+        f'http://{host}:{http_port}/onvif/media_service',
+        '<trt:GetProfiles/>', username, password,
+    )
+    match = re.search(r'<(?:[^:>]+:)?SourceToken>([^<]+)</', response, re.IGNORECASE)
+    if match is None:
+        match = re.search(r'<(?:[^:>]+:)?VideoSourceConfiguration[^>]+token=["\']([^"\']+)', response, re.IGNORECASE)
+    if match is None:
+        raise OSError('Could not find ONVIF video source token.')
+    token = match.group(1)
+    _video_source_token_cache[key] = (token, now)
+    return token
+
+
+def probe_onvif_day_night(
+    host: str, http_port: int, username: str, password: str,
+) -> str | None:
+    """Return ``day``/``night`` from ONVIF IrCutFilter, or ``None``.
+
+    ONVIF cameras vary widely: some expose ``IrCutFilter`` through Imaging;
+    others return ``AUTO`` or omit the field. Unknown/unsupported cameras fail
+    closed to ``None`` so the caller can use its schedule fallback.
+    """
+    token = _get_video_source_token(host, http_port, username, password)
+    response = _soap(
+        f'http://{host}:{http_port}/onvif/imaging_service',
+        '<timg:GetImagingSettings>'
+        f'<timg:VideoSourceToken>{_xml_escape(token)}</timg:VideoSourceToken>'
+        '</timg:GetImagingSettings>',
+        username, password,
+    )
+    match = re.search(r'<(?:[^:>]+:)?IrCutFilter>([^<]+)</', response, re.IGNORECASE)
+    if match is None:
+        return None
+    value = match.group(1).strip().lower()
+    if value in {'on', 'day', 'open'}:
+        return 'day'
+    if value in {'off', 'night', 'closed'}:
+        return 'night'
+    return None
 
 
 def send_ptz_command_onvif(

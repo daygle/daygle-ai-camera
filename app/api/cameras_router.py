@@ -27,6 +27,13 @@ from app.deps import (
 )
 from app.payload_validators import validate_camera_settings, validate_cameras_settings
 from app.ptz import send_ptz_command, VALID_COMMANDS as PTZ_VALID_COMMANDS
+from app.detection_state import clear_camera_motion, mark_camera_motion
+from app.profile_automation import (
+    profile_status,
+    record_ir_probe,
+    suggest_solar_schedule,
+)
+from app.ptz import probe_onvif_day_night
 from app.request_helpers import write_audit_log
 
 router = APIRouter()
@@ -34,7 +41,12 @@ router = APIRouter()
 
 @router.get('/api/cameras')
 def list_cameras():
-    return {'cameras': [_redact_camera(c) for c in effective_cameras_config()]}
+    return {
+        'cameras': [
+            {**_redact_camera(camera), 'profile_status': profile_status(str(camera.get('id') or ''))}
+            for camera in effective_cameras_config()
+        ],
+    }
 
 
 @router.get('/api/cameras/health')
@@ -92,7 +104,12 @@ async def update_cameras(
     db.set_setting('cameras', settings, utc_now())
     apply_cameras_settings(settings)
     write_audit_log(request, db, 'update', 'settings.cameras', details={'count': len(settings)})
-    return {'cameras': [_redact_camera(c) for c in settings]}
+    return {
+        'cameras': [
+            {**_redact_camera(camera), 'profile_status': profile_status(str(camera.get('id') or ''))}
+            for camera in settings
+        ],
+    }
 
 
 @router.put('/api/cameras/{camera_id}')
@@ -112,14 +129,75 @@ async def update_camera(
             db.set_setting('cameras', settings_list, utc_now())
             apply_cameras_settings(settings_list)
             write_audit_log(request, db, 'update', 'settings.camera', normalized, {'camera_name': settings_list[index].get('name')})
-            return _redact_camera(settings_list[index])
+            return {
+                **_redact_camera(settings_list[index]),
+                'profile_status': profile_status(normalized),
+            }
     # Upsert: a PUT to an unknown id creates the camera
     created = validate_camera_settings({**payload, 'id': normalized}, index=len(settings_list) + 1)
     settings_list.append(created)
     db.set_setting('cameras', settings_list, utc_now())
     apply_cameras_settings(settings_list)
     write_audit_log(request, db, 'create', 'settings.camera', normalized, {'camera_name': created.get('name')})
-    return _redact_camera(created)
+    return {
+        **_redact_camera(created),
+        'profile_status': profile_status(normalized),
+    }
+
+
+@router.post('/api/cameras/{camera_id}/ir-state')
+async def check_camera_ir_state(camera_id: str, request: Request):
+    """Check ONVIF IrCutFilter immediately without changing the profile."""
+    require_admin(request)
+    cam = get_camera_config(camera_id)
+    host = cam.get('host') or ''
+    if not host and cam.get('stream_url'):
+        host = urlsplit(cam['stream_url']).hostname or ''
+    if not host:
+        raise HTTPException(status_code=400, detail='Cannot determine camera host for ONVIF IR status.')
+    ptz = cam.get('ptz') if isinstance(cam.get('ptz'), dict) else {}
+    http_port = int(ptz.get('http_port') or cam.get('http_port') or 80)
+    username = str(cam.get('username') or '')
+    password = str(cam.get('password') or '')
+    try:
+        ir_state = await run_in_threadpool(
+            probe_onvif_day_night,
+            host,
+            http_port,
+            username,
+            password,
+        )
+    except Exception as exc:
+        status = record_ir_probe(camera_id, None, type(exc).__name__)
+        return {
+            'camera_id': camera_id,
+            'state': None,
+            'supported': False,
+            'error': type(exc).__name__,
+            'profile_status': status,
+        }
+    status = record_ir_probe(camera_id, ir_state)
+    return {
+        'camera_id': camera_id,
+        'state': ir_state,
+        'supported': ir_state in {'day', 'night'},
+        'error': None if ir_state in {'day', 'night'} else 'Camera did not report a usable IrCutFilter.',
+        'profile_status': status,
+    }
+
+
+@router.get('/api/cameras/{camera_id}/profile-schedule-suggestion')
+def camera_profile_schedule_suggestion(camera_id: str, request: Request):
+    require_admin(request)
+    cam = get_camera_config(camera_id)
+    try:
+        return suggest_solar_schedule(
+            cam.get('latitude'),
+            cam.get('longitude'),
+            cam.get('timezone') or 'UTC',
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post('/api/cameras/test-connection')
@@ -194,4 +272,8 @@ async def camera_ptz(camera_id: str, request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    if command == 'stop':
+        clear_camera_motion(camera_id)
+    else:
+        mark_camera_motion(camera_id, step_duration)
     return {'ok': True, 'command': command}

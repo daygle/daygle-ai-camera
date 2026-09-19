@@ -1269,7 +1269,15 @@ class RecordingService:
 
         while not stop_event.is_set():
             from app.config_facades import effective_live_config as _elc
+            from app.recording_settings import effective_camera_live_settings
             _live_config = _elc()
+            camera_id = str(worker_state.get('camera_id') or camera_key)
+            camera_config = next(
+                (camera for camera in _state.cameras_config
+                 if str(camera.get('id') or '') == camera_id),
+                {},
+            )
+            _live_config = effective_camera_live_settings(camera_config, _live_config)
             _ingest_fps = int(_live_config.get('ingest_frame_fps', self.INGEST_FRAME_FPS))
             _snapshot_quality = int(_live_config.get('snapshot_quality', self.SNAPSHOT_QUALITY))
             command = [

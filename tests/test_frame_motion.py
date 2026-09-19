@@ -42,6 +42,27 @@ def test_detect_frame_motion_returns_four_tuple():
     assert isinstance(confidence, float)
 
 
+def test_camera_motion_requires_persistent_global_change_and_exposes_state():
+    cam = 'ptz-global-motion'
+    st._camera_motion_state.pop(cam, None)
+    first = ds.update_camera_motion(cam, 0.5)
+    assert first['active'] is False
+    second = ds.update_camera_motion(cam, 0.5)
+    assert second['active'] is True
+    assert second['reason'] == 'global_motion'
+    settled = ds.update_camera_motion(cam, 0.0)
+    assert settled['active'] is True  # short hold prevents a one-frame gap
+
+
+def test_application_ptz_state_covers_low_pixel_change_and_stop_settles():
+    cam = 'ptz-command'
+    st._camera_motion_state.pop(cam, None)
+    ds.mark_camera_motion(cam, 0.1)
+    assert ds.update_camera_motion(cam, 0.0)['active'] is True
+    ds.clear_camera_motion(cam)
+    assert ds.update_camera_motion(cam, 0.0)['active'] is True
+
+
 def test_motion_confirmation_requires_two_consecutive_zone_frames():
     """A one-frame zone spike must not create a motion event or recording."""
     cam = "motion-confirmation"

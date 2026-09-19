@@ -104,6 +104,7 @@ import ipaddress
 import os
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
 
@@ -120,6 +121,8 @@ from app.config_facades import (
 )
 from app.recording_settings import (
     _migrate_legacy_camera_motion,
+    apply_active_camera_detection_profile,
+    normalize_camera_detection_profiles,
     normalize_camera_ptz_settings,
     normalize_camera_recording_settings,
 )
@@ -247,8 +250,8 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
 
 def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None=None, index: int=1) -> dict[str, Any]:
     current = current or {}
-    updated = {key: current.get(key) for key in ('id', 'name', 'backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'recording_stream_path', 'host', 'port', 'path', 'username', 'password') if key in current}
-    updated.update({key: payload[key] for key in ('id', 'name', 'backend', 'device', 'flip', 'stream_url', 'recording_stream_path', 'host', 'port', 'path', 'username', 'password') if key in payload})
+    updated = {key: current.get(key) for key in ('id', 'name', 'backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'recording_stream_path', 'host', 'port', 'path', 'username', 'password', 'timezone', 'latitude', 'longitude') if key in current}
+    updated.update({key: payload[key] for key in ('id', 'name', 'backend', 'device', 'flip', 'stream_url', 'recording_stream_path', 'host', 'port', 'path', 'username', 'password', 'timezone', 'latitude', 'longitude') if key in payload})
     backend = str(updated.get('backend', 'onvif')).lower()
     if backend not in {'onvif', 'rtsp'}:
         raise HTTPException(status_code=400, detail='Camera backend must be onvif or rtsp.')
@@ -256,6 +259,38 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     updated['id'] = normalize_camera_id(updated.get('id'), f'camera-{index}')
     updated['name'] = camera_default_name(updated, f'Camera {index}')
     updated['device'] = payload.get('device', current.get('device', 0))
+    timezone_name = str(updated.get('timezone') or 'UTC').strip() or 'UTC'
+    if len(timezone_name) > 100 or any(character in timezone_name for character in '\r\n\x00'):
+        raise HTTPException(status_code=400, detail='timezone must be a valid timezone name.')
+    if timezone_name.upper() != 'UTC':
+        try:
+            ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            # Windows installations may omit tzdata; retain common IANA
+            # regions for persistence and let solar calculation report a
+            # runtime-unavailable timezone when necessary.
+            valid_region_prefixes = {
+                'Africa', 'America', 'Antarctica', 'Arctic', 'Asia',
+                'Atlantic', 'Australia', 'Europe', 'Indian', 'Pacific',
+            }
+            if timezone_name.split('/', 1)[0] not in valid_region_prefixes:
+                raise HTTPException(status_code=400, detail='timezone must be a valid timezone name.')
+    updated['timezone'] = timezone_name
+    for _location_key, _low, _high in (
+        ('latitude', -90.0, 90.0),
+        ('longitude', -180.0, 180.0),
+    ):
+        _raw_location = updated.get(_location_key)
+        if _raw_location is None or (isinstance(_raw_location, str) and not _raw_location.strip()):
+            updated[_location_key] = None
+            continue
+        try:
+            _location_value = float(_raw_location)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f'{_location_key} must be a number.') from exc
+        if not _low <= _location_value <= _high:
+            raise HTTPException(status_code=400, detail=f'{_location_key} must be between {_low} and {_high}.')
+        updated[_location_key] = round(_location_value, 6)
     updated['width'] = _int_field({**current, **payload}, 'width', 1280, 160, 7680)
     updated['height'] = _int_field({**current, **payload}, 'height', 720, 120, 4320)
     raw_fps = payload.get('fps') if 'fps' in payload else current.get('fps')
@@ -396,6 +431,23 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
         # empty/None -> cleared (omit)
     elif current.get('motion_shadow_suppression') is not None:
         updated['motion_shadow_suppression'] = _normalize_shadow_suppression(current['motion_shadow_suppression'])
+
+    # Manual day/night profiles are additive to the legacy flat overrides. A
+    # partial profile update merges into the stored profile so older clients can
+    # continue sending only the fields they know about.
+    current_profiles = current.get('detection_profiles') if isinstance(current.get('detection_profiles'), dict) else {}
+    payload_profiles = payload.get('detection_profiles') if isinstance(payload.get('detection_profiles'), dict) else None
+    if payload_profiles is None:
+        raw_profiles = current_profiles
+    else:
+        raw_profiles = dict(current_profiles)
+        raw_profiles.update({key: value for key, value in payload_profiles.items() if key == 'active'})
+        for _profile_mode in ('day', 'night'):
+            if isinstance(payload_profiles.get(_profile_mode), dict):
+                existing_mode = current_profiles.get(_profile_mode) if isinstance(current_profiles.get(_profile_mode), dict) else {}
+                raw_profiles[_profile_mode] = {**existing_mode, **payload_profiles[_profile_mode]}
+    updated['detection_profiles'] = normalize_camera_detection_profiles(raw_profiles, {**current, **updated})
+    apply_active_camera_detection_profile(updated)
     return updated
 
 

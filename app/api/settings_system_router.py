@@ -50,6 +50,7 @@ from app.backup import (
 )
 from app.auth import SESSION_COOKIE
 from app.utils import _current_version
+from app.profile_automation import profile_status
 import app.state as _state
 
 router = APIRouter()
@@ -62,7 +63,10 @@ def get_system_settings(request: Request, db=Depends(get_database), auth_enabled
     # explicit gate here is the second line if a future refactor moves
     # the path out of the middleware's admin match list.
     require_admin(request)
-    return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'system': effective_system_config(), 'cloudflare_tunnel': _tunnel_status(db),        'auth': {
+    cameras = effective_cameras_config()
+    for camera in cameras:
+        camera['profile_status'] = profile_status(str(camera.get('id') or ''))
+    return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': cameras, 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'system': effective_system_config(), 'cloudflare_tunnel': _tunnel_status(db),        'auth': {
             'session_timeout_hours': effective_auth_config().get('session_timeout_hours'),
             'max_login_attempts': effective_auth_config().get('max_login_attempts'),
             'lockout_minutes': effective_auth_config().get('lockout_minutes'),
