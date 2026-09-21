@@ -84,6 +84,33 @@ def test_camera_motion_activation_resets_high_fraction_streak():
     assert st._camera_motion_state[cam]['high_fraction_streak'] == 0
 
 
+def test_camera_motion_immediate_high_fraction_still_requires_persistence():
+    """A single ultra-high-change frame (a truck passing close, an IR/exposure
+    jump) must NOT activate ego-motion suppression on its own -- persistence is
+    always required so it cannot silence a real subject's object alert."""
+    cam = 'ptz-immediate'
+    st._camera_motion_state.pop(cam, None)
+    assert ds.update_camera_motion(cam, 0.95)['active'] is False
+    assert st._camera_motion_state[cam]['high_fraction_streak'] == 1
+    # A genuine pan spans multiple frames; the second qualifying frame activates.
+    assert ds.update_camera_motion(cam, 0.95)['active'] is True
+
+
+def test_camera_motion_auto_detection_gated_off_for_fixed_camera():
+    """A fixed (non-PTZ) camera never pans, so the frame-wide heuristic must be
+    inert there -- a large close subject or lighting shift cannot gate its
+    object alerts. An explicit PTZ command window is still honoured."""
+    cam = 'fixed-camera'
+    st._camera_motion_state.pop(cam, None)
+    # Repeated frame-filling change never activates auto suppression.
+    assert ds.update_camera_motion(cam, 0.95, allow_auto_detection=False)['active'] is False
+    assert ds.update_camera_motion(cam, 0.95, allow_auto_detection=False)['active'] is False
+    assert st._camera_motion_state[cam]['high_fraction_streak'] == 0
+    # A commanded move (e.g. a shared PTZ mount) still suppresses when marked.
+    ds.mark_camera_motion(cam, 0.2)
+    assert ds.update_camera_motion(cam, 0.0, allow_auto_detection=False)['active'] is True
+
+
 def test_motion_confirmation_requires_two_consecutive_zone_frames():
     """A one-frame zone spike must not create a motion event or recording."""
     cam = "motion-confirmation"

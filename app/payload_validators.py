@@ -131,6 +131,7 @@ from app.utils import (
     camera_default_name,
     default_camera_detection_settings,
     normalize_bool_setting,
+    normalize_ptz_motion_detection,
 )
 from app.zone_schema import normalize_label_list, normalize_monitoring_zones
 
@@ -339,6 +340,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     detection.update(existing_detection)
     detection.update(payload_detection)
     detection['object_detection_enabled'] = normalize_bool_setting(detection.get('object_detection_enabled', True), True)
+    detection['ptz_motion_detection'] = normalize_ptz_motion_detection(detection.get('ptz_motion_detection'))
     detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     _migrate_legacy_camera_motion(detection)

@@ -71,6 +71,7 @@ CAMERA_MOTION_PROFILE_FIELDS = (
     'always_run_object_detection',
     'object_detection_region_boost',
     'object_detection_tiling',
+    'object_detection_motion_mode',
     'periodic_scan_interval_seconds',
     'motion_frame_width',
     'motion_frame_height',
@@ -124,6 +125,13 @@ def _normalize_profile_value(key: str, value: Any) -> int | float | str | bool |
     if key == 'object_detection_tiling':
         text = str(value).strip().lower()
         return text if text in {'off', '2x2', '3x3', '4x4'} else None
+    if key == 'object_detection_motion_mode':
+        # Per-profile override for the Objects moving/still default. ``None``
+        # (unset / anything unrecognised) inherits the global Objects default so
+        # existing cameras are unaffected; a profile that wants still subjects
+        # counted (e.g. cats, which sit still constantly) ships ``any``.
+        text = str(value).strip().lower()
+        return text if text in {'any', 'moving', 'still'} else None
     if key == 'motion_algorithm':
         text = str(value).strip().lower()
         return text if text in {'mog2', 'diff'} else None

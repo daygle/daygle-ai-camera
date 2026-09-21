@@ -68,24 +68,43 @@ def _center_of(box: dict[str, Any]) -> tuple[float, float] | None:
 def _recent_displacement(track: dict[str, Any]) -> float | None:
     """Net normalized motion of a track over its recent center history.
 
-    Returns the largest axis distance between the current box center and any
-    of the last ``TRACK_DISPLACEMENT_HISTORY`` centers, or ``None`` when the
-    track has not accumulated enough history yet (brand-new track, or a legacy
-    track rebuilt after a restart).
+    Returns the larger-axis distance between the mean center of the OLDER half
+    of the last ``TRACK_DISPLACEMENT_HISTORY`` centers and the mean center of
+    the NEWER half, or ``None`` when the track has not accumulated enough
+    history yet (brand-new track, or a legacy track rebuilt after a restart).
+
+    Comparing the two halves' *means* rejects per-cycle detector jitter: a
+    stationary box wobbles symmetrically around its true center, so the wobble
+    cancels in each mean and only sustained translation moves the halves apart.
+    The previous max-deviation-from-the-latest-center measure summed two
+    opposite jitter spikes and reported a parked-but-wobbly car (a large box
+    whose edges shift a little each frame) as *moving*, so a Moving Only rule
+    kept alerting on it.
     """
     centers = track.get("centers")
-    if not isinstance(centers, list) or len(centers) < max(2, TRACK_DISPLACEMENT_MIN_AGE):
+    if not isinstance(centers, list):
         return None
-    recent = centers[-TRACK_DISPLACEMENT_HISTORY:]
-    last_x, last_y = recent[-1]
-    displacement = 0.0
-    for center in recent:
-        try:
-            cx, cy = float(center[0]), float(center[1])
-        except (TypeError, ValueError, IndexError):
-            continue
-        displacement = max(displacement, abs(cx - last_x), abs(cy - last_y))
-    return displacement
+    recent = [
+        center for center in centers[-TRACK_DISPLACEMENT_HISTORY:]
+        if isinstance(center, (list, tuple)) and len(center) >= 2
+    ]
+    if len(recent) < max(2, TRACK_DISPLACEMENT_MIN_AGE):
+        return None
+    mid = len(recent) // 2
+    older = recent[:mid] or recent[:1]
+    newer = recent[mid:] or recent[-1:]
+
+    def _mean(points: list[Any]) -> tuple[float, float]:
+        xs = [float(point[0]) for point in points]
+        ys = [float(point[1]) for point in points]
+        return sum(xs) / len(xs), sum(ys) / len(ys)
+
+    try:
+        older_x, older_y = _mean(older)
+        newer_x, newer_y = _mean(newer)
+    except (TypeError, ValueError):
+        return None
+    return max(abs(newer_x - older_x), abs(newer_y - older_y))
 
 
 def _iou(box_a: dict[str, Any], box_b: dict[str, Any]) -> float:

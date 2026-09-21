@@ -23,6 +23,27 @@ test('cat profile shortcut is removed while reusable presets remain', () => {
   assert.match(source, /profile-save-preset-btn/);
 });
 
+test('PTZ Motion Detection switch is editable and collected into detection', () => {
+  // Tri-state select with Auto/On/Off...
+  assert.match(source, /name="ptz_motion_detection"/);
+  assert.match(source, /Auto \(Follow PTZ\)/);
+  // ...bound to the camera-level detection block (not a profile field)...
+  assert.match(source, /camera\.detection\?\.ptz_motion_detection/);
+  // ...and written into data.detection so the save merge preserves zones.
+  assert.match(source, /detection:\s*\{\s*ptz_motion_detection:\s*getName\('ptz_motion_detection'\)/);
+});
+
+test('per-profile Detection Mode override is editable and collected', () => {
+  // The select and its Any option must render...
+  assert.match(source, /name="profile_object_detection_motion_mode"/);
+  assert.match(source, /Any \(moving &amp; still\)/);
+  // ...be collected into the saved profile...
+  assert.match(source, /profileValue\('object_detection_motion_mode', getName\('profile_object_detection_motion_mode'\)\)/);
+  // ...and be recognised as a profile-scoped performance field so applying a
+  // preset (e.g. Cat / Small Animal) populates it.
+  assert.match(source, /'object_detection_motion_mode'/);
+});
+
 test('camera table exposes day and night profiles and editor can collapse', () => {
   assert.match(source, /camera-profile-pill/);
   assert.match(source, /Solar \(Daily Sunrise\/Sunset\)/);

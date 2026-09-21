@@ -223,6 +223,23 @@ def test_normalize_camera_settings_layers_defaults_id_name_backend(cc):
     # ``default_camera_detection_settings()`` helper from main fills
     # the defaults; we just verify object_detection_enabled is True.
     assert out['detection']['object_detection_enabled'] is True
+    # The PTZ/camera-motion detection switch defaults to ``auto`` (follow the
+    # camera's PTZ-enabled flag) so existing cameras behave exactly as before.
+    assert out['detection']['ptz_motion_detection'] == 'auto'
+
+
+def test_normalize_camera_settings_coerces_ptz_motion_detection(cc):
+    """The ptz_motion_detection switch accepts auto/on/off (case-insensitive);
+    anything else (junk, None, missing) falls back to ``auto``."""
+    for value, expected in [
+        ('on', 'on'), ('OFF', 'off'), ('Auto', 'auto'),
+        ('nonsense', 'auto'), (None, 'auto'), ('', 'auto'),
+    ]:
+        out = cc.normalize_camera_settings({'detection': {'ptz_motion_detection': value}}, index=0)
+        assert out['detection']['ptz_motion_detection'] == expected
+    # Absent key -> default auto, and existing zones are preserved alongside it.
+    out = cc.normalize_camera_settings({'detection': {'zones': []}}, index=0)
+    assert out['detection']['ptz_motion_detection'] == 'auto'
 
 
 def test_normalize_camera_settings_propagates_user_id_and_coerces_numeric(cc):

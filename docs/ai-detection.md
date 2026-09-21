@@ -192,7 +192,20 @@ missing alert does not necessarily mean ONNX missed the object. The audit of
 - **Motion/object classification:** the Objects setting defaults to **Moving
   Only**. A valid still detection is intentionally filtered unless its label is
   configured for `any` or `still`; track displacement can override the pixel
-  mask after a track matures.
+  mask after a track matures. A camera's Day/Night profile can also set
+  **Detection Mode** (`object_detection_motion_mode`) to override that default
+  for that camera only - the Cat / Small Animal profile ships `any` because
+  cats sit still constantly, so a settled cat would otherwise be dropped.
+- **Camera-motion (PTZ) suppression:** while the camera itself is moving,
+  image-space movement is unknowable, so object movement is reported as
+  `unknown` and non-`any` labels cannot alert until it settles. Movement is
+  detected from an app-issued PTZ command and, for PTZ/auto-track cameras, a
+  persistent frame-wide pixel change. The per-camera **PTZ Motion Detection**
+  switch (`detection.ptz_motion_detection`, in the camera editor's Detection
+  section) controls the automatic detection: `auto` (default) follows the
+  camera's PTZ-enabled flag, `on` forces it (a fixed camera on a movable
+  mount), and `off` disables it so a fixed camera's object alerts are never
+  suppressed by a headlight sweep, IR switch, or a large close subject.
 - **Temporal confirmation:** object confirmation defaults to 2 detections in a
   2-frame window (or the configured window), so an isolated valid detection is
   held until it persists. Optional spatial IoU confirmation is stricter.

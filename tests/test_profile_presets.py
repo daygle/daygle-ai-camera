@@ -22,14 +22,22 @@ def test_builtin_presets_have_day_and_night_values():
     assert cat is not None
     assert cat['builtin'] is True
     assert cat['day']['object_detection_region_boost'] is True
-    assert cat['day']['object_detection_tiling'] == '2x2'
+    # Daytime tiling is off so a CPU host can sustain the fast cadence; region
+    # boost still recovers small moving cats. Night keeps full-frame tiling.
+    assert cat['day']['object_detection_tiling'] == 'off'
     assert cat['night']['object_detection_tiling'] == '3x3'
     assert cat['day']['detection_confirm_frames'] == 2
     assert cat['day']['detection_confirm_window'] == 3
-    assert cat['day']['detection_confirm_iou'] == 0.1
+    # Spatial IoU kept low (day matches night) so a small/distant moving cat is
+    # not dropped for failing to overlap its own box across cycles.
+    assert cat['day']['detection_confirm_iou'] == 0.05
     assert cat['night']['detection_confirm_frames'] == 2
     assert cat['night']['detection_confirm_window'] == 3
     assert cat['night']['detection_confirm_iou'] == 0.05
+    # Cats sit still constantly: both profiles count still detections so a
+    # settled cat is not dropped by the global Moving Only default.
+    assert cat['day']['object_detection_motion_mode'] == 'any'
+    assert cat['night']['object_detection_motion_mode'] == 'any'
 
 
 def test_recall_profiles_do_not_add_confirmation_latency():

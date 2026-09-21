@@ -65,7 +65,7 @@ from app.recording_extension import (
     recording_skip_reason,
 )
 from app.backup import purge_camera_diagnostics_by_policy
-from app.utils import build_stream_url, build_recording_stream_url, normalize_bool_setting
+from app.utils import build_stream_url, build_recording_stream_url, normalize_bool_setting, normalize_ptz_motion_detection
 from app.zone_schema import label_matches
 from app.zone_detection import (
     detection_matches_zone,
@@ -528,7 +528,23 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # latter is intentionally zero below the motion gate; the former lets the
     # live bar show real sub-gate pixel changes without making them alertable.
     motion_signal = round(min(1.0, raw_motion_fraction / max(_scale_fraction, 1e-9)), 3)
-    camera_motion = update_camera_motion(camera_id, raw_motion_fraction)
+    # The frame-wide global-motion heuristic is only valid for a camera that can
+    # actually move (PTZ / auto-track). On a fixed camera a high-change frame is
+    # a real subject or a lighting shift, so it must not gate object alerts. The
+    # per-camera ``ptz_motion_detection`` switch decides: ``on`` always runs it,
+    # ``off`` never does, and ``auto`` (default) follows the PTZ-enabled flag --
+    # the historical behaviour. An app-issued PTZ command still suppresses via
+    # ``command_until`` regardless of this switch.
+    _ptz_motion_mode = normalize_ptz_motion_detection((settings.get('detection') or {}).get('ptz_motion_detection'))
+    if _ptz_motion_mode == 'on':
+        _allow_auto_motion = True
+    elif _ptz_motion_mode == 'off':
+        _allow_auto_motion = False
+    else:
+        _allow_auto_motion = bool((settings.get('ptz') or {}).get('enabled'))
+    camera_motion = update_camera_motion(
+        camera_id, raw_motion_fraction, allow_auto_detection=_allow_auto_motion,
+    )
     # A motion-gate error is not evidence of motion, but it must not suppress
     # the independent object-detection path: some callers provide detector-
     # compatible input that the optional motion decoder cannot parse. Keep the
@@ -652,17 +668,37 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Confidence setting (see docstring).
     detections = merge_secondary_face_detections(image, detections)
     detections = normalize_detection_boxes_for_frame(detections, frame)
-    # Stamp tracks BEFORE classifying moving/still. The displacement override is
-    # specifically what distinguishes a parked car from unrelated pixel change
-    # inside its large box; doing this after the filter makes that protection
-    # unreachable and leaves the mask verdict in charge.
-    object_detections = filter_detections_for_camera(detections, settings)
-    object_detections = update_object_tracks(camera_id, object_detections)
+    # Stamp stable track ids on EVERY detection BEFORE the moving/still filter so
+    # the tracker's ``track_displacement`` annotation (net box motion over recent
+    # cycles) is available to it. Without it the pixel mask alone governs, and an
+    # intermittently-moving subject -- a cat that stops and starts, a person who
+    # pauses -- is classified ``still`` on its quiet frames and dropped by the
+    # default Moving Only mode, so it flickers in and out of detection. The
+    # displacement override keeps a traversing-but-paused track ``moving`` and a
+    # genuinely stationary track ``still`` (the parked-car flap). Tracking must
+    # run on this full list, not a camera-filtered copy, because the filter and
+    # ``still_dwell_candidates`` below both read the annotation off ``detections``
+    # directly; the ids then ride through ``filter_detections_for_camera`` into
+    # confirmation, recording, dwell, and face amortisation. It annotates in
+    # place -- it never adds or drops detections -- so it cannot change what any
+    # downstream gate counts.
+    detections = update_object_tracks(camera_id, detections)
     # Object settings (default mode + per-label overrides + still-alert
     # thresholds) drive both the still/moving filter and the still-dwell
     # tracker below, so resolve them once per cycle rather than reading the
     # ``objects`` DB setting twice on this ~4 Hz hot path.
     object_settings = effective_object_settings()
+    # Per-profile moving/still default override. The global Objects default is
+    # Moving Only, which drops a still subject (a sitting cat, a person facing
+    # the camera) after it is detected. A camera's active Day/Night profile can
+    # set ``object_detection_motion_mode`` (any/moving/still) to change that
+    # default for this camera only -- e.g. the Cat / Small Animal profile ships
+    # ``any`` so still cats are counted. Unset inherits the global default.
+    # ``effective_object_settings`` returns a fresh dict, so this override never
+    # touches the shared setting; an explicit per-label mode still wins over it.
+    _profile_motion_mode = live_settings.get('object_detection_motion_mode')
+    if _profile_motion_mode in ('any', 'moving', 'still'):
+        object_settings = {**object_settings, 'default_mode': _profile_motion_mode}
     # Still-dwell candidates must be taken from the UNFILTERED detections: the
     # still/moving filter below drops still detections under the default Moving
     # Only mode, which would otherwise starve every "still for N minutes" alert

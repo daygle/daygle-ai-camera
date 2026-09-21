@@ -345,11 +345,43 @@ def test_displacement_override_marks_traversing_track_moving():
 
 
 def test_young_track_falls_back_to_mask_verdict():
-    car = _det('car')
+    car = _det('car')  # no track_id -> an untracked detection
     # None displacement (too young) -> mask decides, exactly as before.
     assert os.detection_motion_state(car, _mask_changed_inside_box(), None) == 'moving'
     assert os.detection_motion_state(car, _mask_none_changed(), None) == 'still'
     assert os.detection_motion_state(car, None, None) == 'still'
+
+
+def test_persistent_immature_track_biases_to_still():
+    """A car that has PERSISTED a couple of cycles but is not yet old enough for
+    a trustworthy displacement must NOT be called moving by the hyper-sensitive
+    mask -- a parked car whose box catches a passing car's pixels would
+    otherwise alert under Moving Only. It reads still through the maturity
+    window, then the displacement override takes over."""
+    persistent = {**_det('car'), 'track_id': 5, 'track_age': 2}
+    # Mask says moving, but a persistent-yet-immature track is held still.
+    assert os.detection_motion_state(persistent, _mask_all_changed(), None) == 'still'
+    assert os.detection_motion_state(persistent, _mask_changed_inside_box(), None) == 'still'
+
+
+def test_brand_new_track_still_uses_mask_so_fast_cars_are_not_lost():
+    """A brand-new (age 1) detection keeps the mask verdict. This is critical:
+    a fast car moves too far to IoU-match its own prior box, so it opens a new
+    age-1 track every cycle; biasing age 1 to still would drop it under Moving
+    Only forever. Its box is full of changed pixels, so the mask reads moving."""
+    fresh = {**_det('car'), 'track_id': 9, 'track_age': 1, 'track_new': True}
+    assert os.detection_motion_state(fresh, _mask_all_changed(), None) == 'moving'
+    # ...and a genuinely quiet brand-new box still reads still via the mask.
+    assert os.detection_motion_state(fresh, _mask_none_changed(), None) == 'still'
+
+
+def test_mature_tracked_detection_uses_mask_when_displacement_unavailable():
+    """Once a track is old enough (>= MIN_AGE) but this cycle has no
+    displacement value (e.g. rebuilt history after a restart), the mask verdict
+    is trusted again -- the still bias is scoped to the maturity window."""
+    mature = {**_det('car'), 'track_id': 5, 'track_age': os._TRACK_DISPLACEMENT_MIN_AGE}
+    assert os.detection_motion_state(mature, _mask_changed_inside_box(), None) == 'moving'
+    assert os.detection_motion_state(mature, _mask_none_changed(), None) == 'still'
 
 
 def test_displacement_junk_value_falls_back_to_mask():

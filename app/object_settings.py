@@ -445,6 +445,28 @@ def detection_motion_state(
             return MODE_MOVING
         except (TypeError, ValueError):
             pass  # corrupt annotation -> fall through to mask classification
+    else:
+        # A track that has PERSISTED (seen 2+ cycles) but is not yet old enough
+        # for a trustworthy displacement: bias it to STILL rather than trust the
+        # very sensitive pixel mask (``moving`` on ~1% of the box changing).
+        # Otherwise a parked car whose large box catches a passing car's pixels
+        # reads ``moving`` during the maturity window and a Moving Only rule
+        # alerts on it. Once the track accrues ``_TRACK_DISPLACEMENT_MIN_AGE``
+        # cycles the displacement override above takes over and genuine motion
+        # is classified normally.
+        #
+        # The age>=2 floor is essential: a brand-new detection (age 1) has no
+        # temporal evidence, and a FAST car opens a new age-1 track every cycle
+        # (it moves too far to IoU-match its own prior box), so biasing age-1 to
+        # still would drop a fast car under Moving Only forever. Age-1 (and
+        # untracked) detections therefore keep the mask verdict -- a fast car's
+        # box is full of changed pixels and reads moving, exactly as before.
+        try:
+            track_age = int(detection.get('track_age') or 0)
+        except (TypeError, ValueError):
+            track_age = 0
+        if detection.get('track_id') is not None and 2 <= track_age < _TRACK_DISPLACEMENT_MIN_AGE:
+            return MODE_STILL
     if diff_mask is None:
         return MODE_STILL
     box = detection.get('box')
