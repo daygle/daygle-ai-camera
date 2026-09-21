@@ -391,7 +391,12 @@ def confirm_object_detections(
         return streak >= required
 
     def _keep(detection: dict[str, Any]) -> bool:
-        label = str(detection.get('label') or '').strip().lower()
+        # Canonicalize the same way the ``cycle_boxes`` keys and ``confirmed``
+        # set above do, so an aliased detector label (``human`` / ``people`` /
+        # ``pedestrian`` -> ``person``) is looked up under the same key it was
+        # counted under. A raw-lowercase lookup here would never find its
+        # canonical entry and would silently drop every aliased detection.
+        label = canonical_label(detection.get('label'))
         # ``face`` is exempt from the persistence gate: faces flicker far more
         # than objects (small targets, pose changes), so 2-of-3 confirmation
         # dropped a disproportionate share of them and delayed every face alert

@@ -652,12 +652,21 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Confidence setting (see docstring).
     detections = merge_secondary_face_detections(image, detections)
     detections = normalize_detection_boxes_for_frame(detections, frame)
-    # Stamp tracks BEFORE classifying moving/still. The displacement override is
-    # specifically what distinguishes a parked car from unrelated pixel change
-    # inside its large box; doing this after the filter makes that protection
-    # unreachable and leaves the mask verdict in charge.
-    object_detections = filter_detections_for_camera(detections, settings)
-    object_detections = update_object_tracks(camera_id, object_detections)
+    # Stamp stable track ids on EVERY detection BEFORE the moving/still filter so
+    # the tracker's ``track_displacement`` annotation (net box motion over recent
+    # cycles) is available to it. Without it the pixel mask alone governs, and an
+    # intermittently-moving subject -- a cat that stops and starts, a person who
+    # pauses -- is classified ``still`` on its quiet frames and dropped by the
+    # default Moving Only mode, so it flickers in and out of detection. The
+    # displacement override keeps a traversing-but-paused track ``moving`` and a
+    # genuinely stationary track ``still`` (the parked-car flap). Tracking must
+    # run on this full list, not a camera-filtered copy, because the filter and
+    # ``still_dwell_candidates`` below both read the annotation off ``detections``
+    # directly; the ids then ride through ``filter_detections_for_camera`` into
+    # confirmation, recording, dwell, and face amortisation. It annotates in
+    # place -- it never adds or drops detections -- so it cannot change what any
+    # downstream gate counts.
+    detections = update_object_tracks(camera_id, detections)
     # Object settings (default mode + per-label overrides + still-alert
     # thresholds) drive both the still/moving filter and the still-dwell
     # tracker below, so resolve them once per cycle rather than reading the
