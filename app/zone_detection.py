@@ -276,13 +276,44 @@ def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict
     return intersection / detection_area if detection_area > 0 else 0.0
 
 
-def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, min_overlap_ratio: float = 0.2) -> bool:
+def _detection_matches_zone_uncached(detection: dict[str, Any], zone: dict[str, Any], min_overlap_ratio: float) -> bool:
     if detection_center_in_zone(detection, zone):
         return True
     points = zone.get('points') or []
     if isinstance(points, list) and len(points) >= 3:
         return False
     return detection_overlap_ratio_with_zone_rect(detection, zone) >= min_overlap_ratio
+
+
+def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, min_overlap_ratio: float = 0.2) -> bool:
+    """Whether a detection's box falls inside a zone (centre-in, or rect overlap).
+
+    The same (detection, zone) pair is tested several times per cycle -- the
+    camera/zone filter, alert-rule matching, the record-on-detect check, and the
+    zone-name stamping for playback all ask independently. The verdict is a pure
+    function of the detection box and the zone geometry, so it is memoised on the
+    detection: the result is cached under a key of (zone id, box) so a ``{**det}``
+    copy that keeps its box reuses the answer while one that changes its box
+    recomputes. Only the default ``min_overlap_ratio`` (every hot-path caller
+    uses it) is cached, and the ``_zone_match_memo`` field is internal -- history
+    and event serialisation both whitelist detection fields, so it never leaves
+    the process.
+    """
+    zone_id = zone.get('id') or zone.get('name')
+    box = detection.get('box')
+    if min_overlap_ratio != 0.2 or zone_id is None or not isinstance(detection, dict) or not isinstance(box, dict):
+        return _detection_matches_zone_uncached(detection, zone, min_overlap_ratio)
+    key = (zone_id, box.get('x'), box.get('y'), box.get('width'), box.get('height'))
+    memo = detection.get('_zone_match_memo')
+    if memo is None:
+        memo = {}
+        detection['_zone_match_memo'] = memo
+    cached = memo.get(key)
+    if cached is not None:
+        return cached
+    result = _detection_matches_zone_uncached(detection, zone, min_overlap_ratio)
+    memo[key] = result
+    return result
 
 
 def _zone_pixel_bounds(diff_mask: Any, zone: dict[str, Any]) -> tuple[int, int, int, int] | None:

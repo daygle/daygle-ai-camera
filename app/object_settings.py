@@ -508,6 +508,47 @@ def detection_motion_state(
         return MODE_STILL
 
 
+def _resolved_motion_state(detection: dict[str, Any], diff_mask: Any) -> str:
+    """Reuse a detection's already-stamped ``motion_state`` or classify it.
+
+    The moving/still verdict is a pure function of the box, the diff mask, and
+    the track displacement, so once ``annotate_motion_states`` has stamped it we
+    return the stamp instead of repeating the per-box numpy work. Detections
+    that reach these helpers without a stamp (standalone/test callers) classify
+    exactly as before.
+    """
+    existing = detection.get('motion_state')
+    if existing in (MODE_MOVING, MODE_STILL, 'unknown'):
+        return existing
+    return detection_motion_state(detection, diff_mask, detection.get('track_displacement'))
+
+
+def annotate_motion_states(
+    detections: list[dict[str, Any]],
+    diff_mask: Any,
+    *,
+    camera_motion: bool = False,
+) -> list[dict[str, Any]]:
+    """Classify and stamp ``motion_state`` on each detection ONCE per cycle.
+
+    ``filter_detections_by_motion_mode`` and ``still_dwell_candidates`` both need
+    the moving/still verdict, and both run on the same pre-filter list. Calling
+    this first lets each read the stamp (via ``_resolved_motion_state``) instead
+    of re-running the mask classification, so the per-box numpy work happens a
+    single time. It drops nothing and returns annotated copies; during camera
+    motion every detection is stamped ``unknown`` (matching the filter's own
+    PTZ branch), which needs no classification at all.
+    """
+    if not detections:
+        return detections
+    if camera_motion:
+        return [{**detection, 'motion_state': 'unknown', 'camera_motion': True} for detection in detections]
+    return [
+        {**detection, 'motion_state': detection_motion_state(detection, diff_mask, detection.get('track_displacement'))}
+        for detection in detections
+    ]
+
+
 def filter_detections_by_motion_mode(
     detections: list[dict[str, Any]],
     diff_mask: Any,
@@ -562,7 +603,7 @@ def filter_detections_by_motion_mode(
             restricted_labels.add(label)
     if not restricted_labels and diff_mask is None:
         return [
-            {**detection, 'motion_state': detection_motion_state(detection, None, detection.get('track_displacement'))}
+            {**detection, 'motion_state': _resolved_motion_state(detection, None)}
             for detection in detections
         ]
 
@@ -570,7 +611,7 @@ def filter_detections_by_motion_mode(
     for detection in detections:
         label = canonical_label(detection.get('label'))
         mode = MODE_ANY if label == 'face' else (motion_mode_for_label(label, resolved) if label else MODE_ANY)
-        state = detection_motion_state(detection, diff_mask, detection.get('track_displacement'))
+        state = _resolved_motion_state(detection, diff_mask)
         if mode == MODE_ANY or mode == state:
             filtered.append({**detection, 'motion_state': state})
     return filtered
@@ -615,6 +656,6 @@ def still_dwell_candidates(
         label = canonical_label(detection.get('label'))
         if not label or label not in thresholds:
             continue
-        if detection_motion_state(detection, diff_mask, detection.get('track_displacement')) == MODE_STILL:
+        if _resolved_motion_state(detection, diff_mask) == MODE_STILL:
             candidates.append({**detection, 'motion_state': MODE_STILL})
     return candidates

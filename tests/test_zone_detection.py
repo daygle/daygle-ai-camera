@@ -179,6 +179,50 @@ def test_detection_matches_zone_polygon_center_only(zd):
     assert zd.detection_matches_zone(detection, zone) is True
 
 
+def test_detection_matches_zone_memoizes_per_detection(zd, monkeypatch):
+    """The verdict is cached per (zone, box) so repeated tests within a cycle
+    compute the geometry once; a box change (or a different ratio) recomputes."""
+    detection = {'box': {'x': 0.0, 'y': 0.0, 'width': 0.1, 'height': 0.1}}
+    zone = {'id': 'z1', 'x': 0, 'y': 0, 'width': 1, 'height': 1}
+    calls = {'n': 0}
+    real = zd._detection_matches_zone_uncached
+
+    def counting(det, z, ratio):
+        calls['n'] += 1
+        return real(det, z, ratio)
+    monkeypatch.setattr(zd, '_detection_matches_zone_uncached', counting)
+
+    assert zd.detection_matches_zone(detection, zone) is True
+    assert zd.detection_matches_zone(detection, zone) is True  # served from the memo
+    assert calls['n'] == 1
+    assert '_zone_match_memo' in detection
+
+    # A {**det} copy shares the memo and, keeping its box, reuses the verdict.
+    assert zd.detection_matches_zone({**detection}, zone) is True
+    assert calls['n'] == 1
+
+    # Changing the box busts the cache (different key) and recomputes.
+    moved = {**detection, 'box': {'x': 0.9, 'y': 0.9, 'width': 0.05, 'height': 0.05}}
+    zd.detection_matches_zone(moved, zone)
+    assert calls['n'] == 2
+
+    # A non-default overlap ratio never uses the memo.
+    zd.detection_matches_zone(detection, zone, min_overlap_ratio=0.01)
+    assert calls['n'] == 3
+
+
+def test_detection_matches_zone_memo_matches_uncached(zd):
+    """Memoized result is identical to the uncached geometry for both a rect
+    (overlap path) and a polygon (centre path) zone."""
+    for zone in ({'id': 'r', 'x': 0, 'y': 0, 'width': 1, 'height': 1},
+                 {'id': 'p', 'points': SQUARE}):
+        for box in ({'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1},
+                    {'x': 0.9, 'y': 0.9, 'width': 0.4, 'height': 0.4}):
+            det = {'box': dict(box)}
+            expected = zd._detection_matches_zone_uncached(det, zone, 0.2)
+            assert zd.detection_matches_zone({'box': dict(box)}, zone) is expected
+
+
 # ---------------------------------------------------------------------------
 # _zone_pixel_motion_fraction -- numpy slice + polygon-points fallback
 # ---------------------------------------------------------------------------
