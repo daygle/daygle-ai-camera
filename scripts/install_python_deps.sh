@@ -12,9 +12,11 @@
 # variant below. ONNX Runtime GPU includes the CPU execution provider as a
 # fallback, while the CPU and GPU pip wheels must not coexist in one venv.
 #
-# For reproducible deployments, scripts/lock_python_deps.sh can produce
-# variant-specific requirements.cpu.lock.txt and requirements.gpu.lock.txt.
-# The matching lock is preferred; an old generic requirements.lock.txt is
+# For reproducible CPU deployments, scripts/lock_python_deps.sh produces the
+# committed requirements.cpu.lock.txt. A GPU lock can also be generated on
+# demand, but this repository resolves GPU base dependencies from
+# requirements.txt and installs the separate CUDA userspace requirements file.
+# The matching lock is preferred; an old generic requirements.lock.txt remains
 # accepted only for CPU installs for backwards compatibility.
 set -euo pipefail
 
