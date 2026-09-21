@@ -606,6 +606,10 @@ _DEFAULT_MODEL = 'yolo11n'
 def auto_download_default_model() -> None:
     """Download the default YOLO model on first startup if no model exists.
 
+    Set ``DAYGLE_DISABLE_AUTO_MODEL_DOWNLOAD=1`` for environments such as CI
+    that must not perform network/model-export work during application startup.
+    Operators can still download a model explicitly from the Models page.
+
     On a clean install the ``models/`` directory has no ONNX file, so the
     detector reports ``MODEL MISSING`` and object detection is completely
     inert until the operator manually navigates to the Models tab and
@@ -618,6 +622,10 @@ def auto_download_default_model() -> None:
     a clean-install host that lacks network or is missing export
     dependencies still starts normally, just without detection.
     """
+    if os.environ.get('DAYGLE_DISABLE_AUTO_MODEL_DOWNLOAD', '').strip().lower() in {'1', 'true', 'yes', 'on'}:
+        logger.info('Skipping default model auto-download because it is disabled.')
+        return
+
     # If any ONNX file already exists in the models directory, the operator
     # has already set up detection (or a prior startup downloaded it).
     try:
