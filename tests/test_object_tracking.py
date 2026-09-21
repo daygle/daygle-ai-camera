@@ -125,6 +125,22 @@ def test_stationary_track_reports_near_zero_displacement():
     assert out[0]['track_displacement'] <= ot.TRACK_STILL_DISPLACEMENT
 
 
+def test_jittery_stationary_track_stays_still():
+    """A parked car whose box wobbles a little each frame (routine detector
+    noise on a large box) must still read as stationary. The old max-deviation
+    measure summed two opposite jitter spikes and reported ~0.014 (> the 0.01
+    still threshold) -> a Moving Only rule kept alerting on the parked car."""
+    cam = 'trk-disp-jitter'
+    _reset(cam)
+    # Alternating +/- ~0.8%-of-frame wobble around a fixed center.
+    jitter = [0.008, -0.007, 0.006, -0.008, 0.007, -0.006, 0.008, -0.007]
+    out = None
+    for dx in jitter:
+        out = ot.update_object_tracks(cam, [_det('car', 0.40 + dx, 0.40, 0.25, 0.15)])
+    assert out[0]['track_displacement'] is not None
+    assert out[0]['track_displacement'] <= ot.TRACK_STILL_DISPLACEMENT
+
+
 def test_moving_track_reports_real_displacement():
     cam = 'trk-disp-moving'
     _reset(cam)
