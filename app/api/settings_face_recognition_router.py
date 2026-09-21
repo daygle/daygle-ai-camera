@@ -94,18 +94,21 @@ def _embedding_models_response(db, *, reload_succeeded=None, reload_error=None) 
     """
     config = effective_face_recognition_config()
     active_path = str(config.get('model_path') or '')
-    recognition_enabled = bool(config.get('enabled'))
-
     def _active(onnx_name: str) -> bool:
         try:
-            return recognition_enabled and bool(active_path) and _relative_model_path(_safe_within_models_dir(onnx_name)) == active_path
+            return bool(active_path) and _relative_model_path(_safe_within_models_dir(onnx_name)) == active_path
         except Exception:
             return False
+
+    def _can_delete(onnx_name: str) -> bool:
+        return not (config.get('enabled') and _active(onnx_name))
 
     from app.face_recognition_service import get_face_recognition_service as _get_service
 
     response = face_recognition_status(config, _get_service(), db)
     response['models'] = embedding_model_catalog(_embedding_model_installed, _active)
+    for model in response['models']:
+        model['can_delete'] = _can_delete(model['onnx'])
     if reload_succeeded is not None:
         response['reload_succeeded'] = reload_succeeded
         response['reload_error'] = reload_error

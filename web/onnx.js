@@ -282,6 +282,7 @@ function renderCard(m) {
     const sizeMb = m.size_bytes ? `${(m.size_bytes / 1048576).toFixed(0)} MB` : `~${m.approx_mb} MB`;
     const isInstalled = m.installed;
     const isActive = m.active;
+    const canDelete = m.can_delete !== false;
     const versionLabel = m.installed_version ? `v${escapeHtml(m.installed_version)}` : '';
 
     // Determine card state class
@@ -333,12 +334,12 @@ function renderCard(m) {
           </select>
           <button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-family="${escapeHtml(m.family || 'object')}">\u2B07 Download</button>
         </div>`;
-    } else if (isActive && hasUpdate) {
+    } else if (isActive && !canDelete && hasUpdate) {
       // Active model with update: allow re-export in place
       actionsHtml = `
         <span class="model-active-label">\u25CF In Use</span>
         <button class="btn-warning model-action-btn" data-action="update" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-family="${escapeHtml(m.family || 'object')}" data-model-imgsz="${m.exported_imgsz || ''}">\u21BB Update</button>`;
-    } else if (isActive) {
+    } else if (isActive && !canDelete) {
       actionsHtml = '<button class="btn-success model-action-btn" disabled>\u2713 In Use</button>';
     } else {
       const updateBtn = hasUpdate

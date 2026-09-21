@@ -162,9 +162,10 @@ def list_ai_models():
                 # secondary face model -- never by being the active PRIMARY,
                 # which is always an object model now that the face pass is
                 # separate.
-                'active': _same_model_path(
-                    face_active_path if family == 'face' and ai_settings.get('face_enabled') else active_path,
-                    path,
+                'active': _same_model_path(face_active_path if family == 'face' else active_path, path),
+                'can_delete': (
+                    not ai_settings.get('face_enabled') if family == 'face'
+                    else not _same_model_path(active_path, path)
                 ),
                 'family': family,
                 'size_bytes': absolute.stat().st_size if absolute.is_file() else None,

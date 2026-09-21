@@ -94,6 +94,7 @@ function renderModels(models) {
     const id = escapeHtml(model.id);
     const isInstalled = !!model.installed;
     const isActive = !!model.active;
+    const canDelete = model.can_delete !== false;
 
     let cardClass = 'model-card';
     if (isActive) cardClass += ' model-card-active';
@@ -114,9 +115,7 @@ function renderModels(models) {
     let actionsHtml;
     if (!isInstalled) {
       actionsHtml = `<button class="btn-info model-action-btn" data-action="download" data-model-id="${id}">⬇ Download (~${escapeHtml(String(model.approx_mb))} MB)</button>`;
-    } else if (isActive) {
-      // Only an enabled recognition service marks a model active, so a selected
-      // model can still be deleted while recognition is disabled.
+    } else if (isActive && !canDelete) {
       actionsHtml = `<button class="btn-success model-action-btn" disabled>✓ In Use</button>${refreshBtn}`;
     } else {
       actionsHtml = `
