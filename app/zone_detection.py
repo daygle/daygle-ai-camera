@@ -680,8 +680,40 @@ def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dic
 
 
 def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any], *, action: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Zone/rule pairs a detection matches for ``action`` (``alert``/``record``).
+
+    The same detection is asked this several times per cycle -- ``zone_alert_detections``,
+    ``zone_record_on_detect`` (called ~3x), ``zone_name_for_detection`` and
+    ``zone_detection_alert_rule_names`` all funnel through here. The result is a
+    pure function of the settings, the action, and the detection's label /
+    confidence / box, so it is memoised on the detection under those exact keys.
+    ``id(settings)`` keys the (per-cycle stable) settings object so a different
+    settings dict recomputes; the ``_rule_match_memo`` field is internal and
+    dropped by history / event serialisation. Callers only read the returned
+    list, so returning the cached list is safe.
+    """
     if action not in ('alert', 'record'):
         raise ValueError(f"action must be 'alert' or 'record', got {action!r}")
+    box = detection.get('box') if isinstance(detection, dict) else None
+    if not isinstance(box, dict):
+        return _zone_object_rule_matches_uncached(settings, detection, action)
+    key = (
+        id(settings), action, canonical_label(detection.get('label')),
+        round(float(detection.get('confidence') or 0), 4),
+        box.get('x'), box.get('y'), box.get('width'), box.get('height'),
+    )
+    memo = detection.get('_rule_match_memo')
+    if memo is None:
+        memo = {}
+        detection['_rule_match_memo'] = memo
+    if key in memo:
+        return memo[key]
+    result = _zone_object_rule_matches_uncached(settings, detection, action)
+    memo[key] = result
+    return result
+
+
+def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict[str, Any], action: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     detection_settings = settings.get('detection') or {}
     # Face-only zones (monitor_objects=False carrying a ``face`` rule) must be
     # reachable here too: face detections stamped with such a zone's id match
