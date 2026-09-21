@@ -33,15 +33,10 @@ test('PTZ Motion Detection switch is editable and collected into detection', () 
   assert.match(source, /detection:\s*\{\s*ptz_motion_detection:\s*getName\('ptz_motion_detection'\)/);
 });
 
-test('per-profile Detection Mode override is editable and collected', () => {
-  // The select and its Any option must render...
-  assert.match(source, /name="profile_object_detection_motion_mode"/);
-  assert.match(source, /Any \(moving &amp; still\)/);
-  // ...be collected into the saved profile...
-  assert.match(source, /profileValue\('object_detection_motion_mode', getName\('profile_object_detection_motion_mode'\)\)/);
-  // ...and be recognised as a profile-scoped performance field so applying a
-  // preset (e.g. Cat / Small Animal) populates it.
-  assert.match(source, /'object_detection_motion_mode'/);
+test('Detection Mode remains an object-level setting', () => {
+  // Camera profiles must not expose or collect the per-object moving/still mode.
+  assert.doesNotMatch(source, /name="profile_object_detection_motion_mode"/);
+  assert.doesNotMatch(source, /profileValue\('object_detection_motion_mode'/);
 });
 
 test('camera table exposes day and night profiles and editor can collapse', () => {

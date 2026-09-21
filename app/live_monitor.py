@@ -688,17 +688,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # tracker below, so resolve them once per cycle rather than reading the
     # ``objects`` DB setting twice on this ~4 Hz hot path.
     object_settings = effective_object_settings()
-    # Per-profile moving/still default override. The global Objects default is
-    # Moving Only, which drops a still subject (a sitting cat, a person facing
-    # the camera) after it is detected. A camera's active Day/Night profile can
-    # set ``object_detection_motion_mode`` (any/moving/still) to change that
-    # default for this camera only -- e.g. the Cat / Small Animal profile ships
-    # ``any`` so still cats are counted. Unset inherits the global default.
-    # ``effective_object_settings`` returns a fresh dict, so this override never
-    # touches the shared setting; an explicit per-label mode still wins over it.
-    _profile_motion_mode = live_settings.get('object_detection_motion_mode')
-    if _profile_motion_mode in ('any', 'moving', 'still'):
-        object_settings = {**object_settings, 'default_mode': _profile_motion_mode}
     # Still-dwell candidates must be taken from the UNFILTERED detections: the
     # still/moving filter below drops still detections under the default Moving
     # Only mode, which would otherwise starve every "still for N minutes" alert

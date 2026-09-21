@@ -109,20 +109,17 @@ def _run_still_cat(main, monkeypatch, camera_settings):
     return [d for d in (captured.get('detections') or []) if d.get('label') == 'cat']
 
 
-def test_profile_any_mode_keeps_a_still_cat(tmp_path, monkeypatch):
-    """A camera whose active profile sets object_detection_motion_mode='any'
-    counts a genuinely still cat that the global Moving Only default drops."""
+def test_camera_profile_does_not_override_object_mode(tmp_path, monkeypatch):
+    """Moving/still mode is resolved from the Objects page, not a camera profile."""
     main = _load_app(tmp_path, monkeypatch)
     settings = _cat_camera_settings()
     settings['detection_profiles'] = {'active': 'day', 'day': {'object_detection_motion_mode': 'any'}}
     status_cats = _run_still_cat(main, monkeypatch, settings)
-    assert status_cats, 'a still cat must survive when the profile mode is Any'
-    assert status_cats[0].get('motion_state') == 'still'
+    assert not status_cats, 'a camera profile must not override the object setting'
 
 
 def test_global_moving_only_drops_a_still_cat(tmp_path, monkeypatch):
-    """Control: with no profile mode override the global Moving Only default
-    drops the same still cat -- which is why the profile override exists."""
+    """The global Moving Only object setting drops the same still cat."""
     main = _load_app(tmp_path, monkeypatch)
     status_cats = _run_still_cat(main, monkeypatch, _cat_camera_settings())
     assert not status_cats, 'the global Moving Only default drops a still cat'

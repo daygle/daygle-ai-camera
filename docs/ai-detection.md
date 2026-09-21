@@ -192,10 +192,9 @@ missing alert does not necessarily mean ONNX missed the object. The audit of
 - **Motion/object classification:** the Objects setting defaults to **Moving
   Only**. A valid still detection is intentionally filtered unless its label is
   configured for `any` or `still`; track displacement can override the pixel
-  mask after a track matures. A camera's Day/Night profile can also set
-  **Detection Mode** (`object_detection_motion_mode`) to override that default
-  for that camera only - the Cat / Small Animal profile ships `any` because
-  cats sit still constantly, so a settled cat would otherwise be dropped.
+  mask after a track matures. Configure **Detection Mode** on the Objects
+  page to override that default per object or object group. Camera Day/Night
+  profiles do not change moving/still object behavior.
 - **Camera-motion (PTZ) suppression:** while the camera itself is moving,
   image-space movement is unknowable, so object movement is reported as
   `unknown` and non-`any` labels cannot alert until it settles. Movement is

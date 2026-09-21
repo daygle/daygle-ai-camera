@@ -36,9 +36,6 @@ BUILTIN_PRESETS: tuple[dict[str, Any], ...] = (
             # tiling below where IR shrinks distant cats and lighting is worst.
             'object_detection_region_boost': True,
             'object_detection_tiling': 'off',
-            # Cats sit still constantly; count still detections (not just moving)
-            # so a settled cat is not dropped by the global Moving Only default.
-            'object_detection_motion_mode': 'any',
             'periodic_scan_interval_seconds': 15,
             'motion_frame_width': 320,
             'motion_frame_height': 240,
@@ -64,8 +61,6 @@ BUILTIN_PRESETS: tuple[dict[str, Any], ...] = (
             # the extra whole-frame passes most, so the tiling cost is spent here
             # rather than in daytime where the full-frame pass already resolves.
             'object_detection_tiling': '3x3',
-            # Match the day profile: a still cat at night must be counted too.
-            'object_detection_motion_mode': 'any',
             'periodic_scan_interval_seconds': 10,
             'motion_frame_width': 320,
             'motion_frame_height': 240,

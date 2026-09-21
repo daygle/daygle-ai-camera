@@ -34,10 +34,6 @@ def test_builtin_presets_have_day_and_night_values():
     assert cat['night']['detection_confirm_frames'] == 2
     assert cat['night']['detection_confirm_window'] == 3
     assert cat['night']['detection_confirm_iou'] == 0.05
-    # Cats sit still constantly: both profiles count still detections so a
-    # settled cat is not dropped by the global Moving Only default.
-    assert cat['day']['object_detection_motion_mode'] == 'any'
-    assert cat['night']['object_detection_motion_mode'] == 'any'
 
 
 def test_recall_profiles_do_not_add_confirmation_latency():
