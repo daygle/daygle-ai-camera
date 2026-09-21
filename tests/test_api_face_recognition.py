@@ -339,7 +339,7 @@ def test_select_uninstalled_embedding_model_rejected(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
-def test_delete_embedding_model_refuses_active_and_removes_inactive(tmp_path, monkeypatch):
+def test_delete_embedding_model_when_disabled_and_protect_when_enabled(tmp_path, monkeypatch):
     app, _db = _load_app(tmp_path, monkeypatch)
     models_dir = _stub_models_env(monkeypatch, tmp_path)
     server, thread, base_url = _server(app)
@@ -351,25 +351,37 @@ def test_delete_embedding_model_refuses_active_and_removes_inactive(tmp_path, mo
             '/api/settings/face-recognition/embedding-models/arcface-r100/download',
             method='POST', headers={'X-CSRF-Token': csrf},
         )
-        (models_dir / 'arcface-r100-int8.onnx').write_bytes(b'fake int8')
 
-        # The active model cannot be deleted.
-        status, _h, _b = client.request(
+        # The selected model can be deleted while recognition is disabled; the
+        # stale model selection is cleared along with the file.
+        status, _h, body = client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100',
+            method='DELETE', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert not (models_dir / 'arcface-r100.onnx').exists()
+        assert body['model_path'] == ''
+
+        # Once recognition is enabled, the selected model remains protected.
+        status, _h, body = client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100/download',
+            method='POST', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        status, _h, body = client.request('/api/settings/face-recognition', method='PUT',
+            data=json.dumps({
+                'enabled': True,
+                'model_path': body['model_path'],
+                'model_id': body['model_id'],
+            }).encode(),
+            headers={'Content-Type': 'application/json', 'X-CSRF-Token': csrf})
+        assert status == 200
+        status, _h, _body = client.request(
             '/api/settings/face-recognition/embedding-models/arcface-r100',
             method='DELETE', headers={'X-CSRF-Token': csrf},
         )
         assert status == 400
         assert (models_dir / 'arcface-r100.onnx').exists()
-
-        # An installed, inactive model can be deleted.
-        status, _h, body = client.request(
-            '/api/settings/face-recognition/embedding-models/arcface-r100-int8',
-            method='DELETE', headers={'X-CSRF-Token': csrf},
-        )
-        assert status == 200
-        assert not (models_dir / 'arcface-r100-int8.onnx').exists()
-        by_id = {m['id']: m for m in body['models']}
-        assert by_id['arcface-r100-int8']['installed'] is False
     finally:
         server.should_exit = True
         thread.join(timeout=5)

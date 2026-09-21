@@ -162,7 +162,10 @@ def list_ai_models():
                 # secondary face model -- never by being the active PRIMARY,
                 # which is always an object model now that the face pass is
                 # separate.
-                'active': _same_model_path(face_active_path if family == 'face' else active_path, path),
+                'active': _same_model_path(
+                    face_active_path if family == 'face' and ai_settings.get('face_enabled') else active_path,
+                    path,
+                ),
                 'family': family,
                 'size_bytes': absolute.stat().st_size if absolute.is_file() else None,
                 'installed_version': variant.get('version'),
@@ -337,7 +340,18 @@ async def update_ai_model(request: Request, db=Depends(get_database)):
 def delete_ai_model(model_id: str, request: Request, db=Depends(get_database), imgsz: int | None = Query(default=None)):
     require_admin(request)
     model_name = model_id.strip().lower()
+    ai_settings = effective_ai_config()
     result = delete_model(model_name, imgsz=imgsz)
+    is_face_model = str(YOLO_MODELS[model_name].get('labels') or '').endswith('face.names')
+    if (
+        is_face_model
+        and not ai_settings.get('face_enabled')
+        and _same_model_path(str(ai_settings.get('face_model_path') or ''), str(result.get('deleted_path') or ''))
+    ):
+        cleared = dict(ai_settings)
+        cleared['face_model_path'] = ''
+        cleared['face_enabled'] = False
+        db.set_setting('ai', cleared, utc_now())
     write_audit_log(request, db, 'delete', 'settings.ai.model',
                     details={'model_id': model_name, 'imgsz': imgsz})
     result['models'] = list_ai_models()

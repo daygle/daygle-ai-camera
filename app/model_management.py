@@ -596,6 +596,7 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
         'ok': True,
         'message': f"Deleted {info['label']} model.",
         'deleted': model_name,
+        'deleted_path': rel_path,
     }
 
 

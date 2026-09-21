@@ -115,8 +115,8 @@ function renderModels(models) {
     if (!isInstalled) {
       actionsHtml = `<button class="btn-info model-action-btn" data-action="download" data-model-id="${id}">⬇ Download (~${escapeHtml(String(model.approx_mb))} MB)</button>`;
     } else if (isActive) {
-      // The active model can't be deleted (recognition points at it); offer a
-      // refresh only, matching the ONNX page's "In Use" state.
+      // Only an enabled recognition service marks a model active, so a selected
+      // model can still be deleted while recognition is disabled.
       actionsHtml = `<button class="btn-success model-action-btn" disabled>✓ In Use</button>${refreshBtn}`;
     } else {
       actionsHtml = `

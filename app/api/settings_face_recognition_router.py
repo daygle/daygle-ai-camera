@@ -94,10 +94,11 @@ def _embedding_models_response(db, *, reload_succeeded=None, reload_error=None) 
     """
     config = effective_face_recognition_config()
     active_path = str(config.get('model_path') or '')
+    recognition_enabled = bool(config.get('enabled'))
 
     def _active(onnx_name: str) -> bool:
         try:
-            return bool(active_path) and _relative_model_path(_safe_within_models_dir(onnx_name)) == active_path
+            return recognition_enabled and bool(active_path) and _relative_model_path(_safe_within_models_dir(onnx_name)) == active_path
         except Exception:
             return False
 
@@ -243,9 +244,9 @@ def delete_embedding_model(
 ):
     """Delete an installed embedding model's file.
 
-    Refuses to delete the model recognition is currently pointed at -- switch to
-    another model (or clear the selection) first -- so recognition never ends up
-    referencing a missing file.
+    Refuses to delete the selected model only while recognition is enabled. A
+    disabled setup may remove its remembered model; the selection is cleared so
+    re-enabling recognition cannot reference a missing file.
     """
     require_admin(request)
     info = EMBEDDING_MODELS.get(catalog_id)
@@ -254,12 +255,24 @@ def delete_embedding_model(
     destination = _safe_within_models_dir(info['onnx'])
     if not destination.exists():
         raise HTTPException(status_code=404, detail='Model is not installed.')
-    if _relative_model_path(destination) == str(effective_face_recognition_config().get('model_path') or ''):
+    config = effective_face_recognition_config()
+    is_selected = _relative_model_path(destination) == str(config.get('model_path') or '')
+    if config.get('enabled') and is_selected:
         raise HTTPException(
             status_code=400,
-            detail='This model is in use. Select a different model before deleting it.',
+            detail='This model is in use. Disable face recognition or select a different model before deleting it.',
         )
     destination.unlink()
+    # A disabled recognition setup may still remember the selected model path.
+    # Clear it when that file is deleted so re-enabling cannot point at a missing
+    # embedding model and the next model selection starts from a clean state.
+    if is_selected:
+        cleared = validate_face_recognition_settings({
+            **config,
+            'model_path': '',
+            'model_id': 'arcface',
+        })
+        db.set_setting('face_recognition', cleared, utc_now())
     write_audit_log(request, db, 'delete', 'settings.face_recognition.embedding_model', details={
         'catalog_id': catalog_id,
         'onnx': info['onnx'],
