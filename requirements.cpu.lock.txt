@@ -505,9 +505,9 @@ fastapi==0.141.1 \
     --hash=sha256:bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3 \
     --hash=sha256:e8822fc40db1e1858054d7a949a888695bc9bdce70139178e33bd2871a453ca1
     # via -r requirements.txt
-filelock==3.32.6 \
-    --hash=sha256:3f16ecd0117feae0dfc147e8c62eb5daeccd8bd800378c3ddf416de9b4feb6b1 \
-    --hash=sha256:a3f55a18af3652a94d8f47d6055df434f254ca1d02ef2524850c6d249ca2512c
+filelock==4.0.0 \
+    --hash=sha256:3611eca5d818ca9b00ec3cc7db1dcfe1e2aafc8d44fb4920d8cf60ad1f6bfda6 \
+    --hash=sha256:a850aa9ec2acba8db9ca2e9fcf8a327fbc2f85e432725715b37bd76b7dd1f798
     # via
     #   torch
     #   ultralytics
