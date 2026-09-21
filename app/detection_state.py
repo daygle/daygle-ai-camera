@@ -170,10 +170,16 @@ def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
 
 # A high fraction of changed pixels across the whole thumbnail is a useful,
 # cheap PTZ signal: a pan/tilt moves the entire scene, unlike an ordinary
-# subject. It is deliberately conservative and requires persistence so a large
-# passing object does not suppress one frame of real motion.
+# subject. It is deliberately conservative and *always* requires persistence
+# (``_CAMERA_MOTION_REQUIRED_FRAMES`` consecutive high-change frames) before it
+# suppresses anything: a single ultra-high frame -- a truck passing close, an
+# IR/exposure jump, a lightning flash -- is indistinguishable from ego-motion on
+# one frame, and suppressing object alerts on it is the false positive to avoid.
+# A genuine pan spans several frames and clears the threshold easily. Auto
+# detection is also gated to PTZ/auto-track cameras at the call site; a fixed
+# camera never pans, so a high-change frame there is a real subject or a
+# lighting shift, and must never gate its object alerts.
 _CAMERA_MOTION_FRACTION = 0.35
-_CAMERA_MOTION_IMMEDIATE_FRACTION = 0.8
 _CAMERA_MOTION_REQUIRED_FRAMES = 2
 _CAMERA_MOTION_HOLD_SECONDS = 0.75
 _CAMERA_MOTION_SETTLE_SECONDS = 1.5
@@ -209,12 +215,24 @@ def clear_camera_motion(camera_id: str) -> None:
         current['reason'] = 'ptz_settling'
 
 
-def update_camera_motion(camera_id: str, raw_motion_fraction: float) -> dict[str, Any]:
+def update_camera_motion(
+    camera_id: str,
+    raw_motion_fraction: float,
+    *,
+    allow_auto_detection: bool = True,
+) -> dict[str, Any]:
     """Update and return the PTZ/camera-motion state for one analyzed frame.
 
     This is a suppression signal, not geometric compensation. When active,
     object movement is reported as ``unknown`` because image-space displacement
     cannot distinguish a moving object from a moving camera.
+
+    ``allow_auto_detection`` gates the frame-wide global-motion heuristic: it is
+    meaningful only for cameras that can move outside an app-issued command
+    (PTZ / auto-track). Pass ``False`` for a fixed camera so a large close
+    subject or a lighting shift never activates ego-motion suppression there;
+    an app-issued ``mark_camera_motion`` window (``command_until``) is always
+    honoured regardless, since that is a known commanded move.
     """
     try:
         fraction = float(raw_motion_fraction)
@@ -224,12 +242,12 @@ def update_camera_motion(camera_id: str, raw_motion_fraction: float) -> dict[str
     with _state._camera_motion_lock:
         current = _state._camera_motion_state.setdefault(str(camera_id), {})
         was_active = now < float(current.get('command_until', 0.0)) or now < float(current.get('auto_until', 0.0))
-        if fraction >= _CAMERA_MOTION_FRACTION:
+        if allow_auto_detection and fraction >= _CAMERA_MOTION_FRACTION:
             current['high_fraction_streak'] = int(current.get('high_fraction_streak', 0)) + 1
-            if (
-                fraction >= _CAMERA_MOTION_IMMEDIATE_FRACTION
-                or current['high_fraction_streak'] >= _CAMERA_MOTION_REQUIRED_FRAMES
-            ):
+            # Always require persistence: a single high-change frame is not
+            # distinguishable from a real subject, so only a run of
+            # ``_CAMERA_MOTION_REQUIRED_FRAMES`` consecutive frames activates.
+            if current['high_fraction_streak'] >= _CAMERA_MOTION_REQUIRED_FRAMES:
                 current['auto_until'] = now + _CAMERA_MOTION_HOLD_SECONDS
                 current['reason'] = 'global_motion'
         else:

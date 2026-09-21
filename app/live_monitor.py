@@ -528,7 +528,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # latter is intentionally zero below the motion gate; the former lets the
     # live bar show real sub-gate pixel changes without making them alertable.
     motion_signal = round(min(1.0, raw_motion_fraction / max(_scale_fraction, 1e-9)), 3)
-    camera_motion = update_camera_motion(camera_id, raw_motion_fraction)
+    # The frame-wide global-motion heuristic is only valid for a camera that can
+    # actually move (PTZ / auto-track). On a fixed camera a high-change frame is
+    # a real subject or a lighting shift, so gate auto-detection to PTZ-enabled
+    # cameras; an app-issued PTZ command still suppresses via ``command_until``.
+    _ptz_capable = bool((settings.get('ptz') or {}).get('enabled'))
+    camera_motion = update_camera_motion(
+        camera_id, raw_motion_fraction, allow_auto_detection=_ptz_capable,
+    )
     # A motion-gate error is not evidence of motion, but it must not suppress
     # the independent object-detection path: some callers provide detector-
     # compatible input that the optional motion decoder cannot parse. Keep the
