@@ -195,7 +195,21 @@ def camera_default_name(settings: dict[str, Any], fallback: str = 'Primary Camer
 
 
 def default_camera_detection_settings() -> dict[str, Any]:
-    return {'object_detection_enabled': True, 'zones': []}
+    return {'object_detection_enabled': True, 'ptz_motion_detection': 'auto', 'zones': []}
+
+
+# Per-camera control for the automatic PTZ / camera-motion (ego-motion)
+# suppressor. ``auto`` follows the camera's PTZ-enabled flag (the historical
+# behaviour); ``on`` always runs it (a fixed camera on a movable/shared mount);
+# ``off`` never runs it (a PTZ camera driven by presets that must not have its
+# object alerts suppressed). App-issued PTZ commands are honoured regardless.
+_PTZ_MOTION_DETECTION_MODES: frozenset[str] = frozenset({'auto', 'on', 'off'})
+
+
+def normalize_ptz_motion_detection(value: Any) -> str:
+    """Coerce the ``ptz_motion_detection`` setting to ``auto`` / ``on`` / ``off``."""
+    mode = str(value if value is not None else 'auto').strip().lower()
+    return mode if mode in _PTZ_MOTION_DETECTION_MODES else 'auto'
 
 
 def normalize_bool_setting(value: Any, default: bool = False) -> bool:

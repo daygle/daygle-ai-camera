@@ -49,7 +49,11 @@ from app.recording_settings import (
     normalize_camera_ptz_settings,
     normalize_camera_recording_settings,
 )
-from app.utils import camera_default_name, default_camera_detection_settings
+from app.utils import (
+    camera_default_name,
+    default_camera_detection_settings,
+    normalize_ptz_motion_detection,
+)
 from app.zone_schema import normalize_label_list, normalize_monitoring_zones
 
 logger = logging.getLogger('daygle.ai')
@@ -103,6 +107,9 @@ def normalize_camera_settings(
         detection.update(camera_settings['detection'])
     detection['object_detection_enabled'] = bool(
         detection.get('object_detection_enabled', True)
+    )
+    detection['ptz_motion_detection'] = normalize_ptz_motion_detection(
+        detection.get('ptz_motion_detection'),
     )
     detection['object_labels'] = normalize_label_list(
         detection.get('object_labels', []),

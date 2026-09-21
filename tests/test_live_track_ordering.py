@@ -128,6 +128,46 @@ def test_global_moving_only_drops_a_still_cat(tmp_path, monkeypatch):
     assert not status_cats, 'the global Moving Only default drops a still cat'
 
 
+def _resolved_allow_auto_detection(main, monkeypatch, camera_settings):
+    """Run one cycle and capture the ``allow_auto_detection`` the pipeline
+    resolved from the camera's ptz_motion_detection switch + PTZ-enabled flag."""
+    import app.live_monitor as _lm
+    monkeypatch.setattr(main._state, 'detector', _still_cat_detector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    monkeypatch.setattr(_lm, 'detect_frame_motion', lambda *a, **k: (False, 0.0, None, 0.0))
+    captured: dict = {}
+    real = _lm.update_camera_motion
+
+    def capturing(camera_id, fraction, *, allow_auto_detection=True):
+        captured['allow'] = allow_auto_detection
+        return real(camera_id, fraction, allow_auto_detection=allow_auto_detection)
+    monkeypatch.setattr(_lm, 'update_camera_motion', capturing)
+    _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720, 'timestamp': time.time()},
+                                   camera_settings, enforce_interval=False)
+    return captured.get('allow')
+
+
+def test_ptz_motion_detection_switch_resolves_correctly(tmp_path, monkeypatch):
+    """The per-camera ptz_motion_detection switch decides whether the auto
+    ego-motion heuristic runs: on -> always, off -> never, auto -> follow PTZ."""
+    main = _load_app(tmp_path, monkeypatch)
+
+    def _settings(cam_id, mode, *, ptz_enabled):
+        s = _cat_camera_settings()
+        s['id'] = cam_id
+        s['detection']['ptz_motion_detection'] = mode
+        if ptz_enabled:
+            s['ptz'] = {'enabled': True}
+        return s
+
+    # 'on' runs auto-detection even on a fixed camera; 'off' disables it even on
+    # a PTZ camera; 'auto' follows the PTZ-enabled flag either way.
+    assert _resolved_allow_auto_detection(main, monkeypatch, _settings('c-on', 'on', ptz_enabled=False)) is True
+    assert _resolved_allow_auto_detection(main, monkeypatch, _settings('c-off', 'off', ptz_enabled=True)) is False
+    assert _resolved_allow_auto_detection(main, monkeypatch, _settings('c-auto-fixed', 'auto', ptz_enabled=False)) is False
+    assert _resolved_allow_auto_detection(main, monkeypatch, _settings('c-auto-ptz', 'auto', ptz_enabled=True)) is True
+
+
 def test_tracking_feeds_the_motion_mode_filter(tmp_path, monkeypatch):
     """The detections handed to ``filter_detections_by_motion_mode`` must carry
     the tracker's annotation, and a paused (mask-still) but tracked-moving cat

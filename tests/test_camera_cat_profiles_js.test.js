@@ -23,6 +23,16 @@ test('cat profile shortcut is removed while reusable presets remain', () => {
   assert.match(source, /profile-save-preset-btn/);
 });
 
+test('PTZ Motion Detection switch is editable and collected into detection', () => {
+  // Tri-state select with Auto/On/Off...
+  assert.match(source, /name="ptz_motion_detection"/);
+  assert.match(source, /Auto \(Follow PTZ\)/);
+  // ...bound to the camera-level detection block (not a profile field)...
+  assert.match(source, /camera\.detection\?\.ptz_motion_detection/);
+  // ...and written into data.detection so the save merge preserves zones.
+  assert.match(source, /detection:\s*\{\s*ptz_motion_detection:\s*getName\('ptz_motion_detection'\)/);
+});
+
 test('per-profile Detection Mode override is editable and collected', () => {
   // The select and its Any option must render...
   assert.match(source, /name="profile_object_detection_motion_mode"/);

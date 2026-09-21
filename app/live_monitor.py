@@ -65,7 +65,7 @@ from app.recording_extension import (
     recording_skip_reason,
 )
 from app.backup import purge_camera_diagnostics_by_policy
-from app.utils import build_stream_url, build_recording_stream_url, normalize_bool_setting
+from app.utils import build_stream_url, build_recording_stream_url, normalize_bool_setting, normalize_ptz_motion_detection
 from app.zone_schema import label_matches
 from app.zone_detection import (
     detection_matches_zone,
@@ -530,11 +530,20 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     motion_signal = round(min(1.0, raw_motion_fraction / max(_scale_fraction, 1e-9)), 3)
     # The frame-wide global-motion heuristic is only valid for a camera that can
     # actually move (PTZ / auto-track). On a fixed camera a high-change frame is
-    # a real subject or a lighting shift, so gate auto-detection to PTZ-enabled
-    # cameras; an app-issued PTZ command still suppresses via ``command_until``.
-    _ptz_capable = bool((settings.get('ptz') or {}).get('enabled'))
+    # a real subject or a lighting shift, so it must not gate object alerts. The
+    # per-camera ``ptz_motion_detection`` switch decides: ``on`` always runs it,
+    # ``off`` never does, and ``auto`` (default) follows the PTZ-enabled flag --
+    # the historical behaviour. An app-issued PTZ command still suppresses via
+    # ``command_until`` regardless of this switch.
+    _ptz_motion_mode = normalize_ptz_motion_detection((settings.get('detection') or {}).get('ptz_motion_detection'))
+    if _ptz_motion_mode == 'on':
+        _allow_auto_motion = True
+    elif _ptz_motion_mode == 'off':
+        _allow_auto_motion = False
+    else:
+        _allow_auto_motion = bool((settings.get('ptz') or {}).get('enabled'))
     camera_motion = update_camera_motion(
-        camera_id, raw_motion_fraction, allow_auto_detection=_ptz_capable,
+        camera_id, raw_motion_fraction, allow_auto_detection=_allow_auto_motion,
     )
     # A motion-gate error is not evidence of motion, but it must not suppress
     # the independent object-detection path: some callers provide detector-

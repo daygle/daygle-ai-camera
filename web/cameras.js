@@ -273,6 +273,11 @@ function buildEditFormHtml(camera, index) {
               '<option value="moving"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_motion_mode') === 'moving' ? ' selected' : '') + '>Moving Only</option>' +
               '<option value="still"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_motion_mode') === 'still' ? ' selected' : '') + '>Still Only</option>' +
             '</select></label>' +
+            '<label><span>PTZ Motion Detection</span><select name="ptz_motion_detection">' +
+              '<option value="auto"' + ((camera.detection?.ptz_motion_detection || 'auto') === 'auto' ? ' selected' : '') + '>Auto (Follow PTZ)</option>' +
+              '<option value="on"' + (camera.detection?.ptz_motion_detection === 'on' ? ' selected' : '') + '>On</option>' +
+              '<option value="off"' + (camera.detection?.ptz_motion_detection === 'off' ? ' selected' : '') + '>Off</option>' +
+            '</select></label>' +
             '<label><span>Periodic Scan (s)</span><input name="profile_periodic_scan_interval_seconds" type="number" min="0" max="3600" step="1" placeholder="Global Default (0)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'periodic_scan_interval_seconds') ?? '') + '" /></label>' +
             '<label><span>Motion Frame Width</span><input name="profile_motion_frame_width" type="number" min="40" max="640" step="1" placeholder="Global Default (320)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_width') ?? '') + '" /></label>' +
             '<label><span>Motion Frame Height</span><input name="profile_motion_frame_height" type="number" min="30" max="480" step="1" placeholder="Global Default (240)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_height') ?? '') + '" /></label>' +
@@ -678,7 +683,7 @@ function collectFormData(form) {
       speed: getInt('ptz_speed', 5),
       step_duration: (function() { var raw = parseFloat(getVal('ptz_step_duration')); return isFinite(raw) ? raw : 0.4; })(),
     },
-    detection: {},
+    detection: { ptz_motion_detection: getName('ptz_motion_detection') || 'auto' },
     detection_profiles: profiles,
   };
 }
