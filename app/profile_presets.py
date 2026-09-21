@@ -23,11 +23,22 @@ BUILTIN_PRESETS: tuple[dict[str, Any], ...] = (
             'ingest_frame_fps': 6,
             'detection_confirm_frames': 2,
             'detection_confirm_window': 3,
-            'detection_confirm_iou': 0.1,
+            # Spatial-persistence IoU kept low: a small/distant cat walking moves
+            # several box-widths per cycle, so consecutive boxes barely overlap.
+            # A high value would fail exactly the small moving subject this
+            # profile exists to catch; 0.05 still rejects noise that teleports
+            # around the frame while the 2-of-3 label count carries the rest.
+            'detection_confirm_iou': 0.05,
             'always_run_object_detection': True,
+            # Region boost (motion-guided high-res crops) recovers small MOVING
+            # cats without the whole-frame cost of tiling. Daytime tiling stays
+            # off so a CPU host can sustain the 0.35s cadence; night keeps full
+            # tiling below where IR shrinks distant cats and lighting is worst.
             'object_detection_region_boost': True,
-            # Small cats in a deep driveway can be lost by the full-frame pass.
-            'object_detection_tiling': '2x2',
+            'object_detection_tiling': 'off',
+            # Cats sit still constantly; count still detections (not just moving)
+            # so a settled cat is not dropped by the global Moving Only default.
+            'object_detection_motion_mode': 'any',
             'periodic_scan_interval_seconds': 15,
             'motion_frame_width': 320,
             'motion_frame_height': 240,
@@ -49,8 +60,12 @@ BUILTIN_PRESETS: tuple[dict[str, Any], ...] = (
             'always_run_object_detection': True,
             'object_detection_region_boost': True,
             # IR frames make distant cats especially small; 3x3 keeps more
-            # pixels on the subject than 2x2 without changing daytime CPU cost.
+            # pixels on the subject than 2x2. Night is when a cat camera needs
+            # the extra whole-frame passes most, so the tiling cost is spent here
+            # rather than in daytime where the full-frame pass already resolves.
             'object_detection_tiling': '3x3',
+            # Match the day profile: a still cat at night must be counted too.
+            'object_detection_motion_mode': 'any',
             'periodic_scan_interval_seconds': 10,
             'motion_frame_width': 320,
             'motion_frame_height': 240,

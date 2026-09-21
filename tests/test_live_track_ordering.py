@@ -75,6 +75,59 @@ def _cat_camera_settings() -> dict:
     }
 
 
+def _still_cat_detector():
+    cat = {'label': 'cat', 'confidence': 0.8,
+           'box': {'x': 0.45, 'y': 0.55, 'width': 0.08, 'height': 0.06}}
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [dict(cat, box=dict(cat['box']))]
+
+    return FakeDetector()
+
+
+def _run_still_cat(main, monkeypatch, camera_settings):
+    """One cycle with a still cat and no motion; return the status detections."""
+    import app.live_monitor as _lm
+    monkeypatch.setattr(main._state, 'detector', _still_cat_detector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # No motion -> diff_mask is None -> a first-seen cat classifies "still".
+    monkeypatch.setattr(_lm, 'detect_frame_motion', lambda *a, **k: (False, 0.0, None, 0.0))
+    captured: dict = {}
+    real_status = _lm.update_live_detection_status
+
+    def capturing_status(camera_id, **kwargs):
+        captured['detections'] = kwargs.get('detections')
+        return real_status(camera_id, **kwargs)
+    monkeypatch.setattr(_lm, 'update_live_detection_status', capturing_status)
+    _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720, 'timestamp': time.time()},
+                                   camera_settings, enforce_interval=False)
+    return [d for d in (captured.get('detections') or []) if d.get('label') == 'cat']
+
+
+def test_profile_any_mode_keeps_a_still_cat(tmp_path, monkeypatch):
+    """A camera whose active profile sets object_detection_motion_mode='any'
+    counts a genuinely still cat that the global Moving Only default drops."""
+    main = _load_app(tmp_path, monkeypatch)
+    settings = _cat_camera_settings()
+    settings['detection_profiles'] = {'active': 'day', 'day': {'object_detection_motion_mode': 'any'}}
+    status_cats = _run_still_cat(main, monkeypatch, settings)
+    assert status_cats, 'a still cat must survive when the profile mode is Any'
+    assert status_cats[0].get('motion_state') == 'still'
+
+
+def test_global_moving_only_drops_a_still_cat(tmp_path, monkeypatch):
+    """Control: with no profile mode override the global Moving Only default
+    drops the same still cat -- which is why the profile override exists."""
+    main = _load_app(tmp_path, monkeypatch)
+    status_cats = _run_still_cat(main, monkeypatch, _cat_camera_settings())
+    assert not status_cats, 'the global Moving Only default drops a still cat'
+
+
 def test_tracking_feeds_the_motion_mode_filter(tmp_path, monkeypatch):
     """The detections handed to ``filter_detections_by_motion_mode`` must carry
     the tracker's annotation, and a paused (mask-still) but tracked-moving cat

@@ -23,6 +23,17 @@ test('cat profile shortcut is removed while reusable presets remain', () => {
   assert.match(source, /profile-save-preset-btn/);
 });
 
+test('per-profile Detection Mode override is editable and collected', () => {
+  // The select and its Any option must render...
+  assert.match(source, /name="profile_object_detection_motion_mode"/);
+  assert.match(source, /Any \(moving &amp; still\)/);
+  // ...be collected into the saved profile...
+  assert.match(source, /profileValue\('object_detection_motion_mode', getName\('profile_object_detection_motion_mode'\)\)/);
+  // ...and be recognised as a profile-scoped performance field so applying a
+  // preset (e.g. Cat / Small Animal) populates it.
+  assert.match(source, /'object_detection_motion_mode'/);
+});
+
 test('camera table exposes day and night profiles and editor can collapse', () => {
   assert.match(source, /camera-profile-pill/);
   assert.match(source, /Solar \(Daily Sunrise\/Sunset\)/);
