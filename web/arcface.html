@@ -8,6 +8,17 @@
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="stylesheet" href="/static/model-card-messages.css" />
+  <style>
+    /* On phones the hero stacks vertically; keep the copy content-sized
+       instead of carrying the desktop 420px flex basis into its height.
+       Same fix as onnx.html - the page-section rule in styles.css wins the
+       cascade over the shared media query, so the collapse lives here. */
+    @media (max-width: 900px) {
+      .arcface-hero { gap: 16px; min-height: 0; }
+      .arcface-hero-copy { flex: 0 0 auto; }
+      .arcface-hero-mark { margin: 0 auto; }
+    }
+  </style>
 </head>
 <body>
   <main class="shell page-stack">
@@ -29,7 +40,7 @@
         <span class="settings-tab-icon" aria-hidden="true">🧠</span><span class="settings-tab-copy"><span class="settings-tab-label">Status</span><small>Recognition health</small></span>
       </button>
       <button class="settings-tab" type="button" role="tab" id="tab-models" aria-controls="panel-models" data-tab="models" aria-selected="false" tabindex="-1">
-        <span class="settings-tab-icon arcface-tab-icon" aria-hidden="true">📦</span><span class="settings-tab-copy"><span class="settings-tab-label">Embedding models</span><small>Download &amp; manage</small></span>
+        <span class="settings-tab-icon arcface-tab-icon" aria-hidden="true">📦</span><span class="settings-tab-copy"><span class="settings-tab-label">Embedding Models</span><small>Download &amp; manage</small></span>
       </button>
     </div>
 
