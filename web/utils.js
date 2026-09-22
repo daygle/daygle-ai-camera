@@ -1180,7 +1180,24 @@ function normalizeTripwire(raw) {
     email_enabled: raw.email_enabled === true,
     email_recipients: normalizeEmailList(raw.email_recipients),
     push_enabled: raw.push_enabled === true,
+    // Notify quiet-hours window (edited on the Alerts page). Preserved here so
+    // a Zones save can't drop delivery settings made on Alerts; the backend
+    // re-normalises to zero-padded HH:MM.
+    notify_start: tripwireHhmm(raw.notify_start),
+    notify_end: tripwireHhmm(raw.notify_end),
   };
+}
+
+// Coerce an HH:MM time to a canonical zero-padded string, or null. Kept lenient
+// (the backend's normalize_hhmm is authoritative on save); rejects anything
+// that isn't hours 0-23 and minutes 0-59.
+function tripwireHhmm(value) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value == null ? '' : value).trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return `${String(hours).padStart(2, '0')}:${match[2]}`;
 }
 
 // ─── User display preferences (date_format / time_format) ──────────────────

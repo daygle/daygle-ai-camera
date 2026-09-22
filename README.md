@@ -342,10 +342,10 @@ If the TFLite runtime is missing, install `ai-edge-litert` or `tflite-runtime`.
 - Open `/zones` and select a camera and area.
 - In the area's detection panel, turn on **Line crossing**. A yellow line appears on the footage with a dot at each end — drag the two dots to place it across the path you care about (a driveway entrance, a doorway, a gate).
 - Pick the counting **Direction**: *Arrow way* (an object crossing the way the on-screen arrow points), *Against* (the opposite way), or *Both*. The arrow marks the "forward" side so you can see which way counts before saving.
-- Optionally limit **Counts** to specific object classes (e.g. only *Car* or *Person*); leave it empty to count any tracked object. Set a **Cooldown** to avoid repeat alerts for the same subject, and choose whether a crossing records a clip and sends email/push.
-- Click **Save Zones**. Crossings raise an event (and optional recording/alert) whenever a tracked object crosses the line in the chosen direction.
+- Optionally limit **Counts** to specific object classes (e.g. only *Car* or *Person*); leave it empty to count any tracked object. Choose whether a crossing records a clip, then click **Save Zones**.
+- Configure notifications on the **Alerts** page: pick **Line crossing** as the alert type, select the camera and area, and set email/push, recipients, a cooldown, and an optional **Notify From/Until** quiet-hours window — exactly like object and sound alerts.
 
-A tripwire builds on the object tracker, so it works wherever objects are detected — no extra model or GPU load.
+Crossings raise an event (and optional recording) whenever a tracked object crosses the line in the chosen direction, and notify you when email/push are enabled. A tripwire builds on the object tracker, so it works wherever objects are detected — no extra model or GPU load.
 
 ## Updating
 

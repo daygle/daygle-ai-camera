@@ -19,6 +19,10 @@ const currentPeopleRules = () => (faceRulesPayload.rules || []).filter((rule) =>
 const currentRules = () => {
   if (alertType === 'sound') return currentCamera()?.detection?.sound?.rules || [];
   if (alertType === 'people') return currentPeopleRules();
+  if (alertType === 'tripwire') {
+    const wire = currentZone()?.tripwire;
+    return wire ? [wire] : [];
+  }
   return currentZone()?.object_rules || [];
 };
 
@@ -61,7 +65,8 @@ function timeSelect(value, attr) {
 function allPolicies() {
   const objectPolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).flatMap((zone) => zone.object_rules || []));
   const soundPolicies = cameras.flatMap((camera) => camera.detection?.sound?.rules || []);
-  return [...objectPolicies, ...soundPolicies, ...(faceRulesPayload.rules || [])].filter((rule) => rule.email_enabled || rule.push_enabled);
+  const tripwirePolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.tripwire).filter(Boolean));
+  return [...objectPolicies, ...soundPolicies, ...tripwirePolicies, ...(faceRulesPayload.rules || [])].filter((rule) => rule.email_enabled || rule.push_enabled);
 }
 
 function updateStats() {
@@ -88,13 +93,16 @@ function renderSelectors() {
       ? 'Objects, motion, and faces are assigned - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
       : alertType === 'sound'
         ? 'Sound classes are assigned - and set to record - per camera on the Sounds page. Here you choose how each one notifies you.'
-        : 'Add recognized-person and stranger alerts here. Enrol people on the Face Recognition page.';
+        : alertType === 'tripwire'
+          ? 'Line crossings are drawn - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
+          : 'Add recognized-person and stranger alerts here. Enrol people on the Face Recognition page.';
   }
 }
 
 function ruleLabel(rule) {
   if (alertType === 'sound') return titleCase(rule.name || soundClasses.find((item) => item.id === rule.class)?.label || rule.class);
   if (alertType === 'people') return rule.name || 'Unknown Person';
+  if (alertType === 'tripwire') return titleCase(rule.name || 'Tripwire');
   return String(rule.label || '').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
@@ -132,30 +140,38 @@ function renderPolicies() {
       ? 'No objects are assigned to this area yet. Open the <a href="/zones">Zones</a> page to add object, motion, or face detection, then configure alerts here.'
       : alertType === 'sound'
         ? 'No sound classes are assigned to this camera yet. Open the <a href="/sounds">Sounds</a> page to enable classes, then configure alerts here.'
-        : 'No recognized-person alert policies yet. Add one below to get started.';
+        : alertType === 'tripwire'
+          ? 'No line crossing is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Line crossing and draw a line, then set its alerts here.'
+          : 'No recognized-person alert policies yet. Add one below to get started.';
     $('alertsList').innerHTML = `<div class="empty">${emptyMessage}</div>`;
     return;
   }
   $('alertsList').innerHTML = rules.map((rule, index) => {
     const people = alertType === 'people';
     const sound = alertType === 'sound';
+    const tripwire = alertType === 'tripwire';
     const confidence = people ? rule.min_confidence : sound ? rule.confidence_threshold : rule.min_confidence;
     const cooldown = people ? rule.cooldown_minutes : rule.cooldown_seconds;
     const confidenceLabel = people ? 'Minimum Recognition Confidence' : sound ? 'Confidence Threshold' : 'Minimum Confidence';
     const cooldownLabel = people ? 'Cooldown (Minutes)' : 'Cooldown (Seconds)';
+    // A tripwire has no confidence axis (it is a geometric crossing), and its
+    // detection runs whenever it is enabled, so it shows only a Notify window
+    // (no Detect-from/until) - just how it notifies you.
     return `
     <article class="alerts-policy ${rule.enabled !== false ? 'is-enabled' : ''}" data-rule-index="${index}">
       <div class="alerts-policy-head"><div><span class="zones-panel-kicker">${escapeHtml(scopeLabel())} · Policy ${index + 1}</span><h3>${escapeHtml(ruleLabel(rule))}</h3></div><label class="toggle-control"><input data-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''}><span>${rule.enabled !== false ? 'Enabled' : 'Disabled'}</span></label></div>
       <div class="alerts-policy-grid">
         ${people ? `<label><span>Person</span><select data-field="person_id">${ruleOptions(rule)}</select></label>` : ''}
-        <label><span>${confidenceLabel}</span><input data-field="${people ? 'min_confidence' : sound ? 'confidence_threshold' : 'min_confidence'}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(confidence ?? (people ? '' : 0.5)))}"></label>
-        ${!people && !sound ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
+        ${tripwire ? '' : `<label><span>${confidenceLabel}</span><input data-field="${people ? 'min_confidence' : sound ? 'confidence_threshold' : 'min_confidence'}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(confidence ?? (people ? '' : 0.5)))}"></label>`}
+        ${!people && !sound && !tripwire ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
         <label><span>${cooldownLabel}</span><input data-field="${people ? 'cooldown_minutes' : 'cooldown_seconds'}" type="number" min="0" max="${people ? '1440' : '3600'}" step="${people ? '1' : '5'}" value="${escapeHtml(String(cooldown ?? (people ? 5 : 60)))}"></label>
       </div>
       <div class="alerts-channel-row"><label><input data-field="email_enabled" type="checkbox" ${rule.email_enabled ? 'checked' : ''}> Email</label><label><input data-field="push_enabled" type="checkbox" ${rule.push_enabled ? 'checked' : ''}> Push</label></div>
-      ${!people ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>` : ''}
+      ${people ? '' : tripwire
+        ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`
+        : `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`}
       <label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(Array.isArray(rule.email_recipients) ? rule.email_recipients.join(', ') : rule.email_recipients || '')}" placeholder="alerts@example.com, me@example.com"></label>
-      <div class="alerts-policy-actions"><span class="muted">${people ? 'Recognized-person and stranger alerts use the face recognition rule store.' : sound ? 'Assigned on the Sounds page. Removing here unassigns this sound class from the camera.' : 'Assigned on the Zones page. Removing here unassigns this item from the area.'}</span><button class="btn-danger" data-delete-rule type="button">${people ? 'Remove Policy' : 'Remove'}</button></div>
+      <div class="alerts-policy-actions"><span class="muted">${people ? 'Recognized-person and stranger alerts use the face recognition rule store.' : sound ? 'Assigned on the Sounds page. Removing here unassigns this sound class from the camera.' : tripwire ? 'Drawn on the Zones page. Removing here deletes the line from the area.' : 'Assigned on the Zones page. Removing here unassigns this item from the area.'}</span><button class="btn-danger" data-delete-rule type="button">${people ? 'Remove Policy' : 'Remove'}</button></div>
     </article>`;
   }).join('');
   $('alertsList').querySelectorAll('.alerts-policy').forEach((card) => {
@@ -177,6 +193,11 @@ function renderPolicies() {
       if (alertType === 'people') {
         const actualIndex = (faceRulesPayload.rules || []).indexOf(rule);
         if (actualIndex >= 0) faceRulesPayload.rules.splice(actualIndex, 1);
+      } else if (alertType === 'tripwire') {
+        // The tripwire is a single per-zone object drawn on Zones; removing its
+        // policy here deletes the line.
+        const zone = currentZone();
+        if (zone) delete zone.tripwire;
       } else {
         const allRules = alertType === 'sound' ? currentCamera().detection.sound.rules : currentZone().object_rules;
         const actualIndex = allRules.indexOf(rule);

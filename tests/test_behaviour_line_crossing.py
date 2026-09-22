@@ -125,6 +125,19 @@ class ZoneTripwireSchemaTests(unittest.TestCase):
         self.assertEqual(tw['name'], 'Tripwire')
         self.assertEqual(tw['labels'], [])
 
+    def test_notify_window_normalized_to_padded_hhmm(self) -> None:
+        tw = normalize_zone_tripwire({'tripwire': {
+            'a': {'x': 0.2, 'y': 0.1}, 'b': {'x': 0.8, 'y': 0.9},
+            'notify_start': '9:05', 'notify_end': '17:30',
+        }})
+        self.assertEqual(tw['notify_start'], '09:05')
+        self.assertEqual(tw['notify_end'], '17:30')
+
+    def test_notify_window_defaults_to_none(self) -> None:
+        tw = normalize_zone_tripwire({'tripwire': {'a': {'x': 0.2, 'y': 0.1}, 'b': {'x': 0.8, 'y': 0.9}}})
+        self.assertIsNone(tw['notify_start'])
+        self.assertIsNone(tw['notify_end'])
+
     def test_degenerate_line_rejected(self) -> None:
         self.assertIsNone(normalize_zone_tripwire({'tripwire': {'a': {'x': 0.5, 'y': 0.5}, 'b': {'x': 0.5, 'y': 0.5}}}))
 
