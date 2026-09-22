@@ -393,6 +393,60 @@ def zone_motion_max_confidence(zone: dict[str, Any]) -> float:
     return 1.0
 
 
+def normalize_zone_tripwire(zone: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize an optional per-zone behavioural **tripwire** (a directed
+    line-crossing counter). Returns ``None`` when no valid tripwire is
+    configured, so zones without one keep their canonical shape.
+
+    Shape::
+
+        {
+            "enabled": bool,
+            "name": str,
+            "a": {"x": float, "y": float},   # line endpoints, normalized 0..1
+            "b": {"x": float, "y": float},
+            "direction": "forward" | "backward" | "both",
+            "labels": [str, ...],            # object labels that count ([] = any)
+            "cooldown_seconds": int,
+            "record_on_detect": bool,
+            "email_enabled": bool,
+            "email_recipients": [str, ...],
+            "push_enabled": bool,
+        }
+
+    A degenerate line (both endpoints coincident) is rejected.
+    """
+    raw = zone.get('tripwire')
+    if not isinstance(raw, dict):
+        return None
+    point_a = normalize_zone_point(raw.get('a'))
+    point_b = normalize_zone_point(raw.get('b'))
+    if point_a is None or point_b is None:
+        return None
+    if abs(point_a['x'] - point_b['x']) < 1e-6 and abs(point_a['y'] - point_b['y']) < 1e-6:
+        return None
+    direction = str(raw.get('direction') or 'both').strip().lower()
+    if direction not in ('forward', 'backward', 'both'):
+        direction = 'both'
+    try:
+        cooldown = max(0, int(raw.get('cooldown_seconds') if raw.get('cooldown_seconds') is not None else 30))
+    except (TypeError, ValueError):
+        cooldown = 30
+    return {
+        'enabled': bool(raw.get('enabled', True)),
+        'name': str(raw.get('name') or 'Tripwire').strip() or 'Tripwire',
+        'a': point_a,
+        'b': point_b,
+        'direction': direction,
+        'labels': normalize_label_list(raw.get('labels')),
+        'cooldown_seconds': cooldown,
+        'record_on_detect': bool(raw.get('record_on_detect', True)),
+        'email_enabled': bool(raw.get('email_enabled', False)),
+        'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
+        'push_enabled': bool(raw.get('push_enabled', False)),
+    }
+
+
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     if not isinstance(zones, list):
@@ -454,7 +508,7 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             and r.get('enabled', True)
             for r in object_rules
         )
-        normalized.append({
+        entry = {
             'id': normalize_camera_id(zone.get('id'), f'zone-{index}'),
             'name': str(zone.get('name') or f'Zone {index}').strip() or f'Zone {index}',
             'x': round(x, 4),
@@ -483,5 +537,12 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
                 for r in object_rules
             ),
             'object_rules': object_rules,
-        })
+        }
+        # Optional Tier-1 behavioural tripwire (directional line-crossing).
+        # Only attached when a valid line is configured, so zones without one
+        # keep their existing shape.
+        tripwire = normalize_zone_tripwire(zone)
+        if tripwire is not None:
+            entry['tripwire'] = tripwire
+        normalized.append(entry)
     return normalized
