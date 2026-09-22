@@ -6130,9 +6130,11 @@ button.secondary:disabled, a.secondary:disabled {
 .zones-hero .muted { max-width: 680px; margin: 12px 0 0; font-size: 15px; line-height: 1.55; }
 .zones-hero-action { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .zones-hero-action button,
-.zone-editor-footer button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.zone-editor-footer button,
+.sound-editor-footer button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 .zones-hero-action button svg,
-.zone-editor-footer button svg { flex: 0 0 auto; }
+.zone-editor-footer button svg,
+.sound-editor-footer button svg { flex: 0 0 auto; }
 
 .zones-workflow {
   display: flex;

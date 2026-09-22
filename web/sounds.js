@@ -206,25 +206,39 @@ function renderClassEditor(camera) {
     soundClassEditor.innerHTML = '<p class="muted empty-message">No sound classes assigned yet. Add one above so this camera starts listening for it.</p>';
     return;
   }
+  // Mirror the Zones object-rule card (.zone-motion-card) so the detection
+  // rules look identical across the Zones and Sounds pages.
   soundClassEditor.innerHTML = rules.map((rule, index) => {
     const enabled = rule.enabled !== false;
+    const label = escapeHtml(soundClassLabel(rule));
     return `
-      <div class="sound-class-row${enabled ? ' is-enabled' : ''}" data-class-index="${index}" style="display:flex;align-items:end;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--border);border-radius:12px;margin-bottom:8px">
-        <strong style="flex:1;min-width:120px;align-self:center">${escapeHtml(soundClassLabel(rule))}</strong>
-        <label class="sound-rule-field" title="Only sounds detected with at least this confidence (0.01-1) count on this camera. Overrides the detector default for this class.">
-          <span>Min Confidence</span>
-          <input type="number" data-class-confidence="${index}" min="0.01" max="1" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" style="width:90px" />
-        </label>
-        <label class="toggle-control" title="Enable or disable detection of this sound on this camera" style="align-self:center">
-          <input type="checkbox" data-class-toggle="${index}" ${enabled ? 'checked' : ''} />
-          <span>${enabled ? 'On' : 'Off'}</span>
-        </label>
-        <label class="toggle-control" title="Record a clip when this sound is detected on this camera" style="align-self:center">
-          <input type="checkbox" data-class-record="${index}" ${rule.record_on_detect !== false ? 'checked' : ''} />
-          <span>Record</span>
-        </label>
-        <a class="sound-class-alerts-link" href="/alerts" style="color:var(--accent);font-size:11px;font-weight:750;text-decoration:none;white-space:nowrap;align-self:center">Configure alerts</a>
-        <button class="btn-danger" type="button" data-class-remove="${index}" title="Remove this sound class from the camera" style="align-self:center">Remove</button>
+      <div class="zone-motion-card${enabled ? ' is-enabled' : ''}" data-class-index="${index}">
+        <div class="zone-motion-head">
+          <div class="zone-motion-title">
+            <span class="zone-motion-icon" aria-hidden="true">🔊</span>
+            <div>
+              <strong>${label}</strong>
+              <span>Listen for this sound on this camera</span>
+            </div>
+          </div>
+          <label class="toggle-control zone-motion-toggle" title="Enable or disable detection of this sound on this camera">
+            <input type="checkbox" data-class-toggle="${index}" ${enabled ? 'checked' : ''} />
+            <span>${enabled ? 'On' : 'Off'}</span>
+          </label>
+        </div>
+        <div class="zone-motion-body zone-people-body">
+          <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:end">
+            <label class="sound-rule-field" title="Only sounds detected with at least this confidence (0.01-1) count on this camera. Overrides the detector default for this class.">
+              <span>Min Confidence</span>
+              <input type="number" data-class-confidence="${index}" min="0.01" max="1" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" style="width:90px" />
+            </label>
+            <label class="toggle-control" title="Record a clip when this sound is detected on this camera" style="align-self:center">
+              <input type="checkbox" data-class-record="${index}" ${rule.record_on_detect !== false ? 'checked' : ''} />
+              <span>Record</span>
+            </label>
+            <button class="delete-btn secondary zone-action-btn" type="button" data-class-remove="${index}" title="Remove this sound class from the camera">${ICONS.remove} Remove</button>
+          </div>
+        </div>
       </div>`;
   }).join('');
   bindClassEditor(camera);
