@@ -206,41 +206,28 @@ function renderClassEditor(camera) {
     soundClassEditor.innerHTML = '<p class="muted empty-message">No sound classes assigned yet. Add one above so this camera starts listening for it.</p>';
     return;
   }
-  // Mirror the Zones object-rule card (.zone-motion-card) so the detection
-  // rules look identical across the Zones and Sounds pages.
-  soundClassEditor.innerHTML = rules.map((rule, index) => {
+  // Same detection table as the Zones page (.zone-rule-table) so object and
+  // sound rules look identical across pages.
+  const rows = rules.map((rule, index) => {
     const enabled = rule.enabled !== false;
+    const record = rule.record_on_detect !== false;
     const label = escapeHtml(soundClassLabel(rule));
     return `
-      <div class="zone-motion-card${enabled ? ' is-enabled' : ''}" data-class-index="${index}">
-        <div class="zone-motion-head">
-          <div class="zone-motion-title">
-            <span class="zone-motion-icon" aria-hidden="true">🔊</span>
-            <div>
-              <strong>${label}</strong>
-              <span>Listen for this sound on this camera</span>
-            </div>
-          </div>
-          <label class="toggle-control zone-motion-toggle" title="Enable or disable detection of this sound on this camera">
-            <input type="checkbox" data-class-toggle="${index}" ${enabled ? 'checked' : ''} />
-            <span>${enabled ? 'On' : 'Off'}</span>
-          </label>
-        </div>
-        <div class="zone-motion-body zone-people-body">
-          <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:end">
-            <label class="sound-rule-field" title="Only sounds detected with at least this confidence (0.01-1) count on this camera. Overrides the detector default for this class.">
-              <span>Min Confidence</span>
-              <input type="number" data-class-confidence="${index}" min="0.01" max="1" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" style="width:90px" />
-            </label>
-            <label class="toggle-control" title="Record a clip when this sound is detected on this camera" style="align-self:center">
-              <input type="checkbox" data-class-record="${index}" ${rule.record_on_detect !== false ? 'checked' : ''} />
-              <span>Record</span>
-            </label>
-            <button class="delete-btn secondary zone-action-btn" type="button" data-class-remove="${index}" title="Remove this sound class from the camera">${ICONS.remove} Remove</button>
-          </div>
-        </div>
-      </div>`;
+      <tr class="zone-rule-row${enabled ? ' is-enabled' : ''}" data-class-index="${index}">
+        <td class="cell-label"><span class="zone-rule-icon" aria-hidden="true">🔊</span>${label}</td>
+        <td><label class="toggle-control zone-rule-toggle" title="Enable or disable detection of this sound on this camera"><input type="checkbox" data-class-toggle="${index}" ${enabled ? 'checked' : ''} /><span>${enabled ? 'On' : 'Off'}</span></label></td>
+        <td><input class="zone-rule-conf" type="number" data-class-confidence="${index}" min="0.01" max="1" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" title="Only sounds detected with at least this confidence (0.01-1) count on this camera. Overrides the detector default for this class." /></td>
+        <td><label class="toggle-control zone-rule-toggle" title="Record a clip when this sound is detected on this camera"><input type="checkbox" data-class-record="${index}" ${record ? 'checked' : ''} /><span>${record ? 'On' : 'Off'}</span></label></td>
+        <td class="cell-actions"><button class="delete-btn secondary zone-action-btn zone-rule-remove" type="button" data-class-remove="${index}" title="Remove ${label} from this camera" aria-label="Remove ${label} from this camera">${ICONS.remove}</button></td>
+      </tr>`;
   }).join('');
+  soundClassEditor.innerHTML = `
+    <div class="cameras-table-wrap">
+      <table class="rule-table zone-rule-table">
+        <thead><tr><th scope="col">Sound</th><th scope="col">Detect</th><th scope="col">Min confidence</th><th scope="col">Record</th><th scope="col" class="cell-actions" aria-label="Actions"></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
   bindClassEditor(camera);
 }
 
@@ -262,6 +249,8 @@ function bindClassEditor(camera) {
       if (!rule) return;
       rule.record_on_detect = input.checked;
       markSoundDirty();
+      // Re-render so the row's Record On/Off pill updates live.
+      renderClassEditor(camera);
     });
   });
   // Per-class detection threshold (0.01-1); mirrors the Zones object rule's
