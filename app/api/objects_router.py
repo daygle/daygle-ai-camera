@@ -122,7 +122,7 @@ async def update_object_settings(request: Request, db=Depends(get_database)):
         'labels': sorted(normalized['labels']),
         'group_modes': normalized['group_modes'],
         'still_alerts': normalized['still_alerts'],
-        'recording': normalized['recording'],
+        'recording': normalized.get('recording', {}),
     })
     return {
         **normalized,
