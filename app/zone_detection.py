@@ -813,9 +813,12 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             label_seen[label] = label_seen.get(label, 0) + 1
             rule_suffix = f" [{rule.get('id') or label_seen[label]}]" if label_totals.get(label, 0) > 1 else ''
+            cooldown_key = f'{camera_key}::{zone_id}::{label}'
+            if label_totals.get(label, 0) > 1:
+                cooldown_key += f'::{rule.get("id") or label_seen[label]}'
             rules.append({
                 'name': zone_rule_name(settings, zone, rule) + rule_suffix,
-                'cooldown_key': f'{camera_key}::{zone_id}::{label}::{rule.get("id") or label_seen[label]}',
+                'cooldown_key': cooldown_key,
                 'object': label,
                 'zone_id': zone_id,
                 # Motion's and face's canonical confidence default is 0.45

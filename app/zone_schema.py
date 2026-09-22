@@ -219,6 +219,12 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             for label in normalize_label_list(zone.get('object_labels', []))
         ]
     rules: list[dict[str, Any]] = []
+    labels_with_ids = {
+        canonical_label(rule.get('label'))
+        for rule in source_rules
+        if isinstance(rule, dict) and str(rule.get('id') or rule.get('alert_id') or '').strip()
+    }
+    seen_labels: set[str] = set()
     for rule in source_rules:
         if not isinstance(rule, dict):
             continue
@@ -226,6 +232,13 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         if not labels:
             continue
         label = labels[0]
+        # Legacy zone payloads used one rule per label. Continue collapsing
+        # duplicate id-less entries, while retaining explicitly identified
+        # alert instances created by the Alerts editor.
+        raw_rule_id = str(rule.get('id') or rule.get('alert_id') or '').strip()
+        if label in seen_labels and (label not in labels_with_ids or not raw_rule_id):
+            continue
+        seen_labels.add(label)
         # Motion and faces are non-object-class axes, so their canonical
         # confidence default is 0.45 (matching zone_motion_min_confidence /
         # the global Face Confidence default / the frontend's defaultObjectRule)
@@ -266,7 +279,6 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         scale_fraction = _optional_fraction(
             rule.get('scale_fraction'), 0.001, 1.0,
         ) if label == 'motion' else None
-        raw_rule_id = str(rule.get('id') or rule.get('alert_id') or '').strip()
         rules.append({
             **({'id': raw_rule_id} if raw_rule_id else {}),
             'label': label,

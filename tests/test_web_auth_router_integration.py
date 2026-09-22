@@ -137,7 +137,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
     surfaced as an indicator on the Events row.
 
     The 24 paths are: ``/``, ``/favicon.ico``, ``/login``, ``/setup``,
-    ``/live``, ``/zones``, ``/sounds``, ``/objects``, ``/cameras``,
+    ``/live``, ``/zones``, ``/alerts``, ``/sounds``, ``/objects``, ``/cameras``,
     ``/events``, ``/search``, ``/recordings``, ``/snapshots``,
     ``/recordings/timeline``,
     ``/onnx``, ``/ai``, ``/arcface``, ``/yamnet-tflite``, ``/yamnet``, ``/profile``,
@@ -151,6 +151,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
         "/setup",
         "/live",
         "/zones",
+        "/alerts",
         "/sounds",
         "/objects",
         "/cameras",
