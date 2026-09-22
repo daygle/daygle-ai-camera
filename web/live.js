@@ -50,7 +50,6 @@ const liveEls = {
   zoneList: document.getElementById('zoneList'),
   addZoneBtn: document.getElementById('addZoneBtn'),
   fullFrameZoneBtn: document.getElementById('fullFrameZoneBtn'),
-  saveZonesBtn: document.getElementById('saveZonesBtn'),
 };
 
 // View mode: 'single' (one camera at a time) or 'all' (grid of every camera).

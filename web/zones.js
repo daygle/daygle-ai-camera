@@ -1188,11 +1188,19 @@ function markZoneSaved() {
   liveEls.zoneList?.classList.remove('has-unsaved');
 }
 
+// Disable every Save control (header button and each per-area Save button)
+// while a save is in flight. The old standalone `#saveZonesBtn` was removed
+// when detection rules moved to Alerts, so look the buttons up live from the
+// DOM rather than caching a single element reference.
+function setZoneSaving(saving) {
+  document.querySelectorAll('#saveZonesBtnHeader, [data-save-zone]').forEach((btn) => {
+    btn.disabled = saving;
+  });
+}
+
 async function saveZones() {
   try {
-    liveEls.saveZonesBtn.disabled = true;
-    const headerBtn = document.getElementById('saveZonesBtnHeader');
-    if (headerBtn) headerBtn.disabled = true;
+    setZoneSaving(true);
     cameraDetection().zones.forEach(normalizeZone);
     await api(`/api/cameras/${encodeURIComponent(selectedCamera.id)}`, { method: 'PUT', body: JSON.stringify(selectedCamera) });
     const payload = await api('/api/cameras');
@@ -1209,13 +1217,10 @@ async function saveZones() {
     liveEls.status.textContent = error.message;
     window.showToast?.(error.message, true);
   } finally {
-    liveEls.saveZonesBtn.disabled = false;
-    const headerBtn = document.getElementById('saveZonesBtnHeader');
-    if (headerBtn) headerBtn.disabled = false;
+    setZoneSaving(false);
   }
 }
 
-liveEls.saveZonesBtn?.addEventListener('click', saveZones);
 document.getElementById('saveZonesBtnHeader')?.addEventListener('click', saveZones);
 
 window.addEventListener('resize', syncZoneOverlayToImage);

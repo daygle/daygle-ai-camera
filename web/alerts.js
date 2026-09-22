@@ -119,11 +119,21 @@ function scopeLabel() {
   return currentZone() ? `Zone · ${currentZone().name || `Zone ${zoneIndex + 1}`}` : 'Zone';
 }
 
+// Sound alerts are per-camera and never need a zone; object and
+// recognized-person policies are scoped to a specific zone.
+function scopeRequiresZone() {
+  return alertType !== 'sound';
+}
+
 function renderPolicies() {
   const rules = currentRules();
   updateStats();
-  if (!currentCamera() || !currentZone()) {
-    $('alertsList').innerHTML = '<div class="empty">Configure a camera and zone on the Zones page first.</div>';
+  if (!currentCamera()) {
+    $('alertsList').innerHTML = '<div class="empty">Add a camera first.</div>';
+    return;
+  }
+  if (scopeRequiresZone() && !currentZone()) {
+    $('alertsList').innerHTML = '<div class="empty">Draw a zone on the Zones page first, then add object or person policies here.</div>';
     return;
   }
   if (!rules.length) {
@@ -185,12 +195,22 @@ $('cameraSelect').addEventListener('change', () => { cameraIndex = Number($('cam
 $('zoneSelect').addEventListener('change', () => { zoneIndex = Number($('zoneSelect').value); renderPolicies(); });
 $('alertTypeSelect').addEventListener('change', () => { alertType = $('alertTypeSelect').value; renderSelectors(); renderPolicies(); });
 $('addAlertBtn').addEventListener('click', () => {
-  if (!currentCamera() || !currentZone()) return;
+  if (!currentCamera()) return;
+  if (scopeRequiresZone() && !currentZone()) return;
   if (alertType === 'sound') {
-    const available = soundClasses.find((sound) => !(currentCamera().detection?.sound?.rules || []).some((rule) => rule.class === sound.id));
-    if (!available) return;
-    currentCamera().detection.sound ||= { enabled: false, rules: [] };
-    currentCamera().detection.sound.rules.push(defaultRule(available.id, 'sound'));
+    const camera = currentCamera();
+    if (!soundClasses.length) {
+      window.showToast?.('No sound classes are available. Check the sound model on the Sounds page.', true);
+      return;
+    }
+    const available = soundClasses.find((sound) => !(camera.detection?.sound?.rules || []).some((rule) => rule.class === sound.id));
+    if (!available) {
+      window.showToast?.('Every sound class already has a policy on this camera.', true);
+      return;
+    }
+    camera.detection ||= {};
+    camera.detection.sound ||= { enabled: false, rules: [] };
+    camera.detection.sound.rules.push(defaultRule(available.id, 'sound'));
   } else if (alertType === 'people') {
     const existing = currentPeopleRules();
     const candidates = [{ id: '', name: 'Unknown Person' }, ...(enrolledPeople || []).map((person) => ({ id: String(person.id), name: person.name }))];
