@@ -123,9 +123,23 @@ def update_live_detection_status(camera_id: str, **updates: Any) -> None:
     # Hearing lane instead of silently dropping the score.
     if 'detections' in updates:
         best_confidences: dict[str, float] = {}
+        # Store sanitised copies: the live pipeline stamps internal, tuple-keyed
+        # memo dicts (``_zone_match_memo`` / ``_rule_match_memo``) onto the very
+        # detection dicts handed here by reference. This status dict is served
+        # verbatim by ``/api/live/detection-status``, and FastAPI's
+        # ``jsonable_encoder`` encodes a tuple dict-key to a list, then uses it
+        # as a key -- ``TypeError: unhashable type: 'list'`` -- crashing the
+        # endpoint. History/event serialisation whitelists fields and so is
+        # immune; this hot path was the gap. Dropping every ``_``-prefixed key
+        # (the codebase's internal-field convention; the UI reads none of them)
+        # keeps the stored copy JSON-safe without depending on any single memo
+        # name, and the shallow copy avoids mutating the live dict mid-cycle.
+        sanitized: list[Any] = []
         for detection in updates.get('detections') or []:
             if not isinstance(detection, dict):
+                sanitized.append(detection)
                 continue
+            sanitized.append({k: v for k, v in detection.items() if not k.startswith('_')})
             label = str(detection.get('label') or '').strip().lower()
             if not label:
                 continue
@@ -135,6 +149,7 @@ def update_live_detection_status(camera_id: str, **updates: Any) -> None:
                 continue
             if label not in best_confidences or confidence > best_confidences[label]:
                 best_confidences[label] = confidence
+        updates['detections'] = sanitized
         updates['detection_confidences'] = best_confidences
     with _state.live_detection_status_lock:
         _state.live_detection_status[camera_id] = {
