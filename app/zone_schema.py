@@ -445,6 +445,12 @@ def normalize_zone_tripwire(zone: dict[str, Any]) -> dict[str, Any] | None:
         'email_enabled': bool(raw.get('email_enabled', False)),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
         'push_enabled': bool(raw.get('push_enabled', False)),
+        # Optional quiet-hours window for notifications (HH:MM, lexically
+        # compared by _rule_notify_active_now). None = notify any time. The
+        # crossing itself is always detected/recorded when enabled; this only
+        # gates email/push, matching the object/sound alert schedule.
+        'notify_start': normalize_hhmm(raw.get('notify_start')),
+        'notify_end': normalize_hhmm(raw.get('notify_end')),
     }
 
 

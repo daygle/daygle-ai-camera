@@ -288,9 +288,14 @@ function ensureTripwire(zone) {
     labels: [],
     cooldown_seconds: 30,
     record_on_detect: true,
+    // Delivery (email/push/recipients/quiet-hours) is configured on the Alerts
+    // page, matching object/sound rules; these defaults keep the shape intact
+    // until then.
     email_enabled: false,
     email_recipients: [],
     push_enabled: false,
+    notify_start: null,
+    notify_end: null,
   };
   return zone.tripwire;
 }
@@ -655,22 +660,16 @@ function tripwireToggleField(label, attr, on, title) {
   return `<div class="tripwire-toggle-field"><span>${escapeHtml(label)}</span>${ruleToggleCell(attr, on, title, false)}</div>`;
 }
 
-// The editable body of an enabled tripwire card.
+// The editable body of an enabled tripwire card. Detection only (line,
+// direction, which objects count, record); email/push/quiet-hours are
+// configured on the Alerts page, like object and sound rules.
 function tripwireBody(wire, zoneIndex) {
-  const recipients = escapeHtml((wire.email_recipients || []).join(', '));
-  const emailOn = wire.email_enabled === true;
   return `
     <div class="zone-tripwire-body">
-      <div class="tripwire-fields">
-        <label class="sound-rule-field tripwire-name-field">
-          <span>Name</span>
-          <input type="text" data-tripwire-name="${zoneIndex}" value="${escapeHtml(wire.name || 'Tripwire')}" maxlength="60" placeholder="Tripwire" />
-        </label>
-        <label class="sound-rule-field tripwire-cooldown-field">
-          <span>Cooldown (s)</span>
-          <input type="number" data-tripwire-cooldown="${zoneIndex}" min="0" step="1" value="${escapeHtml(wire.cooldown_seconds ?? 30)}" title="Minimum seconds before the same object crossing the same way alerts again." />
-        </label>
-      </div>
+      <label class="sound-rule-field tripwire-name-field">
+        <span>Name</span>
+        <input type="text" data-tripwire-name="${zoneIndex}" value="${escapeHtml(wire.name || 'Tripwire')}" maxlength="60" placeholder="Tripwire" />
+      </label>
       <div class="sound-rule-field tripwire-direction-field">
         <span>Direction</span>
         <div class="zone-shape-toggle tripwire-direction" role="group" aria-label="Counting direction" data-tripwire-direction-for="${zoneIndex}">${tripwireDirectionOptions(wire.direction || 'both')}</div>
@@ -682,14 +681,8 @@ function tripwireBody(wire, zoneIndex) {
       </div>
       <div class="tripwire-toggles">
         ${tripwireToggleField('Record', `data-tripwire-record="${zoneIndex}"`, wire.record_on_detect !== false, 'Record a clip when the line is crossed')}
-        ${tripwireToggleField('Email', `data-tripwire-email="${zoneIndex}"`, emailOn, 'Send an email when the line is crossed')}
-        ${tripwireToggleField('Push', `data-tripwire-push="${zoneIndex}"`, wire.push_enabled === true, 'Send a push notification when the line is crossed')}
       </div>
-      <label class="sound-rule-field tripwire-recipients-field${emailOn ? '' : ' is-hidden'}" data-tripwire-recipients-field="${zoneIndex}">
-        <span>Email to</span>
-        <input type="text" data-tripwire-recipients="${zoneIndex}" value="${recipients}" placeholder="name@example.com, …" />
-      </label>
-      <p class="muted tripwire-hint">Drag the two dots on the footage to place the line. The arrow shows the “forward” direction.</p>
+      <p class="muted tripwire-hint">Drag the two dots on the footage to place the line. The arrow shows the “forward” direction. <a class="zone-assigned-link" href="/alerts">Set email / push alerts</a></p>
     </div>`;
 }
 
@@ -1047,54 +1040,17 @@ function bindTripwireControls() {
     });
   });
 
-  document.querySelectorAll('[data-tripwire-cooldown]').forEach((inp) => {
-    inp.addEventListener('change', () => {
-      const wire = tripwireOf(zoneAt(inp.dataset.tripwireCooldown));
-      if (!wire) return;
-      const value = Math.max(0, Number.parseInt(inp.value, 10) || 0);
-      wire.cooldown_seconds = value;
-      inp.value = value;
-      markZoneUnsaved();
-    });
-  });
-
-  [
-    ['tripwireRecord', 'record_on_detect'],
-    ['tripwirePush', 'push_enabled'],
-  ].forEach(([datasetKey, field]) => {
-    const attr = `input[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`;
-    document.querySelectorAll(attr).forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const wire = tripwireOf(zoneAt(cb.dataset[datasetKey]));
-        if (!wire) return;
-        wire[field] = cb.checked;
-        // Flip the pill's On/Off label live without a full re-render.
-        const pill = cb.parentElement?.querySelector('span');
-        if (pill) pill.textContent = cb.checked ? 'On' : 'Off';
-        markZoneUnsaved();
-      });
-    });
-  });
-
-  document.querySelectorAll('[data-tripwire-email]').forEach((cb) => {
+  // Record is the only delivery-adjacent toggle kept on the Zones card
+  // (recording is a detection concern, like the object/sound rows); email,
+  // push, recipients and quiet-hours are configured on the Alerts page.
+  document.querySelectorAll('[data-tripwire-record]').forEach((cb) => {
     cb.addEventListener('change', () => {
-      const wire = tripwireOf(zoneAt(cb.dataset.tripwireEmail));
+      const wire = tripwireOf(zoneAt(cb.dataset.tripwireRecord));
       if (!wire) return;
-      wire.email_enabled = cb.checked;
-      // Reveal/hide the recipients field to match, without disturbing the canvas.
-      const field = document.querySelector(`[data-tripwire-recipients-field="${cb.dataset.tripwireEmail}"]`);
-      if (field) field.classList.toggle('is-hidden', !cb.checked);
+      wire.record_on_detect = cb.checked;
+      // Flip the pill's On/Off label live without a full re-render.
       const pill = cb.parentElement?.querySelector('span');
       if (pill) pill.textContent = cb.checked ? 'On' : 'Off';
-      markZoneUnsaved();
-    });
-  });
-
-  document.querySelectorAll('[data-tripwire-recipients]').forEach((inp) => {
-    inp.addEventListener('change', () => {
-      const wire = tripwireOf(zoneAt(inp.dataset.tripwireRecipients));
-      if (!wire) return;
-      wire.email_recipients = normalizeEmailList(inp.value);
       markZoneUnsaved();
     });
   });

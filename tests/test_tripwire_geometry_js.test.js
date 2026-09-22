@@ -93,6 +93,24 @@ test('a valid tripwire round-trips with defaults filled in', () => {
   assert.equal(wire.email_enabled, false);
   assert.equal(wire.push_enabled, false);
   assert.deepEqual(rehome(wire.email_recipients), []);
+  // Notify quiet-hours default to unset (any time).
+  assert.equal(wire.notify_start, null);
+  assert.equal(wire.notify_end, null);
+});
+
+test('notify quiet-hours are preserved and coerced to HH:MM (or null)', () => {
+  // These are edited on the Alerts page; normalizeTripwire (used by the Zones
+  // save path) must keep them so a Zones save never wipes delivery settings.
+  const wire = normalizeTripwire({
+    a: { x: 0, y: 0 }, b: { x: 1, y: 0 },
+    notify_start: '9:05', notify_end: '17:30',
+  });
+  assert.equal(wire.notify_start, '09:05'); // zero-padded
+  assert.equal(wire.notify_end, '17:30');
+  // Invalid times drop to null rather than corrupt the window.
+  const bad = normalizeTripwire({ a: { x: 0, y: 0 }, b: { x: 1, y: 0 }, notify_start: '25:00', notify_end: 'nope' });
+  assert.equal(bad.notify_start, null);
+  assert.equal(bad.notify_end, null);
 });
 
 test('a degenerate line (coincident endpoints) is rejected', () => {
