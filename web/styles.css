@@ -1,3 +1,37 @@
+/* Notification delivery is configured on Alerts. Keep Sounds focused on audio
+   detection and recording while preserving its existing saved rule shape. */
+.sounds-shell label:has(input[data-rule-email]), .sounds-shell label:has(input[data-rule-push]),
+.sounds-shell label:has(input[data-rule-email-recipients]),
+.sounds-shell label:has([data-rule-notify-start]), .sounds-shell label:has([data-rule-notify-end]) { display: none; }
+
+/* Alerts are configured on their own page. Keep Zones focused on geometry and
+   detection while preserving the legacy rule shape for existing installations. */
+.zones-shell label:has(input[data-zone-rule-email]), .zones-shell label:has(input[data-zone-rule-push]),
+.zones-shell label:has(input[data-zone-motion-email]), .zones-shell label:has(input[data-zone-motion-push]),
+.zones-shell label:has(input[data-zone-face-email]), .zones-shell label:has(input[data-zone-face-push]),
+.zones-shell label:has(input[data-zone-rule-email-recipients]),
+.zones-shell label:has([data-zone-rule-notify-start]), .zones-shell label:has([data-zone-rule-notify-end]),
+.zones-shell label:has([data-zone-motion-notify-start]), .zones-shell label:has([data-zone-motion-notify-end]),
+.zones-shell label:has([data-zone-face-notify-start]), .zones-shell label:has([data-zone-face-notify-end]) { display: none; }
+.alerts-toolbar { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+.alerts-toolbar label { min-width: 220px; flex: 1; }
+.alerts-toolbar button { min-height: 42px; }
+.alerts-policy-list { display: grid; gap: 16px; }
+.alerts-policy { padding: 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2, rgba(255,255,255,.025)); }
+.alerts-policy.is-enabled { border-color: rgba(45, 212, 191, .38); }
+.alerts-policy-head, .alerts-policy-actions, .alerts-channel-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.alerts-policy-head { margin-bottom: 18px; }
+.alerts-policy h3 { margin: 4px 0 0; }
+.alerts-policy-grid { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 12px; }
+.alerts-policy-grid label, .alerts-recipient-field { display: flex; flex-direction: column; gap: 6px; }
+.alerts-policy-grid label > span, .alerts-recipient-field > span, .alerts-toolbar label > span { font-size: 12px; font-weight: 700; color: var(--muted); }
+.alerts-channel-row { justify-content: flex-start; margin: 18px 0; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.alerts-channel-row label { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; }
+.alerts-recipient-field { margin-bottom: 18px; }
+.alerts-policy-actions { padding-top: 12px; }
+@media (max-width: 760px) { .alerts-policy-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); } }
+@media (max-width: 480px) { .alerts-policy-grid { grid-template-columns: 1fr; } }
+
 :root {
   color-scheme: dark;
   --bg: #070b13;

@@ -10,6 +10,7 @@ Routes:
 - GET  /setup         -- setup_page
 - GET  /live          -- live_page
 - GET  /zones         -- zones_page
+- GET  /alerts        -- alerts_page
 - GET  /sounds        -- sounds_page
 - GET  /objects       -- objects_page
 - GET  /cameras       -- cameras_page
@@ -212,6 +213,15 @@ def zones_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     zones_path = web_dir / 'zones.html'
     if zones_path.exists():
         return FileResponse(zones_path)
+    return root(web_dir=web_dir)
+
+
+@router.get('/alerts')
+def alerts_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
+    alerts_path = web_dir / 'alerts.html'
+    if alerts_path.exists():
+        return FileResponse(alerts_path)
     return root(web_dir=web_dir)
 
 

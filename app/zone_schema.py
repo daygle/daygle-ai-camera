@@ -219,7 +219,6 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             for label in normalize_label_list(zone.get('object_labels', []))
         ]
     rules: list[dict[str, Any]] = []
-    seen: set[str] = set()
     for rule in source_rules:
         if not isinstance(rule, dict):
             continue
@@ -227,9 +226,6 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         if not labels:
             continue
         label = labels[0]
-        if label in seen:
-            continue
-        seen.add(label)
         # Motion and faces are non-object-class axes, so their canonical
         # confidence default is 0.45 (matching zone_motion_min_confidence /
         # the global Face Confidence default / the frontend's defaultObjectRule)
@@ -270,7 +266,9 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         scale_fraction = _optional_fraction(
             rule.get('scale_fraction'), 0.001, 1.0,
         ) if label == 'motion' else None
+        raw_rule_id = str(rule.get('id') or rule.get('alert_id') or '').strip()
         rules.append({
+            **({'id': raw_rule_id} if raw_rule_id else {}),
             'label': label,
             'enabled': normalize_bool_setting(rule.get('enabled'), True),
             'record_on_detect': normalize_bool_setting(rule.get('record_on_detect'), True),

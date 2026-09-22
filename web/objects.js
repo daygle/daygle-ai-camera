@@ -61,6 +61,7 @@ let hasUnsavedChanges = false;
 let availableLabels = [];
 let labels = {}; // label -> 'any' | 'moving' | 'still' (explicit overrides only)
 let stillAlerts = {}; // label -> minutes for the "still for N minutes" dwell alert
+let recording = {}; // label -> explicit global recording preference
 let groups = {}; // group name -> [member labels]
 let groupModes = {}; // group name -> 'any' | 'moving' | 'still'
 let editingGroupName = null; // set while editing an existing group
@@ -119,6 +120,7 @@ function renderTable() {
     const fallback = groupFallbackMode(label);
     const effective = override || fallback;
     const stillMinutes = stillAlerts[label] || 0;
+    const recordingEnabled = Object.prototype.hasOwnProperty.call(recording, label) ? recording[label] : true;
     return `
       <tr data-object-label="${escapeHtml(label)}">
         <td class="cell-label">${title}</td>
@@ -131,6 +133,12 @@ function renderTable() {
           </select>
         </td>
         <td><span class="model-status ${effective === 'any' ? 'model-status-installed' : 'model-status-active'}">${escapeHtml(modeLabel(effective))}</span></td>
+        <td>
+          <label class="toggle-control" title="Record ${title} detections everywhere">
+            <input type="checkbox" data-record-object="${escapeHtml(label)}" ${recordingEnabled ? 'checked' : ''} aria-label="Record ${title} detections" />
+            <span>${recordingEnabled ? 'On' : 'Off'}</span>
+          </label>
+        </td>
         <td>
           <input type="number" min="0" step="1" inputmode="numeric" class="still-alert-input" value="${stillMinutes}" data-still-alert="${escapeHtml(label)}" aria-label="Still alert after minutes for ${title}" title="Alert after this object has been detected continuously still for this many minutes (0 = off)">
         </td>
@@ -148,6 +156,15 @@ function renderTable() {
     });
   });
 
+  tableBody.querySelectorAll('input[data-record-object]').forEach((input) => {
+    input.addEventListener('change', () => {
+      recording[input.dataset.recordObject] = input.checked;
+      const text = input.closest('label')?.querySelector('span');
+      if (text) text.textContent = input.checked ? 'On' : 'Off';
+      markUnsaved();
+    });
+  });
+
   tableBody.querySelectorAll('input[data-still-alert]').forEach((input) => {
     // Values are read fresh from the inputs at save time, so this listener
     // only needs to flag the form dirty.
@@ -161,6 +178,12 @@ function render(settings) {
   if (settings.labels && typeof settings.labels === 'object') {
     for (const [label, mode] of Object.entries(settings.labels)) {
       if (MODE_LABELS[mode]) labels[label] = mode;
+    }
+  }
+  recording = {};
+  if (settings.recording && typeof settings.recording === 'object') {
+    for (const [label, enabled] of Object.entries(settings.recording)) {
+      recording[label] = enabled === true;
     }
   }
   stillAlerts = {};
@@ -442,6 +465,10 @@ async function saveObjects() {
   try {
     saveBtn.disabled = true;
     if (saveBtnHeader) saveBtnHeader.disabled = true;
+    const recordingPayload = { ...recording };
+    tableBody.querySelectorAll('input[data-record-object]').forEach((input) => {
+      recordingPayload[input.dataset.recordObject] = input.checked;
+    });
     const stillAlertsPayload = {};
     tableBody.querySelectorAll('input[data-still-alert]').forEach((input) => {
       const label = input.dataset.stillAlert;
@@ -457,6 +484,7 @@ async function saveObjects() {
       labels,
       group_modes: groupModesPayload,
       still_alerts: stillAlertsPayload,
+      recording: recordingPayload,
     };
     const result = await api('/api/settings/objects', { method: 'PUT', body: JSON.stringify(payload) });
     render(result);

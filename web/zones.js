@@ -261,8 +261,7 @@ function ensureFaceRule(zone) {
 
 function normalizeObjectRules(zone) {
   if (Array.isArray(zone.object_rules) && zone.object_rules.length) {
-    const seen = new Set();
-    return zone.object_rules.map((rule) => ({ ...defaultObjectRule(rule?.label), ...rule }))
+    return zone.object_rules.map((rule, ruleIndex) => ({ ...defaultObjectRule(rule?.label), ...rule, id: rule?.id || `${String(rule?.label || 'rule').trim().toLowerCase()}-${ruleIndex + 1}` }))
       .map((rule) => ({
         ...rule,
         label: String(rule.label || '').trim().toLowerCase(),
@@ -290,11 +289,7 @@ function normalizeObjectRules(zone) {
         notify_start: rule.notify_start || null,
         notify_end: rule.notify_end || null,
       }))
-      .filter((rule) => {
-        if (!rule.label || seen.has(rule.label)) return false;
-        seen.add(rule.label);
-        return true;
-      });
+      .filter((rule) => Boolean(rule.label));
   }
   return normalizeLabelList(zone.object_labels).map(defaultObjectRule);
 }
@@ -474,9 +469,6 @@ function renderObjectRules(zone, zoneIndex) {
         </div>
         <div class="zone-motion-body zone-people-body">
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-            <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Record a clip when ${label} is detected in this area">
-              <input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} />📹 Record
-            </label>
             <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Email when ${label} is detected here">
               <input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} />📧 Email
             </label>
@@ -757,7 +749,7 @@ function bindObjectRuleControls() {
       const zones = cameraDetection().zones;
       const zone = zones[Number(select.dataset.addZoneRule)];
       zone.object_rules = normalizeObjectRules(zone);
-      if (!zone.object_rules.some((rule) => rule.label === label)) zone.object_rules.push(defaultObjectRule(label));
+      zone.object_rules.push({ ...defaultObjectRule(label), id: `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` });
       zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion' && r.label !== 'face').map((rule) => rule.label);
       renderZones();
       markZoneUnsaved();

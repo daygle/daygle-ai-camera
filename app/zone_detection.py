@@ -185,6 +185,7 @@ from app.config_facades import get_camera_config
 # don't flood logs on every frame. Cleared on success to allow self-healing.
 _zone_pixel_motion_errors: set[str] = set()
 from app.utils import normalize_email_recipients
+from app.object_settings import effective_object_settings, recording_enabled_for_label
 from app.zone_schema import (
     canonical_label,
     detection_label_in_allowed,
@@ -741,6 +742,13 @@ def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict
                 continue
             if action == 'record' and (not rule.get('record_on_detect', True)):
                 continue
+            # Regular object recording is now controlled on the Objects page.
+            # Keep motion/face rules on their own zone-specific recording axis,
+            # and fall back to the legacy rule flag until a global object
+            # setting has been explicitly saved.
+            if action == 'record' and label not in ('motion', 'face'):
+                if not recording_enabled_for_label(label, effective_object_settings(), rule.get('record_on_detect', True)):
+                    continue
             # ``label_matches`` canonicalizes the rule label the same way the
             # detection label is (so ``human``/``people``/``pedestrian`` all
             # match a ``person`` detection) AND expands umbrella group rules
@@ -784,6 +792,12 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
     camera_key = str(settings.get('id') or settings.get('name') or 'camera').strip() or 'camera'
     for zone in zones:
         zone_id = str(zone.get('id') or zone.get('name') or 'zone')
+        label_totals: dict[str, int] = {}
+        for _rule in zone.get('object_rules') or []:
+            _label = str(_rule.get('label') or '').strip().lower()
+            if _label:
+                label_totals[_label] = label_totals.get(_label, 0) + 1
+        label_seen: dict[str, int] = {}
         for rule in zone.get('object_rules') or []:
             if not rule.get('enabled', True) or not (rule.get('email_enabled') or rule.get('push_enabled')):
                 continue
@@ -797,9 +811,11 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
             # add dead rules to the engine's list.
             if not zone.get('monitor_objects', True) and label not in ('motion', 'face'):
                 continue
+            label_seen[label] = label_seen.get(label, 0) + 1
+            rule_suffix = f" [{rule.get('id') or label_seen[label]}]" if label_totals.get(label, 0) > 1 else ''
             rules.append({
-                'name': zone_rule_name(settings, zone, rule),
-                'cooldown_key': f'{camera_key}::{zone_id}::{label}',
+                'name': zone_rule_name(settings, zone, rule) + rule_suffix,
+                'cooldown_key': f'{camera_key}::{zone_id}::{label}::{rule.get("id") or label_seen[label]}',
                 'object': label,
                 'zone_id': zone_id,
                 # Motion's and face's canonical confidence default is 0.45
@@ -886,7 +902,21 @@ def zone_motion_record_on_detect(settings: dict[str, Any], zone_id: str | None =
 
 
 def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[str, Any]) -> set[str]:
-    return {zone_rule_name(settings, zone, rule) for zone, rule in zone_object_rule_matches(settings, detection, action='alert')}
+    matched = zone_object_rule_matches(settings, detection, action='alert')
+    names: set[str] = set()
+    for zone, rule in matched:
+        label = str(rule.get('label') or '').strip().lower()
+        same_label_rules = [
+            candidate for candidate in zone.get('object_rules') or []
+            if str(candidate.get('label') or '').strip().lower() == label
+        ]
+        if len(same_label_rules) > 1:
+            rule_position = next((index for index, candidate in enumerate(same_label_rules, start=1) if candidate is rule), 1)
+            suffix = f" [{rule.get('id') or rule_position}]"
+        else:
+            suffix = ''
+        names.add(zone_rule_name(settings, zone, rule) + suffix)
+    return names
 
 
 def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[dict[str, Any]]) -> bool:

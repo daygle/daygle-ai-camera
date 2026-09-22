@@ -47,6 +47,7 @@ Settings are stored in the database (setting key ``objects``) as::
         "labels": {"person": "still"},         # optional per-label overrides
         "group_modes": {"animal": "moving"},   # optional per-group overrides
         "still_alerts": {"package": 10},       # label -> minutes (0/absent = off)
+        "recording": {"person": true},          # optional label -> record detections
     }
 
 A label without an override falls back to ``default_mode``; the default for
@@ -90,6 +91,7 @@ DEFAULT_OBJECT_SETTINGS: dict[str, Any] = {
     'labels': {},
     'group_modes': {},
     'still_alerts': {},
+    'recording': {},
 }
 
 # Still-dwell alert bounds (minutes). A value below the floor is treated as
@@ -146,6 +148,7 @@ def normalize_object_settings(value: Any) -> dict[str, Any]:
             'labels': {},
             'group_modes': {},
             'still_alerts': {},
+            'recording': {},
         }
     default_mode = normalize_mode(value.get('default_mode'), MODE_MOVING)
     labels: dict[str, str] = {}
@@ -185,11 +188,19 @@ def normalize_object_settings(value: Any) -> dict[str, Any]:
             minutes = _normalize_still_alert_minutes(raw_minutes)
             if minutes is not None:
                 still_alerts[label] = minutes
+    recording: dict[str, bool] = {}
+    raw_recording = value.get('recording')
+    if isinstance(raw_recording, dict):
+        for raw_label, raw_enabled in raw_recording.items():
+            label = canonical_label(raw_label)
+            if label:
+                recording[label] = bool(raw_enabled)
     return {
         'default_mode': default_mode,
         'labels': labels,
         'group_modes': group_modes,
         'still_alerts': still_alerts,
+        'recording': recording,
     }
 
 
@@ -203,6 +214,20 @@ def _normalize_still_alert_minutes(value: Any) -> int | None:
         return None
     minutes = int(round(minutes))
     return max(_STILL_ALERT_MIN_MINUTES, min(_STILL_ALERT_MAX_MINUTES, minutes))
+
+
+def recording_enabled_for_label(label: Any, settings: dict[str, Any] | None = None, legacy_default: bool = True) -> bool:
+    """Resolve whether recordings are enabled for a concrete object label.
+
+    An absent entry preserves the legacy per-zone rule behavior. Once a label
+    is explicitly configured on the Objects page, that global setting wins.
+    """
+    resolved = settings if settings is not None else effective_object_settings()
+    recording = resolved.get('recording') if isinstance(resolved, dict) else None
+    canonical = canonical_label(label)
+    if isinstance(recording, dict) and canonical in recording:
+        return bool(recording[canonical])
+    return legacy_default
 
 
 def effective_object_settings() -> dict[str, Any]:

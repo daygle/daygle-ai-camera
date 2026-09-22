@@ -294,8 +294,9 @@ If cloudflared cannot start or later exits, Daygle logs a clear warning and cont
 - `/` - dashboard and event search
 - `/live` - live camera view with detection overlay
 - `/cameras` - camera management, recording, and PTZ
-- `/zones` - monitoring zone editor (use **Draw polygon** or **Full Frame** to add areas, and the per-zone **Shape** control to convert between full frame and polygon), visibility controls, and object/motion rules
-- `/objects` - per-object detection behavior (Moving Only / Still Only / both) with a global default
+- `/zones` - monitoring zone editor (use **Draw polygon** or **Full Frame** to add areas, and the per-zone **Shape** control to convert between full frame and polygon), visibility controls, and object/motion detection rules; object recording preferences live on `/objects`
+- `/alerts` - notification policies for camera zones, objects, and sounds; multiple policies can target the same object with different schedules and thresholds
+- `/objects` - per-object detection behavior (Moving Only / Still Only / both), recording preferences, and still-alert thresholds with a global default
 - `/sounds` - sound detection rules
 - `/onnx` - AI model library and detector settings
 - `/settings` - detection, recording, notifications, retention, backup, Cloudflare Tunnel, and updates
@@ -310,11 +311,11 @@ If cloudflared cannot start or later exits, Daygle logs a clear warning and cont
 
 ## Events, recordings, and alerts
 
-Daygle uses the **Events** page as its single activity feed; there is no separate Alerts page. Each row represents one object, motion, or sound detection. Events that triggered a notification show an alert badge, and event rows can link to the recording containing that scene and to an annotated snapshot with detection boxes when an image is available.
+Daygle uses the **Events** page as its activity feed, while the **Alerts** page manages notification policies. Each event row represents one object, motion, or sound detection. Events that triggered a notification show an alert badge, and event rows can link to the recording containing that scene and to an annotated snapshot with detection boxes when an image is available.
 
 One recording can contain multiple event rows. Use **Recordings** or **Recordings → Timeline** to review the complete clip, while the event row provides the specific detection context. Access-controlled viewers only see events and recordings they are allowed to view.
 
-Email and push notifications use the same alert title/body format. Configure the channels under **Settings → Notifications**, then enable email or push per zone/sound rule as needed. Camera offline and recovery notifications use the same channels when enabled.
+Email and push notifications use the same alert title/body format. Configure delivery channels under **Settings → Notifications**, then create one or more policies under **Alerts** for each camera/zone/object or camera/sound combination. Multiple policies for the same object are independent, so daytime and overnight thresholds or schedules can coexist. Camera offline and recovery notifications use the same channels when enabled.
 
 ## AI and sound detection
 
@@ -331,7 +332,7 @@ Models are stored under `models/`. The default model is `yolo11n`, downloaded au
 
 - Open `/sounds`
 - Enable sound detection for a camera
-- Add sound classes and configure thresholds, recording, and notifications
+- Add sound classes and configure thresholds and recording; configure sound email/push policies on `/alerts`
 - Confirm runtime availability on `/yamnet-tflite`
 
 If the TFLite runtime is missing, install `ai-edge-litert` or `tflite-runtime`.

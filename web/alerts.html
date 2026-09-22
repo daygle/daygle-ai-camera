@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<script>(function(){var t=localStorage.getItem("daygle.theme");if(t!=="dark")document.documentElement.classList.add("light");})()</script>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alerts - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack alerts-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Notification workspace</p>
+        <h1>Alerts</h1>
+        <p class="muted">Create separate policies for objects in zones or sounds on cameras. Give each policy its own schedule, threshold, cooldown, and delivery channels.</p>
+      </div>
+      <button id="saveAlertsBtn" class="primary" type="button">Save alert rules</button>
+    </header>
+
+    <section class="grid stats-grid">
+      <article class="card stat-card"><span class="stat-card-label">Alert policies</span><strong id="alertCount" class="stat-card-value">0</strong><small class="muted stat-card-sub">Across all cameras</small></article>
+      <article class="card stat-card"><span class="stat-card-label">Enabled</span><strong id="enabledCount" class="stat-card-value">0</strong><small class="muted stat-card-sub">Ready to notify</small></article>
+      <article class="card stat-card"><span class="stat-card-label">Delivery paths</span><strong id="channelCount" class="stat-card-value">0</strong><small class="muted stat-card-sub">Email and push enabled</small></article>
+    </section>
+
+    <section class="card alerts-editor-card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🔔</div>
+        <div><h2>Alert policies</h2><p class="settings-section-subtitle">Choose object alerts or sound alerts, then add and tune policies without crowding the detection setup pages.</p></div>
+      </div>
+      <div class="alerts-toolbar">
+        <label><span>Alert type</span><select id="alertTypeSelect"><option value="object">Object in zone</option><option value="sound">Sound on camera</option></select></label>
+        <label><span>Camera</span><select id="cameraSelect"></select></label>
+        <label><span>Zone</span><select id="zoneSelect"></select></label>
+        <button id="addAlertBtn" class="btn-info" type="button">＋ Add alert policy</button>
+      </div>
+      <div id="alertsList" class="alerts-policy-list"></div>
+    </section>
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/alerts.js"></script>
+</body>
+</html>
