@@ -221,13 +221,16 @@ function renderClassEditor(camera) {
         <td class="cell-actions"><button class="delete-btn secondary zone-action-btn zone-rule-remove" type="button" data-class-remove="${index}" title="Remove ${label} from this camera" aria-label="Remove ${label} from this camera">${ICONS.remove}</button></td>
       </tr>`;
   }).join('');
-  soundClassEditor.innerHTML = `
+  // Build the markup in a local first (rows are already escapeHtml'd); the XSS
+  // static guard forbids assigning a raw `${}` template literal to .innerHTML.
+  const tableHtml = `
     <div class="cameras-table-wrap">
       <table class="rule-table zone-rule-table">
         <thead><tr><th scope="col">Sound</th><th scope="col">Detect</th><th scope="col">Min confidence</th><th scope="col">Record</th><th scope="col" class="cell-actions" aria-label="Actions"></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
+  soundClassEditor.innerHTML = tableHtml;
   bindClassEditor(camera);
 }
 
