@@ -56,11 +56,15 @@ BUILTIN_PRESETS: tuple[dict[str, Any], ...] = (
             'detection_confirm_iou': 0.05,
             'always_run_object_detection': True,
             'object_detection_region_boost': True,
-            # IR frames make distant cats especially small; 3x3 keeps more
-            # pixels on the subject than 2x2. Night is when a cat camera needs
-            # the extra whole-frame passes most, so the tiling cost is spent here
-            # rather than in daytime where the full-frame pass already resolves.
-            'object_detection_tiling': '3x3',
+            # IR frames make distant cats especially small, so night keeps
+            # tiling on where day leaves it off. 2x2 (four passes) already ~2x
+            # the pixels on a small cat over full-frame -- the bulk of the recall
+            # win -- while 3x3 (nine passes) adds only marginal resolution at
+            # >2x the GPU cost. On a thermally-marginal accelerator that extra
+            # cost risks throttle/backlog, which drops whole frames and misses
+            # moving cats outright -- a worse failure than slightly coarser
+            # tiles. So night spends region boost + 2x2, not 3x3.
+            'object_detection_tiling': '2x2',
             'periodic_scan_interval_seconds': 10,
             'motion_frame_width': 320,
             'motion_frame_height': 240,
