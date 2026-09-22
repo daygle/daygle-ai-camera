@@ -209,14 +209,22 @@ function renderClassEditor(camera) {
   soundClassEditor.innerHTML = rules.map((rule, index) => {
     const enabled = rule.enabled !== false;
     return `
-      <div class="sound-class-row${enabled ? ' is-enabled' : ''}" data-class-index="${index}" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--border);border-radius:12px;margin-bottom:8px">
-        <strong style="flex:1;min-width:120px">${escapeHtml(soundClassLabel(rule))}</strong>
-        <label class="toggle-control" title="Enable or disable detection of this sound on this camera">
+      <div class="sound-class-row${enabled ? ' is-enabled' : ''}" data-class-index="${index}" style="display:flex;align-items:end;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--border);border-radius:12px;margin-bottom:8px">
+        <strong style="flex:1;min-width:120px;align-self:center">${escapeHtml(soundClassLabel(rule))}</strong>
+        <label class="sound-rule-field" title="Only sounds detected with at least this confidence (0.01-1) count on this camera. Overrides the detector default for this class.">
+          <span>Min Confidence</span>
+          <input type="number" data-class-confidence="${index}" min="0.01" max="1" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" style="width:90px" />
+        </label>
+        <label class="toggle-control" title="Enable or disable detection of this sound on this camera" style="align-self:center">
           <input type="checkbox" data-class-toggle="${index}" ${enabled ? 'checked' : ''} />
           <span>${enabled ? 'On' : 'Off'}</span>
         </label>
-        <a class="sound-class-alerts-link" href="/alerts" style="color:var(--accent);font-size:11px;font-weight:750;text-decoration:none;white-space:nowrap">Configure alerts</a>
-        <button class="btn-danger" type="button" data-class-remove="${index}" title="Remove this sound class from the camera">Remove</button>
+        <label class="toggle-control" title="Record a clip when this sound is detected on this camera" style="align-self:center">
+          <input type="checkbox" data-class-record="${index}" ${rule.record_on_detect !== false ? 'checked' : ''} />
+          <span>Record</span>
+        </label>
+        <a class="sound-class-alerts-link" href="/alerts" style="color:var(--accent);font-size:11px;font-weight:750;text-decoration:none;white-space:nowrap;align-self:center">Configure alerts</a>
+        <button class="btn-danger" type="button" data-class-remove="${index}" title="Remove this sound class from the camera" style="align-self:center">Remove</button>
       </div>`;
   }).join('');
   bindClassEditor(camera);
@@ -232,6 +240,27 @@ function bindClassEditor(camera) {
       markSoundDirty();
       renderClassEditor(camera);
       renderStatus();
+    });
+  });
+  soundClassEditor.querySelectorAll('[data-class-record]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const rule = rules[Number(input.dataset.classRecord)];
+      if (!rule) return;
+      rule.record_on_detect = input.checked;
+      markSoundDirty();
+    });
+  });
+  // Per-class detection threshold (0.01-1); mirrors the Zones object rule's
+  // Min Confidence. Updates the value in place without a re-render so focus
+  // is not lost while typing.
+  soundClassEditor.querySelectorAll('[data-class-confidence]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const rule = rules[Number(input.dataset.classConfidence)];
+      if (!rule) return;
+      const value = Math.min(1, Math.max(0.01, Number(input.value) || 0.35));
+      rule.confidence_threshold = value;
+      input.value = value;
+      markSoundDirty();
     });
   });
   soundClassEditor.querySelectorAll('[data-class-remove]').forEach((button) => {
