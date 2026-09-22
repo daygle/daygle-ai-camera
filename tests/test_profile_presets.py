@@ -23,9 +23,12 @@ def test_builtin_presets_have_day_and_night_values():
     assert cat['builtin'] is True
     assert cat['day']['object_detection_region_boost'] is True
     # Daytime tiling is off so a CPU host can sustain the fast cadence; region
-    # boost still recovers small moving cats. Night keeps full-frame tiling.
+    # boost still recovers small moving cats. Night keeps tiling on at 2x2 --
+    # ~2x the pixels on a small cat for the bulk of the recall win, without the
+    # >2x GPU cost of 3x3 that risks throttle/backlog (dropped frames) on a
+    # thermally-marginal accelerator.
     assert cat['day']['object_detection_tiling'] == 'off'
-    assert cat['night']['object_detection_tiling'] == '3x3'
+    assert cat['night']['object_detection_tiling'] == '2x2'
     assert cat['day']['detection_confirm_frames'] == 2
     assert cat['day']['detection_confirm_window'] == 3
     # Spatial IoU kept low (day matches night) so a small/distant moving cat is
