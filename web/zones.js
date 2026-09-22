@@ -630,6 +630,7 @@ function renderZones() {
   bindZoneControls(zones);
 }
 
+// eslint-disable-next-line no-unused-vars
 function renderObjectDetectionRules() {
   const container = document.getElementById('objectDetectionRules');
   if (!container) return;
@@ -665,6 +666,7 @@ function renderObjectDetectionRules() {
   }).join('');
 }
 
+// eslint-disable-next-line no-unused-vars
 function bindObjectRuleControls() {
   document.querySelectorAll('[data-add-zone-rule]').forEach((select) => {
     select.addEventListener('change', () => {

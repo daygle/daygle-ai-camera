@@ -89,18 +89,11 @@ function renderDetectorStatuses(rows) {
       <td>${escapeHtml(status.backend_reason || '')}</td>
     </tr>
   `).join('');
-  soundCameraStatusList.innerHTML = `
-    <div style="overflow-x:auto">
-      <table class="rule-table">
-        <thead><tr>
-          <th>Camera</th><th>Configured</th><th>Enabled Sounds</th><th>Backend</th>
-          <th>Running</th><th>Status</th><th>Last Sound</th>
-          <th>Recent Scores</th><th>Detail</th>
-        </tr></thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
-    </div>
-  `;
+  soundCameraStatusList.innerHTML = '<div style="overflow-x:auto">'
+    + '<table class="rule-table">'
+    + '<thead><tr><th>Camera</th><th>Configured</th><th>Enabled Sounds</th><th>Backend</th>'
+    + '<th>Running</th><th>Status</th><th>Last Sound</th><th>Recent Scores</th><th>Detail</th></tr></thead>'
+    + '<tbody>' + rowsHtml + '</tbody></table></div>';
 }
 
 async function refreshDetectorStatuses() {
@@ -143,7 +136,7 @@ function renderAssignedSummary(camera) {
   }
   const enabled = detectorEnabledRules(camera);
   const chips = enabled.map((rule) => `<span class="sound-assigned-chip" style="display:inline-flex;align-items:center;min-height:25px;padding:4px 9px;border:1px solid rgba(167,139,250,.3);border-radius:999px;color:#c4b5fd;background:rgba(167,139,250,.1);font-size:11px;font-weight:750">${escapeHtml(titleCase(String(rule.name || rule.class || '').replace(/[_-]+/g, ' ')))}</span>`).join('');
-  soundAssignedSummary.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;color:var(--muted);font-size:10px;font-weight:850;letter-spacing:.07em;text-transform:uppercase"><span>Enabled Sound Classes</span><a style="color:var(--accent);font-size:11px;letter-spacing:normal;text-decoration:none;text-transform:none;white-space:nowrap" href="/alerts">Manage Alert Policies</a></div><div style="display:flex;flex-wrap:wrap;gap:6px">${chips || '<span class="muted">None Yet</span>'}</div>`;
+  soundAssignedSummary.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;color:var(--muted);font-size:10px;font-weight:850;letter-spacing:.07em;text-transform:uppercase"><span>Enabled Sound Classes</span><a style="color:var(--accent);font-size:11px;letter-spacing:normal;text-decoration:none;text-transform:none;white-space:nowrap" href="/alerts">Manage Alert Policies</a></div><div style="display:flex;flex-wrap:wrap;gap:6px">' + (chips || '<span class="muted">None Yet</span>') + '</div>';
 }
 
 function renderStatus() {
