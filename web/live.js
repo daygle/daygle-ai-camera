@@ -771,6 +771,12 @@ function restartDetectionStatusTimer() {
 
 async function refreshDetectionStatus() {
   if (!liveEls.detectionStatus) return;
+  // Mirror refreshFrame: a backgrounded tab has nothing on screen to update
+  // (the frame is paused and the browser has suspended the overlay RAF), so
+  // skip the poll entirely instead of firing 3 requests every 2s per tick
+  // (one /api/status PER CAMERA in all-cameras mode). visibilitychange below
+  // resumes immediately on refocus so the status is never left stale.
+  if (document.hidden) return;
   if (isAllCameraMode()) {
     // The grid has no selected-camera status request, but each tile still needs
     // runtime source metadata. Fetch status independently so Auto cameras do
@@ -935,6 +941,17 @@ liveEls.frame.addEventListener('error', () => {
 });
 
 window.addEventListener('resize', drawLiveOverlay);
+
+// While the tab is hidden refreshFrame and refreshDetectionStatus both no-op
+// (see their document.hidden guards). Their intervals keep ticking, so on
+// refocus the next frame is at most snapshotRefreshMs away but the status is up
+// to detectionStatusRefreshMs (2s) away - refresh both at once so the page is
+// current the instant it is looked at again rather than showing a stale card.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  refreshFrame();
+  refreshDetectionStatus();
+});
 
 if (liveEls.liveAiTrackToggle) {
   const savedTrack = localStorage.getItem(LIVE_AI_TRACK_KEY);
