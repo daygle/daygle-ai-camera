@@ -98,7 +98,25 @@
       </form>
 
       <div id="soundStatusPanel" style="margin-top:1rem"></div>
-      <div id="soundAssignedSummary" class="sound-assigned-summary" style="margin-top:16px;padding:13px 14px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.025)" aria-live="polite"></div>
+
+      <div class="sound-class-assign" style="margin-top:18px">
+        <div class="settings-section-header" style="margin-bottom:12px">
+          <div class="settings-section-icon" aria-hidden="true">🔖</div>
+          <div>
+            <h3 style="margin:0">Sound Classes</h3>
+            <p class="settings-section-subtitle" style="margin:2px 0 0">Choose which sounds this camera listens for. Thresholds, recording, schedules, and email/push delivery are configured per class on the Alerts page.</p>
+          </div>
+        </div>
+        <div class="sound-class-add" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
+          <label style="flex:1;min-width:180px">
+            <span>Add a sound class</span>
+            <select id="soundClassSelect" aria-label="Select a sound class to add"></select>
+          </label>
+          <button id="addSoundClassBtn" class="btn-info" type="button">＋ Add Class</button>
+        </div>
+        <div id="soundClassEditor" aria-live="polite"></div>
+      </div>
+
       <div id="soundMessage" class="muted cameras-list-status" style="margin-top:12px" aria-live="polite"></div>
 
       <div class="sound-editor-footer">

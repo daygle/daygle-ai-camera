@@ -99,6 +99,26 @@
         <div id="liveDetectionStatus" class="live-detection-status">Live preview status waiting for frames.</div>
       </section>
 
+      <section class="card zone-rules-card" aria-labelledby="detectionScopeTitle">
+        <div class="settings-section-header zones-section-header">
+          <div class="settings-section-icon" aria-hidden="true">◉</div>
+          <div>
+            <span class="zones-panel-kicker">Detection scope</span>
+            <h2 id="detectionScopeTitle">What each area detects</h2>
+            <p class="settings-section-subtitle">Assign the objects, motion, and faces each area should watch for. Alert delivery - recording, email, push, schedules, and cooldowns - is configured per policy on the Alerts page.</p>
+          </div>
+        </div>
+        <div class="zones-rules-tip"><span class="zones-tip-icon" aria-hidden="true">i</span><span>Add an object, or turn on motion or face detection, for each area. Then open <a href="/alerts">Alerts</a> to choose how you are notified.</span></div>
+        <div id="objectDetectionRules"></div>
+        <div class="zone-editor-footer">
+          <div class="zones-save-copy"><span class="zones-save-indicator"></span><span>Remember to save your changes.</span></div>
+          <button id="saveZonesBtn" type="button" class="primary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+            Save Zones
+          </button>
+        </div>
+      </section>
+
     </div>
   </main>
   <script src="/static/nav.js"></script>
