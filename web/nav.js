@@ -700,6 +700,9 @@ window.daygleAuthReady = (async () => {
    */
   const AUTH_FOCUS_REFRESH_MARGIN_MS = 5 * 60 * 1000;
   const AUTH_IDLE_REFRESH_MS = 60 * 1000;
+  // Public pages have no session to restore, so a null-user re-verify there
+  // would bounce a legitimately signed-out visitor to /login on every focus.
+  const PUBLIC_AUTH_PATHS = new Set(['/login', '/setup', '/logout']);
   let lastForegroundAt = Date.now();
   function isFreshForRefresh() {
     const exp = window.daygleAuth?.expiresAt;
@@ -712,7 +715,23 @@ window.daygleAuthReady = (async () => {
     const wasIdle = now - lastForegroundAt >= AUTH_IDLE_REFRESH_MS;
     lastForegroundAt = now;
     if (typeof window.refreshDaygleAuth !== 'function') return;
-    if (!window.daygleAuth?.user) return; // handleSessionLoss already redirects on a 401 from any page's first request.
+    // A real session-loss redirect is already in flight - don't race it.
+    if (window.daygleAuth?.redirecting) return;
+    if (!window.daygleAuth?.user) {
+      // The account renders as the static "Sign in" skeleton, but on a tab
+      // that was frozen, discarded, or restored from bfcache this is usually
+      // STALE client state while the server session is still valid: the
+      // initial /api/auth/me was interrupted (throttled/frozen) and never
+      // repainted the nav, and the old guard here returned early on the
+      // assumption that a 401 redirect was already handling it - which is not
+      // true when the user is null for any non-401 reason. That left the nav
+      // stuck at "Sign in" until the next click happened to fire a request.
+      // Re-verify authoritatively instead: /api/auth/me returns 200 (setApiAuth
+      // repaints the nav) or 401 (handleSessionLoss redirects to /login).
+      if (PUBLIC_AUTH_PATHS.has(window.location?.pathname)) return;
+      window.refreshDaygleAuth().catch(() => { /* keep last-known auth on transient network blips */ });
+      return;
+    }
     if (!wasIdle && isFreshForRefresh()) return;
     window.refreshDaygleAuth().catch(() => { /* keep last-known auth on transient network blips */ });
   }
@@ -720,6 +739,14 @@ window.daygleAuthReady = (async () => {
     if (document.visibilityState === 'visible') onReturnToForeground();
   });
   window.addEventListener('focus', onReturnToForeground);
+  // bfcache restore (back/forward, or a discarded tab reactivated) does not
+  // reliably fire visibilitychange/focus and never re-runs the initial
+  // daygleAuthReady fetch, so the nav can reappear showing the static
+  // "Sign in" skeleton. Re-verify on a persisted pageshow so a restored,
+  // still-valid session repaints immediately instead of waiting for a click.
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) onReturnToForeground();
+  });
 })();
 
 // ─── Top-level account-area renderer ────────────────────────────────────
