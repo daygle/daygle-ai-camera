@@ -174,6 +174,138 @@ def evaluate_dwell(
     }
 
 
+# How long a track may go unseen inside a zone before its visit is considered
+# finished (and its dwell folded into the baseline as a completed sample). A few
+# seconds absorbs the tracker's own miss/re-acquire gaps at 2-4 Hz.
+DEFAULT_DEPARTURE_GRACE_SECONDS = 5.0
+
+
+def _cooldown_ok(last_fired: float | None, now: float, cooldown_seconds: float) -> bool:
+    if cooldown_seconds <= 0 or last_fired is None:
+        return True
+    return (now - last_fired) >= cooldown_seconds
+
+
+def loiter_step(
+    presence: Any,
+    baselines: Any,
+    cooldowns: Any,
+    observations: Any,
+    now: float,
+    *,
+    departure_grace_seconds: float = DEFAULT_DEPARTURE_GRACE_SECONDS,
+) -> dict[str, Any]:
+    """Advance one detection cycle of loiter tracking. Pure (mutates the three
+    passed dicts, does no I/O), so the whole decision is unit-testable.
+
+    ``presence`` maps a per-visit key (``camera|zone|track``) to a record of
+    when the track was first/last seen inside the zone and whether it has
+    already fired. ``baselines`` maps ``camera|zone|label`` to a Welford dwell
+    baseline; ``cooldowns`` maps the same key to the last loiter-alert time.
+    ``observations`` is the list of tracks present inside a loiter-enabled zone
+    THIS cycle, each::
+
+        {"key", "baseline_key", "zone_id", "zone_name", "label", "track_id",
+         "confidence", "min_dwell_seconds", "sensitivity", "cooldown_seconds"}
+
+    Returns ``{"fires": [...], "learned": int}`` where each fire is a loiter
+    anomaly that should alert now::
+
+        {"zone_id", "zone_name", "label", "track_id", "dwell", "threshold",
+         "mean", "confidence"}
+
+    A visit fires at most once (while it stays present); a completed visit -- a
+    track not seen for ``departure_grace_seconds`` -- is removed from
+    ``presence`` and its total dwell folded into the matching baseline, so the
+    baseline learns from *finished* visits rather than the currently-loitering
+    one.
+    """
+    if not isinstance(presence, dict):
+        presence = {}
+    if not isinstance(baselines, dict):
+        baselines = {}
+    if not isinstance(cooldowns, dict):
+        cooldowns = {}
+    fires: list[dict[str, Any]] = []
+    present_keys: set[str] = set()
+
+    for obs in observations or []:
+        if not isinstance(obs, dict):
+            continue
+        key = obs.get('key')
+        if not key:
+            continue
+        present_keys.add(key)
+        baseline_key = obs.get('baseline_key') or ''
+        rec = presence.get(key)
+        if rec is None:
+            rec = {
+                'first_seen': now,
+                'last_seen': now,
+                'fired': False,
+                'baseline_key': baseline_key,
+                'label': obs.get('label'),
+                'zone_id': obs.get('zone_id'),
+                'zone_name': obs.get('zone_name'),
+                'track_id': obs.get('track_id'),
+            }
+            presence[key] = rec
+        else:
+            rec['last_seen'] = now
+            if baseline_key:
+                rec['baseline_key'] = baseline_key
+        if rec['fired']:
+            continue
+        try:
+            min_dwell = float(obs.get('min_dwell_seconds', DEFAULT_MIN_DWELL_SECONDS))
+        except (TypeError, ValueError):
+            min_dwell = float(DEFAULT_MIN_DWELL_SECONDS)
+        try:
+            sensitivity = float(obs.get('sensitivity', DEFAULT_SENSITIVITY))
+        except (TypeError, ValueError):
+            sensitivity = DEFAULT_SENSITIVITY
+        result = evaluate_dwell(
+            baselines.get(baseline_key), now - rec['first_seen'],
+            min_dwell_seconds=min_dwell, sensitivity=sensitivity,
+        )
+        if not result['anomalous']:
+            continue
+        try:
+            cooldown = max(0.0, float(obs.get('cooldown_seconds', 0)))
+        except (TypeError, ValueError):
+            cooldown = 0.0
+        if not _cooldown_ok(cooldowns.get(baseline_key), now, cooldown):
+            continue
+        rec['fired'] = True
+        cooldowns[baseline_key] = now
+        fires.append({
+            'zone_id': rec['zone_id'],
+            'zone_name': rec['zone_name'],
+            'label': rec['label'],
+            'track_id': rec['track_id'],
+            'dwell': result['dwell'],
+            'threshold': result['threshold'],
+            'mean': result['mean'],
+            'confidence': obs.get('confidence'),
+        })
+
+    # Fold completed visits (departed tracks) into their baselines and drop them.
+    learned = 0
+    cutoff = now - departure_grace_seconds
+    for key in list(presence.keys()):
+        rec = presence[key]
+        if key in present_keys or rec.get('last_seen', now) >= cutoff:
+            continue
+        baseline_key = rec.get('baseline_key') or ''
+        baselines[baseline_key] = update_dwell_baseline(
+            baselines.get(baseline_key), rec.get('last_seen', now) - rec.get('first_seen', now),
+        )
+        learned += 1
+        del presence[key]
+
+    return {'fires': fires, 'learned': learned}
+
+
 def dwell_seconds(first_ts: Any, last_ts: Any) -> float | None:
     """Dwell (seconds) between a track's first and last observation, or None
     when either timestamp is missing/invalid. Negative spans (clock skew)
