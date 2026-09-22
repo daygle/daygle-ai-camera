@@ -8,24 +8,9 @@ let cameraIndex = 0;
 let zoneIndex = 0;
 let alertType = 'object';
 
-// Keep the selector useful before any alert policy exists in a zone. These are
-// the standard detector classes; existing custom/model labels are added below.
-const STANDARD_OBJECT_LABELS = [
-  'person', 'bicycle', 'car', 'motorcycle', 'bus', 'train', 'truck', 'boat',
-  'traffic light', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog',
-  'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
-  'umbrella', 'handbag', 'suitcase', 'bottle', 'cup', 'laptop', 'cell phone',
-];
-
 const $ = (id) => document.getElementById(id);
 const currentCamera = () => cameras[cameraIndex];
 const currentZone = () => currentCamera()?.detection?.zones?.[zoneIndex];
-const objectLabels = () => [...new Set([
-  ...STANDARD_OBJECT_LABELS,
-  'motion',
-  'face',
-  ...cameras.flatMap((camera) => (camera.detection?.zones || []).flatMap((zone) => (zone.object_rules || []).map((rule) => rule.label))),
-].filter(Boolean))].sort();
 const currentPeopleRules = () => (faceRulesPayload.rules || []).filter((rule) => {
   const cameraMatches = !rule.camera_id || String(rule.camera_id) === String(currentCamera()?.id || '');
   const zoneMatches = !rule.zone_id || String(rule.zone_id) === String(currentZone()?.id || '');
@@ -94,6 +79,17 @@ function renderSelectors() {
   $('zoneSelect').innerHTML = zones.map((zone, index) => `<option value="${index}">${escapeHtml(zone.name || `Zone ${index + 1}`)}</option>`).join('') || '<option>No zones</option>';
   $('zoneSelect').value = String(zoneIndex);
   $('zoneSelect').disabled = alertType === 'sound' || !zones.length;
+  // Objects and sounds are assigned on the Zones/Sounds pages and appear here
+  // automatically, so only recognized-person alerts are added from this page.
+  $('addAlertBtn').style.display = alertType === 'people' ? '' : 'none';
+  const hint = $('alertScopeHint');
+  if (hint) {
+    hint.textContent = alertType === 'object'
+      ? 'Objects, motion, and faces are assigned per area on the Zones page. Enable them there, then configure how each one alerts you below.'
+      : alertType === 'sound'
+        ? 'Sound classes are assigned per camera on the Sounds page. Enable them there, then configure how each one alerts you below.'
+        : 'Add recognized-person and stranger alerts here. Enrol people on the Face Recognition page.';
+  }
 }
 
 function ruleLabel(rule) {
@@ -102,16 +98,11 @@ function ruleLabel(rule) {
   return String(rule.label || '').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+// Only recognized-person policies still pick their subject here; objects and
+// sound classes are fixed by their assignment on the Zones and Sounds pages.
 function ruleOptions(rule) {
-  if (alertType === 'sound') return soundClasses.map((sound) => `<option value="${escapeHtml(sound.id)}" ${sound.id === rule.class ? 'selected' : ''}>${escapeHtml(sound.label)}</option>`).join('');
-  if (alertType === 'people') {
-    const people = [{ id: '', name: 'Unknown Person' }, ...(enrolledPeople || []).map((person) => ({ id: String(person.id), name: person.name }))];
-    return people.map((person) => `<option value="${escapeHtml(person.id)}" ${String(rule.person_id || '') === person.id ? 'selected' : ''}>${escapeHtml(person.name)}</option>`).join('');
-  }
-  return objectLabels().map((label) => {
-    const displayLabel = titleCase(String(label).replace(/[_-]+/g, ' '));
-    return `<option value="${escapeHtml(label)}" ${label === rule.label ? 'selected' : ''}>${escapeHtml(displayLabel)}</option>`;
-  }).join('');
+  const people = [{ id: '', name: 'Unknown Person' }, ...(enrolledPeople || []).map((person) => ({ id: String(person.id), name: person.name }))];
+  return people.map((person) => `<option value="${escapeHtml(person.id)}" ${String(rule.person_id || '') === person.id ? 'selected' : ''}>${escapeHtml(person.name)}</option>`).join('');
 }
 
 function scopeLabel() {
@@ -119,15 +110,30 @@ function scopeLabel() {
   return currentZone() ? `Zone · ${currentZone().name || `Zone ${zoneIndex + 1}`}` : 'Zone';
 }
 
+// Sound alerts are per-camera and never need a zone; object and
+// recognized-person policies are scoped to a specific zone.
+function scopeRequiresZone() {
+  return alertType !== 'sound';
+}
+
 function renderPolicies() {
   const rules = currentRules();
   updateStats();
-  if (!currentCamera() || !currentZone()) {
-    $('alertsList').innerHTML = '<div class="empty">Configure a camera and zone on the Zones page first.</div>';
+  if (!currentCamera()) {
+    $('alertsList').innerHTML = '<div class="empty">Add a camera first.</div>';
+    return;
+  }
+  if (scopeRequiresZone() && !currentZone()) {
+    $('alertsList').innerHTML = '<div class="empty">Draw a zone on the Zones page first, then add object or person policies here.</div>';
     return;
   }
   if (!rules.length) {
-    $('alertsList').innerHTML = `<div class="empty">No ${escapeHtml(alertType === 'people' ? 'recognized-person' : alertType)} alert policies in this scope. Add one below to get started.</div>`;
+    const emptyMessage = alertType === 'object'
+      ? 'No objects are assigned to this area yet. Open the <a href="/zones">Zones</a> page to add object, motion, or face detection, then configure alerts here.'
+      : alertType === 'sound'
+        ? 'No sound classes are assigned to this camera yet. Open the <a href="/sounds">Sounds</a> page to enable classes, then configure alerts here.'
+        : 'No recognized-person alert policies yet. Add one below to get started.';
+    $('alertsList').innerHTML = `<div class="empty">${emptyMessage}</div>`;
     return;
   }
   $('alertsList').innerHTML = rules.map((rule, index) => {
@@ -141,7 +147,7 @@ function renderPolicies() {
     <article class="alerts-policy ${rule.enabled !== false ? 'is-enabled' : ''}" data-rule-index="${index}">
       <div class="alerts-policy-head"><div><span class="zones-panel-kicker">${escapeHtml(scopeLabel())} · Policy ${index + 1}</span><h3>${escapeHtml(ruleLabel(rule))}</h3></div><label class="toggle-control"><input data-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''}><span>${rule.enabled !== false ? 'Enabled' : 'Disabled'}</span></label></div>
       <div class="alerts-policy-grid">
-        <label><span>${people ? 'Person' : sound ? 'Sound' : 'Object'}</span><select data-field="${people ? 'person_id' : sound ? 'class' : 'label'}">${ruleOptions(rule)}</select></label>
+        ${people ? `<label><span>Person</span><select data-field="person_id">${ruleOptions(rule)}</select></label>` : ''}
         <label><span>${confidenceLabel}</span><input data-field="${people ? 'min_confidence' : sound ? 'confidence_threshold' : 'min_confidence'}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(confidence ?? (people ? '' : 0.5)))}"></label>
         ${!people && !sound ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
         <label><span>${cooldownLabel}</span><input data-field="${people ? 'cooldown_minutes' : 'cooldown_seconds'}" type="number" min="0" max="${people ? '1440' : '3600'}" step="${people ? '1' : '5'}" value="${escapeHtml(String(cooldown ?? (people ? 5 : 60)))}"></label>
@@ -149,7 +155,7 @@ function renderPolicies() {
       <div class="alerts-channel-row"><label><input data-field="email_enabled" type="checkbox" ${rule.email_enabled ? 'checked' : ''}> Email</label><label><input data-field="push_enabled" type="checkbox" ${rule.push_enabled ? 'checked' : ''}> Push</label>${!people ? '<label><input data-field="record_on_detect" type="checkbox" ' + (rule.record_on_detect !== false ? 'checked' : '') + '> Record</label>' : ''}</div>
       ${!people ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>` : ''}
       <label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(Array.isArray(rule.email_recipients) ? rule.email_recipients.join(', ') : rule.email_recipients || '')}" placeholder="alerts@example.com, me@example.com"></label>
-      <div class="alerts-policy-actions"><span class="muted">${people ? 'Recognized-Person And Stranger Alerts Use The Face Recognition Rule Store.' : sound ? 'Sound Alert Policies Are Managed On This Page.' : ''}</span><button class="btn-danger" data-delete-rule type="button">Remove Policy</button></div>
+      <div class="alerts-policy-actions"><span class="muted">${people ? 'Recognized-person and stranger alerts use the face recognition rule store.' : sound ? 'Assigned on the Sounds page. Removing here unassigns this sound class from the camera.' : 'Assigned on the Zones page. Removing here unassigns this item from the area.'}</span><button class="btn-danger" data-delete-rule type="button">${people ? 'Remove Policy' : 'Remove'}</button></div>
     </article>`;
   }).join('');
   $('alertsList').querySelectorAll('.alerts-policy').forEach((card) => {
@@ -184,23 +190,19 @@ function renderPolicies() {
 $('cameraSelect').addEventListener('change', () => { cameraIndex = Number($('cameraSelect').value); zoneIndex = 0; renderSelectors(); renderPolicies(); });
 $('zoneSelect').addEventListener('change', () => { zoneIndex = Number($('zoneSelect').value); renderPolicies(); });
 $('alertTypeSelect').addEventListener('change', () => { alertType = $('alertTypeSelect').value; renderSelectors(); renderPolicies(); });
+// Objects and sound classes are assigned on the Zones and Sounds pages, so the
+// only thing added from here is a recognized-person alert. The button is hidden
+// for the other alert types (see renderSelectors).
 $('addAlertBtn').addEventListener('click', () => {
-  if (!currentCamera() || !currentZone()) return;
-  if (alertType === 'sound') {
-    const available = soundClasses.find((sound) => !(currentCamera().detection?.sound?.rules || []).some((rule) => rule.class === sound.id));
-    if (!available) return;
-    currentCamera().detection.sound ||= { enabled: false, rules: [] };
-    currentCamera().detection.sound.rules.push(defaultRule(available.id, 'sound'));
-  } else if (alertType === 'people') {
-    const existing = currentPeopleRules();
-    const candidates = [{ id: '', name: 'Unknown Person' }, ...(enrolledPeople || []).map((person) => ({ id: String(person.id), name: person.name }))];
-    const available = candidates.find((person) => !existing.some((rule) => String(rule.person_id || '') === person.id));
-    if (!available) return;
-    faceRulesPayload.rules.push(defaultPeopleRule(available.id, available.name));
-  } else {
-    currentZone().object_rules ||= [];
-    currentZone().object_rules.push(defaultRule(objectLabels()[0] || 'person', 'object'));
+  if (alertType !== 'people' || !currentCamera() || !currentZone()) return;
+  const existing = currentPeopleRules();
+  const candidates = [{ id: '', name: 'Unknown Person' }, ...(enrolledPeople || []).map((person) => ({ id: String(person.id), name: person.name }))];
+  const available = candidates.find((person) => !existing.some((rule) => String(rule.person_id || '') === person.id));
+  if (!available) {
+    window.showToast?.('Every enrolled person already has an alert in this zone.', true);
+    return;
   }
+  faceRulesPayload.rules.push(defaultPeopleRule(available.id, available.name));
   renderPolicies();
 });
 

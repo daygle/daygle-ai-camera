@@ -1,6 +1,8 @@
 let cameras = [];
+let soundClasses = [];
 let selectedCameraId = '';
 let selectedStatus = null;
+let soundDirty = false;
 
 requireElements(['soundCameraSelect', 'soundEnabled', 'soundStatusPanel']);
 
@@ -14,7 +16,51 @@ const statActiveRules = document.getElementById('statActiveRules');
 const statDetection = document.getElementById('statDetection');
 const statCamera = document.getElementById('statCamera');
 const soundCameraStatusList = document.getElementById('soundCameraStatusList');
-const soundAssignedSummary = document.getElementById('soundAssignedSummary');
+const soundClassSelect = document.getElementById('soundClassSelect');
+const addSoundClassBtn = document.getElementById('addSoundClassBtn');
+const soundClassEditor = document.getElementById('soundClassEditor');
+
+// Detection-scope defaults for a newly assigned class. Alert delivery fields
+// (email/push/record/schedule) start off and are configured on the Alerts page.
+function defaultSoundRule(cls) {
+  const sound = soundClasses.find((item) => String(item.id) === String(cls));
+  return {
+    class: cls,
+    name: sound?.label || cls,
+    enabled: true,
+    record_on_detect: true,
+    confidence_threshold: sound?.default_threshold ?? 0.35,
+    cooldown_seconds: sound?.default_cooldown ?? 30,
+    email_enabled: false,
+    email_recipients: [],
+    push_enabled: false,
+    active_start: null,
+    active_end: null,
+    notify_start: null,
+    notify_end: null,
+  };
+}
+
+function soundClassLabel(rule) {
+  const fallback = soundClasses.find((item) => String(item.id) === String(rule.class))?.label;
+  return titleCase(String(rule.name || fallback || rule.class || '').replace(/[_-]+/g, ' '));
+}
+
+function markSoundDirty() {
+  soundDirty = true;
+  const message = document.getElementById('soundMessage');
+  if (message) {
+    message.textContent = 'Unsaved changes - click Save Detection Settings to apply.';
+    message.className = 'muted cameras-list-status';
+  }
+}
+
+function ensureSoundConfig(camera) {
+  camera.detection ||= {};
+  camera.detection.sound ||= { enabled: false, rules: [] };
+  camera.detection.sound.rules ||= [];
+  return camera.detection.sound;
+}
 
 function detectorSoundConfig(camera) {
   return camera?.detection?.sound || {};
@@ -128,15 +174,91 @@ function renderCameraSelect() {
   }).join('');
 }
 
-function renderAssignedSummary(camera) {
-  if (!soundAssignedSummary) return;
-  if (!camera) {
-    soundAssignedSummary.innerHTML = '';
+function renderClassPicker(camera) {
+  if (!soundClassSelect) return;
+  const assigned = new Set((detectorSoundConfig(camera).rules || []).map((rule) => String(rule.class)));
+  const available = soundClasses.filter((sound) => !assigned.has(String(sound.id)));
+  const disabled = !camera || !available.length;
+  soundClassSelect.disabled = disabled;
+  if (addSoundClassBtn) addSoundClassBtn.disabled = disabled;
+  if (!soundClasses.length) {
+    soundClassSelect.innerHTML = '<option value="">No sound classes available</option>';
     return;
   }
-  const enabled = detectorEnabledRules(camera);
-  const chips = enabled.map((rule) => `<span class="sound-assigned-chip" style="display:inline-flex;align-items:center;min-height:25px;padding:4px 9px;border:1px solid rgba(167,139,250,.3);border-radius:999px;color:#c4b5fd;background:rgba(167,139,250,.1);font-size:11px;font-weight:750">${escapeHtml(titleCase(String(rule.name || rule.class || '').replace(/[_-]+/g, ' ')))}</span>`).join('');
-  soundAssignedSummary.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;color:var(--muted);font-size:10px;font-weight:850;letter-spacing:.07em;text-transform:uppercase"><span>Enabled Sound Classes</span><a style="color:var(--accent);font-size:11px;letter-spacing:normal;text-decoration:none;text-transform:none;white-space:nowrap" href="/alerts">Manage Alert Policies</a></div><div style="display:flex;flex-wrap:wrap;gap:6px">' + (chips || '<span class="muted">None Yet</span>') + '</div>';
+  if (!available.length) {
+    soundClassSelect.innerHTML = '<option value="">All classes already added</option>';
+    return;
+  }
+  soundClassSelect.innerHTML = available
+    .map((sound) => `<option value="${escapeHtml(sound.id)}">${escapeHtml(sound.label || sound.id)}</option>`)
+    .join('');
+}
+
+function renderClassEditor(camera) {
+  renderClassPicker(camera);
+  if (!soundClassEditor) return;
+  if (!camera) {
+    soundClassEditor.innerHTML = '';
+    return;
+  }
+  const rules = detectorSoundConfig(camera).rules || [];
+  if (!rules.length) {
+    soundClassEditor.innerHTML = '<p class="muted empty-message">No sound classes assigned yet. Add one above so this camera starts listening for it.</p>';
+    return;
+  }
+  soundClassEditor.innerHTML = rules.map((rule, index) => {
+    const enabled = rule.enabled !== false;
+    return `
+      <div class="sound-class-row${enabled ? ' is-enabled' : ''}" data-class-index="${index}" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--border);border-radius:12px;margin-bottom:8px">
+        <strong style="flex:1;min-width:120px">${escapeHtml(soundClassLabel(rule))}</strong>
+        <label class="toggle-control" title="Enable or disable detection of this sound on this camera">
+          <input type="checkbox" data-class-toggle="${index}" ${enabled ? 'checked' : ''} />
+          <span>${enabled ? 'On' : 'Off'}</span>
+        </label>
+        <a class="sound-class-alerts-link" href="/alerts" style="color:var(--accent);font-size:11px;font-weight:750;text-decoration:none;white-space:nowrap">Configure alerts</a>
+        <button class="btn-danger" type="button" data-class-remove="${index}" title="Remove this sound class from the camera">Remove</button>
+      </div>`;
+  }).join('');
+  bindClassEditor(camera);
+}
+
+function bindClassEditor(camera) {
+  const rules = detectorSoundConfig(camera).rules || [];
+  soundClassEditor.querySelectorAll('[data-class-toggle]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const rule = rules[Number(input.dataset.classToggle)];
+      if (!rule) return;
+      rule.enabled = input.checked;
+      markSoundDirty();
+      renderClassEditor(camera);
+      renderStatus();
+    });
+  });
+  soundClassEditor.querySelectorAll('[data-class-remove]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const index = Number(button.dataset.classRemove);
+      const rule = rules[index];
+      if (!rule) return;
+      if (!window.confirm(`Remove ${soundClassLabel(rule)} from this camera?`)) return;
+      rules.splice(index, 1);
+      markSoundDirty();
+      renderClassEditor(camera);
+      renderStatus();
+    });
+  });
+}
+
+function addSoundClass() {
+  const camera = currentCamera();
+  if (!camera || !soundClassSelect) return;
+  const cls = soundClassSelect.value;
+  if (!cls) return;
+  const config = ensureSoundConfig(camera);
+  if (config.rules.some((rule) => String(rule.class) === String(cls))) return;
+  config.rules.push(defaultSoundRule(cls));
+  markSoundDirty();
+  renderClassEditor(camera);
+  renderStatus();
 }
 
 function renderStatus() {
@@ -167,7 +289,7 @@ function renderEditor() {
   reloadBtn.disabled = !camera;
   soundEnabled.value = String(detectorSoundConfigured(camera));
   renderStatus();
-  renderAssignedSummary(camera);
+  renderClassEditor(camera);
 }
 
 async function refreshStatus() {
@@ -215,6 +337,7 @@ async function saveSoundDetection() {
     });
     cameras = result.cameras || updatedCameras;
     selectedStatus = null;
+    soundDirty = false;
     setMessage('Sound Detection Settings Saved.');
     await refreshStatus();
     await refreshDetectorStatuses();
@@ -236,7 +359,12 @@ function setMessage(text, isError = false) {
 
 async function loadSounds() {
   await window.daygleAuthReady;
-  const settings = await api('/api/settings/system');
+  soundDirty = false;
+  const [settings, classPayload] = await Promise.all([
+    api('/api/settings/system'),
+    api('/api/sound/classes').catch(() => ({ classes: [] })),
+  ]);
+  soundClasses = classPayload.classes || [];
   cameras = settings.cameras || (settings.camera ? [settings.camera] : []);
   const requested = new URLSearchParams(window.location.search).get('camera');
   selectedCameraId = requested && cameras.some((camera) => camera.id === requested)
@@ -247,11 +375,19 @@ async function loadSounds() {
 }
 
 cameraSelect.addEventListener('change', () => selectCamera(cameraSelect.value));
-soundEnabled.addEventListener('change', renderStatus);
+soundEnabled.addEventListener('change', () => { markSoundDirty(); renderStatus(); });
+addSoundClassBtn?.addEventListener('click', addSoundClass);
 saveBtn.addEventListener('click', saveSoundDetection);
 reloadBtn.addEventListener('click', () => loadSounds().catch((err) => {
   if (!window.daygleAuth?.redirecting) setMessage(err.message, true);
 }));
+
+// Warn before leaving with unsaved class/enablement changes.
+window.addEventListener('beforeunload', (event) => {
+  if (!soundDirty) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
 
 loadSounds().catch((err) => {
   if (!window.daygleAuth?.redirecting) setMessage(err.message, true);

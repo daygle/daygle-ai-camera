@@ -34,9 +34,9 @@
         <label><span>Alert Type</span><select id="alertTypeSelect"><option value="object">Object</option><option value="sound">Sound</option><option value="people">Person</option></select></label>
         <label><span>Camera</span><select id="cameraSelect"></select></label>
         <label><span>Zone</span><select id="zoneSelect"></select></label>
-        <button id="addAlertBtn" class="btn-info" type="button">＋ Add Alert Policy</button>
+        <button id="addAlertBtn" class="btn-info" type="button">＋ Add Person Alert</button>
       </div>
-      <p class="form-help muted">Detection scope stays on Zones. All recording, notification channels, schedules, cooldowns, and recognized-person alert policies are managed here.</p>
+      <p id="alertScopeHint" class="form-help muted">Objects, motion, and faces are assigned per area on the Zones page; sound classes on the Sounds page. This page configures how each assigned item alerts you - recording, email, push, schedules, and cooldowns.</p>
       <div id="alertsList" class="alerts-policy-list"></div>
     </section>
   </main>

@@ -580,6 +580,7 @@ function renderZones() {
   updateZonesStats();
   if (!zones.length) {
     liveEls.zoneList.innerHTML = '<div class="empty">No Zone Areas yet. Click "Draw polygon", place corner dots on the footage, then click the first dot to close the area - or add the whole frame at once.</div>';
+    renderObjectDetectionRules();
     return;
   }
   liveEls.zoneList.innerHTML = zones.map((zone, index) => {
@@ -628,9 +629,9 @@ function renderZones() {
   `;
   }).join('');
   bindZoneControls(zones);
+  renderObjectDetectionRules();
 }
 
-// eslint-disable-next-line no-unused-vars
 function renderObjectDetectionRules() {
   const container = document.getElementById('objectDetectionRules');
   if (!container) return;
@@ -664,9 +665,9 @@ function renderObjectDetectionRules() {
         ${rulesHtml}
       </div>`;
   }).join('');
+  bindObjectRuleControls();
 }
 
-// eslint-disable-next-line no-unused-vars
 function bindObjectRuleControls() {
   document.querySelectorAll('[data-add-zone-rule]').forEach((select) => {
     select.addEventListener('change', () => {
@@ -733,6 +734,8 @@ function bindMotionControls() {
       // derives it from the enabled motion rule on every render/save.
       zone.monitor_motion = cb.checked;
       zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
+      // Re-render so the sensitivity/gate body appears or collapses with the toggle.
+      renderObjectDetectionRules();
       markZoneUnsaved();
     });
   });
@@ -788,6 +791,8 @@ function bindFaceControls() {
         const rule = faceRuleOf(zone);
         if (rule) rule.enabled = false;
       }
+      // Re-render so the confidence body appears or collapses with the toggle.
+      renderObjectDetectionRules();
       markZoneUnsaved();
     });
   });
@@ -1188,11 +1193,19 @@ function markZoneSaved() {
   liveEls.zoneList?.classList.remove('has-unsaved');
 }
 
+// Disable every Save control (header button, the detection-scope Save Zones
+// button, and each per-area Save button) while a save is in flight. Look the
+// buttons up live from the DOM so a missing one is simply skipped instead of
+// throwing.
+function setZoneSaving(saving) {
+  document.querySelectorAll('#saveZonesBtnHeader, #saveZonesBtn, [data-save-zone]').forEach((btn) => {
+    btn.disabled = saving;
+  });
+}
+
 async function saveZones() {
   try {
-    liveEls.saveZonesBtn.disabled = true;
-    const headerBtn = document.getElementById('saveZonesBtnHeader');
-    if (headerBtn) headerBtn.disabled = true;
+    setZoneSaving(true);
     cameraDetection().zones.forEach(normalizeZone);
     await api(`/api/cameras/${encodeURIComponent(selectedCamera.id)}`, { method: 'PUT', body: JSON.stringify(selectedCamera) });
     const payload = await api('/api/cameras');
@@ -1209,14 +1222,12 @@ async function saveZones() {
     liveEls.status.textContent = error.message;
     window.showToast?.(error.message, true);
   } finally {
-    liveEls.saveZonesBtn.disabled = false;
-    const headerBtn = document.getElementById('saveZonesBtnHeader');
-    if (headerBtn) headerBtn.disabled = false;
+    setZoneSaving(false);
   }
 }
 
-liveEls.saveZonesBtn?.addEventListener('click', saveZones);
 document.getElementById('saveZonesBtnHeader')?.addEventListener('click', saveZones);
+document.getElementById('saveZonesBtn')?.addEventListener('click', saveZones);
 
 window.addEventListener('resize', syncZoneOverlayToImage);
 
