@@ -28,6 +28,56 @@ def test_live_status_preserves_best_object_confidence_for_vision_card(tmp_path, 
     assert payload['detection_confidences'] == {'person': 0.86}
 
 
+def test_live_status_strips_internal_memo_and_stays_json_encodable(tmp_path, monkeypatch):
+    """The live payload must survive FastAPI serialisation even when the live
+    pipeline has stamped its internal, tuple-keyed memo dicts onto the very
+    detection objects handed to the status store.
+
+    Regression: ``_zone_match_memo`` / ``_rule_match_memo`` are keyed by tuples;
+    FastAPI's ``jsonable_encoder`` turns a tuple key into a list and then uses
+    it as a dict key -> ``TypeError: unhashable type: 'list'`` -- crashing
+    ``/api/live/detection-status``. The store must drop internal ``_``-prefixed
+    fields while preserving the real ones the live overlay renders.
+    """
+    from fastapi.encoders import jsonable_encoder
+
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.detection_status as detection_status
+
+    main._state.live_detection_status.clear()
+    detection_status.update_live_detection_status(
+        'camera-1',
+        state='checked',
+        detected_labels=['cat'],
+        detections=[
+            {
+                'label': 'cat',
+                'confidence': 0.88,
+                'box': {'x': 0.1, 'y': 0.2, 'width': 0.1, 'height': 0.1},
+                'motion_state': 'moving',
+                'track_id': 7,
+                # Exactly what the zone/rule memoisation stamps in production.
+                '_zone_match_memo': {('porch', 0.1, 0.2, 0.1, 0.1): True},
+                '_rule_match_memo': {(id(object()), 'alert', 'cat', 0.88): ['Porch']},
+            },
+        ],
+    )
+
+    payload = detection_status.live_detection_status_payload('camera-1')
+    detection = payload['detections'][0]
+    # Internal stamps are gone...
+    assert '_zone_match_memo' not in detection
+    assert '_rule_match_memo' not in detection
+    # ...and the real fields the overlay needs survive.
+    assert detection['label'] == 'cat'
+    assert detection['motion_state'] == 'moving'
+    assert detection['track_id'] == 7
+    assert detection['box'] == {'x': 0.1, 'y': 0.2, 'width': 0.1, 'height': 0.1}
+    # The whole payload now round-trips through FastAPI's encoder (the crash site).
+    assert jsonable_encoder(payload)
+
+
 def test_live_payload_exposes_face_detection_state_and_detections(tmp_path, monkeypatch):
     """The live detection-status payload carries the face pass state and its
     detections so the live page's Faces lane can render identity + confidence."""
