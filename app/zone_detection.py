@@ -185,7 +185,6 @@ from app.config_facades import get_camera_config
 # don't flood logs on every frame. Cleared on success to allow self-healing.
 _zone_pixel_motion_errors: set[str] = set()
 from app.utils import normalize_email_recipients
-from app.object_settings import effective_object_settings, recording_enabled_for_label
 from app.zone_schema import (
     canonical_label,
     detection_label_in_allowed,
@@ -742,13 +741,6 @@ def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict
                 continue
             if action == 'record' and (not rule.get('record_on_detect', True)):
                 continue
-            # Regular object recording is now controlled on the Objects page.
-            # Keep motion/face rules on their own zone-specific recording axis,
-            # and fall back to the legacy rule flag until a global object
-            # setting has been explicitly saved.
-            if action == 'record' and label not in ('motion', 'face'):
-                if not recording_enabled_for_label(label, effective_object_settings(), rule.get('record_on_detect', True)):
-                    continue
             # ``label_matches`` canonicalizes the rule label the same way the
             # detection label is (so ``human``/``people``/``pedestrian`` all
             # match a ``person`` detection) AND expands umbrella group rules

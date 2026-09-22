@@ -14,7 +14,7 @@
       <div>
         <p class="eyebrow">Monitoring workspace</p>
         <h1>Objects</h1>
-        <p class="muted">Choose whether each object class counts when it is moving, standing still, or either, and alert when an object has been sitting still for a while - a package left in view, a pet that has settled down. Detection still runs on every cycle; this decides what becomes an event, recording, or alert.</p>
+        <p class="muted">Choose whether each object class counts when it is moving, standing still, or either, and alert when an object has been sitting still for a while - a package left in view, a pet that has settled down. Detection still runs on every cycle; notification and recording policies live on Alerts.</p>
       </div>
       <div class="hero-action">
         <button id="saveObjectsBtnHeader" type="button" class="primary" style="display:none">Save Changes</button>
@@ -110,7 +110,7 @@
         <div class="settings-section-icon" aria-hidden="true">🏷️</div>
         <div>
           <h2>Per-Object Overrides</h2>
-          <p class="settings-section-subtitle">One row per class the current detector can identify, loaded from <code>models/coco.names</code> - the 80 standard COCO categories. <strong>Inherit</strong> uses the default above; the Effective column shows what actually applies. <strong>Record detections</strong> controls recording for this object everywhere; alert policies can still add their own recording behavior. <strong>Still alert after</strong> fires an event, recording, and in-app alert the first time this object has been detected continuously still for that many minutes - 0 turns it off.</p>
+          <p class="settings-section-subtitle">One row per class the current detector can identify, loaded from <code>models/coco.names</code> - the 80 standard COCO categories. <strong>Inherit</strong> uses the default above; the Effective column shows what actually applies. Configure recording, email, push, schedules, and thresholds together as alert policies on <strong>Alerts</strong>. <strong>Still alert after</strong> fires an event and in-app alert the first time this object has been detected continuously still for that many minutes - 0 turns it off.</p>
         </div>
       </div>
       <div id="objectsMessage" class="muted" style="margin-bottom:8px"></div>
@@ -121,7 +121,6 @@
               <th>Object</th>
               <th>Detection Mode</th>
               <th>Effective</th>
-              <th>Record detections</th>
               <th>Still alert after (min)</th>
             </tr>
           </thead>

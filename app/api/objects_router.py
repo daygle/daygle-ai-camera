@@ -100,21 +100,11 @@ async def update_object_settings(request: Request, db=Depends(get_database)):
                 detail=f"still_alerts['{label}'] must be a number of minutes (>= 1) or 0 to disable.",
             )
 
-    raw_recording = payload.get('recording', {})
-    if raw_recording is None:
-        raw_recording = {}
-    if not isinstance(raw_recording, dict):
-        raise HTTPException(status_code=400, detail='recording must be an object mapping label to a boolean.')
-    for label, enabled in raw_recording.items():
-        if not isinstance(enabled, bool):
-            raise HTTPException(status_code=400, detail=f"recording['{label}'] must be true or false.")
-
     normalized = normalize_object_settings({
         'default_mode': default_mode,
         'labels': raw_labels,
         'group_modes': raw_group_modes,
         'still_alerts': raw_still,
-        'recording': raw_recording,
     })
     db.set_setting('objects', normalized, utc_now())
     write_audit_log(request, db, 'update', 'settings.objects', details={
@@ -122,7 +112,6 @@ async def update_object_settings(request: Request, db=Depends(get_database)):
         'labels': sorted(normalized['labels']),
         'group_modes': normalized['group_modes'],
         'still_alerts': normalized['still_alerts'],
-        'recording': normalized.get('recording', {}),
     })
     return {
         **normalized,

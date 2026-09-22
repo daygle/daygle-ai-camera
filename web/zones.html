@@ -14,7 +14,7 @@
       <div class="zones-hero-copy">
         <p class="eyebrow">Monitoring workspace</p>
         <h1>Zones</h1>
-        <p class="muted">Shape the areas your camera should watch, then fine-tune what gets recorded or sent as an alert.</p>
+        <p class="muted">Shape the areas your camera should watch and tune detection sensitivity. Configure alerts on the Alerts page.</p>
       </div>
       <div class="hero-action zones-hero-action">
         <button id="saveZonesBtnHeader" type="button" class="primary" style="display:none">
@@ -48,14 +48,6 @@
         </div>
         <strong id="statRuleCount" class="stat-card-value">0</strong>
         <small class="muted stat-card-sub">Objects and motion</small>
-      </article>
-      <article class="card stat-card">
-        <div class="stat-card-head">
-          <span class="stat-card-label">Alert rules</span>
-          <span class="stat-card-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
-        </div>
-        <strong id="statAlertRules" class="stat-card-value">-</strong>
-        <small class="muted stat-card-sub">Notifications enabled</small>
       </article>
       <article class="card stat-card stat-card-camera">
         <div class="stat-card-head">
@@ -129,10 +121,10 @@
           <div>
             <span class="zones-panel-kicker">Steps 2-3</span>
             <h2 id="detectionRulesTitle">Detection rules</h2>
-            <p class="settings-section-subtitle">Choose what each area should record, detect, or use for notifications.</p>
+            <p class="settings-section-subtitle">Choose which detection types are active in each area. Configure recording and notifications on the Alerts page.</p>
           </div>
         </div>
-        <div class="zones-rules-tip"><span class="zones-tip-icon" aria-hidden="true">i</span><span>Start with <strong>Enabled</strong> for each area. Configure object recording on the Objects page, and use Alerts for email or push policies.</span></div>
+        <div class="zones-rules-tip"><span class="zones-tip-icon" aria-hidden="true">i</span><span>Start with <strong>Enabled</strong> for each area. Use the Alerts page to configure recording, email, push, schedules, and cooldowns.</span></div>
         <div id="objectDetectionRules"></div>
         <div class="zone-editor-footer">
           <div class="zones-save-copy"><span class="zones-save-indicator"></span><span>Remember to save your changes.</span></div>

@@ -355,10 +355,8 @@ function updateZonesStats() {
   const detection = cameraDetection();
   const zones = detection.zones || [];
   const ruleCount = zones.reduce((sum, zone) => sum + (zone.object_rules?.length || 0), 0);
-  const alertCount = zones.reduce((sum, zone) => sum + (zone.object_rules || []).filter((r) => r.email_enabled || r.push_enabled).length, 0);
   if (liveEls.statZoneCount) liveEls.statZoneCount.textContent = String(zones.length);
   if (liveEls.statRuleCount) liveEls.statRuleCount.textContent = String(ruleCount);
-  if (liveEls.statAlertRules) liveEls.statAlertRules.textContent = String(alertCount);
   if (liveEls.statCameraName) {
     liveEls.statCameraName.textContent = selectedCamera.name || selectedCamera.id || '-';
   }
@@ -450,7 +448,6 @@ function renderObjectRules(zone, zoneIndex) {
   const cards = rules.map(({ rule, ruleIndex }) => {
     const key = `${zoneIndex}:${ruleIndex}`;
     const label = escapeHtml(titleCase(rule.label));
-    const expanded = expandedZoneRules.has(key);
     const enabled = rule.enabled !== false;
     return `
       <div class="zone-motion-card${enabled ? ' is-enabled' : ''}">
@@ -468,49 +465,12 @@ function renderObjectRules(zone, zoneIndex) {
           </label>
         </div>
         <div class="zone-motion-body zone-people-body">
-          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-            <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Email when ${label} is detected here">
-              <input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} />📧 Email
-            </label>
-            <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Push when ${label} is detected here">
-              <input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} />🔔 Push
-            </label>
-            <button class="secondary rule-expand-btn" type="button" data-expand-zone-rule="${key}" title="Advanced settings for ${label}">${expanded ? ICONS.chevronUp : ICONS.email}<span>${expanded ? 'Hide' : 'Advanced'}</span></button>
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:14px">
+          <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:end">
             <label class="sound-rule-field" title="Minimum confidence (0.01-1). Overrides the global ONNX slider for this object in this zone.">
               <span>Min Confidence</span>
               <input type="number" data-zone-rule-confidence-value="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" style="width:90px" />
             </label>
-            <label class="sound-rule-field" title="Cooldown: minimum seconds between detection events and alerts for this area.">
-              <span>Cooldown (s)</span>
-              <input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" style="width:90px" />
-            </label>
-          </div>
-        </div>
-        <div class="zone-motion-advanced-body" ${expanded ? '' : 'hidden'}>
-          <label class="sound-rule-field" title="Comma-separated email recipients for ${label} alerts in this area.">
-            <span>Recipients</span>
-            <input type="email" data-zone-rule-email-recipients="${key}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" style="min-width:220px" />
-          </label>
-          <label class="sound-rule-field" title="Detection window: only detect between these times. Leave blank for all day.">
-            <span>Active from</span>
-            ${renderTimeSelect(rule.active_start, 'data-zone-rule-active-start', key)}
-          </label>
-          <label class="sound-rule-field" title="Detection window: stop detecting at this time. Leave blank for all day.">
-            <span>Active to</span>
-            ${renderTimeSelect(rule.active_end, 'data-zone-rule-active-end', key)}
-          </label>
-          <label class="sound-rule-field" title="Email/Push window: only send notifications between these times.">
-            <span>Email/Push from</span>
-            ${renderTimeSelect(rule.notify_start, 'data-zone-rule-notify-start', key)}
-          </label>
-          <label class="sound-rule-field" title="Email/Push window: stop sending notifications at this time.">
-            <span>Email/Push to</span>
-            ${renderTimeSelect(rule.notify_end, 'data-zone-rule-notify-end', key)}
-          </label>
-          <div style="width:100%;display:flex;justify-content:flex-end;padding-top:4px">
-            <button class="delete-btn secondary zone-action-btn" type="button" data-delete-zone-rule="${key}" title="Delete ${label} rule from this zone">${ICONS.remove} Remove</button>
+            <button class="delete-btn secondary zone-action-btn" type="button" data-delete-zone-rule="${key}" title="Delete ${label} detection rule from this zone">${ICONS.remove} Remove</button>
           </div>
         </div>
       </div>`;
@@ -521,8 +481,6 @@ function renderObjectRules(zone, zoneIndex) {
 function renderMotionCard(zone, zoneIndex) {
   const rule = motionRuleOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
-  const key = `motion:${zoneIndex}`;
-  const expanded = expandedZoneRules.has(key);
   const zoneLabel = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
   return `
     <div class="zone-motion-card${enabled ? ' is-enabled' : ''}" data-zone-motion-for="${zoneIndex}">
@@ -550,20 +508,10 @@ function renderMotionCard(zone, zoneIndex) {
           <small class="form-help muted zone-motion-pixel-help" data-zone-motion-pixel-help="${zoneIndex}">${escapeHtml(motionPixelThresholdText(rule))}</small>
         </label>
         <div class="zone-motion-secondary">
-          <label class="zone-motion-field" title="Record a clip whenever motion is detected in this area.">
-            <span>Record on motion</span>
-            <input type="checkbox" data-zone-motion-record="${zoneIndex}" ${rule.record_on_detect !== false ? 'checked' : ''} />
-          </label>
-          <button class="secondary rule-expand-btn zone-motion-advanced" type="button" data-expand-zone-motion="${zoneIndex}" aria-expanded="${expanded}">
-            ${expanded ? ICONS.chevronUp : ICONS.email}<span>${expanded ? 'Hide advanced' : 'Advanced'}</span>
-          </button>
+          <span class="muted">Recording and notifications are configured on Alerts.</span>
         </div>
       </div>
-      <div class="zone-motion-advanced-body" ${expanded ? '' : 'hidden'}>
-        <label class="sound-rule-field" title="Cooldown: minimum seconds between motion events and alerts for this area. Default 60.">
-          <span>Cooldown (s)</span>
-          <input type="number" data-zone-motion-cooldown="${zoneIndex}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" />
-        </label>
+      <div class="zone-motion-advanced-body">
         <label class="sound-rule-field" title="Per-zone gate: minimum fraction of THIS zone's pixels that must change before motion counts. Leave blank to use the camera/global gate. Lower = more sensitive for this zone only.">
           <span>Gate override</span>
           <input type="number" data-zone-motion-gate="${zoneIndex}" value="${rule.gate_fraction != null ? escapeHtml(rule.gate_fraction) : ''}" min="0.0001" max="0.5" step="0.0001" placeholder="Inherit" />
@@ -572,15 +520,7 @@ function renderMotionCard(zone, zoneIndex) {
           <span>Scale override</span>
           <input type="number" data-zone-motion-scale="${zoneIndex}" value="${rule.scale_fraction != null ? escapeHtml(rule.scale_fraction) : ''}" min="0.001" max="1.0" step="0.001" placeholder="Inherit" />
         </label>
-        <label class="sound-rule-field" title="Send an email when motion is detected in this area. Add recipients in the Email recipients field below.">
-          <span>Email alerts</span>
-          <input type="checkbox" data-zone-motion-email="${zoneIndex}" ${rule.email_enabled === true ? 'checked' : ''} />
-        </label>
-        <label class="sound-rule-field" title="Send a push notification when motion is detected in this area.">
-          <span>Push alerts</span>
-          <input type="checkbox" data-zone-motion-push="${zoneIndex}" ${rule.push_enabled === true ? 'checked' : ''} />
-        </label>
-        ${renderRuleExpandFields('zone-motion', zoneIndex, rule)}
+
       </div>` : ''}
     </div>`;
 }
@@ -588,8 +528,6 @@ function renderMotionCard(zone, zoneIndex) {
 function renderFaceCard(zone, zoneIndex) {
   const rule = faceRuleOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
-  const key = `face:${zoneIndex}`;
-  const expanded = expandedZoneRules.has(key);
   const zoneLabel = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
   return `
     <div class="zone-motion-card${enabled ? ' is-enabled' : ''}" data-zone-face-for="${zoneIndex}">
@@ -617,30 +555,10 @@ function renderFaceCard(zone, zoneIndex) {
           <small class="form-help muted">Faces detected outside Face-enabled areas are ignored entirely.</small>
         </label>
         <div class="zone-motion-secondary">
-          <label class="zone-motion-field" title="Record a clip whenever a face is detected in this area.">
-            <span>Record on face</span>
-            <input type="checkbox" data-zone-face-record="${zoneIndex}" ${rule.record_on_detect !== false ? 'checked' : ''} />
-          </label>
-          <button class="secondary rule-expand-btn zone-motion-advanced" type="button" data-expand-zone-face="${zoneIndex}" aria-expanded="${expanded}">
-            ${expanded ? ICONS.chevronUp : ICONS.email}<span>${expanded ? 'Hide advanced' : 'Advanced'}</span>
-          </button>
+          <span class="muted">Recording and notifications are configured on Alerts.</span>
         </div>
       </div>
-      <div class="zone-motion-advanced-body" ${expanded ? '' : 'hidden'}>
-        <label class="sound-rule-field" title="Cooldown: minimum seconds between face events and alerts for this area. Default 60.">
-          <span>Cooldown (s)</span>
-          <input type="number" data-zone-face-cooldown="${zoneIndex}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" />
-        </label>
-        <label class="sound-rule-field" title="Send an email when a face is detected in this area. Add recipients below.">
-          <span>Email alerts</span>
-          <input type="checkbox" data-zone-face-email="${zoneIndex}" ${rule.email_enabled === true ? 'checked' : ''} />
-        </label>
-        <label class="sound-rule-field" title="Send a push notification when a face is detected in this area.">
-          <span>Push alerts</span>
-          <input type="checkbox" data-zone-face-push="${zoneIndex}" ${rule.push_enabled === true ? 'checked' : ''} />
-        </label>
-        ${renderRuleExpandFields('zone-face', zoneIndex, rule)}
-      </div>` : ''}
+` : ''}
     </div>`;
 }
 
@@ -731,7 +649,6 @@ function renderObjectDetectionRules() {
         <div class="zone-name-card"><span class="zone-name-kicker">Area</span><strong>${zoneName}</strong></div>
         ${renderMotionCard(zone, zoneIndex)}
         ${renderFaceCard(zone, zoneIndex)}
-        ${renderPeopleCard(zone, zoneIndex)}
         <div class="zone-object-rules-header">
           <select data-add-zone-rule="${zoneIndex}" class="rule-add-select">${addOptions}</select>
         </div>
@@ -755,17 +672,8 @@ function bindObjectRuleControls() {
       markZoneUnsaved();
     });
   });
-  document.querySelectorAll('[data-expand-zone-rule]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const key = btn.dataset.expandZoneRule;
-      if (expandedZoneRules.has(key)) expandedZoneRules.delete(key);
-      else expandedZoneRules.add(key);
-      renderObjectDetectionRules();
-    });
-  });
   bindMotionControls();
   bindFaceControls();
-  bindPeopleControls();
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
@@ -799,9 +707,9 @@ function bindObjectRuleControls() {
   bindRuleFields();
 }
 
-// Motion card controls: a single on/off toggle plus the essentials
-// (record, sensitivity) and the advanced fields (email recipients + time
-// windows) that reuse the shared renderRuleExpandFields markup. Data
+// Motion card controls are limited to detection sensitivity and per-zone
+// pixel gate/scale overrides. Alert delivery, recording, schedules, and
+// cooldowns are edited on Alerts. Data
 // attributes carry the bare zone index; the motion rule itself is looked up
 // by label so reordering object rules never breaks these bindings.
 function bindMotionControls() {
@@ -820,14 +728,6 @@ function bindMotionControls() {
       markZoneUnsaved();
     });
   });
-  document.querySelectorAll('[data-zone-motion-record]').forEach((cb) => {
-    cb.addEventListener('change', () => {
-      const rule = motionRuleOf(cameraDetection().zones[Number(cb.dataset.zoneMotionRecord)]);
-      if (!rule) return;
-      rule.record_on_detect = cb.checked;
-      markZoneUnsaved();
-    });
-  });
   // Sensitivity slider: `input` updates the live readout only, `change`
   // (released) commits the value to the rule.
   document.querySelectorAll('[data-zone-motion-confidence]').forEach((inp) => {
@@ -843,14 +743,6 @@ function bindMotionControls() {
       const rule = motionRuleOf(cameraDetection().zones[Number(inp.dataset.zoneMotionConfidence)]);
       if (!rule) return;
       rule.min_confidence = clamp(Number(inp.value || 0.45), 0, 1);
-      markZoneUnsaved();
-    });
-  });
-  document.querySelectorAll('[data-zone-motion-cooldown]').forEach((inp) => {
-    inp.addEventListener('change', () => {
-      const rule = motionRuleOf(cameraDetection().zones[Number(inp.dataset.zoneMotionCooldown)]);
-      if (!rule) return;
-      rule.cooldown_seconds = Math.max(0, Number.parseInt(inp.value || 0, 10) || 0);
       markZoneUnsaved();
     });
   });
@@ -873,60 +765,11 @@ function bindMotionControls() {
       });
     });
   });
-  [
-    ['zoneMotionEmail', 'email_enabled'],
-    ['zoneMotionPush', 'push_enabled'],
-  ].forEach(([datasetKey, ruleKey]) => {
-    const attr = `input[type="checkbox"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`;
-    document.querySelectorAll(attr).forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const rule = motionRuleOf(cameraDetection().zones[Number(cb.dataset[datasetKey])]);
-        if (!rule) return;
-        rule[ruleKey] = cb.checked;
-        markZoneUnsaved();
-      });
-    });
-  });
-  document.querySelectorAll('[data-expand-zone-motion]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const key = `motion:${btn.dataset.expandZoneMotion}`;
-      if (expandedZoneRules.has(key)) expandedZoneRules.delete(key);
-      else expandedZoneRules.add(key);
-      renderObjectDetectionRules();
-    });
-  });
-  document.querySelectorAll('[data-zone-motion-email-recipients]').forEach((input) => {
-    input.addEventListener('change', () => {
-      const rule = motionRuleOf(cameraDetection().zones[Number(input.dataset.zoneMotionEmailRecipients)]);
-      if (!rule) return;
-      rule.email_recipients = normalizeEmailList(input.value);
-      markZoneUnsaved();
-    });
-  });
-  [
-    ['zoneMotionActiveStart', 'active_start'],
-    ['zoneMotionActiveEnd', 'active_end'],
-    ['zoneMotionNotifyStart', 'notify_start'],
-    ['zoneMotionNotifyEnd', 'notify_end'],
-  ].forEach(([datasetKey, ruleKey]) => {
-    const attr = `data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`;
-    document.querySelectorAll(`[${attr}]`).forEach((wrap) => {
-      wrap.querySelectorAll('select').forEach((sel) => {
-        sel.addEventListener('change', () => {
-          const rule = motionRuleOf(cameraDetection().zones[Number(wrap.dataset[datasetKey])]);
-          if (!rule) return;
-          rule[ruleKey] = timeSelectValue(wrap);
-          markZoneUnsaved();
-        });
-      });
-    });
-  });
 }
 
 
-// Face-card bindings: same structure as the motion card (data attributes carry
-// the bare zone index; the face rule is looked up by label so reordering
-// object rules never breaks these bindings).
+// Face-card bindings only edit face detection scope and sensitivity. Alert
+// delivery, recording, schedules, and cooldowns are edited on Alerts.
 function bindFaceControls() {
   document.querySelectorAll('[data-zone-face-toggle]').forEach((cb) => {
     cb.addEventListener('change', () => {
@@ -938,14 +781,6 @@ function bindFaceControls() {
         if (rule) rule.enabled = false;
       }
       renderObjectDetectionRules();
-      markZoneUnsaved();
-    });
-  });
-  document.querySelectorAll('[data-zone-face-record]').forEach((cb) => {
-    cb.addEventListener('change', () => {
-      const rule = faceRuleOf(cameraDetection().zones[Number(cb.dataset.zoneFaceRecord)]);
-      if (!rule) return;
-      rule.record_on_detect = cb.checked;
       markZoneUnsaved();
     });
   });
@@ -962,264 +797,7 @@ function bindFaceControls() {
       markZoneUnsaved();
     });
   });
-  document.querySelectorAll('[data-zone-face-cooldown]').forEach((inp) => {
-    inp.addEventListener('change', () => {
-      const rule = faceRuleOf(cameraDetection().zones[Number(inp.dataset.zoneFaceCooldown)]);
-      if (!rule) return;
-      rule.cooldown_seconds = Math.max(0, Number.parseInt(inp.value || 0, 10) || 0);
-      markZoneUnsaved();
-    });
-  });
-  [
-    ['zoneFaceEmail', 'email_enabled'],
-    ['zoneFacePush', 'push_enabled'],
-  ].forEach(([datasetKey, ruleKey]) => {
-    const attr = `input[type="checkbox"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`;
-    document.querySelectorAll(attr).forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const rule = faceRuleOf(cameraDetection().zones[Number(cb.dataset[datasetKey])]);
-        if (!rule) return;
-        rule[ruleKey] = cb.checked;
-        markZoneUnsaved();
-      });
-    });
-  });
-  document.querySelectorAll('[data-expand-zone-face]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const key = `face:${btn.dataset.expandZoneFace}`;
-      if (expandedZoneRules.has(key)) expandedZoneRules.delete(key);
-      else expandedZoneRules.add(key);
-      renderObjectDetectionRules();
-    });
-  });
-  document.querySelectorAll('[data-zone-face-email-recipients]').forEach((input) => {
-    input.addEventListener('change', () => {
-      const rule = faceRuleOf(cameraDetection().zones[Number(input.dataset.zoneFaceEmailRecipients)]);
-      if (!rule) return;
-      rule.email_recipients = normalizeEmailList(input.value);
-      markZoneUnsaved();
-    });
-  });
-  [
-    ['zoneFaceActiveStart', 'active_start'],
-    ['zoneFaceActiveEnd', 'active_end'],
-    ['zoneFaceNotifyStart', 'notify_start'],
-    ['zoneFaceNotifyEnd', 'notify_end'],
-  ].forEach(([datasetKey, ruleKey]) => {
-    const attr = `data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`;
-    document.querySelectorAll(`[${attr}]`).forEach((wrap) => {
-      wrap.querySelectorAll('select').forEach((sel) => {
-        sel.addEventListener('change', () => {
-          const rule = faceRuleOf(cameraDetection().zones[Number(wrap.dataset[datasetKey])]);
-          if (!rule) return;
-          rule[ruleKey] = timeSelectValue(wrap);
-          markZoneUnsaved();
-        });
-      });
-    });
-  });
 }
-
-// ── People Detection card ────────────────────────────────────────────
-// Per-zone known-person + stranger alerting. Rules live in the shared
-// face-detection-rules store (the former Face Rules tab) and are stamped
-// with camera_id/zone_id so they fire only inside this area. Changes save
-// immediately -- they do NOT participate in the zone Save button, because
-// they are stored separately from camera detection settings.
-
-let faceRulesPayload = { rules: [] };
-let enrolledPeople = [];
-const PEOPLE_SAVE_DELAY_MS = 400;
-let peopleSaveTimer = null;
-
-function peopleRowKey(personId) {
-  return personId ? String(personId) : '_unknown';
-}
-
-function findScopedPeopleRule(zone, personId) {
-  const wanted = peopleRowKey(personId);
-  return (faceRulesPayload.rules || []).find((rule) => {
-    if (String(rule.camera_id || '') !== String(selectedCamera?.id || '')) return false;
-    if (String(rule.zone_id || '') !== String(zone.id || '')) return false;
-    return peopleRowKey(rule.person_id) === wanted;
-  }) || null;
-}
-
-function ensureScopedPeopleRule(zone, personId, personName) {
-  let rule = findScopedPeopleRule(zone, personId);
-  if (rule) return rule;
-  const isUnknown = !personId;
-  rule = {
-    id: isUnknown ? `_unknown:${zone.id}` : `zone:${zone.id}:person:${personId}`,
-    person_id: isUnknown ? null : personId,
-    name: personName || 'Unknown Person',
-    enabled: true,
-    email_enabled: false,
-    push_enabled: false,
-    email_recipients: '',
-    cooldown_minutes: 5,
-    min_confidence: null,
-    camera_id: selectedCamera.id,
-    zone_id: zone.id,
-  };
-  faceRulesPayload.rules = [...(faceRulesPayload.rules || []), rule];
-  return rule;
-}
-
-function schedulePeopleSave() {
-  clearTimeout(peopleSaveTimer);
-  peopleSaveTimer = setTimeout(async () => {
-    try {
-      faceRulesPayload = await api('/api/settings/face-detection-rules', {
-        method: 'PUT',
-        body: JSON.stringify({ rules: faceRulesPayload.rules || [] }),
-      });
-      window.showToast?.('People rules saved.');
-    } catch (error) {
-      if (!window.daygleAuth?.redirecting) window.showToast?.(error.message || 'Failed to save people rules.', true);
-    }
-  }, PEOPLE_SAVE_DELAY_MS);
-}
-
-function renderPeopleCard(zone, zoneIndex) {
-  if (!selectedCamera) return '';
-  const zi = Number(zoneIndex);
-  const zoneLabel = escapeHtml(zone.name || `Zone ${zi + 1}`);
-  const rows = [{ key: '', name: 'Unknown Person', unknown: true }]
-    .concat((enrolledPeople || []).map((person) => ({ key: String(person.id), name: person.name, unknown: false })))
-    .map(({ key, name, unknown }) => {
-      const rule = findScopedPeopleRule(zone, key);
-      const expandKey = `people:${zi}:${key || '_unknown'}`;
-      const expanded = expandedZoneRules.has(expandKey);
-      // dk is a two-part composite (zone index + person row key) carried
-      // through HTML data attributes. Percent-encode each part so neither can
-      // inject the '|' or ':' delimiters, then decode on read -- no lossy
-      // first-match replace (CodeQL: incomplete string escaping).
-      const dk = `${encodeURIComponent(zi)}|${encodeURIComponent(key || '_unknown')}`;
-      return `
-      <div class="people-rule-row" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.06)">
-        <span style="flex:1;font-size:13px;font-weight:500">${escapeHtml(name)}${unknown ? ' <span class="muted" style="font-size:11px">(Stranger Alerts)</span>' : ''}</span>
-        <label class="toggle-control" title="Alert when ${escapeHtml(name)} is detected in this area">
-          <input type="checkbox" data-people-toggle="${dk}" ${rule && rule.enabled ? 'checked' : ''} aria-label="Toggle alerts for ${escapeHtml(name)} in ${zoneLabel}" />
-          <span>${rule && rule.enabled ? 'On' : 'Off'}</span>
-        </label>
-        <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Email when ${escapeHtml(name)} is detected here">
-          <input type="checkbox" data-people-email="${dk}" ${rule?.email_enabled ? 'checked' : ''} />📧
-        </label>
-        <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Push when ${escapeHtml(name)} is detected here">
-          <input type="checkbox" data-people-push="${dk}" ${rule?.push_enabled ? 'checked' : ''} />🔔
-        </label>
-        <button class="secondary rule-expand-btn" type="button" data-expand-zone-people="${dk}" aria-expanded="${expanded}" title="Recipients, cooldown and confidence for ${escapeHtml(name)}">${expanded ? ICONS.chevronUp : ICONS.email}<span>${expanded ? 'Hide' : 'Advanced'}</span></button>
-      </div>
-      <div class="zone-motion-advanced-body" data-people-advanced="${dk}" ${expanded ? '' : 'hidden'} style="display:flex;flex-wrap:wrap;gap:12px;padding:0 0 10px">
-        <label class="sound-rule-field" title="Comma-separated email recipients for ${escapeHtml(name)} alerts in this area.">
-          <span>Recipients</span>
-          <input type="text" data-people-recipients="${dk}" value="${escapeHtml(normalizeEmailList(rule?.email_recipients || '').join(', '))}" placeholder="a@example.com, b@example.com" style="min-width:220px" />
-        </label>
-        <label class="sound-rule-field" title="Minutes between repeat alerts for the same person in this area. Default 5.">
-          <span>Cooldown (min)</span>
-          <input type="number" data-people-cooldown="${dk}" value="${escapeHtml(String(rule ? (rule.cooldown_minutes ?? 5) : 5))}" min="0" max="1440" step="1" style="width:90px" />
-        </label>
-        <label class="sound-rule-field" title="Minimum recognition confidence (0-1) required. Leave blank for any.">
-          <span>Min confidence</span>
-          <input type="number" data-people-confidence="${dk}" value="${rule?.min_confidence != null ? escapeHtml(String(rule.min_confidence)) : ''}" min="0" max="1" step="0.01" placeholder="Any" style="width:90px" />
-        </label>
-      </div>`;
-    }).join('');
-  return `
-    <div class="zone-motion-card" data-zone-people-for="${zi}">
-      <div class="zone-motion-head">
-        <div class="zone-motion-title">
-          <span class="zone-motion-icon" aria-hidden="true">👥</span>
-          <div>
-            <strong>People Detection</strong>
-            <span>Alert on recognised people inside this area</span>
-          </div>
-        </div>
-      </div>
-      <div class="zone-motion-body zone-people-body">${rows}</div>
-    </div>`;
-}
-
-function bindPeopleControls() {
-  const ruleFromDataset = (datasetValue) => {
-    const sep = datasetValue.indexOf('|');
-    const zone = cameraDetection().zones[Number(datasetValue.slice(0, sep))];
-    if (!zone) return null;
-    const rawKey = decodeURIComponent(datasetValue.slice(sep + 1));
-    const personId = rawKey === '_unknown' ? '' : rawKey;
-    let rule = findScopedPeopleRule(zone, personId);
-    if (!rule) {
-      const person = (enrolledPeople || []).find((candidate) => String(candidate.id) === String(personId));
-      rule = ensureScopedPeopleRule(zone, personId, person?.name);
-    }
-    return rule;
-  };
-  [
-    ['peopleToggle', (rule, checked) => { rule.enabled = checked; }],
-    ['peopleEmail', (rule, checked) => { rule.email_enabled = checked; }],
-    ['peoplePush', (rule, checked) => { rule.push_enabled = checked; }],
-  ].forEach(([datasetKey, apply]) => {
-    document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const rule = ruleFromDataset(cb.dataset[datasetKey]);
-        if (!rule) return;
-        apply(rule, cb.checked);
-        schedulePeopleSave();
-      });
-    });
-  });
-  [['peopleRecipients', 'email_recipients'], ['peopleCooldown', 'cooldown_minutes'], ['peopleConfidence', 'min_confidence']]
-    .forEach(([datasetKey, ruleKey]) => {
-      document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((input) => {
-        input.addEventListener('change', () => {
-          const rule = ruleFromDataset(input.dataset[datasetKey]);
-          if (!rule) return;
-          if (ruleKey === 'email_recipients') {
-            rule.email_recipients = normalizeEmailList(input.value);
-          } else if (ruleKey === 'cooldown_minutes') {
-            rule.cooldown_minutes = Math.max(0, Number.parseInt(input.value || '5', 10) || 0);
-          } else {
-            const raw = String(input.value || '').trim();
-            const num = raw === '' ? null : clamp(Number(raw), 0, 1);
-            rule.min_confidence = Number.isFinite(num) ? num : null;
-          }
-          schedulePeopleSave();
-        });
-      });
-    });
-  document.querySelectorAll('[data-expand-zone-people]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const [rawZi, rawKey] = btn.dataset.expandZonePeople.split('|');
-      const expandKey = `people:${decodeURIComponent(rawZi)}:${decodeURIComponent(rawKey)}`;
-      if (expandedZoneRules.has(expandKey)) expandedZoneRules.delete(expandKey);
-      else expandedZoneRules.add(expandKey);
-      renderObjectDetectionRules();
-    });
-  });
-}
-
-async function loadEnrolledPeople() {
-  try {
-    const body = await api('/api/persons');
-    enrolledPeople = body.persons || [];
-  } catch {
-    enrolledPeople = []; // non-fatal: the Unknown row still works
-  }
-}
-
-(async function initPeopleCard() {
-  try {
-    const [rules] = await Promise.all([
-      api('/api/settings/face-detection-rules'),
-      loadEnrolledPeople(),
-    ]);
-    faceRulesPayload = rules;
-  } catch {
-    // Card still renders from empty defaults; saving recreates the store.
-  }
-  if (selectedCamera) renderObjectDetectionRules();
-})();
 
 function parseZoneRuleKey(value) {
   const [zoneIndex, ruleIndex] = String(value).split(':').map((part) => Number.parseInt(part, 10));
@@ -1317,9 +895,6 @@ function bindZoneControls(zones) {
 function bindRuleFields() {
   const checkboxBindings = [
     ['zoneRuleEnabled', 'enabled'],
-    ['zoneRuleRecord', 'record_on_detect'],
-    ['zoneRuleEmail', 'email_enabled'],
-    ['zoneRulePush', 'push_enabled'],
   ];
   checkboxBindings.forEach(([datasetKey, ruleKey]) => {
     document.querySelectorAll(`input[type="checkbox"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((cb) => {
@@ -1346,9 +921,7 @@ function bindRuleFields() {
       markZoneUnsaved();
     });
   });
-  const numberBindings = [
-    ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],
-  ];
+  const numberBindings = [];
   // Note: ``max_confidence`` is intentionally not exposed in the GUI -- the
   // frontend always writes the 1.0 (no upper limit) default so rules keep
   // their legacy behavior. The backend still normalizes and honors the field
@@ -1361,34 +934,6 @@ function bindRuleFields() {
         rule[ruleKey] = transform(inp.value);
         cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
         markZoneUnsaved();
-      });
-    });
-  });
-  document.querySelectorAll('input[data-zone-rule-email-recipients]').forEach((input) => {
-    input.addEventListener('change', () => {
-      const { zoneIndex, rule } = parseZoneRuleKey(input.dataset.zoneRuleEmailRecipients);
-      if (!rule) return;
-      rule.email_recipients = normalizeEmailList(input.value);
-      cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
-      markZoneUnsaved();
-    });
-  });
-  [
-    ['zoneRuleActiveStart', 'active_start'],
-    ['zoneRuleActiveEnd', 'active_end'],
-    ['zoneRuleNotifyStart', 'notify_start'],
-    ['zoneRuleNotifyEnd', 'notify_end'],
-  ].forEach(([datasetKey, ruleKey]) => {
-    const attr = `data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`;
-    document.querySelectorAll(`[${attr}]`).forEach((wrap) => {
-      wrap.querySelectorAll('select').forEach((sel) => {
-        sel.addEventListener('change', () => {
-          const { zoneIndex, rule } = parseZoneRuleKey(wrap.dataset[datasetKey]);
-          if (!rule) return;
-          rule[ruleKey] = timeSelectValue(wrap);
-          cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
-          markZoneUnsaved();
-        });
       });
     });
   });
