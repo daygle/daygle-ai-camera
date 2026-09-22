@@ -81,6 +81,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from app.camera_id import normalize_camera_id
@@ -447,6 +448,66 @@ def normalize_zone_tripwire(zone: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def normalize_zone_loiter(zone: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize an optional per-zone behavioural **loiter** rule (Tier 2:
+    statistical long-dwell / loitering detection). Returns ``None`` when no
+    loiter rule is configured, so zones without one keep their canonical shape.
+
+    Shape::
+
+        {
+            "enabled": bool,
+            "name": str,
+            "labels": [str, ...],         # object labels that count ([] = any)
+            "min_dwell_seconds": int,     # absolute floor before "loitering"
+            "sensitivity": float,         # std multiplier k in mean + k*std
+            "cooldown_seconds": int,
+            "record_on_detect": bool,
+            "email_enabled": bool,
+            "email_recipients": [str, ...],
+            "push_enabled": bool,
+        }
+
+    The learned per-(zone, label) dwell baseline is NOT stored here -- this is
+    only the user-facing policy; the running statistics live with the behaviour
+    monitor (a later phase).
+    """
+    raw = zone.get('loiter')
+    if not isinstance(raw, dict):
+        return None
+    try:
+        min_dwell = max(1, int(raw.get('min_dwell_seconds') if raw.get('min_dwell_seconds') is not None else 30))
+    except (TypeError, ValueError):
+        min_dwell = 30
+    try:
+        sensitivity = float(raw.get('sensitivity') if raw.get('sensitivity') is not None else 3.0)
+    except (TypeError, ValueError):
+        sensitivity = 3.0
+    # ``float('nan')``/``float('inf')`` parse without error but must not slip
+    # through the clamp (min/max with NaN is order-dependent), so fall back.
+    if not math.isfinite(sensitivity):
+        sensitivity = 3.0
+    # Keep sensitivity in a sane band: 0 means "floor only" (ignore the learned
+    # spread), and a very large k would never fire.
+    sensitivity = max(0.0, min(10.0, sensitivity))
+    try:
+        cooldown = max(0, int(raw.get('cooldown_seconds') if raw.get('cooldown_seconds') is not None else 120))
+    except (TypeError, ValueError):
+        cooldown = 120
+    return {
+        'enabled': bool(raw.get('enabled', True)),
+        'name': str(raw.get('name') or 'Loitering').strip() or 'Loitering',
+        'labels': normalize_label_list(raw.get('labels')),
+        'min_dwell_seconds': min_dwell,
+        'sensitivity': round(sensitivity, 3),
+        'cooldown_seconds': cooldown,
+        'record_on_detect': bool(raw.get('record_on_detect', True)),
+        'email_enabled': bool(raw.get('email_enabled', False)),
+        'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
+        'push_enabled': bool(raw.get('push_enabled', False)),
+    }
+
+
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     if not isinstance(zones, list):
@@ -544,5 +605,10 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
         tripwire = normalize_zone_tripwire(zone)
         if tripwire is not None:
             entry['tripwire'] = tripwire
+        # Optional Tier-2 behavioural loiter rule (statistical long-dwell).
+        # Attached only when configured, so zones without one keep their shape.
+        loiter = normalize_zone_loiter(zone)
+        if loiter is not None:
+            entry['loiter'] = loiter
         normalized.append(entry)
     return normalized
