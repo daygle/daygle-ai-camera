@@ -7021,3 +7021,43 @@ button.secondary:disabled, a.secondary:disabled {
   border-color: rgba(124, 58, 237, .22);
   color: #7c3aed;
 }
+
+/* ─── Detection rule tables (Zones detection scope + Sounds classes) ───────── */
+/* Object, motion, face and sound rules all render as rows of the shared
+   .rule-table so both pages match the cameras-table look. */
+.zone-rule-table td { padding: 9px 12px; vertical-align: middle; }
+.zone-rule-table th { white-space: nowrap; }
+.zone-rule-table .cell-label { color: var(--text); font-weight: 750; white-space: nowrap; }
+.zone-rule-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 9px;
+  border: 1px solid rgba(71, 214, 255, .3);
+  border-radius: 7px;
+  background: rgba(71, 214, 255, .08);
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1;
+  vertical-align: middle;
+}
+.zone-rule-row.is-enabled .zone-rule-icon {
+  border-color: rgba(73, 230, 163, .4);
+  background: rgba(73, 230, 163, .1);
+  color: var(--success);
+}
+.zone-rule-toggle { display: inline-flex; padding: 5px 12px; font-size: 12px; }
+.zone-rule-conf { width: 88px; }
+.zone-rule-table .cell-actions { text-align: right; white-space: nowrap; }
+.zone-rule-remove { padding: 7px 10px; }
+.zone-rule-advanced-toggle { padding: 6px 12px; font-size: 12px; }
+.zone-rule-advanced-toggle.is-open { border-color: var(--accent); color: var(--accent); }
+.zone-rule-advanced-row > td { background: rgba(255, 255, 255, .02); }
+.zone-rule-advanced { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; }
+.zone-rule-table input:disabled { opacity: .5; }
+.zone-rule-toggle input:disabled + span { opacity: .5; }
+.zone-rule-add { margin-top: 12px; }
+.zone-rule-add .rule-add-select { max-width: 260px; }
+:root.light .zone-rule-advanced-row > td { background: rgba(0, 0, 0, .02); }

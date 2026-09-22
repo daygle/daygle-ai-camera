@@ -434,6 +434,14 @@ function objectRuleOptions(selectedLabel) {
   return `<option value="">Add Object...</option><optgroup label="Groups">${groups}</optgroup>${coco}`;
 }
 
+// Shared On/Off pill used in every detection-table cell (Detect + Record),
+// so object, motion, face and sound rows all render identically.
+function ruleToggleCell(attr, on, title, disabled) {
+  return `<label class="toggle-control zone-rule-toggle" title="${escapeHtml(title)}"><input type="checkbox" ${attr}${on ? ' checked' : ''}${disabled ? ' disabled' : ''} /><span>${on ? 'On' : 'Off'}</span></label>`;
+}
+
+// Object-class rows for a zone's detection table. Motion and face get their own
+// rows (renderMotionCard/renderFaceCard); this returns only object-class <tr>s.
 function renderObjectRules(zone, zoneIndex) {
   zone.object_rules = normalizeObjectRules(zone);
   const rules = zone.object_rules
@@ -442,136 +450,67 @@ function renderObjectRules(zone, zoneIndex) {
       const label = String(rule.label || '').trim().toLowerCase();
       return label !== 'motion' && label !== 'face';
     });
-  if (!rules.length) {
-    return '<div class="empty compact-empty">No object rules yet. Choose an object below to add detection settings for this area.</div>';
-  }
-  const cards = rules.map(({ rule, ruleIndex }) => {
+  return rules.map(({ rule, ruleIndex }) => {
     const key = `${zoneIndex}:${ruleIndex}`;
     const label = escapeHtml(titleCase(rule.label));
+    const lower = label.toLowerCase();
     const enabled = rule.enabled !== false;
     return `
-      <div class="zone-motion-card${enabled ? ' is-enabled' : ''}">
-        <div class="zone-motion-head">
-          <div class="zone-motion-title">
-            <span class="zone-motion-icon" aria-hidden="true">🔍</span>
-            <div>
-              <strong>${label}</strong>
-              <span>Detect ${label.toLowerCase()} in this area</span>
-            </div>
-          </div>
-          <label class="toggle-control zone-motion-toggle" title="Enable or disable ${label} detection for this area">
-            <input type="checkbox" data-zone-rule-enabled="${key}" ${enabled ? 'checked' : ''} />
-            <span>${enabled ? 'On' : 'Off'}</span>
-          </label>
-        </div>
-        <div class="zone-motion-body zone-people-body">
-          <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:end">
-            <label class="sound-rule-field" title="Minimum confidence (0.01-1). Overrides the global ONNX slider for this object in this zone.">
-              <span>Min Confidence</span>
-              <input type="number" data-zone-rule-confidence-value="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" style="width:90px" />
-            </label>
-            <label class="toggle-control" title="Record a clip when ${label.toLowerCase()} is detected in this area" style="align-self:center">
-              <input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} />
-              <span>Record</span>
-            </label>
-            <button class="delete-btn secondary zone-action-btn" type="button" data-delete-zone-rule="${key}" title="Delete ${label} detection rule from this zone">${ICONS.remove} Remove</button>
-          </div>
-        </div>
-      </div>`;
+      <tr class="zone-rule-row${enabled ? ' is-enabled' : ''}">
+        <td class="cell-label"><span class="zone-rule-icon" aria-hidden="true">🔍</span>${label}</td>
+        <td>${ruleToggleCell(`data-zone-rule-enabled="${key}"`, enabled, `Enable or disable ${lower} detection in this area`, false)}</td>
+        <td><input class="zone-rule-conf" type="number" data-zone-rule-confidence-value="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" title="Minimum confidence (0.01-1). Overrides the global ONNX slider for this object in this zone." /></td>
+        <td>${ruleToggleCell(`data-zone-rule-record="${key}"`, rule.record_on_detect !== false, `Record a clip when ${lower} is detected in this area`, false)}</td>
+        <td class="cell-actions"><button class="delete-btn secondary zone-action-btn zone-rule-remove" type="button" data-delete-zone-rule="${key}" title="Remove ${label} from this area" aria-label="Remove ${label} from this area">${ICONS.remove}</button></td>
+      </tr>`;
   }).join('');
-  return cards;
 }
 
+// Motion row for the detection table, plus a hidden "Advanced" row that holds
+// the per-zone gate/scale overrides and the pixel-threshold hint.
 function renderMotionCard(zone, zoneIndex) {
   const rule = motionRuleOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
-  const zoneLabel = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
-  return `
-    <div class="zone-motion-card${enabled ? ' is-enabled' : ''}" data-zone-motion-for="${zoneIndex}">
-      <div class="zone-motion-head">
-        <div class="zone-motion-title">
-          <span class="zone-motion-icon" aria-hidden="true">⟳</span>
-          <div>
-            <strong>Motion Detection</strong>
-            <span>Detect any movement in this area</span>
-          </div>
-        </div>
-        <label class="toggle-control zone-motion-toggle" title="Enable or disable motion detection for this area">
-          <input type="checkbox" data-zone-motion-toggle="${zoneIndex}" ${enabled ? 'checked' : ''} aria-label="Toggle motion detection for ${zoneLabel}" />
-          <span>${enabled ? 'On' : 'Off'}</span>
-        </label>
-      </div>
-      ${enabled ? `
-      <div class="zone-motion-body">
-        <label class="zone-motion-field zone-motion-sensitivity" title="Sensitivity: only motion with at least this confidence counts (0-1). Drag left for more sensitive, right for less.">
-          <span>Sensitivity</span>
-          <span class="zone-motion-sensitivity-row">
-            <input type="range" data-zone-motion-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(rule.min_confidence)}" />
-            <output class="zone-motion-sensitivity-value" data-zone-motion-confidence-value="${zoneIndex}">${escapeHtml(rule.min_confidence)}</output>
-          </span>
-          <small class="form-help muted zone-motion-pixel-help" data-zone-motion-pixel-help="${zoneIndex}">${escapeHtml(motionPixelThresholdText(rule))}</small>
-        </label>
-        <div class="zone-motion-secondary">
-          <label class="toggle-control" title="Record a clip when motion is detected in this area">
-            <input type="checkbox" data-zone-motion-record="${zoneIndex}" ${rule.record_on_detect !== false ? 'checked' : ''} />
-            <span>Record</span>
+  const conf = rule?.min_confidence ?? 0.45;
+  const advancedRow = enabled ? `
+    <tr class="zone-rule-advanced-row" data-zone-motion-advanced-for="${zoneIndex}" hidden>
+      <td colspan="5">
+        <div class="zone-rule-advanced">
+          <label class="sound-rule-field" title="Per-zone gate: minimum fraction of THIS zone's pixels that must change before motion counts. Leave blank to use the camera/global gate. Lower = more sensitive for this zone only.">
+            <span>Gate override</span>
+            <input type="number" data-zone-motion-gate="${zoneIndex}" value="${rule.gate_fraction != null ? escapeHtml(rule.gate_fraction) : ''}" min="0.0001" max="0.5" step="0.0001" placeholder="Inherit" />
           </label>
-          <span class="muted">Notifications are configured on Alerts.</span>
+          <label class="sound-rule-field" title="Per-zone scale: pixel-change fraction in THIS zone that maps to 100% motion confidence. Leave blank to use the camera/global scale. Lower = stronger confidence for small motion in this zone.">
+            <span>Scale override</span>
+            <input type="number" data-zone-motion-scale="${zoneIndex}" value="${rule.scale_fraction != null ? escapeHtml(rule.scale_fraction) : ''}" min="0.001" max="1.0" step="0.001" placeholder="Inherit" />
+          </label>
+          <small class="form-help muted zone-motion-pixel-help" data-zone-motion-pixel-help="${zoneIndex}">${escapeHtml(motionPixelThresholdText(rule))}</small>
         </div>
-      </div>
-      <div class="zone-motion-advanced-body">
-        <label class="sound-rule-field" title="Per-zone gate: minimum fraction of THIS zone's pixels that must change before motion counts. Leave blank to use the camera/global gate. Lower = more sensitive for this zone only.">
-          <span>Gate override</span>
-          <input type="number" data-zone-motion-gate="${zoneIndex}" value="${rule.gate_fraction != null ? escapeHtml(rule.gate_fraction) : ''}" min="0.0001" max="0.5" step="0.0001" placeholder="Inherit" />
-        </label>
-        <label class="sound-rule-field" title="Per-zone scale: pixel-change fraction in THIS zone that maps to 100% motion confidence. Leave blank to use the camera/global scale. Lower = stronger confidence for small motion in this zone.">
-          <span>Scale override</span>
-          <input type="number" data-zone-motion-scale="${zoneIndex}" value="${rule.scale_fraction != null ? escapeHtml(rule.scale_fraction) : ''}" min="0.001" max="1.0" step="0.001" placeholder="Inherit" />
-        </label>
-
-      </div>` : ''}
-    </div>`;
+      </td>
+    </tr>` : '';
+  return `
+    <tr class="zone-rule-row zone-rule-structural${enabled ? ' is-enabled' : ''}" data-zone-motion-for="${zoneIndex}">
+      <td class="cell-label"><span class="zone-rule-icon" aria-hidden="true">⟳</span>Motion</td>
+      <td>${ruleToggleCell(`data-zone-motion-toggle="${zoneIndex}"`, enabled, 'Enable or disable motion detection in this area', false)}</td>
+      <td><input class="zone-rule-conf" type="number" data-zone-motion-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(conf)}" title="Sensitivity: only motion with at least this confidence counts (0-1). Lower = more sensitive."${enabled ? '' : ' disabled'} /></td>
+      <td>${ruleToggleCell(`data-zone-motion-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when motion is detected in this area', !enabled)}</td>
+      <td class="cell-actions">${enabled ? `<button class="secondary zone-action-btn zone-rule-advanced-toggle" type="button" data-zone-motion-advanced-toggle="${zoneIndex}" title="Per-zone motion pixel overrides" aria-expanded="false">Advanced</button>` : ''}</td>
+    </tr>${advancedRow}`;
 }
 
+// Face row for the detection table.
 function renderFaceCard(zone, zoneIndex) {
   const rule = faceRuleOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
-  const zoneLabel = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
+  const conf = rule?.min_confidence ?? 0.45;
   return `
-    <div class="zone-motion-card${enabled ? ' is-enabled' : ''}" data-zone-face-for="${zoneIndex}">
-      <div class="zone-motion-head">
-        <div class="zone-motion-title">
-          <span class="zone-motion-icon" aria-hidden="true">👤</span>
-          <div>
-            <strong>Face Detection</strong>
-            <span>Recognise faces inside this area only</span>
-          </div>
-        </div>
-        <label class="toggle-control zone-motion-toggle" title="Enable or disable face detection for this area">
-          <input type="checkbox" data-zone-face-toggle="${zoneIndex}" ${enabled ? 'checked' : ''} aria-label="Toggle face detection for ${zoneLabel}" />
-          <span>${enabled ? 'On' : 'Off'}</span>
-        </label>
-      </div>
-      ${enabled ? `
-      <div class="zone-motion-body">
-        <label class="zone-motion-field" title="Only faces with at least this confidence are processed in this area (0-1). Lower finds more faces, higher reduces false positives.">
-          <span>Min confidence</span>
-          <span class="zone-motion-sensitivity-row">
-            <input type="range" data-zone-face-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(rule.min_confidence)}" />
-            <output class="zone-motion-sensitivity-value" data-zone-face-confidence-value="${zoneIndex}">${escapeHtml(rule.min_confidence)}</output>
-          </span>
-          <small class="form-help muted">Faces detected outside Face-enabled areas are ignored entirely.</small>
-        </label>
-        <div class="zone-motion-secondary">
-          <label class="toggle-control" title="Record a clip when a face is detected in this area">
-            <input type="checkbox" data-zone-face-record="${zoneIndex}" ${rule.record_on_detect !== false ? 'checked' : ''} />
-            <span>Record</span>
-          </label>
-          <span class="muted">Notifications are configured on Alerts.</span>
-        </div>
-      </div>
-` : ''}
-    </div>`;
+    <tr class="zone-rule-row zone-rule-structural${enabled ? ' is-enabled' : ''}" data-zone-face-for="${zoneIndex}">
+      <td class="cell-label"><span class="zone-rule-icon" aria-hidden="true">👤</span>Face</td>
+      <td>${ruleToggleCell(`data-zone-face-toggle="${zoneIndex}"`, enabled, 'Enable or disable face detection in this area', false)}</td>
+      <td><input class="zone-rule-conf" type="number" data-zone-face-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(conf)}" title="Only faces with at least this confidence are processed in this area (0-1). Faces detected outside Face-enabled areas are ignored entirely."${enabled ? '' : ' disabled'} /></td>
+      <td>${ruleToggleCell(`data-zone-face-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when a face is detected in this area', !enabled)}</td>
+      <td class="cell-actions"></td>
+    </tr>`;
 }
 
 function assignedObjectsMarkup(zone) {
@@ -657,24 +596,24 @@ function renderObjectDetectionRules() {
     zone.object_rules = normalizeObjectRules(zone);
     const zoneName = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
     const addOptions = objectRuleOptions('');
-    // Motion lives in its own card above; the object table only lists
-    // object-class rules.
-    const objectRuleCount = zone.object_rules.filter((rule) => {
-      const label = String(rule.label || '').trim().toLowerCase();
-      return label !== 'motion' && label !== 'face';
-    }).length;
-    const rulesHtml = objectRuleCount
-      ? renderObjectRules(zone, zoneIndex)
-      : '<p class="muted empty-message">No object rules yet. Choose an object below to add detection settings for this area.</p>';
+    // One table per area. Object rows come first, then the Motion and Face
+    // rows (which are always present so they can be toggled on).
     return `
       <div class="zone-object-rules" data-zone-rules-for="${zoneIndex}">
         <div class="zone-name-card"><span class="zone-name-kicker">Area</span><strong>${zoneName}</strong></div>
-        ${renderMotionCard(zone, zoneIndex)}
-        ${renderFaceCard(zone, zoneIndex)}
-        <div class="zone-object-rules-header">
-          <select data-add-zone-rule="${zoneIndex}" class="rule-add-select">${addOptions}</select>
+        <div class="cameras-table-wrap">
+          <table class="rule-table zone-rule-table">
+            <thead><tr><th scope="col">Detection</th><th scope="col">Detect</th><th scope="col">Min confidence</th><th scope="col">Record</th><th scope="col" class="cell-actions" aria-label="Actions"></th></tr></thead>
+            <tbody>
+              ${renderObjectRules(zone, zoneIndex)}
+              ${renderMotionCard(zone, zoneIndex)}
+              ${renderFaceCard(zone, zoneIndex)}
+            </tbody>
+          </table>
         </div>
-        ${rulesHtml}
+        <div class="zone-rule-add">
+          <select data-add-zone-rule="${zoneIndex}" class="rule-add-select" aria-label="Add an object to ${zoneName}">${addOptions}</select>
+        </div>
       </div>`;
   }).join('');
   bindObjectRuleControls();
@@ -759,22 +698,28 @@ function bindMotionControls() {
       markZoneUnsaved();
     });
   });
-  // Sensitivity slider: `input` updates the live readout only, `change`
-  // (released) commits the value to the rule.
+  // Sensitivity number input: commit on change and refresh the pixel hint.
   document.querySelectorAll('[data-zone-motion-confidence]').forEach((inp) => {
-    inp.addEventListener('input', () => {
-      const zoneIndex = Number(inp.dataset.zoneMotionConfidence);
-      const readout = document.querySelector(`[data-zone-motion-confidence-value="${zoneIndex}"]`);
-      if (readout) readout.textContent = inp.value;
-      const help = document.querySelector(`[data-zone-motion-pixel-help="${zoneIndex}"]`);
-      const rule = motionRuleOf(cameraDetection().zones[zoneIndex]);
-      if (help && rule) help.textContent = motionPixelThresholdText({ ...rule, min_confidence: Number(inp.value) });
-    });
     inp.addEventListener('change', () => {
-      const rule = motionRuleOf(cameraDetection().zones[Number(inp.dataset.zoneMotionConfidence)]);
+      const zoneIndex = Number(inp.dataset.zoneMotionConfidence);
+      const rule = motionRuleOf(cameraDetection().zones[zoneIndex]);
       if (!rule) return;
       rule.min_confidence = clamp(Number(inp.value || 0.45), 0, 1);
+      inp.value = rule.min_confidence;
+      const help = document.querySelector(`[data-zone-motion-pixel-help="${zoneIndex}"]`);
+      if (help) help.textContent = motionPixelThresholdText(rule);
       markZoneUnsaved();
+    });
+  });
+  // "Advanced" expander per motion row: toggles the hidden gate/scale row.
+  document.querySelectorAll('[data-zone-motion-advanced-toggle]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const row = document.querySelector(`[data-zone-motion-advanced-for="${btn.dataset.zoneMotionAdvancedToggle}"]`);
+      if (!row) return;
+      const show = row.hasAttribute('hidden');
+      if (show) row.removeAttribute('hidden'); else row.setAttribute('hidden', '');
+      btn.setAttribute('aria-expanded', String(show));
+      btn.classList.toggle('is-open', show);
     });
   });
   // Per-zone motion gate/scale overrides. Blank clears the override (inherit).
@@ -825,15 +770,11 @@ function bindFaceControls() {
     });
   });
   document.querySelectorAll('[data-zone-face-confidence]').forEach((inp) => {
-    inp.addEventListener('input', () => {
-      const zoneIndex = Number(inp.dataset.zoneFaceConfidence);
-      const readout = document.querySelector(`[data-zone-face-confidence-value="${zoneIndex}"]`);
-      if (readout) readout.textContent = inp.value;
-    });
     inp.addEventListener('change', () => {
       const rule = faceRuleOf(cameraDetection().zones[Number(inp.dataset.zoneFaceConfidence)]);
       if (!rule) return;
       rule.min_confidence = clamp(Number(inp.value || 0.45), 0, 1);
+      inp.value = rule.min_confidence;
       markZoneUnsaved();
     });
   });
@@ -944,6 +885,8 @@ function bindRuleFields() {
         if (!rule) return;
         rule[ruleKey] = cb.checked;
         cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+        // Re-render so the row's On/Off pill and enabled styling update live.
+        renderObjectDetectionRules();
         markZoneUnsaved();
       });
     });
