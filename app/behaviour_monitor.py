@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import app.state as _state
-from app import behaviour
+from app import behaviour, behaviour_baseline
 
 logger = logging.getLogger('daygle.ai')
 
@@ -149,6 +149,223 @@ def _emit_one(camera_id: str, settings: dict[str, Any], crossing: dict[str, Any]
             _state._notification_threads.append(thread)
         thread.start()
     logger.info('Tripwire crossing on %s: %s %s -> %s (event %s)', camera_id, label, wire_name, direction, event_id)
+
+
+# ─── Tier-2 behavioural intelligence: statistical loitering / long-dwell ─────
+# Per-visit presence + per-(camera, zone, label) learned dwell baselines, all
+# guarded by one lock. The baseline map is loaded from the app_settings KV store
+# on first use and flushed back periodically (throttled), so what the site has
+# learned survives a restart. The pure decision logic lives in
+# ``behaviour_baseline.loiter_step``; this layer only supplies observations,
+# persistence, and the event/recording/alert emission.
+# Presence is per-camera (``camera_id -> {visit_key -> record}``): loiter_step
+# prunes any visit not seen in the cycle's observations, so each camera must
+# only ever see its own presence dict, or one camera's cycle would retire
+# another's still-active visits. Baselines and cooldowns are global maps keyed by
+# ``camera|zone|label``, so they never collide across cameras.
+_loiter_presence: dict[str, dict[str, dict[str, Any]]] = {}
+_loiter_baselines: dict[str, dict[str, float]] = {}
+_loiter_cooldowns: dict[str, float] = {}
+_loiter_lock = threading.Lock()
+_loiter_state: dict[str, Any] = {'loaded': False, 'dirty': False, 'last_flush': 0.0}
+_LOITER_BASELINES_KEY = 'behaviour_loiter_baselines'
+_LOITER_FLUSH_INTERVAL_SECONDS = 60.0
+
+
+def _enabled_zones_with_loiter(settings: Any) -> list[dict[str, Any]]:
+    zones = (settings.get('detection') or {}).get('zones', []) if isinstance(settings, dict) else []
+    out: list[dict[str, Any]] = []
+    for zone in zones or []:
+        if not isinstance(zone, dict) or zone.get('enabled') is False:
+            continue
+        rule = zone.get('loiter')
+        if isinstance(rule, dict) and rule.get('enabled') is not False:
+            out.append(zone)
+    return out
+
+
+def _ensure_loiter_loaded_locked() -> None:
+    if _loiter_state['loaded']:
+        return
+    _loiter_state['loaded'] = True  # set first: a load failure must not retry every cycle
+    try:
+        raw = _state.database.get_setting(_LOITER_BASELINES_KEY)
+    except Exception as exc:  # noqa: BLE001 - a missing/locked DB just means "start fresh"
+        logger.warning('Loiter baseline load failed: %s', exc)
+        return
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if not isinstance(value, dict):
+                continue
+            try:
+                _loiter_baselines[str(key)] = {
+                    'count': max(0.0, float(value.get('count') or 0.0)),
+                    'mean': max(0.0, float(value.get('mean') or 0.0)),
+                    'm2': max(0.0, float(value.get('m2') or 0.0)),
+                }
+            except (TypeError, ValueError):
+                continue
+
+
+def _flush_loiter_baselines_locked(now: float, now_iso: str) -> None:
+    if not _loiter_state['dirty'] or (now - _loiter_state['last_flush']) < _LOITER_FLUSH_INTERVAL_SECONDS:
+        return
+    try:
+        _state.database.set_setting(_LOITER_BASELINES_KEY, dict(_loiter_baselines), now_iso)
+        _loiter_state['dirty'] = False
+        _loiter_state['last_flush'] = now
+    except Exception as exc:  # noqa: BLE001 - persistence is best-effort; keep learning in memory
+        logger.warning('Loiter baseline flush failed: %s', exc)
+
+
+def emit_loiter_anomalies(camera_id: str, settings: dict[str, Any], detections: list[dict[str, Any]]) -> int:
+    """Detect and emit loitering (long-dwell) anomalies for one detection cycle.
+
+    Tracks how long each object dwells inside a loiter-enabled zone, learns the
+    zone's normal dwell distribution from completed visits, and fires when a
+    visit runs far longer than normal. Returns the number of anomalies emitted.
+    Best-effort and fully isolated: an individual emission failure is logged and
+    never raised.
+    """
+    zones = _enabled_zones_with_loiter(settings)
+    if not zones:
+        return 0
+    from app.zone_detection import detection_matches_zone
+
+    observations: list[dict[str, Any]] = []
+    loiter_by_zone: dict[str, dict[str, Any]] = {}
+    for zone in zones:
+        rule = zone.get('loiter') or {}
+        zone_id = str(zone.get('id') or zone.get('name') or '')
+        zone_name = str(zone.get('name') or zone.get('id') or '').strip() or None
+        loiter_by_zone[zone_id] = rule
+        wanted = {str(label).strip().lower() for label in (rule.get('labels') or []) if str(label).strip()}
+        for det in detections or []:
+            if not isinstance(det, dict) or det.get('track_id') is None:
+                continue
+            label = str(det.get('label') or '').strip().lower()
+            if wanted and label not in wanted:
+                continue
+            if not detection_matches_zone(det, zone):
+                continue
+            try:
+                confidence = float(det.get('confidence') or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            observations.append({
+                'key': f"{camera_id}|{zone_id}|{det.get('track_id')}",
+                'baseline_key': f"{camera_id}|{zone_id}|{label}",
+                'zone_id': zone_id,
+                'zone_name': zone_name,
+                'label': label,
+                'track_id': det.get('track_id'),
+                'confidence': confidence,
+                'min_dwell_seconds': rule.get('min_dwell_seconds', 30),
+                'sensitivity': rule.get('sensitivity', 3.0),
+                'cooldown_seconds': rule.get('cooldown_seconds', 120),
+            })
+
+    now = time.time()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with _loiter_lock:
+        _ensure_loiter_loaded_locked()
+        presence = _loiter_presence.setdefault(camera_id, {})
+        result = behaviour_baseline.loiter_step(
+            presence, _loiter_baselines, _loiter_cooldowns, observations, now,
+        )
+        if result['learned']:
+            _loiter_state['dirty'] = True
+        # Track ids climb forever; keep the cooldown map from growing without
+        # bound by dropping day-old entries once it gets large.
+        if len(_loiter_cooldowns) > 4096:
+            cutoff = now - 86400
+            for stale in [k for k, ts in _loiter_cooldowns.items() if ts < cutoff]:
+                _loiter_cooldowns.pop(stale, None)
+        _flush_loiter_baselines_locked(now, now_iso)
+
+    fired = 0
+    for fire in result['fires']:
+        rule = loiter_by_zone.get(fire['zone_id']) or {}
+        try:
+            _emit_loiter(camera_id, settings, fire, rule, now_iso)
+            fired += 1
+        except Exception as exc:  # noqa: BLE001 - one anomaly must not break the loop
+            logger.warning('Loiter emit failed on %s: %s', camera_id, exc)
+    return fired
+
+
+def _emit_loiter(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], rule: dict[str, Any], now_iso: str) -> None:
+    from app.alert_dispatch import _rule_notify_active_now, deliver_alert_notifications
+    from app.utils import normalize_bool_setting, normalize_email_recipients
+
+    zone_name = fire.get('zone_name') or 'zone'
+    label = fire.get('label') or 'object'
+    try:
+        dwell = float(fire.get('dwell') or 0.0)
+    except (TypeError, ValueError):
+        dwell = 0.0
+    try:
+        threshold = float(fire.get('threshold') or 0.0)
+    except (TypeError, ValueError):
+        threshold = 0.0
+    try:
+        confidence = float(fire.get('confidence') or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    email_enabled = normalize_bool_setting(rule.get('email_enabled'), False)
+    push_enabled = normalize_bool_setting(rule.get('push_enabled'), False)
+    email_recipients = normalize_email_recipients(rule.get('email_recipients') or [])
+    notify_enabled = email_enabled or push_enabled
+    camera_name = str((settings or {}).get('name') or '').strip() or None
+    rule_display = str(rule.get('name') or 'Loitering').strip() or 'Loitering'
+
+    metadata = {
+        'source': 'loiter',
+        'camera_id': camera_id,
+        'camera_name': camera_name,
+        'zone_id': fire.get('zone_id'),
+        'zone_name': fire.get('zone_name'),
+        'label': label,
+        'track_id': fire.get('track_id'),
+        'dwell_seconds': round(dwell, 1),
+        'threshold_seconds': round(threshold, 1),
+        'confidence': round(confidence, 3),
+    }
+    event_id = _state.database.add_event(
+        created_at=now_iso, source='behaviour', snapshot_path=None,
+        detections=[], alert_triggered=notify_enabled, metadata=metadata,
+    )
+
+    recording_id = None
+    if normalize_bool_setting(rule.get('record_on_detect'), True):
+        recording_id = _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
+
+    rule_name = f'{zone_name} · {rule_display}'
+    message = f'{str(label).title()} loitering in {zone_name} ({int(round(dwell))}s)'
+    notify_rule = {
+        'name': rule_name,
+        'email_enabled': email_enabled,
+        'push_enabled': push_enabled,
+        'email_recipients': email_recipients,
+        'notify_start': str(rule.get('notify_start') or '').strip() or None,
+        'notify_end': str(rule.get('notify_end') or '').strip() or None,
+    }
+    if notify_enabled and _rule_notify_active_now(notify_rule):
+        _state.database.add_alert(
+            created_at=now_iso, rule_name=rule_name, event_id=event_id,
+            label=label, confidence=confidence, message=message, recording_id=recording_id,
+        )
+        alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
+        thread = threading.Thread(
+            target=deliver_alert_notifications, args=([alert_payload], event_id, [notify_rule]),
+            name=f'loiter-notify-{event_id}', daemon=True,
+        )
+        with _state._notification_threads_lock:
+            _state._notification_threads[:] = [t for t in _state._notification_threads if t.is_alive()]
+            _state._notification_threads.append(thread)
+        thread.start()
+    logger.info('Loiter on %s: %s in %s (%.0fs, event %s)', camera_id, label, zone_name, dwell, event_id)
 
 
 def _attach_recording(camera_id: str, settings: dict[str, Any], event_id: int, now_iso: str, label: str, confidence: float) -> int | None:
