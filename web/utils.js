@@ -1047,6 +1047,142 @@ function normalizeEmailList(value) {
   return source.map((recipient) => String(recipient).trim()).filter(Boolean);
 }
 
+// ─── Behavioural tripwire (Tier 1: directional line-crossing) ───────────────
+// Pure geometry + normalisation for the per-zone "tripwire" line drawn on the
+// Zones canvas (web/zones.js) and stored on ``zone.tripwire``. Mirrors the
+// backend (app/behaviour.py + app/zone_schema.py::normalize_zone_tripwire) so
+// the on-canvas preview, the direction arrow, and which lines count as "valid"
+// all agree with what the server will actually fire on. Lives in the shared
+// bundle (not zones.js) so it loads on every page and is unit-testable via the
+// utils.js vm harness (the same pattern as the motion-boundary helpers).
+
+const TRIPWIRE_DIRECTIONS = ['forward', 'backward', 'both'];
+
+// Match normalize_zone_point()'s 4-dp rounding so a client-drawn endpoint and
+// the value the server stores round-trip to the exact same coordinates.
+function roundTripwireCoord(value) {
+  return Math.round((Number(value) || 0) * 1e4) / 1e4;
+}
+
+function tripwireClamp01(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.max(0, Math.min(1, number));
+}
+
+// Coerce a tripwire endpoint ({x,y} or [x,y]) to a clamped {x,y}, or null.
+function tripwirePoint(value) {
+  let x = null;
+  let y = null;
+  if (Array.isArray(value) && value.length >= 2) {
+    x = tripwireClamp01(value[0]);
+    y = tripwireClamp01(value[1]);
+  } else if (value && typeof value === 'object') {
+    x = tripwireClamp01(value.x);
+    y = tripwireClamp01(value.y);
+  }
+  return x == null || y == null ? null : { x, y };
+}
+
+// A zone's normalized bounding box, from its polygon points when present or its
+// legacy x/y/width/height. Width/height are floored so a default line placed
+// inside a degenerate zone never collapses to a point.
+function tripwireZoneBounds(zone) {
+  const points = zone && Array.isArray(zone.points) ? zone.points : null;
+  if (points && points.length >= 2) {
+    const xs = points.map((point) => Number(point && point.x)).filter(Number.isFinite);
+    const ys = points.map((point) => Number(point && point.y)).filter(Number.isFinite);
+    if (xs.length && ys.length) {
+      const x = Math.min(...xs);
+      const y = Math.min(...ys);
+      return { x, y, width: Math.max(0.02, Math.max(...xs) - x), height: Math.max(0.02, Math.max(...ys) - y) };
+    }
+  }
+  const num = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
+  const x = Math.max(0, Math.min(1, num(zone && zone.x, 0)));
+  const y = Math.max(0, Math.min(1, num(zone && zone.y, 0)));
+  return { x, y, width: Math.max(0.02, num(zone && zone.width, 1 - x)), height: Math.max(0.02, num(zone && zone.height, 1 - y)) };
+}
+
+// A sensible starting line for a zone with no tripwire yet: a horizontal
+// segment across the middle of the zone, inset from the edges so both endpoints
+// sit inside the area and are easy to grab. Never degenerate.
+function tripwireDefaultLine(zone) {
+  const bounds = tripwireZoneBounds(zone);
+  const midY = roundTripwireCoord(bounds.y + bounds.height / 2);
+  const inset = Math.min(0.12, bounds.width * 0.2);
+  let left = bounds.x + inset;
+  let right = bounds.x + bounds.width - inset;
+  if (right - left < 0.05) {
+    // Very narrow zone: centre a fixed-width segment inside the frame instead.
+    const centre = Math.max(0, Math.min(1, bounds.x + bounds.width / 2));
+    left = Math.max(0, centre - 0.1);
+    right = Math.min(1, Math.max(left + 0.1, centre + 0.1));
+  }
+  return {
+    a: { x: roundTripwireCoord(Math.max(0, left)), y: midY },
+    b: { x: roundTripwireCoord(Math.min(1, right)), y: midY },
+  };
+}
+
+// Signed orientation of point c relative to the directed line a->b:
+//   > 0 : c is LEFT of a->b,  < 0 : RIGHT,  == 0 : collinear.
+// Identical sign convention to app/behaviour.py::_orientation, so "forward"
+// here (left -> right) is exactly the crossing the backend fires on.
+function tripwireOrientation(a, b, c) {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+// Unit vector from the line's midpoint toward the FORWARD destination side (the
+// RIGHT side of a->b, where a forward crossing ends up), or null for a
+// degenerate line. In frame coordinates (x right, y down) this is (uy, -ux) for
+// the unit tangent (ux, uy) -- it lands where tripwireOrientation(a,b,·) < 0,
+// so the drawn arrow always points the way a "forward" crossing travels.
+function tripwireForwardNormal(a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 1e-9) return null;
+  return { x: dy / length, y: -dx / length };
+}
+
+function tripwireMidpoint(a, b) {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+// Client-side mirror of normalize_zone_tripwire(): returns a normalized
+// tripwire object, or null when no usable line is configured -- so a zone
+// without a valid tripwire drops the field entirely, exactly like the backend.
+// A degenerate line (coincident endpoints) is rejected.
+function normalizeTripwire(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const a = tripwirePoint(raw.a);
+  const b = tripwirePoint(raw.b);
+  if (!a || !b) return null;
+  if (Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6) return null;
+  let direction = String(raw.direction || 'both').trim().toLowerCase();
+  if (!TRIPWIRE_DIRECTIONS.includes(direction)) direction = 'both';
+  let cooldown = Number.parseInt(raw.cooldown_seconds, 10);
+  if (raw.cooldown_seconds == null || !Number.isFinite(cooldown)) cooldown = 30;
+  else cooldown = Math.max(0, cooldown);
+  const labels = Array.isArray(raw.labels)
+    ? [...new Set(raw.labels.map((label) => String(label).trim().toLowerCase()).filter(Boolean))]
+    : [];
+  return {
+    enabled: raw.enabled !== false,
+    name: String(raw.name || 'Tripwire').trim() || 'Tripwire',
+    a: { x: roundTripwireCoord(a.x), y: roundTripwireCoord(a.y) },
+    b: { x: roundTripwireCoord(b.x), y: roundTripwireCoord(b.y) },
+    direction,
+    labels,
+    cooldown_seconds: cooldown,
+    record_on_detect: raw.record_on_detect !== false,
+    email_enabled: raw.email_enabled === true,
+    email_recipients: normalizeEmailList(raw.email_recipients),
+    push_enabled: raw.push_enabled === true,
+  };
+}
+
 // ─── User display preferences (date_format / time_format) ──────────────────
 // Populated by nav.js after /api/auth/me resolves, but exposed as early as
 // possible so every page (dashboard, events, alerts, recordings, etc.) renders
@@ -1456,6 +1592,10 @@ window.daygleUi = {
   setDaygleDatePrefs, getDaygleDatePrefs,
   // Date-range "since" bounds (alerts page + dashboard share these)
   daygleSinceParamForRange, daygleLocalDayStartIso,
+  // Behavioural tripwire geometry + normalisation (Zones canvas ↔ backend)
+  TRIPWIRE_DIRECTIONS, roundTripwireCoord, tripwirePoint, tripwireZoneBounds,
+  tripwireDefaultLine, tripwireOrientation, tripwireForwardNormal, tripwireMidpoint,
+  normalizeTripwire,
   // Theme management
   setDaygleThemePref, getDaygleThemePref, applyDaygleTheme,
   watchDaygleSystemTheme, unwatchDaygleSystemTheme,

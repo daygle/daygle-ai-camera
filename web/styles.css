@@ -1631,6 +1631,67 @@ input[type="file"] { padding: 10px; }
   pointer-events: auto;
 }
 .close-draft-point:active { cursor: pointer; }
+/* Behavioural tripwire (directional line-crossing) overlay. */
+.monitor-tripwire { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.monitor-tripwire line {
+  stroke: #fbbf24;
+  stroke-width: 0.7;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.monitor-tripwire polyline {
+  fill: none;
+  stroke: #fbbf24;
+  stroke-width: 0.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.monitor-tripwire.selected line,
+.monitor-tripwire.selected polyline { stroke: #f59e0b; stroke-width: 0.9; }
+.tripwire-handle {
+  background: #fbbf24;
+  border-color: #07111d;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.4);
+}
+/* Line-crossing card in the detection-rules panel. */
+.zone-tripwire-card {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(251,191,36,.28);
+  border-radius: 12px;
+  background: rgba(251,191,36,.05);
+}
+.zone-tripwire-card.is-enabled { border-color: rgba(251,191,36,.5); }
+.zone-tripwire-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.zone-tripwire-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.zone-tripwire-title strong { font-size: 13px; }
+.zone-tripwire-sub { font-size: 11px; }
+.zone-tripwire-body { margin-top: 12px; display: grid; gap: 12px; }
+.tripwire-fields { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+.tripwire-direction { display: inline-flex; flex-wrap: wrap; }
+.tripwire-dir-option { min-width: 72px; }
+.tripwire-labels { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 26px; }
+.tripwire-chip { display: inline-flex; align-items: center; gap: 4px; }
+.tripwire-chip-remove {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.tripwire-any { color: var(--muted); font-size: 12px; }
+.tripwire-toggles { display: flex; flex-wrap: wrap; gap: 16px; }
+.tripwire-toggle-field { display: inline-flex; align-items: center; gap: 8px; }
+.tripwire-toggle-field > span { font-size: 12px; font-weight: 700; color: var(--muted); }
+.tripwire-recipients-field.is-hidden { display: none; }
+.tripwire-hint { font-size: 11px; margin: 0; }
+.tripwire-hint-off { margin-top: 10px; }
+@media (max-width: 560px) {
+  .tripwire-fields { grid-template-columns: 1fr; }
+}
 .zones-layout {
   display: grid;
   grid-template-columns: 1fr 1fr;

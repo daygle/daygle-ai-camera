@@ -259,6 +259,42 @@ function ensureFaceRule(zone) {
   return rule;
 }
 
+// ─── Behavioural tripwire (line crossing) ──────────────────────────────────
+// A zone's optional directional line-crossing counter, stored on
+// ``zone.tripwire``. The pure geometry/normalisation lives in web/utils.js
+// (tripwireDefaultLine, normalizeTripwire, tripwireForwardNormal, …); these
+// helpers locate/materialise the rule on the in-memory zone, mirroring the
+// motion/face card pattern.
+function tripwireOf(zone) {
+  return zone && zone.tripwire && typeof zone.tripwire === 'object' ? zone.tripwire : null;
+}
+
+// Turn a tripwire on: reuse the existing one (re-enabling it) or seed a fresh
+// one with a default line spanning the zone, which the user then drags into
+// place on the footage.
+function ensureTripwire(zone) {
+  const existing = tripwireOf(zone);
+  if (existing) {
+    existing.enabled = true;
+    return existing;
+  }
+  const line = tripwireDefaultLine(zone);
+  zone.tripwire = {
+    enabled: true,
+    name: 'Tripwire',
+    a: line.a,
+    b: line.b,
+    direction: 'both',
+    labels: [],
+    cooldown_seconds: 30,
+    record_on_detect: true,
+    email_enabled: false,
+    email_recipients: [],
+    push_enabled: false,
+  };
+  return zone.tripwire;
+}
+
 function normalizeObjectRules(zone) {
   if (Array.isArray(zone.object_rules) && zone.object_rules.length) {
     return zone.object_rules.map((rule, ruleIndex) => ({ ...defaultObjectRule(rule?.label), ...rule, id: rule?.id || `${String(rule?.label || 'rule').trim().toLowerCase()}-${ruleIndex + 1}` }))
@@ -316,6 +352,12 @@ function normalizeZone(zone) {
     (rule) => String(rule.label || '').trim().toLowerCase() === 'face'
       && rule.enabled !== false
   );
+  // Normalise (or drop) the optional line-crossing tripwire so the in-memory
+  // shape matches what the backend stores: a valid line is clamped/rounded, an
+  // absent or degenerate one is removed so the zone keeps its canonical shape.
+  const tripwire = normalizeTripwire(zone.tripwire);
+  if (tripwire) zone.tripwire = tripwire;
+  else if ('tripwire' in zone) delete zone.tripwire;
   updateZoneBounds(zone);
   return zone;
 }
@@ -366,6 +408,66 @@ function updateZonesStats() {
   }
 }
 
+// SVG arrow(s) drawn from the tripwire midpoint indicating the counting
+// direction: one along the forward (right-hand) normal for 'forward', the
+// reverse for 'backward', both for 'both'. Coordinates are in the 0..100
+// viewBox space shared with the zone polygons.
+function tripwireArrowMarkup(a, b, direction) {
+  const normal = tripwireForwardNormal(a, b);
+  if (!normal) return '';
+  const mid = tripwireMidpoint(a, b);
+  const mx = mid.x * 100;
+  const my = mid.y * 100;
+  const STEM = 9;
+  const HEAD = 3.4;
+  const round = (value) => Math.round(value * 100) / 100;
+  const oneArrow = (sign) => {
+    const dx = normal.x * sign;
+    const dy = normal.y * sign;
+    const tipX = mx + dx * STEM;
+    const tipY = my + dy * STEM;
+    // Splay the two head strokes along the arrow's perpendicular (the line
+    // tangent), backed off from the tip along -direction.
+    const px = -dy;
+    const py = dx;
+    const h1x = tipX - dx * HEAD + px * HEAD * 0.7;
+    const h1y = tipY - dy * HEAD + py * HEAD * 0.7;
+    const h2x = tipX - dx * HEAD - px * HEAD * 0.7;
+    const h2y = tipY - dy * HEAD - py * HEAD * 0.7;
+    return `<polyline points="${round(mx)},${round(my)} ${round(tipX)},${round(tipY)}"></polyline>`
+      + `<polyline points="${round(h1x)},${round(h1y)} ${round(tipX)},${round(tipY)} ${round(h2x)},${round(h2y)}"></polyline>`;
+  };
+  if (direction === 'forward') return oneArrow(1);
+  if (direction === 'backward') return oneArrow(-1);
+  return oneArrow(1) + oneArrow(-1);
+}
+
+// The tripwire line, its direction arrow, and (when the zone is selected)
+// draggable endpoint handles, layered over the zone polygon.
+function renderTripwireOverlay(zone, index) {
+  const wire = tripwireOf(zone);
+  if (!wire || wire.enabled === false) return '';
+  const a = tripwirePoint(wire.a);
+  const b = tripwirePoint(wire.b);
+  if (!a || !b) return '';
+  const selected = index === selectedZoneIndex;
+  const ax = a.x * 100;
+  const ay = a.y * 100;
+  const bx = b.x * 100;
+  const by = b.y * 100;
+  const handles = selected && !drawingMode ? (
+    `<i class="zone-handle tripwire-handle" data-tripwire-index="${index}" data-tripwire-end="a" title="Drag to move the line start" style="left:${ax}%;top:${ay}%"></i>`
+    + `<i class="zone-handle tripwire-handle" data-tripwire-index="${index}" data-tripwire-end="b" title="Drag to move the line end" style="left:${bx}%;top:${by}%"></i>`
+  ) : '';
+  return `
+    <svg class="monitor-tripwire${selected ? ' selected' : ''}" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}"></line>
+      ${tripwireArrowMarkup(a, b, wire.direction || 'both')}
+    </svg>
+    ${handles}
+  `;
+}
+
 function renderZoneBox(zone, index) {
   const selected = index === selectedZoneIndex ? ' selected' : '';
   const points = zone.points.map((point) => `${point.x * 100},${point.y * 100}`).join(' ');
@@ -399,6 +501,7 @@ function renderZoneBox(zone, index) {
     </span>
     ${handles}
     ${addPointHandles}
+    ${renderTripwireOverlay(zone, index)}
   `;
 }
 
@@ -513,6 +616,98 @@ function renderFaceCard(zone, zoneIndex) {
     </tr>`;
 }
 
+// Segmented direction control for a tripwire card. Forward = an object moving
+// from the LEFT of the drawn line to its RIGHT (the arrow side).
+function tripwireDirectionOptions(current) {
+  const options = [
+    ['forward', 'Arrow way', 'Count only crossings that travel the way the arrow points (left → right of the line).'],
+    ['backward', 'Against', 'Count only crossings that travel against the arrow (right → left of the line).'],
+    ['both', 'Both', 'Count a crossing in either direction.'],
+  ];
+  return options.map(([value, label, title]) => (
+    `<button type="button" class="zone-shape-option tripwire-dir-option${value === current ? ' is-active' : ''}" data-tripwire-direction-set="${value}" aria-pressed="${value === current}" title="${escapeHtml(title)}">${label}</button>`
+  )).join('');
+}
+
+// Removable chips for the object labels a tripwire counts ([] = any object).
+function tripwireLabelChips(wire, zoneIndex) {
+  const labels = wire && Array.isArray(wire.labels) ? wire.labels : [];
+  if (!labels.length) return '<span class="tripwire-any">Any object</span>';
+  return labels.map((label, labelIndex) => (
+    `<span class="zone-object-chip tripwire-chip">${escapeHtml(titleCase(label))}<button type="button" class="tripwire-chip-remove" data-tripwire-label-remove="${zoneIndex}:${labelIndex}" title="Stop counting ${escapeHtml(titleCase(label))}" aria-label="Stop counting ${escapeHtml(titleCase(label))}">×</button></span>`
+  )).join('');
+}
+
+// "+ Limit to object" picker: available classes/groups not already chosen.
+function tripwireLabelAddOptions(selected) {
+  const chosen = new Set((selected || []).map((label) => String(label).toLowerCase()));
+  const groupValues = new Set(OBJECT_GROUP_LABELS.map((group) => group.value));
+  const labels = [...new Set(availableLabels.filter((label) => (
+    label && label !== 'motion' && label !== 'face' && !groupValues.has(label) && !chosen.has(label)
+  )))];
+  const coco = labels.map((label) => `<option value="${escapeHtml(label)}">${escapeHtml(titleCase(label))}</option>`).join('');
+  const groups = OBJECT_GROUP_LABELS.filter((group) => !chosen.has(group.value))
+    .map((group) => `<option value="${escapeHtml(group.value)}">${escapeHtml(group.label)}</option>`).join('');
+  return `<option value="">+ Limit to object…</option>${groups ? `<optgroup label="Groups">${groups}</optgroup>` : ''}${coco}`;
+}
+
+function tripwireToggleField(label, attr, on, title) {
+  return `<div class="tripwire-toggle-field"><span>${escapeHtml(label)}</span>${ruleToggleCell(attr, on, title, false)}</div>`;
+}
+
+// The editable body of an enabled tripwire card.
+function tripwireBody(wire, zoneIndex) {
+  const recipients = escapeHtml((wire.email_recipients || []).join(', '));
+  const emailOn = wire.email_enabled === true;
+  return `
+    <div class="zone-tripwire-body">
+      <div class="tripwire-fields">
+        <label class="sound-rule-field tripwire-name-field">
+          <span>Name</span>
+          <input type="text" data-tripwire-name="${zoneIndex}" value="${escapeHtml(wire.name || 'Tripwire')}" maxlength="60" placeholder="Tripwire" />
+        </label>
+        <label class="sound-rule-field tripwire-cooldown-field">
+          <span>Cooldown (s)</span>
+          <input type="number" data-tripwire-cooldown="${zoneIndex}" min="0" step="1" value="${escapeHtml(wire.cooldown_seconds ?? 30)}" title="Minimum seconds before the same object crossing the same way alerts again." />
+        </label>
+      </div>
+      <div class="sound-rule-field tripwire-direction-field">
+        <span>Direction</span>
+        <div class="zone-shape-toggle tripwire-direction" role="group" aria-label="Counting direction" data-tripwire-direction-for="${zoneIndex}">${tripwireDirectionOptions(wire.direction || 'both')}</div>
+      </div>
+      <div class="sound-rule-field tripwire-labels-field">
+        <span>Counts</span>
+        <div class="tripwire-labels" data-tripwire-labels="${zoneIndex}">${tripwireLabelChips(wire, zoneIndex)}</div>
+        <select class="rule-add-select tripwire-label-add" data-tripwire-label-add="${zoneIndex}" aria-label="Limit which objects this line counts">${tripwireLabelAddOptions(wire.labels)}</select>
+      </div>
+      <div class="tripwire-toggles">
+        ${tripwireToggleField('Record', `data-tripwire-record="${zoneIndex}"`, wire.record_on_detect !== false, 'Record a clip when the line is crossed')}
+        ${tripwireToggleField('Email', `data-tripwire-email="${zoneIndex}"`, emailOn, 'Send an email when the line is crossed')}
+        ${tripwireToggleField('Push', `data-tripwire-push="${zoneIndex}"`, wire.push_enabled === true, 'Send a push notification when the line is crossed')}
+      </div>
+      <label class="sound-rule-field tripwire-recipients-field${emailOn ? '' : ' is-hidden'}" data-tripwire-recipients-field="${zoneIndex}">
+        <span>Email to</span>
+        <input type="text" data-tripwire-recipients="${zoneIndex}" value="${recipients}" placeholder="name@example.com, …" />
+      </label>
+      <p class="muted tripwire-hint">Drag the two dots on the footage to place the line. The arrow shows the “forward” direction.</p>
+    </div>`;
+}
+
+// Per-zone line-crossing card, rendered under the detection table. Off by
+// default; enabling it seeds a line across the zone to drag into position.
+function renderTripwireCard(zone, zoneIndex) {
+  const wire = tripwireOf(zone);
+  const enabled = Boolean(wire && wire.enabled !== false);
+  return `
+    <div class="zone-tripwire-card${enabled ? ' is-enabled' : ''}" data-zone-tripwire-for="${zoneIndex}">
+      <div class="zone-tripwire-head">
+        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">⤢</span><strong>Line crossing</strong><span class="muted zone-tripwire-sub">Alert when an object crosses a line you draw</span></div>
+        ${ruleToggleCell(`data-tripwire-enabled="${zoneIndex}"`, enabled, 'Enable a directional line-crossing counter for this area', false)}
+      </div>
+      ${enabled ? tripwireBody(wire, zoneIndex) : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to draw a line across the footage and get alerted when a tracked object crosses it in the direction you choose.</p>'}
+    </div>`;
+}
+
 function assignedObjectsMarkup(zone) {
   const labels = [...new Set((zone.object_rules || [])
     .filter((rule) => !['motion', 'face'].includes(String(rule.label || '').trim().toLowerCase()))
@@ -614,6 +809,7 @@ function renderObjectDetectionRules() {
         <div class="zone-rule-add">
           <select data-add-zone-rule="${zoneIndex}" class="rule-add-select" aria-label="Add an object to ${zoneName}">${addOptions}</select>
         </div>
+        ${renderTripwireCard(zone, zoneIndex)}
       </div>`;
   }).join('');
   bindObjectRuleControls();
@@ -635,6 +831,7 @@ function bindObjectRuleControls() {
   });
   bindMotionControls();
   bindFaceControls();
+  bindTripwireControls();
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
@@ -775,6 +972,129 @@ function bindFaceControls() {
       if (!rule) return;
       rule.min_confidence = clamp(Number(inp.value || 0.45), 0, 1);
       inp.value = rule.min_confidence;
+      markZoneUnsaved();
+    });
+  });
+}
+
+// Line-crossing (tripwire) card bindings. The enable toggle, direction, and
+// label edits re-render (so the canvas line/arrow and the card body update
+// together); the text/number inputs mutate in place without a re-render so an
+// open field keeps focus while typing. The tripwire itself is looked up by
+// zone, mirroring the motion/face card pattern.
+function bindTripwireControls() {
+  const zoneAt = (index) => cameraDetection().zones[Number(index)];
+
+  document.querySelectorAll('[data-tripwire-enabled]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const zone = zoneAt(cb.dataset.tripwireEnabled);
+      if (!zone) return;
+      selectedZoneIndex = Number(cb.dataset.tripwireEnabled);
+      if (cb.checked) {
+        ensureTripwire(zone);
+        liveEls.status.textContent = 'Line added - drag its two dots on the footage to position it, then Save Zones.';
+      } else if (tripwireOf(zone)) {
+        zone.tripwire.enabled = false;
+      }
+      renderZones();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-tripwire-direction-set]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const group = button.closest('[data-tripwire-direction-for]');
+      const zone = group ? zoneAt(group.dataset.tripwireDirectionFor) : null;
+      const wire = zone && tripwireOf(zone);
+      if (!wire) return;
+      wire.direction = button.dataset.tripwireDirectionSet;
+      selectedZoneIndex = Number(group.dataset.tripwireDirectionFor);
+      renderZones();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-tripwire-label-add]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const label = String(select.value || '').trim().toLowerCase();
+      if (!label) return;
+      const wire = tripwireOf(zoneAt(select.dataset.tripwireLabelAdd));
+      if (!wire) return;
+      wire.labels = Array.isArray(wire.labels) ? wire.labels : [];
+      if (!wire.labels.includes(label)) wire.labels.push(label);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-tripwire-label-remove]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [zoneIndex, labelIndex] = String(button.dataset.tripwireLabelRemove).split(':').map(Number);
+      const wire = tripwireOf(zoneAt(zoneIndex));
+      if (!wire || !Array.isArray(wire.labels)) return;
+      wire.labels.splice(labelIndex, 1);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-tripwire-name]').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const wire = tripwireOf(zoneAt(inp.dataset.tripwireName));
+      if (!wire) return;
+      wire.name = inp.value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-tripwire-cooldown]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const wire = tripwireOf(zoneAt(inp.dataset.tripwireCooldown));
+      if (!wire) return;
+      const value = Math.max(0, Number.parseInt(inp.value, 10) || 0);
+      wire.cooldown_seconds = value;
+      inp.value = value;
+      markZoneUnsaved();
+    });
+  });
+
+  [
+    ['tripwireRecord', 'record_on_detect'],
+    ['tripwirePush', 'push_enabled'],
+  ].forEach(([datasetKey, field]) => {
+    const attr = `input[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`;
+    document.querySelectorAll(attr).forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const wire = tripwireOf(zoneAt(cb.dataset[datasetKey]));
+        if (!wire) return;
+        wire[field] = cb.checked;
+        // Flip the pill's On/Off label live without a full re-render.
+        const pill = cb.parentElement?.querySelector('span');
+        if (pill) pill.textContent = cb.checked ? 'On' : 'Off';
+        markZoneUnsaved();
+      });
+    });
+  });
+
+  document.querySelectorAll('[data-tripwire-email]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const wire = tripwireOf(zoneAt(cb.dataset.tripwireEmail));
+      if (!wire) return;
+      wire.email_enabled = cb.checked;
+      // Reveal/hide the recipients field to match, without disturbing the canvas.
+      const field = document.querySelector(`[data-tripwire-recipients-field="${cb.dataset.tripwireEmail}"]`);
+      if (field) field.classList.toggle('is-hidden', !cb.checked);
+      const pill = cb.parentElement?.querySelector('span');
+      if (pill) pill.textContent = cb.checked ? 'On' : 'Off';
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-tripwire-recipients]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const wire = tripwireOf(zoneAt(inp.dataset.tripwireRecipients));
+      if (!wire) return;
+      wire.email_recipients = normalizeEmailList(inp.value);
       markZoneUnsaved();
     });
   });
@@ -949,6 +1269,10 @@ function updateDraggedZone(event) {
     zone.points = zoneDrag.startPoints.map((startPoint) => ({ x: roundCoord(startPoint.x + safeDx), y: roundCoord(startPoint.y + safeDy) }));
   } else if (zoneDrag.mode === 'point') {
     zone.points[zoneDrag.pointIndex] = normalizePoint(point);
+  } else if (zoneDrag.mode === 'tripwire') {
+    const wire = tripwireOf(zone);
+    if (!wire) return;
+    wire[zoneDrag.end] = normalizePoint(point);
   }
   normalizeZone(zone);
   renderZones();
@@ -1065,6 +1389,23 @@ function bindZoneDrawing() {
         selectedZoneIndex = zoneIndex;
         renderZones();
         markZoneUnsaved();
+      }
+      return;
+    }
+    const tripwireHandle = event.target.closest('[data-tripwire-end]');
+    if (tripwireHandle) {
+      event.preventDefault();
+      const index = Number(tripwireHandle.dataset.tripwireIndex);
+      const zone = cameraDetection().zones[index];
+      if (zone && tripwireOf(zone)) {
+        selectedZoneIndex = index;
+        zoneDrag = {
+          index,
+          mode: 'tripwire',
+          end: tripwireHandle.dataset.tripwireEnd,
+          startPoint: pointFromEvent(event),
+        };
+        liveEls.zoneOverlay.setPointerCapture(event.pointerId);
       }
       return;
     }

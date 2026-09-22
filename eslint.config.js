@@ -97,6 +97,12 @@ const WEB_SHARED_GLOBALS = {
   titleCase: 'readonly',
   RECORDINGS_OVERLAY_TOGGLE_KEY: 'readonly',
   TIMELINE_OVERLAY_TOGGLE_KEY: 'readonly',
+  // web/utils.js - behavioural tripwire geometry/normalisation (Zones canvas).
+  tripwireDefaultLine: 'readonly',
+  normalizeTripwire: 'readonly',
+  tripwirePoint: 'readonly',
+  tripwireForwardNormal: 'readonly',
+  tripwireMidpoint: 'readonly',
 
   // web/icons.js - SVG icon registry consumed across pages.
   ICONS: 'readonly',
