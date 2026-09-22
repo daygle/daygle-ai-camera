@@ -16,6 +16,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from app import behaviour  # noqa: E402
+from app.object_tracking import update_object_tracks  # noqa: E402
 from app.zone_schema import normalize_monitoring_zones, normalize_zone_tripwire  # noqa: E402
 
 
@@ -159,6 +160,79 @@ class ZoneTripwireSchemaTests(unittest.TestCase):
         self.assertIn('tripwire', zones[0])
         self.assertEqual(zones[0]['tripwire']['direction'], 'both')
         self.assertNotIn('tripwire', zones[1])
+
+
+class TrackerCentreAnnotationTests(unittest.TestCase):
+    """update_object_tracks annotates each detection with its previous and
+    current normalized centre, which the crossing detector consumes."""
+
+    def test_prev_and_current_centre_across_cycles(self) -> None:
+        cam = 'test-cam-tripwire-annotation'
+        d1 = [{'label': 'car', 'confidence': 0.9, 'box': {'x': 0.40, 'y': 0.45, 'width': 0.1, 'height': 0.1}}]
+        out1 = update_object_tracks(cam, d1)
+        self.assertIsNone(out1[0]['track_prev_center'])
+        self.assertIsNotNone(out1[0]['track_center'])
+
+        # Overlapping box next cycle -> same track id, prev centre now present.
+        d2 = [{'label': 'car', 'confidence': 0.9, 'box': {'x': 0.45, 'y': 0.45, 'width': 0.1, 'height': 0.1}}]
+        out2 = update_object_tracks(cam, d2)
+        self.assertEqual(out2[0]['track_id'], out1[0]['track_id'])
+        self.assertIsNotNone(out2[0]['track_prev_center'])
+        self.assertAlmostEqual(out2[0]['track_center'][0], 0.5, places=6)
+        self.assertAlmostEqual(out2[0]['track_prev_center'][0], 0.45, places=6)
+
+
+class ZoneTripwireCrossingsTests(unittest.TestCase):
+    def _zone(self, **wire_over):
+        wire = {'enabled': True, 'a': {'x': 0.5, 'y': 0.0}, 'b': {'x': 0.5, 'y': 1.0}, 'direction': 'both', 'labels': []}
+        wire.update(wire_over)
+        return {'id': 'z1', 'name': 'Drive', 'enabled': True, 'tripwire': wire}
+
+    def _det(self, **over):
+        det = {'label': 'car', 'confidence': 0.8, 'track_id': 7,
+               'track_prev_center': (0.4, 0.5), 'track_center': (0.6, 0.5)}
+        det.update(over)
+        return det
+
+    def test_forward_crossing_detected(self) -> None:
+        out = behaviour.zone_tripwire_crossings([self._det()], [self._zone()])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]['direction'], 'forward')
+        self.assertEqual(out[0]['zone_id'], 'z1')
+        self.assertEqual(out[0]['label'], 'car')
+        self.assertEqual(out[0]['track_id'], 7)
+        self.assertEqual(out[0]['tripwire_name'], 'Tripwire')
+
+    def test_label_filter_excludes_other_labels(self) -> None:
+        self.assertEqual(behaviour.zone_tripwire_crossings([self._det()], [self._zone(labels=['person'])]), [])
+        self.assertEqual(len(behaviour.zone_tripwire_crossings([self._det()], [self._zone(labels=['car'])])), 1)
+
+    def test_direction_filter(self) -> None:
+        self.assertEqual(behaviour.zone_tripwire_crossings([self._det()], [self._zone(direction='backward')]), [])
+
+    def test_disabled_zone_or_wire_skipped(self) -> None:
+        zone = self._zone()
+        zone['enabled'] = False
+        self.assertEqual(behaviour.zone_tripwire_crossings([self._det()], [zone]), [])
+        self.assertEqual(behaviour.zone_tripwire_crossings([self._det()], [self._zone(enabled=False)]), [])
+
+    def test_no_prev_centre_or_track_skipped(self) -> None:
+        self.assertEqual(behaviour.zone_tripwire_crossings([self._det(track_prev_center=None)], [self._zone()]), [])
+        self.assertEqual(behaviour.zone_tripwire_crossings([self._det(track_id=None)], [self._zone()]), [])
+
+    def test_no_zones_or_detections(self) -> None:
+        self.assertEqual(behaviour.zone_tripwire_crossings([], [self._zone()]), [])
+        self.assertEqual(behaviour.zone_tripwire_crossings([self._det()], []), [])
+
+
+class CooldownTests(unittest.TestCase):
+    def test_first_fire_and_zero_cooldown(self) -> None:
+        self.assertTrue(behaviour.cooldown_passed(None, 100.0, 30))
+        self.assertTrue(behaviour.cooldown_passed(100.0, 100.0, 0))
+
+    def test_within_and_beyond_window(self) -> None:
+        self.assertFalse(behaviour.cooldown_passed(100.0, 110.0, 30))
+        self.assertTrue(behaviour.cooldown_passed(100.0, 131.0, 30))
 
 
 if __name__ == '__main__':
