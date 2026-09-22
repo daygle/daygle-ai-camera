@@ -648,3 +648,43 @@ def test_still_dwell_candidates_empty_without_thresholds():
     settings = {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
     assert os.still_dwell_candidates([_det('package')], _mask_none_changed(), settings) == []
     assert os.still_dwell_candidates([], _mask_none_changed(), settings) == []
+
+
+# ---------------------------------------------------------------------------
+# single-pass motion-state annotation (annotate_motion_states + reuse)
+# ---------------------------------------------------------------------------
+
+
+def test_annotate_motion_states_stamps_each_detection_once():
+    out = os.annotate_motion_states([_det('car'), _det('person')], _mask_none_changed())
+    assert [d['motion_state'] for d in out] == ['still', 'still']
+    moving = os.annotate_motion_states([_det('car')], _mask_changed_inside_box())
+    assert moving[0]['motion_state'] == 'moving'
+
+
+def test_annotate_motion_states_marks_camera_motion_unknown():
+    out = os.annotate_motion_states([_det('car')], _mask_all_changed(), camera_motion=True)
+    assert out[0]['motion_state'] == 'unknown' and out[0]['camera_motion'] is True
+
+
+def test_motion_mode_filter_reuses_a_stamped_state():
+    """A detection already carrying ``motion_state`` is not re-classified: the
+    filter trusts the stamp, so the numpy classification runs once per cycle."""
+    settings = {'default_mode': 'moving', 'labels': {}}
+    # Stamp 'still' but hand a mask that WOULD classify moving -> reused 'still'
+    # means the car is dropped under Moving Only (recompute would keep it).
+    stamped_still = {**_det('car'), 'motion_state': 'still'}
+    assert os.filter_detections_by_motion_mode([stamped_still], _mask_all_changed(), settings) == []
+    # Stamp 'moving' but hand an empty mask -> reused 'moving' keeps it
+    # (recompute from the empty mask would call it 'still' and drop it).
+    stamped_moving = {**_det('car'), 'motion_state': 'moving'}
+    kept = os.filter_detections_by_motion_mode([stamped_moving], _mask_none_changed(), settings)
+    assert len(kept) == 1 and kept[0]['motion_state'] == 'moving'
+
+
+def test_still_dwell_reuses_a_stamped_state():
+    settings = {'default_mode': 'moving', 'labels': {}, 'still_alerts': {'car': 5}}
+    # Stamp 'still' with an all-changed mask: reuse -> candidate (recompute -> moving -> excluded).
+    stamped_still = {**_det('car'), 'motion_state': 'still'}
+    out = os.still_dwell_candidates([stamped_still], _mask_all_changed(), settings)
+    assert len(out) == 1 and out[0]['label'] == 'car'

@@ -465,6 +465,12 @@ def _remap_restored_database(database_path: Path, manifest: dict[str, Any], targ
         conn.commit()
     finally:
         conn.close()
+    # This restore wrote ``app_settings`` on a raw connection, bypassing
+    # ``set_setting``, so drop the live instance's cached settings to avoid
+    # serving the pre-restore config until the next write.
+    database = getattr(_state, 'database', None)
+    if database is not None and hasattr(database, 'invalidate_setting_cache'):
+        database.invalidate_setting_cache()
 
 
 def _copy_restored_tree(source: Path, target: Path) -> int:

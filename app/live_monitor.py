@@ -32,6 +32,7 @@ from app.detection_state import (
 )
 from app.detection_status import _camera_has_live_alert_stream, update_live_detection_status
 from app.object_settings import (
+    annotate_motion_states,
     effective_object_settings,
     filter_detections_by_motion_mode,
     object_detection_allowed_during_camera_motion,
@@ -688,6 +689,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # tracker below, so resolve them once per cycle rather than reading the
     # ``objects`` DB setting twice on this ~4 Hz hot path.
     object_settings = effective_object_settings()
+    # Classify moving/still ONCE for this cycle and stamp it on each detection.
+    # Both ``still_dwell_candidates`` and ``filter_detections_by_motion_mode``
+    # below need the verdict and both run on this same pre-filter list, so
+    # annotating up front lets each reuse the stamp instead of repeating the
+    # per-box mask classification (the numpy work) a second time.
+    detections = annotate_motion_states(
+        detections, diff_mask, camera_motion=camera_motion['active'],
+    )
     # Still-dwell candidates must be taken from the UNFILTERED detections: the
     # still/moving filter below drops still detections under the default Moving
     # Only mode, which would otherwise starve every "still for N minutes" alert

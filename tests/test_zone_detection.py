@@ -179,6 +179,50 @@ def test_detection_matches_zone_polygon_center_only(zd):
     assert zd.detection_matches_zone(detection, zone) is True
 
 
+def test_detection_matches_zone_memoizes_per_detection(zd, monkeypatch):
+    """The verdict is cached per (zone, box) so repeated tests within a cycle
+    compute the geometry once; a box change (or a different ratio) recomputes."""
+    detection = {'box': {'x': 0.0, 'y': 0.0, 'width': 0.1, 'height': 0.1}}
+    zone = {'id': 'z1', 'x': 0, 'y': 0, 'width': 1, 'height': 1}
+    calls = {'n': 0}
+    real = zd._detection_matches_zone_uncached
+
+    def counting(det, z, ratio):
+        calls['n'] += 1
+        return real(det, z, ratio)
+    monkeypatch.setattr(zd, '_detection_matches_zone_uncached', counting)
+
+    assert zd.detection_matches_zone(detection, zone) is True
+    assert zd.detection_matches_zone(detection, zone) is True  # served from the memo
+    assert calls['n'] == 1
+    assert '_zone_match_memo' in detection
+
+    # A {**det} copy shares the memo and, keeping its box, reuses the verdict.
+    assert zd.detection_matches_zone({**detection}, zone) is True
+    assert calls['n'] == 1
+
+    # Changing the box busts the cache (different key) and recomputes.
+    moved = {**detection, 'box': {'x': 0.9, 'y': 0.9, 'width': 0.05, 'height': 0.05}}
+    zd.detection_matches_zone(moved, zone)
+    assert calls['n'] == 2
+
+    # A non-default overlap ratio never uses the memo.
+    zd.detection_matches_zone(detection, zone, min_overlap_ratio=0.01)
+    assert calls['n'] == 3
+
+
+def test_detection_matches_zone_memo_matches_uncached(zd):
+    """Memoized result is identical to the uncached geometry for both a rect
+    (overlap path) and a polygon (centre path) zone."""
+    for zone in ({'id': 'r', 'x': 0, 'y': 0, 'width': 1, 'height': 1},
+                 {'id': 'p', 'points': SQUARE}):
+        for box in ({'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1},
+                    {'x': 0.9, 'y': 0.9, 'width': 0.4, 'height': 0.4}):
+            det = {'box': dict(box)}
+            expected = zd._detection_matches_zone_uncached(det, zone, 0.2)
+            assert zd.detection_matches_zone({'box': dict(box)}, zone) is expected
+
+
 # ---------------------------------------------------------------------------
 # _zone_pixel_motion_fraction -- numpy slice + polygon-points fallback
 # ---------------------------------------------------------------------------
@@ -726,9 +770,8 @@ def test_filter_for_camera_passes_through_when_enabled_no_zones(monkeypatch):
 # zone_object_rule_matches / zone_object_alert_rules
 # ---------------------------------------------------------------------------
 
-def test_zone_object_rule_matches_returns_matching_tuple():
-    from app import zone_detection as zd
-    settings = {
+def _one_person_zone_settings():
+    return {
         'id': 'cam-1',
         'detection': {
             'zones': [
@@ -743,6 +786,11 @@ def test_zone_object_rule_matches_returns_matching_tuple():
             ],
         },
     }
+
+
+def test_zone_object_rule_matches_returns_matching_tuple():
+    from app import zone_detection as zd
+    settings = _one_person_zone_settings()
     matches = zd.zone_object_rule_matches(
         settings, {'label': 'person', 'confidence': 0.8, 'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}},
         action='alert'
@@ -750,6 +798,37 @@ def test_zone_object_rule_matches_returns_matching_tuple():
     assert len(matches) == 1
     zone, rule = matches[0]
     assert rule['label'] == 'person'
+
+
+def test_zone_object_rule_matches_memoizes_per_detection(monkeypatch):
+    """Repeated (settings, action) calls for the same detection compute once;
+    a changed confidence, box, action, or settings object recomputes."""
+    from app import zone_detection as zd
+    settings = _one_person_zone_settings()
+    det = {'label': 'person', 'confidence': 0.8, 'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}}
+    calls = {'n': 0}
+    real = zd._zone_object_rule_matches_uncached
+
+    def counting(s, d, action):
+        calls['n'] += 1
+        return real(s, d, action)
+    monkeypatch.setattr(zd, '_zone_object_rule_matches_uncached', counting)
+
+    assert len(zd.zone_object_rule_matches(settings, det, action='alert')) == 1
+    assert len(zd.zone_object_rule_matches(settings, det, action='alert')) == 1  # memo hit
+    assert zd.zone_record_on_detect(det, settings) is True  # action='record' -> one more compute
+    assert zd.zone_record_on_detect(det, settings) is True  # memo hit
+    assert calls['n'] == 2  # one per (action) only
+
+    # A {**det} copy that keeps its box/label/confidence reuses the memo.
+    assert len(zd.zone_object_rule_matches(settings, {**det}, action='alert')) == 1
+    assert calls['n'] == 2
+    # Changing confidence below the rule minimum recomputes AND changes the result.
+    assert zd.zone_object_rule_matches(settings, {**det, 'confidence': 0.1}, action='alert') == []
+    assert calls['n'] == 3
+    # A different settings object recomputes.
+    zd.zone_object_rule_matches(_one_person_zone_settings(), det, action='alert')
+    assert calls['n'] == 4
 
 
 def test_zone_object_rule_matches_label_aliases_human_to_person():
