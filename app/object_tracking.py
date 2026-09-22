@@ -231,6 +231,12 @@ def update_object_tracks(
                 detection["track_age"] = best_track["hits"]
                 detection["track_new"] = False
                 detection["track_displacement"] = _recent_displacement(best_track)
+                # This cycle's centre and the previous one, so a behavioural
+                # consumer (line-crossing) can test the ``prev -> curr`` step
+                # without reaching into tracker state. ``None`` prev on the
+                # first two sights (need two points to define a crossing).
+                detection["track_center"] = centers[-1] if centers else None
+                detection["track_prev_center"] = centers[-2] if len(centers) >= 2 else None
             else:
                 track_id = state["next_id"]
                 state["next_id"] += 1
@@ -251,6 +257,8 @@ def update_object_tracks(
                 # One center is not motion evidence; the classifier falls back
                 # to the motion mask until the track has enough history.
                 detection["track_displacement"] = None
+                detection["track_center"] = _center_of(box) if isinstance(box, dict) else None
+                detection["track_prev_center"] = None
 
         # Age out tracks that were not matched this cycle.
         survivors = []

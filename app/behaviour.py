@@ -125,6 +125,72 @@ def _point_of(value: Any) -> Point | None:
     return None
 
 
+def zone_tripwire_crossings(detections: Any, zones: Any) -> list[dict[str, Any]]:
+    """Detect tripwire crossings for one detection cycle. Pure / no side effects.
+
+    ``detections`` are tracked detections annotated by
+    ``object_tracking.update_object_tracks`` (each with ``track_id``,
+    ``track_center`` and ``track_prev_center``); ``zones`` is a camera's
+    normalized ``detection.zones``. Returns one descriptor per firing crossing::
+
+        {"zone_id", "zone_name", "tripwire_name", "direction",
+         "label", "track_id", "confidence"}
+
+    A tripwire only fires for an enabled zone + enabled tripwire whose ``labels``
+    filter (empty = any) admits the detection's label.
+    """
+    results: list[dict[str, Any]] = []
+    if not isinstance(detections, list) or not isinstance(zones, list):
+        return results
+    live_wires: list[tuple[dict[str, Any], dict[str, Any], set[str]]] = []
+    for zone in zones:
+        if not isinstance(zone, dict) or zone.get('enabled') is False:
+            continue
+        wire = zone.get('tripwire')
+        if not isinstance(wire, dict) or wire.get('enabled') is False:
+            continue
+        wanted = {str(label).strip().lower() for label in (wire.get('labels') or []) if str(label).strip()}
+        live_wires.append((zone, wire, wanted))
+    if not live_wires:
+        return results
+    for det in detections:
+        if not isinstance(det, dict) or det.get('track_id') is None:
+            continue
+        prev = det.get('track_prev_center')
+        curr = det.get('track_center')
+        if prev is None or curr is None:
+            continue
+        label = str(det.get('label') or '').strip().lower()
+        for zone, wire, wanted in live_wires:
+            if wanted and label not in wanted:
+                continue
+            direction = tripwire_crossing(prev, curr, wire)
+            if direction is None:
+                continue
+            try:
+                confidence = float(det.get('confidence') or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            results.append({
+                'zone_id': str(zone.get('id') or zone.get('name') or ''),
+                'zone_name': str(zone.get('name') or zone.get('id') or '').strip() or None,
+                'tripwire_name': str(wire.get('name') or 'Tripwire'),
+                'direction': direction,
+                'label': label,
+                'track_id': det.get('track_id'),
+                'confidence': confidence,
+            })
+    return results
+
+
+def cooldown_passed(last_fired: float | None, now: float, cooldown_seconds: float) -> bool:
+    """True when a crossing may fire again: no prior fire, a non-positive
+    cooldown, or at least ``cooldown_seconds`` since ``last_fired``."""
+    if cooldown_seconds <= 0 or last_fired is None:
+        return True
+    return (now - last_fired) >= cooldown_seconds
+
+
 def tripwire_crossing(prev: Any, curr: Any, tripwire: Any) -> str | None:
     """Convenience wrapper: read ``a``/``b`` off a normalized ``tripwire``
     dict (as produced by ``zone_schema.normalize_zone_tripwire``) and return
