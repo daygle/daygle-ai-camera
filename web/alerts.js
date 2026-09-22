@@ -8,10 +8,20 @@ let cameraIndex = 0;
 let zoneIndex = 0;
 let alertType = 'object';
 
+// Keep the selector useful before any alert policy exists in a zone. These are
+// the standard detector classes; existing custom/model labels are added below.
+const STANDARD_OBJECT_LABELS = [
+  'person', 'bicycle', 'car', 'motorcycle', 'bus', 'train', 'truck', 'boat',
+  'traffic light', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog',
+  'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
+  'umbrella', 'handbag', 'suitcase', 'bottle', 'cup', 'laptop', 'cell phone',
+];
+
 const $ = (id) => document.getElementById(id);
 const currentCamera = () => cameras[cameraIndex];
 const currentZone = () => currentCamera()?.detection?.zones?.[zoneIndex];
 const objectLabels = () => [...new Set([
+  ...STANDARD_OBJECT_LABELS,
   'motion',
   'face',
   ...cameras.flatMap((camera) => (camera.detection?.zones || []).flatMap((zone) => (zone.object_rules || []).map((rule) => rule.label))),
@@ -98,7 +108,10 @@ function ruleOptions(rule) {
     const people = [{ id: '', name: 'Unknown Person' }, ...(enrolledPeople || []).map((person) => ({ id: String(person.id), name: person.name }))];
     return people.map((person) => `<option value="${escapeHtml(person.id)}" ${String(rule.person_id || '') === person.id ? 'selected' : ''}>${escapeHtml(person.name)}</option>`).join('');
   }
-  return objectLabels().map((label) => `<option value="${escapeHtml(label)}" ${label === rule.label ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+  return objectLabels().map((label) => {
+    const displayLabel = titleCase(String(label).replace(/[_-]+/g, ' '));
+    return `<option value="${escapeHtml(label)}" ${label === rule.label ? 'selected' : ''}>${escapeHtml(displayLabel)}</option>`;
+  }).join('');
 }
 
 function scopeLabel() {
@@ -133,7 +146,7 @@ function renderPolicies() {
         ${!people && !sound ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
         <label><span>${cooldownLabel}</span><input data-field="${people ? 'cooldown_minutes' : 'cooldown_seconds'}" type="number" min="0" max="${people ? '1440' : '3600'}" step="${people ? '1' : '5'}" value="${escapeHtml(String(cooldown ?? (people ? 5 : 60)))}"></label>
       </div>
-      <div class="alerts-channel-row"><label><input data-field="email_enabled" type="checkbox" ${rule.email_enabled ? 'checked' : ''}> Email</label><label><input data-field="push_enabled" type="checkbox" ${rule.push_enabled ? 'checked' : ''}> Push</label>${!people ? '<label><input data-field="record_on_detect" type="checkbox" ' + (rule.record_on_detect !== false ? 'checked' : '') + '> Record Event</label>' : ''}</div>
+      <div class="alerts-channel-row"><label><input data-field="email_enabled" type="checkbox" ${rule.email_enabled ? 'checked' : ''}> Email</label><label><input data-field="push_enabled" type="checkbox" ${rule.push_enabled ? 'checked' : ''}> Push</label>${!people ? '<label><input data-field="record_on_detect" type="checkbox" ' + (rule.record_on_detect !== false ? 'checked' : '') + '> Record</label>' : ''}</div>
       ${!people ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>` : ''}
       <label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(Array.isArray(rule.email_recipients) ? rule.email_recipients.join(', ') : rule.email_recipients || '')}" placeholder="alerts@example.com, me@example.com"></label>
       <div class="alerts-policy-actions"><span class="muted">${people ? 'Recognized-Person And Stranger Alerts Use The Face Recognition Rule Store.' : sound ? 'Sound Alert Policies Are Managed On This Page.' : ''}</span><button class="btn-danger" data-delete-rule type="button">Remove Policy</button></div>

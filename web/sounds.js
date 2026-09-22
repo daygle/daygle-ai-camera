@@ -14,6 +14,7 @@ const statActiveRules = document.getElementById('statActiveRules');
 const statDetection = document.getElementById('statDetection');
 const statCamera = document.getElementById('statCamera');
 const soundCameraStatusList = document.getElementById('soundCameraStatusList');
+const soundAssignedSummary = document.getElementById('soundAssignedSummary');
 
 function detectorSoundConfig(camera) {
   return camera?.detection?.sound || {};
@@ -134,6 +135,17 @@ function renderCameraSelect() {
   }).join('');
 }
 
+function renderAssignedSummary(camera) {
+  if (!soundAssignedSummary) return;
+  if (!camera) {
+    soundAssignedSummary.innerHTML = '';
+    return;
+  }
+  const enabled = detectorEnabledRules(camera);
+  const chips = enabled.map((rule) => `<span class="sound-assigned-chip" style="display:inline-flex;align-items:center;min-height:25px;padding:4px 9px;border:1px solid rgba(167,139,250,.3);border-radius:999px;color:#c4b5fd;background:rgba(167,139,250,.1);font-size:11px;font-weight:750">${escapeHtml(titleCase(String(rule.name || rule.class || '').replace(/[_-]+/g, ' ')))}</span>`).join('');
+  soundAssignedSummary.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;color:var(--muted);font-size:10px;font-weight:850;letter-spacing:.07em;text-transform:uppercase"><span>Enabled Sound Classes</span><a style="color:var(--accent);font-size:11px;letter-spacing:normal;text-decoration:none;text-transform:none;white-space:nowrap" href="/alerts">Manage Alert Policies</a></div><div style="display:flex;flex-wrap:wrap;gap:6px">${chips || '<span class="muted">None Yet</span>'}</div>`;
+}
+
 function renderStatus() {
   const camera = currentCamera();
   const config = detectorSoundConfig(camera);
@@ -162,6 +174,7 @@ function renderEditor() {
   reloadBtn.disabled = !camera;
   soundEnabled.value = String(detectorSoundConfigured(camera));
   renderStatus();
+  renderAssignedSummary(camera);
 }
 
 async function refreshStatus() {
