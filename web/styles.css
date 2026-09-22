@@ -48,11 +48,15 @@
   z-index: 5;
 }
 :root.light .card {
-  background: var(--panel);
+  border-color: rgba(2,132,199,.18);
+  background:
+    radial-gradient(circle at 100% 0, rgba(2,132,199,.1), transparent 36%),
+    linear-gradient(145deg, rgba(255,255,255,.98), rgba(241,248,252,.9)),
+    var(--panel);
   box-shadow: 0 4px 24px rgba(0,0,0,.06);
 }
 :root.light .card:hover {
-  border-color: rgba(2, 132, 199, 0.18);
+  border-color: rgba(2, 132, 199, 0.36);
   box-shadow: 0 8px 32px rgba(0,0,0,.10);
 }
 :root.light .app-nav-toggle { background: rgba(0,0,0,.04); }
@@ -452,22 +456,45 @@ h2 { margin: 0; font-size: 20px; }
 .grid { display: grid; gap: 18px; }
 .stats-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .card {
-  border: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--panel), rgba(10, 16, 28, 0.86));
+  position: relative;
+  border: 1px solid rgba(71,214,255,.18);
+  /* Layers, top to bottom: corner accent glow, faint top sheen, then the
+     original panel gradient -- the signature "model card" look from the
+     YAMNet TFLite page, applied to every card. */
+  background:
+    radial-gradient(circle at 100% 0, rgba(71,214,255,.13), transparent 36%),
+    linear-gradient(145deg, rgba(255,255,255,.055), rgba(255,255,255,.018)),
+    linear-gradient(180deg, var(--panel), rgba(10, 16, 28, 0.86));
   box-shadow: 0 18px 50px rgba(0,0,0,.32);
   border-radius: 24px;
   padding: 22px;
   backdrop-filter: blur(20px);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.card:hover { border-color: rgba(71, 214, 255, 0.18); box-shadow: 0 22px 60px rgba(0,0,0,.40); }
+.card:hover { border-color: rgba(71, 214, 255, 0.36); box-shadow: 0 22px 60px rgba(0,0,0,.40); }
+
+/* Gradient hairline across the top of every card (the yamnet-model-card
+   accent bar, generalized). Drawn as a small background layer pinned to the
+   top instead of an ::after so cards can keep visible overflow -- the /objects
+   multi-select dropdown overflows its card. */
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 12%;
+  width: 32%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--success), transparent);
+  opacity: .9;
+  pointer-events: none;
+}
 
 .stats-grid .card { padding: 20px 22px 22px; }
 .stats-grid .card span { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
 .stats-grid .card strong { display: block; margin-top: 10px; font-size: 32px; font-weight: 900; letter-spacing: -.01em; }
 
 .stats-grid .card small { display: block; margin-top: 6px; line-height: 1.4; }
-.ai-mode { font-size: 24px; letter-spacing: .04em; }
+.ai-mode { letter-spacing: .04em; }
 .ai-mode.onnx-active { color: var(--success); }
 .ai-mode.ai-disabled { color: var(--muted); }
 .ai-mode.model-missing { color: var(--danger); }
@@ -876,23 +903,10 @@ input[type="file"] { padding: 10px; }
 }
 
 /* ─── YAMNet model card ────────────────────────────────────────────────────── */
+/* The yamnet-model-card look was promoted to the base .card (tinted border,
+   corner glow, top hairline); these rules keep only what is still unique. */
 .yamnet-model-card {
-  position: relative;
   overflow: hidden;
-  border-color: rgba(71,214,255,.18);
-  background:
-    radial-gradient(circle at 100% 0, rgba(71,214,255,.13), transparent 36%),
-    linear-gradient(145deg, rgba(255,255,255,.055), rgba(255,255,255,.018));
-}
-.yamnet-model-card::after {
-  position: absolute;
-  top: 0;
-  right: 12%;
-  width: 32%;
-  height: 2px;
-  content: '';
-  background: linear-gradient(90deg, transparent, var(--accent), var(--success), transparent);
-  opacity: .9;
 }
 .yamnet-model-section-header {
   align-items: center;
@@ -1079,12 +1093,7 @@ input[type="file"] { padding: 10px; }
   0% { transform: scale(.7); opacity: .7; }
   70%, 100% { transform: scale(1.55); opacity: 0; }
 }
-:root.light .yamnet-model-card {
-  border-color: rgba(2,132,199,.18);
-  background:
-    radial-gradient(circle at 100% 0, rgba(2,132,199,.1), transparent 36%),
-    linear-gradient(145deg, rgba(255,255,255,.98), rgba(241,248,252,.9));
-}
+/* Light-mode card treatment was promoted to :root.light .card. */
 :root.light .yamnet-model-state { background: rgba(2,132,199,.035); }
 :root.light .yamnet-model-spec { background: rgba(255,255,255,.7); }
 :root.light .yamnet-model-engine-badge { color: #0369a1; background: rgba(2,132,199,.07); }

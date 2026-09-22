@@ -49,7 +49,7 @@ function setModelMessage(modelId, text, type = 'info') {
 }
 
 function renderStatus(status) {
-  const modelName = status.model_path ? status.model_path.split('/').pop() : '(none)';
+  const modelName = status.model_path ? status.model_path.split('/').pop() : '-';
   const rows = [
     ['Enabled', yesNo(status.enabled)],
     ['Model Loaded', yesNo(status.model_loaded)],
@@ -71,6 +71,7 @@ async function loadStatus() {
     renderStatus(status);
   } catch (err) {
     arcfaceStatusPanel.innerHTML = safeHtml`<div class="muted">${err.message || 'Failed to load status.'}</div>`;
+    window.showToast(err.message || 'Failed to load status.', true);
   }
 }
 
@@ -162,6 +163,7 @@ async function loadModels() {
   } catch (err) {
     arcfaceModelsMessage.hidden = false;
     arcfaceModelsMessage.textContent = err.message || 'Failed to load models.';
+    window.showToast(err.message || 'Failed to load models.', true);
   }
 }
 
@@ -266,9 +268,11 @@ async function runModelAction(action, modelId, button) {
     // renderModels() just replaced the card DOM; set the message on the fresh
     // card and let it fade out on its own.
     setModelMessage(modelId, spec.done, 'success');
+    window.showToast(spec.done, false);
     setTimeout(() => setModelMessage(modelId, '', 'info'), 5000);
   } catch (err) {
     setModelMessage(modelId, err.message || spec.fail, 'error');
+    window.showToast(err.message || spec.fail, true);
     button.disabled = false;
     button.classList.remove('model-action-loading');
     button.textContent = original;

@@ -445,12 +445,14 @@ function bindModelCardActions() {
           delete: `${modelId} deleted.`,
         };
         setModelMessage(modelId, result.message || successMessages[action] || `${modelName} ${action}d.`, 'success');
+        window.showToast(result.message || successMessages[action] || `${modelName} ${action}d.`, false);
         // Clear message after 5 seconds
         setTimeout(() => setModelMessage(modelId, '', 'info'), 5000);
         await loadModels();
       } catch (error) {
         if (window.daygleAuth?.redirecting) return;
         setModelMessage(modelId, error.message, 'error');
+        window.showToast(error.message, true);
         btn.disabled = false;
         btn.classList.remove('model-action-loading');
         btn.textContent = originalText;
@@ -471,7 +473,7 @@ function populateFaceModelSelect(models, currentValue) {
   const faceModels = (models || []).filter(
     (m) => m.installed && (m.family === 'face' || /face/i.test(m.path || ''))
   );
-  const options = ['<option value="">None installed</option>'];
+  const options = ['<option value="">None Installed</option>'];
   for (const model of faceModels) {
     const selected = model.path === currentValue ? ' selected' : '';
     options.push(`<option value="${escapeHtml(model.path)}"${selected}>${escapeHtml(model.label)} (${model.exported_imgsz || '?'})</option>`);
@@ -494,6 +496,7 @@ async function loadModels() {
     faceModelsEmpty.textContent = 'Could not load the model list.';
     objectModelUpdatesMessage.textContent = 'Could not load model list.';
     faceModelUpdatesMessage.textContent = 'Could not load model list.';
+    window.showToast('Could not load the model list.', true);
   }
 }
 
