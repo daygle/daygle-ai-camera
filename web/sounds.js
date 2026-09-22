@@ -219,6 +219,10 @@ function renderClassEditor(camera) {
           <input type="checkbox" data-class-toggle="${index}" ${enabled ? 'checked' : ''} />
           <span>${enabled ? 'On' : 'Off'}</span>
         </label>
+        <label class="toggle-control" title="Record a clip when this sound is detected on this camera" style="align-self:center">
+          <input type="checkbox" data-class-record="${index}" ${rule.record_on_detect !== false ? 'checked' : ''} />
+          <span>Record</span>
+        </label>
         <a class="sound-class-alerts-link" href="/alerts" style="color:var(--accent);font-size:11px;font-weight:750;text-decoration:none;white-space:nowrap;align-self:center">Configure alerts</a>
         <button class="btn-danger" type="button" data-class-remove="${index}" title="Remove this sound class from the camera" style="align-self:center">Remove</button>
       </div>`;
@@ -236,6 +240,14 @@ function bindClassEditor(camera) {
       markSoundDirty();
       renderClassEditor(camera);
       renderStatus();
+    });
+  });
+  soundClassEditor.querySelectorAll('[data-class-record]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const rule = rules[Number(input.dataset.classRecord)];
+      if (!rule) return;
+      rule.record_on_detect = input.checked;
+      markSoundDirty();
     });
   });
   // Per-class detection threshold (0.01-1); mirrors the Zones object rule's

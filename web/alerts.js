@@ -85,9 +85,9 @@ function renderSelectors() {
   const hint = $('alertScopeHint');
   if (hint) {
     hint.textContent = alertType === 'object'
-      ? 'Objects, motion, and faces are assigned per area on the Zones page. Enable them there, then configure how each one alerts you below.'
+      ? 'Objects, motion, and faces are assigned - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
       : alertType === 'sound'
-        ? 'Sound classes are assigned per camera on the Sounds page. Enable them there, then configure how each one alerts you below.'
+        ? 'Sound classes are assigned - and set to record - per camera on the Sounds page. Here you choose how each one notifies you.'
         : 'Add recognized-person and stranger alerts here. Enrol people on the Face Recognition page.';
   }
 }
@@ -152,7 +152,7 @@ function renderPolicies() {
         ${!people && !sound ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
         <label><span>${cooldownLabel}</span><input data-field="${people ? 'cooldown_minutes' : 'cooldown_seconds'}" type="number" min="0" max="${people ? '1440' : '3600'}" step="${people ? '1' : '5'}" value="${escapeHtml(String(cooldown ?? (people ? 5 : 60)))}"></label>
       </div>
-      <div class="alerts-channel-row"><label><input data-field="email_enabled" type="checkbox" ${rule.email_enabled ? 'checked' : ''}> Email</label><label><input data-field="push_enabled" type="checkbox" ${rule.push_enabled ? 'checked' : ''}> Push</label>${!people ? '<label><input data-field="record_on_detect" type="checkbox" ' + (rule.record_on_detect !== false ? 'checked' : '') + '> Record</label>' : ''}</div>
+      <div class="alerts-channel-row"><label><input data-field="email_enabled" type="checkbox" ${rule.email_enabled ? 'checked' : ''}> Email</label><label><input data-field="push_enabled" type="checkbox" ${rule.push_enabled ? 'checked' : ''}> Push</label></div>
       ${!people ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>` : ''}
       <label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(Array.isArray(rule.email_recipients) ? rule.email_recipients.join(', ') : rule.email_recipients || '')}" placeholder="alerts@example.com, me@example.com"></label>
       <div class="alerts-policy-actions"><span class="muted">${people ? 'Recognized-person and stranger alerts use the face recognition rule store.' : sound ? 'Assigned on the Sounds page. Removing here unassigns this sound class from the camera.' : 'Assigned on the Zones page. Removing here unassigns this item from the area.'}</span><button class="btn-danger" data-delete-rule type="button">${people ? 'Remove Policy' : 'Remove'}</button></div>

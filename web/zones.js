@@ -470,6 +470,10 @@ function renderObjectRules(zone, zoneIndex) {
               <span>Min Confidence</span>
               <input type="number" data-zone-rule-confidence-value="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" style="width:90px" />
             </label>
+            <label class="toggle-control" title="Record a clip when ${label.toLowerCase()} is detected in this area" style="align-self:center">
+              <input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} />
+              <span>Record</span>
+            </label>
             <button class="delete-btn secondary zone-action-btn" type="button" data-delete-zone-rule="${key}" title="Delete ${label} detection rule from this zone">${ICONS.remove} Remove</button>
           </div>
         </div>
@@ -508,7 +512,11 @@ function renderMotionCard(zone, zoneIndex) {
           <small class="form-help muted zone-motion-pixel-help" data-zone-motion-pixel-help="${zoneIndex}">${escapeHtml(motionPixelThresholdText(rule))}</small>
         </label>
         <div class="zone-motion-secondary">
-          <span class="muted">Recording and notifications are configured on Alerts.</span>
+          <label class="toggle-control" title="Record a clip when motion is detected in this area">
+            <input type="checkbox" data-zone-motion-record="${zoneIndex}" ${rule.record_on_detect !== false ? 'checked' : ''} />
+            <span>Record</span>
+          </label>
+          <span class="muted">Notifications are configured on Alerts.</span>
         </div>
       </div>
       <div class="zone-motion-advanced-body">
@@ -555,7 +563,11 @@ function renderFaceCard(zone, zoneIndex) {
           <small class="form-help muted">Faces detected outside Face-enabled areas are ignored entirely.</small>
         </label>
         <div class="zone-motion-secondary">
-          <span class="muted">Recording and notifications are configured on Alerts.</span>
+          <label class="toggle-control" title="Record a clip when a face is detected in this area">
+            <input type="checkbox" data-zone-face-record="${zoneIndex}" ${rule.record_on_detect !== false ? 'checked' : ''} />
+            <span>Record</span>
+          </label>
+          <span class="muted">Notifications are configured on Alerts.</span>
         </div>
       </div>
 ` : ''}
@@ -718,10 +730,10 @@ function bindObjectRuleControls() {
 }
 
 // Motion card controls are limited to detection sensitivity and per-zone
-// pixel gate/scale overrides. Alert delivery, recording, schedules, and
-// cooldowns are edited on Alerts. Data
-// attributes carry the bare zone index; the motion rule itself is looked up
-// by label so reordering object rules never breaks these bindings.
+// pixel gate/scale overrides, plus the Record toggle. Alert delivery,
+// schedules, and cooldowns are edited on Alerts. Data attributes carry the
+// bare zone index; the motion rule itself is looked up by label so reordering
+// object rules never breaks these bindings.
 function bindMotionControls() {
   document.querySelectorAll('[data-zone-motion-toggle]').forEach((cb) => {
     cb.addEventListener('change', () => {
@@ -736,6 +748,14 @@ function bindMotionControls() {
       zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
       // Re-render so the sensitivity/gate body appears or collapses with the toggle.
       renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+  document.querySelectorAll('[data-zone-motion-record]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const rule = motionRuleOf(cameraDetection().zones[Number(cb.dataset.zoneMotionRecord)]);
+      if (!rule) return;
+      rule.record_on_detect = cb.checked;
       markZoneUnsaved();
     });
   });
@@ -779,8 +799,8 @@ function bindMotionControls() {
 }
 
 
-// Face-card bindings only edit face detection scope and sensitivity. Alert
-// delivery, recording, schedules, and cooldowns are edited on Alerts.
+// Face-card bindings edit face detection scope, sensitivity, and the Record
+// toggle. Alert delivery, schedules, and cooldowns are edited on Alerts.
 function bindFaceControls() {
   document.querySelectorAll('[data-zone-face-toggle]').forEach((cb) => {
     cb.addEventListener('change', () => {
@@ -793,6 +813,14 @@ function bindFaceControls() {
       }
       // Re-render so the confidence body appears or collapses with the toggle.
       renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+  document.querySelectorAll('[data-zone-face-record]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const rule = faceRuleOf(cameraDetection().zones[Number(cb.dataset.zoneFaceRecord)]);
+      if (!rule) return;
+      rule.record_on_detect = cb.checked;
       markZoneUnsaved();
     });
   });
@@ -907,6 +935,7 @@ function bindZoneControls(zones) {
 function bindRuleFields() {
   const checkboxBindings = [
     ['zoneRuleEnabled', 'enabled'],
+    ['zoneRuleRecord', 'record_on_detect'],
   ];
   checkboxBindings.forEach(([datasetKey, ruleKey]) => {
     document.querySelectorAll(`input[type="checkbox"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((cb) => {

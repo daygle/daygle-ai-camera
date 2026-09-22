@@ -14,7 +14,7 @@
       <div>
         <p class="eyebrow">Notification Workspace</p>
         <h1>Alerts</h1>
-        <p class="muted">Create separate policies for objects, recognized people, and sounds. Give each policy its own schedule, threshold, cooldown, recording, and delivery channels.</p>
+        <p class="muted">Create separate policies for objects, recognized people, and sounds. Give each policy its own schedule, threshold, cooldown, and delivery channels. Detection scope and recording are set on the Zones and Sounds pages.</p>
       </div>
       <button id="saveAlertsBtn" class="primary" type="button">Save Alert Rules</button>
     </header>
@@ -36,7 +36,7 @@
         <label><span>Zone</span><select id="zoneSelect"></select></label>
         <button id="addAlertBtn" class="btn-info" type="button">＋ Add Person Alert</button>
       </div>
-      <p id="alertScopeHint" class="form-help muted">Objects, motion, and faces are assigned per area on the Zones page; sound classes on the Sounds page. This page configures how each assigned item alerts you - recording, email, push, schedules, and cooldowns.</p>
+      <p id="alertScopeHint" class="form-help muted">Objects, motion, and faces are assigned - and set to record - per area on the Zones page; sound classes on the Sounds page. This page configures how each assigned item notifies you - email, push, schedules, and cooldowns.</p>
       <div id="alertsList" class="alerts-policy-list"></div>
     </section>
   </main>
