@@ -67,15 +67,15 @@ function renderPolicies() {
   updateStats();
   const scope = alertType === 'sound' ? (currentCamera() ? `Camera sound · ${currentCamera().name || currentCamera().id}` : 'Camera sound') : (currentZone() ? `Zone · ${currentZone().name || `Zone ${zoneIndex + 1}`}` : 'Zone');
   if (!currentCamera() || (alertType === 'object' && !currentZone())) { $('alertsList').innerHTML = '<div class="empty">Configure a camera and zone on the Zones page first.</div>'; return; }
-  if (!rules.length) { $('alertsList').innerHTML = `<div class="empty">No ${alertType} alert policies in this scope. Add one below to get started.</div>`; return; }
+  if (!rules.length) { $('alertsList').innerHTML = `<div class="empty">No ${escapeHtml(alertType)} alert policies in this scope. Add one below to get started.</div>`; return; }
   $('alertsList').innerHTML = rules.map((rule, index) => `
     <article class="alerts-policy ${rule.enabled !== false ? 'is-enabled' : ''}" data-rule-index="${index}">
       <div class="alerts-policy-head"><div><span class="zones-panel-kicker">${escapeHtml(scope)} · Policy ${index + 1}</span><h3>${escapeHtml(ruleLabel(rule))}</h3></div><label class="toggle-control"><input data-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''}><span>${rule.enabled !== false ? 'Enabled' : 'Disabled'}</span></label></div>
       <div class="alerts-policy-grid">
         <label><span>${alertType === 'sound' ? 'Sound' : 'Object'}</span><select data-field="${alertType === 'sound' ? 'class' : 'label'}">${ruleOptions(rule)}</select></label>
-        <label><span>${alertType === 'sound' ? 'Confidence threshold' : 'Minimum confidence'}</span><input data-field="${alertType === 'sound' ? 'confidence_threshold' : 'min_confidence'}" type="number" min="0" max="1" step="0.01" value="${rule[alertType === 'sound' ? 'confidence_threshold' : 'min_confidence'] ?? 0.5}"></label>
-        ${alertType === 'object' ? '<label><span>Maximum confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + (rule.max_confidence ?? 1) + '"></label>' : ''}
-        <label><span>Cooldown (seconds)</span><input data-field="cooldown_seconds" type="number" min="0" max="3600" step="5" value="${rule.cooldown_seconds ?? 60}"></label>
+        <label><span>${alertType === 'sound' ? 'Confidence threshold' : 'Minimum confidence'}</span><input data-field="${alertType === 'sound' ? 'confidence_threshold' : 'min_confidence'}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(rule[alertType === 'sound' ? 'confidence_threshold' : 'min_confidence'] ?? 0.5))}"></label>
+        ${alertType === 'object' ? '<label><span>Maximum confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
+        <label><span>Cooldown (seconds)</span><input data-field="cooldown_seconds" type="number" min="0" max="3600" step="5" value="${escapeHtml(String(rule.cooldown_seconds ?? 60))}"></label>
       </div>
       <div class="alerts-channel-row"><label><input data-field="email_enabled" type="checkbox" ${rule.email_enabled ? 'checked' : ''}> Email</label><label><input data-field="push_enabled" type="checkbox" ${rule.push_enabled ? 'checked' : ''}> Push</label><label><input data-field="record_on_detect" type="checkbox" ${rule.record_on_detect !== false ? 'checked' : ''}> Record event</label></div>
       <div class="alerts-policy-grid alerts-schedule-grid">
