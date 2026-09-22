@@ -294,10 +294,10 @@ If cloudflared cannot start or later exits, Daygle logs a clear warning and cont
 - `/` - dashboard and event search
 - `/live` - live camera view with detection overlay
 - `/cameras` - camera management, recording, and PTZ
-- `/zones` - monitoring zone editor (use **Draw polygon** or **Full Frame** to add areas, and the per-zone **Shape** control to convert between full frame and polygon), visibility controls, and object/motion/face detection scope. Alert delivery, recording, schedules, and cooldowns are configured on `/alerts`
+- `/zones` - monitoring zone editor (use **Draw polygon** or **Full Frame** to add areas, and the per-zone **Shape** control to convert between full frame and polygon), plus visibility controls. Object and alert policies are configured on `/alerts`
 - `/alerts` - notification policies for camera zones, objects, and sounds; multiple policies can target the same object with different schedules and thresholds
 - `/objects` - per-object detection behavior (Moving Only / Still Only / both) and still-alert thresholds with a global default; recording is configured per policy on `/alerts`
-- `/sounds` - sound detection rules
+- `/sounds` - camera audio detection status and enablement; sound alert policies are configured on `/alerts`
 - `/onnx` - AI model library and detector settings
 - `/settings` - detection, recording, notifications, retention, backup, Cloudflare Tunnel, and updates
 - `/users` - user management (admin)
@@ -332,7 +332,7 @@ Models are stored under `models/`. The default model is `yolo11n`, downloaded au
 
 - Open `/sounds`
 - Enable sound detection for a camera
-- Add sound classes and configure thresholds and recording; configure sound email/push policies on `/alerts`
+- Configure sound thresholds, recording, schedules, and email/push policies on `/alerts`
 - Confirm runtime availability on `/yamnet-tflite`
 
 If the TFLite runtime is missing, install `ai-edge-litert` or `tflite-runtime`.

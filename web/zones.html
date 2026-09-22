@@ -14,7 +14,7 @@
       <div class="zones-hero-copy">
         <p class="eyebrow">Monitoring workspace</p>
         <h1>Zones</h1>
-        <p class="muted">Shape the areas your camera should watch and tune detection sensitivity. Configure alerts on the Alerts page.</p>
+        <p class="muted">Shape the areas your camera should watch and keep your live view organized.</p>
       </div>
       <div class="hero-action zones-hero-action">
         <button id="saveZonesBtnHeader" type="button" class="primary" style="display:none">
@@ -24,12 +24,10 @@
       </div>
     </header>
 
-    <div class="zones-workflow" aria-label="Zone setup steps">
+    <div class="zones-workflow" aria-label="Zone editing steps">
       <div class="zones-workflow-step is-current"><span>1</span><div><strong>Choose a camera</strong><small>Set the view you want to edit</small></div></div>
       <div class="zones-workflow-line" aria-hidden="true"></div>
       <div class="zones-workflow-step"><span>2</span><div><strong>Draw areas</strong><small>Click points on the live preview</small></div></div>
-      <div class="zones-workflow-line" aria-hidden="true"></div>
-      <div class="zones-workflow-step"><span>3</span><div><strong>Set detection rules</strong><small>Decide what should trigger action</small></div></div>
     </div>
 
     <section class="grid stats-grid zones-stats" aria-label="Zone overview">
@@ -40,14 +38,6 @@
         </div>
         <strong id="statZoneCount" class="stat-card-value">0</strong>
         <small class="muted stat-card-sub">Areas on this camera</small>
-      </article>
-      <article class="card stat-card">
-        <div class="stat-card-head">
-          <span class="stat-card-label">Detection rules</span>
-          <span class="stat-card-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
-        </div>
-        <strong id="statRuleCount" class="stat-card-value">0</strong>
-        <small class="muted stat-card-sub">Objects and motion</small>
       </article>
       <article class="card stat-card stat-card-camera">
         <div class="stat-card-head">
@@ -89,7 +79,7 @@
           </div>
         </div>
         <label class="zones-editor-camera">
-          <span>Camera to configure</span>
+          <span>Camera</span>
           <span class="zones-camera-select-wrap">
             <select id="cameraSelect" aria-label="Select camera"></select>
           </span>
@@ -112,25 +102,9 @@
         </div>
         <div class="zones-list-heading"><div><strong>Your areas</strong><span>Click an area to select it on the preview. Use Shape to switch between full frame and polygon.</span></div><span class="zones-list-count" id="zonesListCount" aria-live="polite">0 areas</span></div>
         <div id="zoneList" class="list zones-list"></div>
-        <div id="liveDetectionStatus" class="live-detection-status">Live AI status waiting for frames.</div>
+        <div id="liveDetectionStatus" class="live-detection-status">Live preview status waiting for frames.</div>
       </section>
 
-      <section class="card zone-rules-card" aria-labelledby="detectionRulesTitle">
-        <div class="settings-section-header zones-section-header">
-          <div class="settings-section-icon" aria-hidden="true">◉</div>
-          <div>
-            <span class="zones-panel-kicker">Steps 2-3</span>
-            <h2 id="detectionRulesTitle">Detection rules</h2>
-            <p class="settings-section-subtitle">Choose which detection types are active in each area. Configure recording and notifications on the Alerts page.</p>
-          </div>
-        </div>
-        <div class="zones-rules-tip"><span class="zones-tip-icon" aria-hidden="true">i</span><span>Start with <strong>Enabled</strong> for each area. Use the Alerts page to configure recording, email, push, schedules, and cooldowns.</span></div>
-        <div id="objectDetectionRules"></div>
-        <div class="zone-editor-footer">
-          <div class="zones-save-copy"><span class="zones-save-indicator"></span><span>Remember to save your changes.</span></div>
-          <button id="saveZonesBtn" type="button" class="primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>Save Zones</button>
-        </div>
-      </section>
     </div>
   </main>
   <script src="/static/nav.js"></script>

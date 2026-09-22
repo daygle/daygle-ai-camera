@@ -571,7 +571,6 @@ function renderZones() {
   updateZonesStats();
   if (!zones.length) {
     liveEls.zoneList.innerHTML = '<div class="empty">No Zone Areas yet. Click "Draw polygon", place corner dots on the footage, then click the first dot to close the area - or add the whole frame at once.</div>';
-    renderObjectDetectionRules();
     return;
   }
   liveEls.zoneList.innerHTML = zones.map((zone, index) => {
@@ -619,7 +618,6 @@ function renderZones() {
   `;
   }).join('');
   bindZoneControls(zones);
-  renderObjectDetectionRules();
 }
 
 function renderObjectDetectionRules() {
@@ -655,7 +653,6 @@ function renderObjectDetectionRules() {
         ${rulesHtml}
       </div>`;
   }).join('');
-  bindObjectRuleControls();
 }
 
 function bindObjectRuleControls() {
@@ -724,7 +721,6 @@ function bindMotionControls() {
       // derives it from the enabled motion rule on every render/save.
       zone.monitor_motion = cb.checked;
       zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
-      renderObjectDetectionRules();
       markZoneUnsaved();
     });
   });
@@ -780,7 +776,6 @@ function bindFaceControls() {
         const rule = faceRuleOf(zone);
         if (rule) rule.enabled = false;
       }
-      renderObjectDetectionRules();
       markZoneUnsaved();
     });
   });
