@@ -274,6 +274,74 @@ def test_deliver_push_notifications_unknown_face_uses_unknown_rule_push(tmp_path
     assert captured == []
 
 
+def test_multi_schedule_notifications_use_each_entry_channel_recipients_and_window(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.alert_dispatch as dispatch
+
+    captured_email: list[tuple[str, list[str]]] = []
+    captured_push: list[str] = []
+    current_time = {'value': '10:00'}
+
+    class FakeEmailAlertService:
+        def __init__(self, settings):
+            pass
+
+        def send_alert(self, alert, *, event_id, recipients=None, **_kwargs):
+            captured_email.append((alert['rule_name'], recipients))
+
+    class FakePushNotificationService:
+        def __init__(self, settings):
+            pass
+
+        def send_alert(self, alert, *, event_id, **_kwargs):
+            captured_push.append(alert['rule_name'])
+
+    monkeypatch.setattr(dispatch, 'effective_email_alert_settings', lambda: {'enabled': True})
+    monkeypatch.setattr(dispatch, 'effective_push_notification_settings', lambda: {'enabled': True})
+    monkeypatch.setattr(dispatch, 'EmailAlertService', FakeEmailAlertService)
+    monkeypatch.setattr(dispatch, 'PushNotificationService', FakePushNotificationService)
+    monkeypatch.setattr(dispatch, '_now_hm_in_admin_tz', lambda: current_time['value'])
+    monkeypatch.setattr(dispatch._state.database, 'get_event', lambda _event_id: {
+        'metadata': {'camera_name': 'Front Door', 'camera_id': 'front'},
+        'snapshot_path': None, 'created_at': '',
+    })
+
+    schedules = [
+        {
+            'id': 'day', 'name': 'Person [Schedule 1]', 'email_enabled': True,
+            'email_recipients': ['day@example.com'], 'push_enabled': True,
+            'notify_start': '08:00', 'notify_end': '12:00',
+        },
+        {
+            'id': 'night', 'name': 'Person [Schedule 2]', 'email_enabled': True,
+            'email_recipients': ['night@example.com'], 'push_enabled': True,
+            'notify_start': '18:00', 'notify_end': '23:00',
+        },
+    ]
+    rules = [{
+        **schedule,
+        'schedule': schedule,
+    } for schedule in schedules]
+    triggered = [{
+        'label': 'person', 'rule_name': schedule['name'], 'confidence': 0.9,
+        'message': 'Person detected',
+    } for schedule in schedules]
+
+    dispatch.deliver_email_alerts(triggered, 41, rules=rules)
+    dispatch.deliver_push_notifications(triggered, 41, rules=rules)
+    assert captured_email == [('Person [Schedule 1]', ['day@example.com'])]
+    assert captured_push == ['Person [Schedule 1]']
+
+    current_time['value'] = '20:00'
+    dispatch.deliver_email_alerts(triggered, 42, rules=rules)
+    dispatch.deliver_push_notifications(triggered, 42, rules=rules)
+    assert captured_email == [
+        ('Person [Schedule 1]', ['day@example.com']),
+        ('Person [Schedule 2]', ['night@example.com']),
+    ]
+    assert captured_push == ['Person [Schedule 1]', 'Person [Schedule 2]']
+
+
 def test_alert_detection_type_classifies_every_sound_class_as_sound():
     """Every configured sound class must render "Detection Type: Sound", motion
     as "Motion", and object labels (including underscored ones) as "Object".

@@ -210,6 +210,55 @@ def normalize_label_list(value: Any) -> list[str]:
     return labels
 
 
+def normalize_zone_alert_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize an object's independent detection and notification windows.
+
+    Legacy rules store one set of schedule/delivery fields directly on the
+    object rule. When no schedule list exists, lift those fields into one
+    entry so existing configurations keep their exact behavior.
+    """
+    raw_schedules = rule.get('alert_schedules')
+    has_schedules = isinstance(raw_schedules, list) and bool(raw_schedules)
+    source = raw_schedules if has_schedules else [rule]
+    schedules: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for index, raw in enumerate(source, start=1):
+        if not isinstance(raw, dict):
+            continue
+        raw_id = raw.get('id') if has_schedules else None
+        schedule_id = str(raw_id or f'schedule-{index}').strip() or f'schedule-{index}'
+        base_id = schedule_id
+        duplicate = 2
+        while schedule_id in seen_ids:
+            schedule_id = f'{base_id}-{duplicate}'
+            duplicate += 1
+        seen_ids.add(schedule_id)
+        schedules.append({
+            'id': schedule_id,
+            'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
+            'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
+            'email_recipients': normalize_email_recipients(raw.get('email_recipients', [])),
+            'active_start': _normalize_hhmm(raw.get('active_start')),
+            'active_end': _normalize_hhmm(raw.get('active_end')),
+            'notify_start': _normalize_hhmm(raw.get('notify_start')),
+            'notify_end': _normalize_hhmm(raw.get('notify_end')),
+        })
+    if has_schedules and schedules:
+        return schedules
+    if not schedules:
+        schedules.append({
+            'id': 'schedule-1',
+            'email_enabled': False,
+            'push_enabled': False,
+            'email_recipients': [],
+            'active_start': None,
+            'active_end': None,
+            'notify_start': None,
+            'notify_end': None,
+        })
+    return schedules
+
+
 def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
     raw_rules = zone.get('object_rules')
     if isinstance(raw_rules, list):
@@ -235,7 +284,7 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         label = labels[0]
         # Legacy zone payloads used one rule per label. Continue collapsing
         # duplicate id-less entries, while retaining explicitly identified
-        # alert instances created by the Alerts editor.
+        # alert instances already present in saved camera settings.
         raw_rule_id = str(rule.get('id') or rule.get('alert_id') or '').strip()
         if label in seen_labels and (label not in labels_with_ids or not raw_rule_id):
             continue
@@ -280,6 +329,13 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         scale_fraction = _optional_fraction(
             rule.get('scale_fraction'), 0.001, 1.0,
         ) if label == 'motion' else None
+        alert_schedules = normalize_zone_alert_schedules(rule)
+        first_schedule = alert_schedules[0]
+        email_recipients = list(dict.fromkeys(
+            recipient
+            for schedule in alert_schedules
+            for recipient in schedule['email_recipients']
+        ))
         rules.append({
             **({'id': raw_rule_id} if raw_rule_id else {}),
             'label': label,
@@ -290,13 +346,16 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             'gate_fraction': gate_fraction,
             'scale_fraction': scale_fraction,
             'cooldown_seconds': max(0, cooldown_seconds),
-            'email_enabled': normalize_bool_setting(rule.get('email_enabled'), False),
-            'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])),
-            'active_start': _normalize_hhmm(rule.get('active_start')),
-            'active_end': _normalize_hhmm(rule.get('active_end')),
-            'notify_start': _normalize_hhmm(rule.get('notify_start')),
-            'notify_end': _normalize_hhmm(rule.get('notify_end')),
-            'push_enabled': normalize_bool_setting(rule.get('push_enabled'), False),
+            # Legacy top-level fields aggregate channels/recipients and mirror
+            # the first window; schedule-aware dispatch uses the full list.
+            'email_enabled': any(schedule['email_enabled'] for schedule in alert_schedules),
+            'email_recipients': email_recipients,
+            'active_start': first_schedule['active_start'],
+            'active_end': first_schedule['active_end'],
+            'notify_start': first_schedule['notify_start'],
+            'notify_end': first_schedule['notify_end'],
+            'push_enabled': any(schedule['push_enabled'] for schedule in alert_schedules),
+            'alert_schedules': alert_schedules,
         })
     return rules
 

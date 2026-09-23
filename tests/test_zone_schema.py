@@ -404,6 +404,37 @@ def test_normalize_zone_object_rules_seeds_from_object_rules_list(monkeypatch, z
     assert rule['email_recipients'] == ['a@example.com']
 
 
+def test_normalize_zone_alert_schedules_upgrades_legacy_fields_and_keeps_multiple_entries(monkeypatch, zs):
+    _install_zone_dependencies(monkeypatch)
+    legacy = zs.normalize_zone_object_rules({'object_rules': [{
+        'label': 'person', 'email_enabled': True, 'push_enabled': False,
+        'email_recipients': ['legacy@example.com'], 'active_start': '08:00',
+        'active_end': '18:00', 'notify_start': '09:00', 'notify_end': '17:00',
+    }]})[0]
+    assert legacy['alert_schedules'] == [{
+        'id': 'schedule-1', 'email_enabled': True, 'push_enabled': False,
+        'email_recipients': ['legacy@example.com'], 'active_start': '08:00',
+        'active_end': '18:00', 'notify_start': '09:00', 'notify_end': '17:00',
+    }]
+    assert legacy['email_enabled'] is True
+    assert legacy['push_enabled'] is False
+    assert legacy['email_recipients'] == ['legacy@example.com']
+    assert legacy['active_start'] == '08:00'
+
+    multiple = zs.normalize_zone_object_rules({'object_rules': [{
+        'id': 'person-main', 'label': 'person',
+        'alert_schedules': [
+            {'id': 'morning', 'email_enabled': True, 'email_recipients': ['morning@example.com'], 'active_start': '06:00', 'active_end': '12:00'},
+            {'id': 'evening', 'push_enabled': True, 'email_recipients': ['evening@example.com'], 'active_start': '18:00', 'active_end': '23:00'},
+        ],
+    }]})[0]
+    assert [schedule['id'] for schedule in multiple['alert_schedules']] == ['morning', 'evening']
+    assert [schedule['active_start'] for schedule in multiple['alert_schedules']] == ['06:00', '18:00']
+    assert multiple['email_enabled'] is True
+    assert multiple['push_enabled'] is True
+    assert multiple['email_recipients'] == ['morning@example.com', 'evening@example.com']
+
+
 def test_normalize_zone_object_rules_synthesizes_from_object_labels_when_no_rules(monkeypatch, zs):
     """If ``object_rules`` is missing, synthesize 1-row rules from
     ``object_labels`` (the older UI-driven schema)."""

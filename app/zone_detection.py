@@ -737,8 +737,14 @@ def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict
         for rule in zone.get('object_rules') or []:
             if not rule.get('enabled', True):
                 continue
-            if action == 'alert' and (not (rule.get('email_enabled') or rule.get('push_enabled'))):
-                continue
+            if action == 'alert':
+                schedules = rule.get('alert_schedules')
+                deliverable = any(
+                    isinstance(schedule, dict) and (schedule.get('email_enabled') or schedule.get('push_enabled'))
+                    for schedule in schedules
+                ) if isinstance(schedules, list) and schedules else (rule.get('email_enabled') or rule.get('push_enabled'))
+                if not deliverable:
+                    continue
             if action == 'record' and (not rule.get('record_on_detect', True)):
                 continue
             # ``label_matches`` canonicalizes the rule label the same way the
@@ -787,11 +793,24 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
         label_totals: dict[str, int] = {}
         for _rule in zone.get('object_rules') or []:
             _label = str(_rule.get('label') or '').strip().lower()
-            if _label:
+            has_delivery = any(
+                isinstance(_schedule, dict) and (_schedule.get('email_enabled') or _schedule.get('push_enabled'))
+                for _schedule in (
+                    _rule.get('alert_schedules')
+                    if isinstance(_rule.get('alert_schedules'), list) and _rule.get('alert_schedules')
+                    else [_rule]
+                )
+            )
+            _monitored = (
+                zone.get('monitor_objects', True)
+                or (_label == 'motion' and zone.get('monitor_motion', True))
+                or (_label == 'face' and _has_enabled_face_rule(zone))
+            )
+            if _label and _rule.get('enabled', True) and has_delivery and _monitored:
                 label_totals[_label] = label_totals.get(_label, 0) + 1
         label_seen: dict[str, int] = {}
         for rule in zone.get('object_rules') or []:
-            if not rule.get('enabled', True) or not (rule.get('email_enabled') or rule.get('push_enabled')):
+            if not rule.get('enabled', True):
                 continue
             label = str(rule.get('label') or '').strip().lower()
             if not label:
@@ -803,34 +822,50 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
             # add dead rules to the engine's list.
             if not zone.get('monitor_objects', True) and label not in ('motion', 'face'):
                 continue
+            raw_schedules = rule.get('alert_schedules')
+            schedules = raw_schedules if isinstance(raw_schedules, list) and raw_schedules else [rule]
+            deliverable_schedules = [
+                (schedule_index, schedule)
+                for schedule_index, schedule in enumerate(schedules, start=1)
+                if isinstance(schedule, dict) and (schedule.get('email_enabled') or schedule.get('push_enabled'))
+            ]
+            if not deliverable_schedules:
+                continue
             label_seen[label] = label_seen.get(label, 0) + 1
             rule_suffix = f" [{rule.get('id') or label_seen[label]}]" if label_totals.get(label, 0) > 1 else ''
+            base_name = zone_rule_name(settings, zone, rule) + rule_suffix
             cooldown_key = f'{camera_key}::{zone_id}::{label}'
             if label_totals.get(label, 0) > 1:
                 cooldown_key += f'::{rule.get("id") or label_seen[label]}'
-            rules.append({
-                'name': zone_rule_name(settings, zone, rule) + rule_suffix,
-                'cooldown_key': cooldown_key,
-                'object': label,
-                'zone_id': zone_id,
-                # Motion's and face's canonical confidence default is 0.45
-                # (see zone_motion_min_confidence / the Face Confidence
-                # setting); object classes default to 0.5. Matching the
-                # detection axis here keeps a rule missing min_confidence
-                # gating alerts at the same threshold that produced the
-                # detection in the first place.
-                'min_confidence': rule.get('min_confidence', 0.45 if label in ('motion', 'face') else 0.5),
-                'max_confidence': rule.get('max_confidence', 1.0),
-                'cooldown_seconds': rule.get('cooldown_seconds', 60),
-                'enabled': True,
-                'email_enabled': bool(rule.get('email_enabled', False)),
-                'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])),
-                'push_enabled': bool(rule.get('push_enabled', False)),
-                'active_start': rule.get('active_start'),
-                'active_end': rule.get('active_end'),
-                'notify_start': rule.get('notify_start'),
-                'notify_end': rule.get('notify_end'),
-            })
+            for schedule_index, schedule in deliverable_schedules:
+                schedule_id = str(schedule.get('id') or f'schedule-{schedule_index}')
+                schedule_name = f'{base_name} [Schedule {schedule_index}]' if len(schedules) > 1 else base_name
+                rules.append({
+                    'name': schedule_name,
+                    'schedule_name': base_name,
+                    'cooldown_key': f'{cooldown_key}::{schedule_id}' if len(schedules) > 1 else cooldown_key,
+                    'object': label,
+                    'zone_id': zone_id,
+                    # Motion's and face's canonical confidence default is 0.45
+                    # (see zone_motion_min_confidence / the Face Confidence
+                    # setting); object classes default to 0.5. Matching the
+                    # detection axis here keeps a rule missing min_confidence
+                    # gating alerts at the same threshold that produced the
+                    # detection in the first place.
+                    'min_confidence': rule.get('min_confidence', 0.45 if label in ('motion', 'face') else 0.5),
+                    'max_confidence': rule.get('max_confidence', 1.0),
+                    'cooldown_seconds': rule.get('cooldown_seconds', 60),
+                    'enabled': True,
+                    'email_enabled': bool(schedule.get('email_enabled', False)),
+                    'email_recipients': normalize_email_recipients(schedule.get('email_recipients', [])),
+                    'push_enabled': bool(schedule.get('push_enabled', False)),
+                    'active_start': schedule.get('active_start'),
+                    'active_end': schedule.get('active_end'),
+                    'notify_start': schedule.get('notify_start'),
+                    'notify_end': schedule.get('notify_end'),
+                    'schedule_id': schedule_id,
+                    'schedule': schedule,
+                })
     return rules
 
 
@@ -903,14 +938,31 @@ def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[st
         label = str(rule.get('label') or '').strip().lower()
         same_label_rules = [
             candidate for candidate in zone.get('object_rules') or []
-            if str(candidate.get('label') or '').strip().lower() == label
+            if candidate.get('enabled', True)
+            and str(candidate.get('label') or '').strip().lower() == label
+            and any(
+                isinstance(schedule, dict) and (schedule.get('email_enabled') or schedule.get('push_enabled'))
+                for schedule in (
+                    candidate.get('alert_schedules')
+                    if isinstance(candidate.get('alert_schedules'), list) and candidate.get('alert_schedules')
+                    else [candidate]
+                )
+            )
         ]
         if len(same_label_rules) > 1:
             rule_position = next((index for index, candidate in enumerate(same_label_rules, start=1) if candidate is rule), 1)
             suffix = f" [{rule.get('id') or rule_position}]"
         else:
             suffix = ''
-        names.add(zone_rule_name(settings, zone, rule) + suffix)
+        base_name = zone_rule_name(settings, zone, rule) + suffix
+        schedules = rule.get('alert_schedules')
+        schedules = schedules if isinstance(schedules, list) and schedules else [rule]
+        for schedule_index, schedule in enumerate(schedules, start=1):
+            if not isinstance(schedule, dict) or not (
+                schedule.get('email_enabled') or schedule.get('push_enabled')
+            ):
+                continue
+            names.add(f'{base_name} [Schedule {schedule_index}]' if len(schedules) > 1 else base_name)
     return names
 
 

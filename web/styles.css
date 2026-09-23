@@ -27,6 +27,26 @@
 .alerts-policy h3 { margin: 4px 0 0; }
 .alerts-policy-actions { padding-top: 12px; }
 .alerts-policy-table { min-width: 760px; table-layout: fixed; }
+.alerts-policy-table-wrap { min-width: 0; }
+.alerts-policy-table { min-width: 760px; }
+.alerts-policy-table tbody tr.alerts-policy-row { transition: background 0.12s; }
+.alerts-policy-table tbody tr.alerts-policy-row:hover td { background: rgba(71, 214, 255, 0.055); }
+.alerts-policy-table tbody tr.alerts-policy-row.is-enabled td:first-child { box-shadow: inset 3px 0 0 var(--success); }
+.alerts-policy-table .alerts-policy-row td { border-bottom: 1px solid var(--border); }
+.alerts-policy-table .alerts-policy-row td.alerts-table-actions { display: table-cell; text-align: right; white-space: nowrap; }
+.alerts-policy-table .alerts-table-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  line-height: 1;
+  vertical-align: middle;
+}
+.alerts-policy-table .alerts-table-actions button svg { display: block; flex: 0 0 auto; }
+.alerts-policy-table .alerts-policy-expand.is-open { border-color: var(--accent); color: var(--accent); }
 .alerts-policy-table th:first-child, .alerts-policy-table td:first-child { width: 24%; }
 .alerts-policy-table th:nth-child(2), .alerts-policy-table td:nth-child(2) { width: 28%; }
 .alerts-policy-table th:nth-child(3), .alerts-policy-table td:nth-child(3),
@@ -34,15 +54,16 @@
 .alerts-policy-table th:nth-child(5), .alerts-policy-table td:nth-child(5) { width: 10%; }
 .alerts-policy-table th:last-child, .alerts-policy-table td:last-child { width: 18%; }
 .alerts-policy-table td { vertical-align: middle; }
-.alerts-policy-table .alerts-policy-row.is-enabled td:first-child { box-shadow: inset 3px 0 0 var(--success); }
-.alerts-policy-table .alerts-policy-row td { border-bottom: 1px solid var(--border); }
-.alerts-policy-table .alerts-policy-details-row > td { padding: 0 !important; border-bottom: 1px solid var(--border); }
+.alerts-policy-row.is-enabled td:first-child { box-shadow: inset 3px 0 0 var(--success); }
+.alerts-policy-row td { border-bottom: 1px solid var(--border); }
+.alerts-policy-table .alerts-policy-details-row > td { padding: 0 !important; border-bottom: 2px solid var(--accent); background: var(--panel-strong); }
 .alerts-policy-table .alerts-policy-details-row[hidden] { display: none; }
-.alerts-policy-table .alerts-policy-details-row .alerts-policy { border: 0; border-radius: 0; box-shadow: none; }
-.alerts-policy-table .alerts-policy-details-row .alerts-policy-head { display: none; }
-.alerts-policy-table .alerts-policy-details-row .alerts-policy-actions { align-items: flex-start; }
-.alerts-policy-table .alerts-policy-details-row .alerts-policy-actions button { flex: 0 0 auto; }
-.alerts-policy-table .alerts-policy-row > td.alerts-table-actions { display: table-cell; }
+.alerts-policy-table .alerts-policy-details-row .alerts-policy { padding: 14px 20px 18px; border: 0; border-left: 3px solid var(--accent); border-radius: 0; background: transparent; box-shadow: none; }
+.alerts-policy-table .alerts-policy-details-row .alerts-policy-head { margin-bottom: 12px; }
+.alerts-policy-table .alerts-policy-collapse { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 8px; }
+.alerts-policy-table .alerts-policy-collapse svg { display: block; }
+
+
 .alerts-policy-name strong, .alerts-policy-name span { display: block; }
 .alerts-policy-name strong { color: var(--text); }
 .alerts-policy-name span { margin-top: 3px; color: var(--muted); font-size: 11px; }
@@ -50,14 +71,15 @@
 .alerts-table-toggle input { margin: 0; accent-color: var(--success); }
 .alerts-table-toggle:has(input:checked) { color: var(--success); }
 .alerts-table-actions { display: table-cell; text-align: right; white-space: nowrap; }
-.alerts-table-actions button { padding: 7px 10px; font-size: 12px; }
-.alerts-table-actions .alerts-policy-expand { margin-right: 6px; }
-.alerts-policy-details-row > td { padding: 0 !important; }
-.alerts-policy-details-row[hidden] { display: none; }
-.alerts-policy-details { padding: 18px; border-top: 1px solid var(--border); background: rgba(255,255,255,.025); }
-.alerts-policy-details .alerts-recipient-field { margin: 14px 0 0; }
-.alerts-policy-details .alerts-policy-actions { margin-top: 14px; }
 .alerts-policy-note { margin: 12px 0 0; font-size: 12px; }
+.alerts-schedule-list { display: grid; gap: 12px; margin-top: 14px; }
+.alerts-schedule-entry { padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.alerts-schedule-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.alerts-schedule-head strong { color: var(--text); }
+.alerts-schedule-head button { padding: 6px 10px; font-size: 12px; }
+.alerts-schedule-entry .alerts-channel-row { margin: 10px 0; padding: 8px 0; }
+.alerts-schedule-entry .alerts-recipient-field { margin: 12px 0 0; }
+.alerts-schedule-add { justify-self: start; }
 @media (max-width: 760px) { .alerts-policy-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); } }
 @media (max-width: 480px) { .alerts-policy-grid { grid-template-columns: 1fr; } .alerts-policy-table { min-width: 700px; } }
 
@@ -6453,14 +6475,22 @@ button.secondary:disabled, a.secondary:disabled {
 .zones-rules-tip strong { color: var(--text); }
 .zones-tip-icon { display: grid; place-items: center; flex: 0 0 auto; width: 18px; height: 18px; border: 1px solid rgba(71,214,255,.45); border-radius: 999px; color: var(--accent); font-size: 11px; font-weight: 900; }
 .zone-object-rules { margin-bottom: 20px; padding: 14px; border: 1px solid var(--border); border-radius: 17px; background: rgba(255,255,255,.018); }
+.zone-rules-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--border);
+}
 .zone-name-card {
   display: grid;
   gap: 4px;
   align-items: start;
+  min-width: 0;
   margin: 0;
-  padding: 0 0 11px;
+  padding: 0;
   border: 0;
-  border-bottom: 1px solid var(--border);
   border-radius: 0;
   background: transparent;
   color: var(--text);
@@ -6485,9 +6515,24 @@ button.secondary:disabled, a.secondary:disabled {
   line-height: 1.3;
   overflow-wrap: anywhere;
 }
-.zone-object-rules-header { margin: 12px 0 9px; justify-content: space-between; }
-.zone-object-rules-header::before { content: 'What should this area watch for?'; color: var(--muted); font-size: 12px; font-weight: 700; }
-.zone-object-rules-header select { max-width: 230px; min-height: 40px; border-radius: 11px; }
+.zone-rule-add {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 5px;
+  margin: 0;
+}
+.zone-rule-add-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.zone-rule-add .rule-add-select { width: 230px; max-width: 100%; min-height: 38px; border-radius: 10px; }
+@media (max-width: 560px) {
+  .zone-rules-header { align-items: stretch; flex-direction: column; }
+  .zone-rule-add .rule-add-select { width: 100%; }
+}
 /* Motion is its own card with a single toggle -- it is not an object class,
    so it lives above the object table instead of in it. */
 .zone-motion-card {
@@ -7174,17 +7219,17 @@ button.secondary:disabled, a.secondary:disabled {
   padding: 6px 12px;
   font-size: 12px;
 }
-.cameras-table-wrap .zone-rule-table .cell-actions button.zone-rule-advanced-toggle {
+.cameras-table-wrap .zone-rule-table .cell-actions button.zone-rule-advanced-toggle:not(.zone-rule-advanced-icon-btn) {
   width: auto;
   height: auto;
   padding: 6px 12px;
   line-height: 1;
 }
 .zone-rule-advanced-toggle.is-open { border-color: var(--accent); color: var(--accent); }
+.zone-rule-advanced-icon-btn { width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 0; }
+.zone-rule-advanced-icon-btn svg { display: block; flex: 0 0 auto; }
 .zone-rule-advanced-row > td { background: rgba(255, 255, 255, .02); }
 .zone-rule-advanced { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; }
 .zone-rule-table input:disabled { opacity: .5; }
 .zone-rule-toggle input:disabled + span { opacity: .5; }
-.zone-rule-add { margin-top: 12px; }
-.zone-rule-add .rule-add-select { max-width: 260px; }
 :root.light .zone-rule-advanced-row > td { background: rgba(0, 0, 0, .02); }

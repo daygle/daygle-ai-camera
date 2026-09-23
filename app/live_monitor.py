@@ -1118,7 +1118,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _rule_by_name = {str(r.get('name') or ''): r for r in zone_rules or []}
     for alert in triggered:
         _rule = _rule_by_name.get(str(alert.get('rule_name') or ''), {})
-        if not _rule_notify_active_now(_rule):
+        if _rule and not _rule.get('enabled', True):
             continue
         _state.database.add_alert(created_at=datetime.now(timezone.utc).isoformat(), rule_name=alert['rule_name'], event_id=event_id, label=alert['label'], confidence=alert['confidence'], message=alert['message'], recording_id=recording_id)
     if triggered:
@@ -1127,7 +1127,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         with _state._notification_threads_lock:
             _state._notification_threads[:] = [thread for thread in _state._notification_threads if thread.is_alive()]
             _state._notification_threads.append(notify_thread)
-    email_rules = [rule for rule in zone_rules if rule.get('enabled', True) and rule.get('email_enabled') and _rule_notify_active_now(rule) and (str(rule.get('name') or '') in {str(alert.get('rule_name') or '') for alert in triggered})]
+    triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
+    email_rules = [
+        rule for rule in zone_rules
+        if rule.get('enabled', True)
+        and rule.get('email_enabled')
+        and str(rule.get('name') or '') in triggered_rule_names
+        and _rule_notify_active_now(rule.get('schedule') or rule)
+    ]
     email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
     update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Detections found. No new alert event was created because no alert rule matched, or a matching rule is still in cooldown.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, _state.camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
     return event_id

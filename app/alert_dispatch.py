@@ -286,11 +286,14 @@ def deliver_email_alerts(
     created_at_raw = str(event.get('created_at') or '').strip()
     detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
     rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
-    # Check if any triggered alerts have email enabled via zone rules
+    # Check if any triggered alerts have email enabled via zone rules.
+    # Rule names remain unchanged for legacy schedules; expanded schedules use
+    # a unique name and resolve their delivery fields from the schedule entry.
     any_email_enabled = any(
         (
             (rule := rules_by_name.get(str(alert.get('rule_name')), {})).get('email_enabled')
-            and _rule_notify_active_now(rule)
+            and bool(rule.get('email_recipients'))
+            and _rule_notify_active_now(rule.get('schedule') or rule)
         )
         for alert in triggered
     )
@@ -411,7 +414,7 @@ def deliver_email_alerts(
         if rule is not None:
             if not rule.get('email_enabled'):
                 continue
-            if not _rule_notify_active_now(rule):
+            if not _rule_notify_active_now(rule.get('schedule') or rule):
                 logger.debug(
                     'Email skipped for event %s rule %r: outside notify window %s-%s '
                     '(the detection still recorded; widen the rule notify window to email it)',
@@ -420,6 +423,8 @@ def deliver_email_alerts(
                     rule.get('notify_start'),
                     rule.get('notify_end'),
                 )
+                continue
+            if not rule.get('email_recipients'):
                 continue
             _send_rule_email(list(rule.get('email_recipients') or []), alert, 'zone-rule')
             continue
@@ -507,7 +512,7 @@ def deliver_push_notifications(
                     rule_name,
                 )
                 continue
-            if not _rule_notify_active_now(rule):
+            if not _rule_notify_active_now(rule.get('schedule') or rule):
                 logger.debug(
                     'Push skipped for event %s rule %r: outside notify window %s-%s '
                     '(the detection still recorded; widen the rule notify window to push it)',

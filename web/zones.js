@@ -362,6 +362,32 @@ function ensureTime(zone) {
   return zone.time_of_day;
 }
 
+function normalizeAlertSchedules(rule) {
+  const source = Array.isArray(rule.alert_schedules) && rule.alert_schedules.length
+    ? rule.alert_schedules
+    : [rule];
+  const schedules = source.filter((schedule) => schedule && typeof schedule === 'object').map((schedule, index) => ({
+    ...schedule,
+    id: String(schedule.id || `schedule-${index + 1}`),
+    email_enabled: schedule.email_enabled === true,
+    push_enabled: schedule.push_enabled === true,
+    email_recipients: normalizeEmailList(schedule.email_recipients),
+    active_start: schedule.active_start || null,
+    active_end: schedule.active_end || null,
+    notify_start: schedule.notify_start || null,
+    notify_end: schedule.notify_end || null,
+  }));
+  const first = schedules[0];
+  rule.alert_schedules = schedules;
+  rule.email_enabled = schedules.some((schedule) => schedule.email_enabled);
+  rule.push_enabled = schedules.some((schedule) => schedule.push_enabled);
+  rule.email_recipients = [...new Set(schedules.flatMap((schedule) => schedule.email_recipients))];
+  if (first) {
+    for (const key of ['active_start', 'active_end', 'notify_start', 'notify_end']) rule[key] = first[key];
+  }
+  return schedules;
+}
+
 function normalizeObjectRules(zone) {
   if (Array.isArray(zone.object_rules) && zone.object_rules.length) {
     return zone.object_rules.map((rule, ruleIndex) => ({ ...defaultObjectRule(rule?.label), ...rule, id: rule?.id || `${String(rule?.label || 'rule').trim().toLowerCase()}-${ruleIndex + 1}` }))
@@ -391,6 +417,7 @@ function normalizeObjectRules(zone) {
         active_end: rule.active_end || null,
         notify_start: rule.notify_start || null,
         notify_end: rule.notify_end || null,
+        alert_schedules: normalizeAlertSchedules(rule),
       }))
       .filter((rule) => Boolean(rule.label));
   }
@@ -673,7 +700,7 @@ function renderMotionCard(zone, zoneIndex) {
       <td>${ruleToggleCell(`data-zone-motion-toggle="${zoneIndex}"`, enabled, 'Enable or disable motion detection in this area', false)}</td>
       <td><input class="zone-rule-conf" type="number" data-zone-motion-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(conf)}" title="Sensitivity: only motion with at least this confidence counts (0-1). Lower = more sensitive."${enabled ? '' : ' disabled'} /></td>
       <td>${ruleToggleCell(`data-zone-motion-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when motion is detected in this area', !enabled)}</td>
-      <td class="cell-actions">${enabled ? `<button class="secondary zone-action-btn zone-rule-advanced-toggle" type="button" data-zone-motion-advanced-toggle="${zoneIndex}" title="Per-zone motion pixel overrides" aria-expanded="false">Advanced</button>` : ''}</td>
+      <td class="cell-actions">${enabled ? `<button class="secondary zone-action-btn zone-rule-advanced-toggle zone-rule-advanced-icon-btn" type="button" data-zone-motion-advanced-toggle="${zoneIndex}" title="Per-zone motion pixel overrides" aria-label="Per-zone motion pixel overrides" aria-expanded="false">${ICONS.cog}</button>` : ''}</td>
     </tr>${advancedRow}`;
 }
 
@@ -956,7 +983,13 @@ function renderObjectDetectionRules() {
     // rows (which are always present so they can be toggled on).
     return `
       <div class="zone-object-rules" data-zone-rules-for="${zoneIndex}">
-        <div class="zone-name-card"><span class="zone-name-kicker">Area</span><strong>${zoneName}</strong></div>
+        <div class="zone-rules-header">
+          <div class="zone-name-card"><span class="zone-name-kicker">Area</span><strong>${zoneName}</strong></div>
+          <label class="zone-rule-add">
+            <span class="zone-rule-add-label">Add Object</span>
+            <select data-add-zone-rule="${zoneIndex}" class="rule-add-select" aria-label="Add an object to ${zoneName}">${addOptions}</select>
+          </label>
+        </div>
         <div class="cameras-table-wrap">
           <table class="rule-table zone-rule-table">
             <thead><tr><th scope="col">Detection</th><th scope="col">Detect</th><th scope="col">Min confidence</th><th scope="col">Record</th><th scope="col" class="cell-actions" aria-label="Actions"></th></tr></thead>
@@ -966,9 +999,6 @@ function renderObjectDetectionRules() {
               ${renderFaceCard(zone, zoneIndex)}
             </tbody>
           </table>
-        </div>
-        <div class="zone-rule-add">
-          <select data-add-zone-rule="${zoneIndex}" class="rule-add-select" aria-label="Add an object to ${zoneName}">${addOptions}</select>
         </div>
         ${renderTripwireCard(zone, zoneIndex)}
         ${renderLoiterCard(zone, zoneIndex)}

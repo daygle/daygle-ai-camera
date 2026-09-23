@@ -53,12 +53,87 @@ function defaultPeopleRule(personId, personName) {
   };
 }
 
+function defaultAlertSchedule() {
+  return {
+    id: `schedule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    email_enabled: false,
+    push_enabled: false,
+    email_recipients: [],
+    active_start: null,
+    active_end: null,
+    notify_start: null,
+    notify_end: null,
+  };
+}
+
+function ensureAlertSchedules(rule) {
+  const hasSchedules = Array.isArray(rule.alert_schedules) && rule.alert_schedules.length;
+  const raw = hasSchedules ? rule.alert_schedules : [rule];
+  const seenIds = new Set();
+  rule.alert_schedules = raw.filter((schedule) => schedule && typeof schedule === 'object').map((schedule, index) => {
+    const baseId = String(schedule.id || `schedule-${index + 1}`);
+    let id = baseId;
+    let duplicate = 2;
+    while (seenIds.has(id)) id = `${baseId}-${duplicate++}`;
+    seenIds.add(id);
+    return {
+      ...schedule,
+      id,
+      email_enabled: schedule.email_enabled === true,
+      push_enabled: schedule.push_enabled === true,
+      email_recipients: normalizeEmailList(schedule.email_recipients),
+      active_start: schedule.active_start || null,
+      active_end: schedule.active_end || null,
+      notify_start: schedule.notify_start || null,
+      notify_end: schedule.notify_end || null,
+    };
+  });
+  if (!rule.alert_schedules.length) rule.alert_schedules = [defaultAlertSchedule()];
+  // Mirror legacy singular fields only when upgrading an older stored policy;
+  // once explicit schedules exist their per-entry values are authoritative.
+  if (!hasSchedules) {
+    const legacy = rule.alert_schedules[0];
+    legacy.email_enabled = rule.email_enabled === true;
+    legacy.push_enabled = rule.push_enabled === true;
+    legacy.email_recipients = normalizeEmailList(rule.email_recipients);
+    for (const key of ['active_start', 'active_end', 'notify_start', 'notify_end']) {
+      legacy[key] = rule[key] || null;
+    }
+  }
+  rule.email_enabled = rule.alert_schedules.some((schedule) => schedule.email_enabled);
+  rule.push_enabled = rule.alert_schedules.some((schedule) => schedule.push_enabled);
+  rule.email_recipients = [...new Set(rule.alert_schedules.flatMap((schedule) => schedule.email_recipients))];
+  return rule.alert_schedules;
+}
+
+function policyHasChannel(rule, channel) {
+  if (Array.isArray(rule.alert_schedules) && rule.alert_schedules.length) {
+    return rule.alert_schedules.some((schedule) => schedule[channel]);
+  }
+  return Boolean(rule[channel]);
+}
+
 function defaultRule(label = 'person', type = alertType) {
   if (type === 'sound') {
     const sound = soundClasses.find((item) => item.id === label);
     return { class: label, name: sound?.label || label, enabled: true, record_on_detect: true, confidence_threshold: sound?.default_threshold ?? 0.35, cooldown_seconds: sound?.default_cooldown ?? 30, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null };
   }
-  return { id: `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, label, enabled: true, record_on_detect: true, min_confidence: label === 'motion' || label === 'face' ? 0.45 : 0.5, max_confidence: 1, cooldown_seconds: 60, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null };
+  return { id: `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, label, enabled: true, record_on_detect: true, min_confidence: label === 'motion' || label === 'face' ? 0.45 : 0.5, max_confidence: 1, cooldown_seconds: 60, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null, alert_schedules: [defaultAlertSchedule()] };
+}
+
+function renderObjectSchedules(rule, ruleIndex, schedules) {
+  return `<div class="alerts-schedule-list">${schedules.map((schedule, scheduleIndex) => `
+    <section class="alerts-schedule-entry" data-schedule-index="${scheduleIndex}">
+      <header class="alerts-schedule-head"><strong>Schedule ${scheduleIndex + 1}</strong>${schedules.length > 1 ? `<button class="secondary alerts-schedule-remove" data-remove-schedule="${ruleIndex}" data-schedule-index="${scheduleIndex}" type="button" aria-label="Remove schedule ${scheduleIndex + 1}">Remove</button>` : ''}</header>
+      <div class="alerts-channel-row"><label><input data-field="email_enabled" type="checkbox" ${schedule.email_enabled ? 'checked' : ''}> Email</label><label><input data-field="push_enabled" type="checkbox" ${schedule.push_enabled ? 'checked' : ''}> Push</label></div>
+      <div class="alerts-policy-grid alerts-schedule-grid">
+        <label><span>Detect From</span>${timeSelect(schedule.active_start, 'data-field="active_start"')}</label>
+        <label><span>Detect Until</span>${timeSelect(schedule.active_end, 'data-field="active_end"')}</label>
+        <label><span>Notify From</span>${timeSelect(schedule.notify_start, 'data-field="notify_start"')}</label>
+        <label><span>Notify Until</span>${timeSelect(schedule.notify_end, 'data-field="notify_end"')}</label>
+      </div>
+      <label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(schedule.email_recipients.join(', '))}" placeholder="alerts@example.com, me@example.com"></label>
+    </section>`).join('')}<button class="secondary alerts-schedule-add" data-add-schedule="${ruleIndex}" type="button">＋ Add Schedule</button></div>`;
 }
 
 function timeSelect(value, attr) {
@@ -76,14 +151,18 @@ function allPolicies() {
   const tripwirePolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.tripwire).filter(Boolean));
   const loiterPolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.loiter).filter(Boolean));
   const timePolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.time_of_day).filter(Boolean));
-  return [...objectPolicies, ...soundPolicies, ...tripwirePolicies, ...loiterPolicies, ...timePolicies, ...(faceRulesPayload.rules || [])].filter((rule) => rule.email_enabled || rule.push_enabled);
+  return [...objectPolicies, ...soundPolicies, ...tripwirePolicies, ...loiterPolicies, ...timePolicies, ...(faceRulesPayload.rules || [])].filter((rule) => (
+    Array.isArray(rule.alert_schedules) && rule.alert_schedules.length
+      ? rule.alert_schedules.some((schedule) => schedule.email_enabled || schedule.push_enabled)
+      : rule.email_enabled || rule.push_enabled
+  ));
 }
 
 function updateStats() {
   const policies = allPolicies();
   $('alertCount').textContent = String(policies.length);
   $('enabledCount').textContent = String(policies.filter((rule) => rule.enabled !== false).length);
-  $('channelCount').textContent = String(policies.filter((rule) => rule.email_enabled).length + policies.filter((rule) => rule.push_enabled).length);
+  $('channelCount').textContent = String(policies.filter((rule) => policyHasChannel(rule, 'email_enabled')).length + policies.filter((rule) => policyHasChannel(rule, 'push_enabled')).length);
 }
 
 function renderSelectors() {
@@ -180,6 +259,9 @@ function renderPolicies() {
     const cooldown = people ? rule.cooldown_minutes : rule.cooldown_seconds;
     const confidenceLabel = people ? 'Minimum Recognition Confidence' : sound ? 'Confidence Threshold' : 'Minimum Confidence';
     const cooldownLabel = people ? 'Cooldown (Minutes)' : 'Cooldown (Seconds)';
+    const schedules = alertType === 'object' ? ensureAlertSchedules(rule) : [];
+    const emailEnabled = alertType === 'object' ? schedules.some((schedule) => schedule.email_enabled) : rule.email_enabled;
+    const pushEnabled = alertType === 'object' ? schedules.some((schedule) => schedule.push_enabled) : rule.push_enabled;
     const policyNote = people
       ? 'Recognized-person and stranger alerts use the face recognition rule store.'
       : sound
@@ -196,24 +278,23 @@ function renderPolicies() {
       <td class="alerts-policy-name"><strong>${escapeHtml(ruleLabel(rule))}</strong><span>Policy ${index + 1}</span></td>
       <td>${escapeHtml(scopeLabel())}</td>
       <td><label class="alerts-table-toggle"><input data-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''}><span>${rule.enabled !== false ? 'On' : 'Off'}</span></label></td>
-      <td><label class="alerts-table-toggle"><input data-field="email_enabled" type="checkbox" ${rule.email_enabled ? 'checked' : ''}><span>${rule.email_enabled ? 'On' : 'Off'}</span></label></td>
-      <td><label class="alerts-table-toggle"><input data-field="push_enabled" type="checkbox" ${rule.push_enabled ? 'checked' : ''}><span>${rule.push_enabled ? 'On' : 'Off'}</span></label></td>
-      <td class="alerts-table-actions"><button class="secondary alerts-policy-expand" data-expand-policy="${index}" type="button" aria-expanded="false">Settings</button><button class="btn-danger alerts-policy-remove" data-delete-rule type="button" aria-label="Remove ${escapeHtml(ruleLabel(rule))}">Remove</button></td>
+      <td><label class="alerts-table-toggle"><input data-field="email_enabled" type="checkbox" ${emailEnabled ? 'checked' : ''}><span>${emailEnabled ? 'On' : 'Off'}</span></label></td>
+      <td><label class="alerts-table-toggle"><input data-field="push_enabled" type="checkbox" ${pushEnabled ? 'checked' : ''}><span>${pushEnabled ? 'On' : 'Off'}</span></label></td>
+      <td class="alerts-table-actions"><button class="secondary alerts-policy-expand" data-expand-policy="${index}" type="button" aria-expanded="false" aria-controls="alert-policy-settings-${index}" title="Edit alert policy" aria-label="Edit ${escapeHtml(ruleLabel(rule))}">${ICONS.edit}</button><button class="delete-btn secondary alerts-policy-remove" data-delete-rule type="button" title="Remove alert policy" aria-label="Remove ${escapeHtml(ruleLabel(rule))}">${ICONS.remove}</button></td>
     </tr>
-    <tr class="alerts-policy-details-row" data-policy-details-for="${index}" hidden><td colspan="6">
+    <tr class="alerts-policy-details-row" id="alert-policy-settings-${index}" data-policy-details-for="${index}" hidden><td colspan="6">
     <article class="alerts-policy ${rule.enabled !== false ? 'is-enabled' : ''}" data-rule-index="${index}">
-      <div class="alerts-policy-head"><div><span class="zones-panel-kicker">${escapeHtml(scopeLabel())} · Policy ${index + 1}</span><h3>${escapeHtml(ruleLabel(rule))}</h3></div><label class="toggle-control"><input data-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''}><span>${rule.enabled !== false ? 'Enabled' : 'Disabled'}</span></label></div>
+      <div class="alerts-policy-head"><div><span class="zones-panel-kicker">${escapeHtml(scopeLabel())} · Policy ${index + 1}</span><h3>${escapeHtml(ruleLabel(rule))}</h3></div><button type="button" class="secondary alerts-policy-collapse" data-collapse-policy="${index}" title="Collapse policy settings" aria-label="Collapse ${escapeHtml(ruleLabel(rule))} settings">${ICONS.chevronUp}</button></div>
       <div class="alerts-policy-grid">
         ${people ? `<label><span>Person</span><select data-field="person_id">${ruleOptions(rule)}</select></label>` : ''}
         ${behaviour ? '' : `<label><span>${confidenceLabel}</span><input data-field="${people ? 'min_confidence' : sound ? 'confidence_threshold' : 'min_confidence'}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(confidence ?? (people ? '' : 0.5)))}"></label>`}
         ${!people && !sound && !behaviour ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
         <label><span>${cooldownLabel}</span><input data-field="${people ? 'cooldown_minutes' : 'cooldown_seconds'}" type="number" min="0" max="${people ? '1440' : '3600'}" step="${people ? '1' : '5'}" value="${escapeHtml(String(cooldown ?? (people ? 5 : 60)))}"></label>
       </div>
-      <div class="alerts-channel-row"><label><input data-field="email_enabled" type="checkbox" ${rule.email_enabled ? 'checked' : ''}> Email</label><label><input data-field="push_enabled" type="checkbox" ${rule.push_enabled ? 'checked' : ''}> Push</label></div>
-      ${people ? '' : behaviour
+      ${alertType === 'object' ? renderObjectSchedules(rule, index, schedules) : people ? '' : behaviour
         ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`
         : `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`}
-      <label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(Array.isArray(rule.email_recipients) ? rule.email_recipients.join(', ') : rule.email_recipients || '')}" placeholder="alerts@example.com, me@example.com"></label>
+      ${alertType === 'object' ? '' : `<label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(Array.isArray(rule.email_recipients) ? rule.email_recipients.join(', ') : rule.email_recipients || '')}" placeholder="alerts@example.com, me@example.com"></label>`}
       <p class="muted alerts-policy-note">${policyNote}</p>
     </article></td></tr>`;
   }).join('')}</tbody></table></div>`;
@@ -222,10 +303,34 @@ function renderPolicies() {
     const index = Number(policyRow.dataset.ruleIndex ?? policyRow.dataset.policyDetailsFor);
     const rule = rules[index];
     const key = field.dataset.field;
-    if (field.type === 'checkbox') {
-      rule[key] = field.checked;
-      const summary = $('alertsList').querySelector(`.alerts-policy-row[data-rule-index="${index}"]`);
-      const details = $('alertsList').querySelector(`[data-policy-details-for="${index}"]`);
+    const scheduleEntry = alertType === 'object' ? field.closest('[data-schedule-index]') : null;
+    const schedule = scheduleEntry ? ensureAlertSchedules(rule)[Number(scheduleEntry.dataset.scheduleIndex)] : null;
+    const summary = $('alertsList').querySelector(`.alerts-policy-row[data-rule-index="${index}"]`);
+    const details = $('alertsList').querySelector(`[data-policy-details-for="${index}"]`);
+    if (schedule) {
+      if (field.type === 'checkbox') schedule[key] = field.checked;
+      else if (key === 'email_recipients') schedule.email_recipients = normalizeEmailList(field.value);
+      else schedule[key] = field.value || null;
+      ensureAlertSchedules(rule);
+      [summary, details].forEach((container) => container?.querySelectorAll(`[data-field="${key}"]`).forEach((matchingField) => {
+        const isSummary = Boolean(matchingField.closest('.alerts-policy-row'));
+        if (key === 'email_enabled' || key === 'push_enabled') {
+          if (!isSummary && matchingField.closest('[data-schedule-index]') !== scheduleEntry) return;
+          const aggregate = rule.alert_schedules.some((entry) => entry[key]);
+          matchingField.checked = isSummary ? aggregate : schedule[key];
+          const state = matchingField.closest('label')?.querySelector('span');
+          if (state && isSummary) state.textContent = aggregate ? 'On' : 'Off';
+        } else if (matchingField !== field && matchingField.closest('[data-schedule-index]') === scheduleEntry) {
+          if (key === 'email_recipients') matchingField.value = schedule.email_recipients.join(', ');
+          else matchingField.value = schedule[key] || '';
+        }
+      }));
+    } else if (field.type === 'checkbox') {
+      if (alertType === 'object' && (key === 'email_enabled' || key === 'push_enabled')) {
+        ensureAlertSchedules(rule).forEach((entry) => { entry[key] = field.checked; });
+        ensureAlertSchedules(rule);
+        details?.querySelectorAll(`[data-field="${key}"]`).forEach((matchingField) => { matchingField.checked = field.checked; });
+      } else rule[key] = field.checked;
       [summary, details].forEach((container) => container?.querySelectorAll(`[data-field="${key}"]`).forEach((matchingField) => {
         matchingField.checked = field.checked;
         const state = matchingField.closest('label')?.querySelector('span');
@@ -247,13 +352,49 @@ function renderPolicies() {
     if (key === 'class') rule.name = soundClasses.find((sound) => sound.id === field.value)?.label || field.value;
     updateStats();
   }));
+  $('alertsList').querySelectorAll('[data-add-schedule]').forEach((button) => button.addEventListener('click', () => {
+    const rule = rules[Number(button.dataset.addSchedule)];
+    ensureAlertSchedules(rule).push(defaultAlertSchedule());
+    renderPolicies();
+    const details = $('alertsList').querySelector(`[data-policy-details-for="${button.dataset.addSchedule}"]`);
+    if (details) details.hidden = false;
+    const expand = $('alertsList').querySelector(`[data-expand-policy="${button.dataset.addSchedule}"]`);
+    if (expand) { expand.setAttribute('aria-expanded', 'true'); expand.classList.add('is-open'); }
+  }));
+  $('alertsList').querySelectorAll('[data-remove-schedule]').forEach((button) => button.addEventListener('click', () => {
+    const rule = rules[Number(button.dataset.removeSchedule)];
+    const schedules = ensureAlertSchedules(rule);
+    schedules.splice(Number(button.dataset.scheduleIndex), 1);
+    ensureAlertSchedules(rule);
+    renderPolicies();
+    const details = $('alertsList').querySelector(`[data-policy-details-for="${button.dataset.removeSchedule}"]`);
+    if (details) details.hidden = false;
+    const expand = $('alertsList').querySelector(`[data-expand-policy="${button.dataset.removeSchedule}"]`);
+    if (expand) { expand.setAttribute('aria-expanded', 'true'); expand.classList.add('is-open'); }
+  }));
   $('alertsList').querySelectorAll('[data-expand-policy]').forEach((button) => button.addEventListener('click', () => {
     const index = button.dataset.expandPolicy;
     const details = $('alertsList').querySelector(`[data-policy-details-for="${index}"]`);
     const expanded = button.getAttribute('aria-expanded') === 'true';
-    button.setAttribute('aria-expanded', String(!expanded));
-    button.textContent = expanded ? 'Settings' : 'Close';
     details.hidden = expanded;
+    if (!expanded) details.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    $('alertsList').querySelectorAll(`[data-expand-policy="${index}"]`).forEach((expandButton) => {
+      expandButton.setAttribute('aria-expanded', String(!expanded));
+      expandButton.classList.toggle('is-open', !expanded);
+      expandButton.title = expanded ? 'Edit alert policy' : 'Close alert policy settings';
+      expandButton.setAttribute('aria-label', `${expanded ? 'Edit' : 'Close'} ${ruleLabel(rules[Number(index)])} settings`);
+    });
+  }));
+  $('alertsList').querySelectorAll('[data-collapse-policy]').forEach((button) => button.addEventListener('click', () => {
+    const index = button.dataset.collapsePolicy;
+    const details = $('alertsList').querySelector(`[data-policy-details-for="${index}"]`);
+    const expandButton = $('alertsList').querySelector(`[data-expand-policy="${index}"]`);
+    if (!details || !expandButton) return;
+    details.hidden = true;
+    expandButton.setAttribute('aria-expanded', 'false');
+    expandButton.classList.remove('is-open');
+    expandButton.title = 'Edit alert policy';
+    expandButton.setAttribute('aria-label', `Edit ${ruleLabel(rules[Number(index)])}`);
   }));
   $('alertsList').querySelectorAll('[data-delete-rule]').forEach((button) => {
     const card = button.closest('[data-rule-index]');
@@ -307,7 +448,7 @@ $('saveAlertsBtn').addEventListener('click', async () => {
   try {
     cameras.forEach((camera) => {
       (camera.detection?.zones || []).forEach((zone) => {
-        zone.object_rules = (zone.object_rules || []).map((rule, index) => ({ ...defaultRule(rule.label, 'object'), ...rule, id: rule.id || `${rule.label}-${index + 1}` }));
+        zone.object_rules = (zone.object_rules || []).map((rule, index) => ({ ...defaultRule(rule.label, 'object'), ...rule, id: rule.id || `${rule.label}-${index + 1}`, alert_schedules: ensureAlertSchedules(rule) }));
         zone.object_labels = zone.object_rules.filter((rule) => !['motion', 'face'].includes(rule.label)).map((rule) => rule.label);
       });
       if (camera.detection?.sound) camera.detection.sound.rules = (camera.detection.sound.rules || []).map((rule) => ({ ...defaultRule(rule.class, 'sound'), ...rule }));
@@ -333,7 +474,10 @@ $('saveAlertsBtn').addEventListener('click', async () => {
     soundClasses = soundPayload.classes || [];
     enrolledPeople = peoplePayload.persons || [];
     faceRulesPayload = rulesPayload || { rules: [] };
-    cameras.forEach((camera) => (camera.detection?.zones || []).forEach((zone) => { zone.object_rules ||= []; }));
+    cameras.forEach((camera) => (camera.detection?.zones || []).forEach((zone) => {
+      zone.object_rules ||= [];
+      zone.object_rules.forEach(ensureAlertSchedules);
+    }));
     renderSelectors(); renderPolicies();
   } catch (error) { $('alertsList').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`; }
 }());

@@ -989,6 +989,48 @@ def test_zone_object_alert_rules_includes_motion_rules_from_motion_only_zones():
     assert rules[0]['zone_id'] == 'porch'
 
 
+def test_zone_object_alert_rules_expands_schedules_with_independent_windows_and_cooldowns(monkeypatch):
+    from app import zone_detection as zd
+    settings = {
+        'id': 'cam-1', 'name': 'Cam 1',
+        'detection': {'zones': [{
+            'enabled': True, 'monitor_objects': True, 'id': 'porch', 'name': 'Porch',
+            'x': 0, 'y': 0, 'width': 1, 'height': 1,
+            'object_rules': [{
+                'id': 'person-main', 'label': 'person', 'enabled': True,
+                'cooldown_seconds': 45, 'min_confidence': 0.6,
+                'alert_schedules': [
+                    {'id': 'day', 'email_enabled': True, 'email_recipients': ['day@example.com'], 'active_start': '06:00', 'active_end': '18:00', 'notify_start': '07:00', 'notify_end': '17:00'},
+                    {'id': 'night', 'push_enabled': True, 'active_start': '18:00', 'active_end': '06:00', 'notify_start': '19:00', 'notify_end': '05:00'},
+                ],
+            }],
+        }]},
+    }
+    rules = zd.zone_object_alert_rules(settings)
+    assert [rule['name'] for rule in rules] == [
+        'Cam 1 / Porch / person [Schedule 1]',
+        'Cam 1 / Porch / person [Schedule 2]',
+    ]
+    assert [rule['cooldown_key'] for rule in rules] == [
+        'cam-1::porch::person::day', 'cam-1::porch::person::night',
+    ]
+    assert [rule['active_start'] for rule in rules] == ['06:00', '18:00']
+    assert rules[0]['email_recipients'] == ['day@example.com']
+    assert rules[1]['push_enabled'] is True
+    assert all(rule['min_confidence'] == 0.6 and rule['cooldown_seconds'] == 45 for rule in rules)
+
+    from app.alerts import AlertEngine
+    import app.alerts as alerts_module
+    now = {'value': '10:00'}
+    monkeypatch.setattr(alerts_module, '_now_hm_in_admin_tz', lambda: now['value'])
+    engine = AlertEngine(rules)
+    detection = {'label': 'person', 'confidence': 0.9, 'zone_id': 'porch'}
+    assert [alert['rule_name'] for alert in engine.process([detection])] == [rules[0]['name']]
+    now['value'] = '20:00'
+    assert [alert['rule_name'] for alert in engine.process([detection])] == [rules[1]['name']]
+
+
+
 def test_zone_object_alert_rules_keeps_object_rules_inert_in_motion_only_zones():
     """An OBJECT rule inside a motion-only zone stays out of the alert list:
     object detections are filtered through the monitor_objects axis and can
@@ -1051,6 +1093,28 @@ def test_zone_object_alert_rules_email_recipients_cleaned(monkeypatch):
     assert rules[0]['email_recipients'] == ['admin@example.com']
     assert rules[0]['push_enabled'] is True
     assert rules[0]['cooldown_key'] == 'cam-1::zon::person'
+
+
+def test_zone_detection_alert_rule_names_includes_each_configured_schedule():
+    from app import zone_detection as zd
+    settings = {
+        'id': 'cam-1', 'name': 'Cam 1',
+        'detection': {'zones': [{
+            'enabled': True, 'monitor_objects': True, 'id': 'porch', 'name': 'Porch',
+            'x': 0, 'y': 0, 'width': 1, 'height': 1,
+            'object_rules': [{'id': 'person-main', 'label': 'person', 'enabled': True,
+                'alert_schedules': [
+                    {'id': 'day', 'email_enabled': True},
+                    {'id': 'night', 'push_enabled': True},
+                    {'id': 'off'},
+                ]}],
+        }]},
+    }
+    detection = {'label': 'person', 'confidence': 0.9, 'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}}
+    assert zd.zone_detection_alert_rule_names(settings, detection) == {
+        'Cam 1 / Porch / person [Schedule 1]',
+        'Cam 1 / Porch / person [Schedule 2]',
+    }
 
 
 def test_zone_rule_name_composes_camera_zone_label():
