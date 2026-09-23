@@ -103,6 +103,7 @@ const WEB_SHARED_GLOBALS = {
   tripwirePoint: 'readonly',
   tripwireForwardNormal: 'readonly',
   tripwireMidpoint: 'readonly',
+  normalizeLoiter: 'readonly',
 
   // web/icons.js - SVG icon registry consumed across pages.
   ICONS: 'readonly',
