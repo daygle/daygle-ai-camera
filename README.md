@@ -347,6 +347,16 @@ If the TFLite runtime is missing, install `ai-edge-litert` or `tflite-runtime`.
 
 Crossings raise an event (and optional recording) whenever a tracked object crosses the line in the chosen direction, and notify you when email/push are enabled. A tripwire builds on the object tracker, so it works wherever objects are detected — no extra model or GPU load.
 
+### Loitering (long dwell)
+
+Loitering *learns your site*: it measures how long objects normally dwell in an area, then alerts when one stays far longer than usual — no fixed timer to guess at.
+
+- Open `/zones`, select a camera and area, and turn on **Loitering** in the detection panel.
+- Set **Min dwell** — the minimum seconds before anything can count as loitering (a hard floor). Set **Sensitivity** — how far above the area's *learned normal* dwell before it fires (× the normal spread; lower = more sensitive, `0` fires at the minimum dwell). Optionally limit **Counts** to specific object classes, choose whether it records, then **Save Zones**.
+- Configure notifications on the **Alerts** page under the **Loitering** type — email/push, recipients, a cooldown, and an optional **Notify From/Until** quiet-hours window, like the other alerts.
+
+Each area learns from completed visits, so the effective threshold is `max(min dwell, normal + sensitivity × spread)`: a busy patio where people linger won't cry wolf, while a driveway where nobody stops fires at the floor. It works on day one from the minimum dwell and sharpens as history builds; the learned baselines persist across restarts. Also built on the object tracker — pure statistics, no extra model or GPU load.
+
 ## Updating
 
 ### Local update

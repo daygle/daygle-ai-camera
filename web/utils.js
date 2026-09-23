@@ -1200,6 +1200,41 @@ function tripwireHhmm(value) {
   return `${String(hours).padStart(2, '0')}:${match[2]}`;
 }
 
+// ─── Behavioural loiter rule (Tier 2: statistical long-dwell) ───────────────
+// Client mirror of app/zone_schema.py::normalize_zone_loiter, used by the Zones
+// save path so a save never drops delivery settings made on the Alerts page and
+// the in-memory shape matches what the backend stores. Returns null when no
+// loiter rule is present (the field is then dropped, keeping the zone's shape).
+function normalizeLoiter(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  let minDwell = Number.parseInt(raw.min_dwell_seconds, 10);
+  if (raw.min_dwell_seconds == null || !Number.isFinite(minDwell)) minDwell = 30;
+  minDwell = Math.max(1, minDwell);
+  let sensitivity = Number(raw.sensitivity);
+  if (raw.sensitivity == null || !Number.isFinite(sensitivity)) sensitivity = 3.0;
+  sensitivity = Math.round(Math.max(0, Math.min(10, sensitivity)) * 1000) / 1000;
+  let cooldown = Number.parseInt(raw.cooldown_seconds, 10);
+  if (raw.cooldown_seconds == null || !Number.isFinite(cooldown)) cooldown = 120;
+  cooldown = Math.max(0, cooldown);
+  const labels = Array.isArray(raw.labels)
+    ? [...new Set(raw.labels.map((label) => String(label).trim().toLowerCase()).filter(Boolean))]
+    : [];
+  return {
+    enabled: raw.enabled !== false,
+    name: String(raw.name || 'Loitering').trim() || 'Loitering',
+    labels,
+    min_dwell_seconds: minDwell,
+    sensitivity,
+    cooldown_seconds: cooldown,
+    record_on_detect: raw.record_on_detect !== false,
+    email_enabled: raw.email_enabled === true,
+    email_recipients: normalizeEmailList(raw.email_recipients),
+    push_enabled: raw.push_enabled === true,
+    notify_start: tripwireHhmm(raw.notify_start),
+    notify_end: tripwireHhmm(raw.notify_end),
+  };
+}
+
 // ─── User display preferences (date_format / time_format) ──────────────────
 // Populated by nav.js after /api/auth/me resolves, but exposed as early as
 // possible so every page (dashboard, events, alerts, recordings, etc.) renders
@@ -1612,7 +1647,7 @@ window.daygleUi = {
   // Behavioural tripwire geometry + normalisation (Zones canvas ↔ backend)
   TRIPWIRE_DIRECTIONS, roundTripwireCoord, tripwirePoint, tripwireZoneBounds,
   tripwireDefaultLine, tripwireOrientation, tripwireForwardNormal, tripwireMidpoint,
-  normalizeTripwire,
+  normalizeTripwire, normalizeLoiter,
   // Theme management
   setDaygleThemePref, getDaygleThemePref, applyDaygleTheme,
   watchDaygleSystemTheme, unwatchDaygleSystemTheme,

@@ -472,6 +472,8 @@ def normalize_zone_loiter(zone: dict[str, Any]) -> dict[str, Any] | None:
             "email_enabled": bool,
             "email_recipients": [str, ...],
             "push_enabled": bool,
+            "notify_start": str | None,   # HH:MM quiet-hours window (notify only)
+            "notify_end": str | None,
         }
 
     The learned per-(zone, label) dwell baseline is NOT stored here -- this is
@@ -511,6 +513,11 @@ def normalize_zone_loiter(zone: dict[str, Any]) -> dict[str, Any] | None:
         'email_enabled': bool(raw.get('email_enabled', False)),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
         'push_enabled': bool(raw.get('push_enabled', False)),
+        # Optional quiet-hours window for notifications (HH:MM, gates email/push
+        # only; the anomaly is still detected/recorded when enabled), matching
+        # the tripwire and object/sound alert schedules.
+        'notify_start': normalize_hhmm(raw.get('notify_start')),
+        'notify_end': normalize_hhmm(raw.get('notify_end')),
     }
 
 

@@ -275,6 +275,14 @@ class LoiterSchemaTests(unittest.TestCase):
         self.assertEqual(loiter['labels'], ['person', 'car'])
         self.assertEqual(loiter['name'], 'Loitering')      # blank -> default
 
+    def test_notify_window_normalized_and_defaults_to_none(self) -> None:
+        loiter = normalize_zone_loiter({'loiter': {'notify_start': '9:05', 'notify_end': '17:30'}})
+        self.assertEqual(loiter['notify_start'], '09:05')
+        self.assertEqual(loiter['notify_end'], '17:30')
+        bare = normalize_zone_loiter({'loiter': {}})
+        self.assertIsNone(bare['notify_start'])
+        self.assertIsNone(bare['notify_end'])
+
     def test_bad_types_fall_back_to_defaults(self) -> None:
         loiter = normalize_zone_loiter({'loiter': {
             'min_dwell_seconds': 'nope', 'sensitivity': 'nan', 'cooldown_seconds': 'x',

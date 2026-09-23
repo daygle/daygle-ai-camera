@@ -300,6 +300,38 @@ function ensureTripwire(zone) {
   return zone.tripwire;
 }
 
+// ─── Behavioural loiter rule (Tier 2: statistical long-dwell) ───────────────
+// A zone's optional loitering detector, stored on ``zone.loiter``. Detection
+// config (min dwell, sensitivity, which objects, record) lives on the Zones
+// card; email/push/quiet-hours are configured on the Alerts page, like the
+// tripwire and object/sound rules.
+function loiterOf(zone) {
+  return zone && zone.loiter && typeof zone.loiter === 'object' ? zone.loiter : null;
+}
+
+function ensureLoiter(zone) {
+  const existing = loiterOf(zone);
+  if (existing) {
+    existing.enabled = true;
+    return existing;
+  }
+  zone.loiter = {
+    enabled: true,
+    name: 'Loitering',
+    labels: [],
+    min_dwell_seconds: 30,
+    sensitivity: 3,
+    cooldown_seconds: 120,
+    record_on_detect: true,
+    email_enabled: false,
+    email_recipients: [],
+    push_enabled: false,
+    notify_start: null,
+    notify_end: null,
+  };
+  return zone.loiter;
+}
+
 function normalizeObjectRules(zone) {
   if (Array.isArray(zone.object_rules) && zone.object_rules.length) {
     return zone.object_rules.map((rule, ruleIndex) => ({ ...defaultObjectRule(rule?.label), ...rule, id: rule?.id || `${String(rule?.label || 'rule').trim().toLowerCase()}-${ruleIndex + 1}` }))
@@ -363,6 +395,11 @@ function normalizeZone(zone) {
   const tripwire = normalizeTripwire(zone.tripwire);
   if (tripwire) zone.tripwire = tripwire;
   else if ('tripwire' in zone) delete zone.tripwire;
+  // Same for the optional loiter rule (Tier 2): normalise when present, drop
+  // otherwise so a zone without one keeps its canonical shape.
+  const loiter = normalizeLoiter(zone.loiter);
+  if (loiter) zone.loiter = loiter;
+  else if ('loiter' in zone) delete zone.loiter;
   updateZoneBounds(zone);
   return zone;
 }
@@ -701,6 +738,62 @@ function renderTripwireCard(zone, zoneIndex) {
     </div>`;
 }
 
+// Removable chips for the object labels a loiter rule counts ([] = any object).
+function loiterLabelChips(rule, zoneIndex) {
+  const labels = rule && Array.isArray(rule.labels) ? rule.labels : [];
+  if (!labels.length) return '<span class="tripwire-any">Any object</span>';
+  return labels.map((label, labelIndex) => (
+    `<span class="zone-object-chip tripwire-chip">${escapeHtml(titleCase(label))}<button type="button" class="tripwire-chip-remove" data-loiter-label-remove="${zoneIndex}:${labelIndex}" title="Stop counting ${escapeHtml(titleCase(label))}" aria-label="Stop counting ${escapeHtml(titleCase(label))}">×</button></span>`
+  )).join('');
+}
+
+// The editable body of an enabled loiter card. Detection only (min dwell,
+// sensitivity, which objects, record); email/push/quiet-hours are configured on
+// the Alerts page, like the tripwire and object/sound rules.
+function loiterBody(rule, zoneIndex) {
+  return `
+    <div class="zone-tripwire-body">
+      <label class="sound-rule-field tripwire-name-field">
+        <span>Name</span>
+        <input type="text" data-loiter-name="${zoneIndex}" value="${escapeHtml(rule.name || 'Loitering')}" maxlength="60" placeholder="Loitering" />
+      </label>
+      <div class="tripwire-toggles">
+        <label class="sound-rule-field">
+          <span>Min dwell (s)</span>
+          <input type="number" data-loiter-min-dwell="${zoneIndex}" min="1" step="1" value="${escapeHtml(rule.min_dwell_seconds ?? 30)}" title="An object must stay at least this many seconds before it can count as loitering." />
+        </label>
+        <label class="sound-rule-field">
+          <span>Sensitivity</span>
+          <input type="number" data-loiter-sensitivity="${zoneIndex}" min="0" max="10" step="0.5" value="${escapeHtml(rule.sensitivity ?? 3)}" title="How far above the zone's normal dwell before it counts (× the normal spread). Lower = more sensitive; 0 = fire at the minimum dwell." />
+        </label>
+      </div>
+      <div class="sound-rule-field tripwire-labels-field">
+        <span>Counts</span>
+        <div class="tripwire-labels" data-loiter-labels="${zoneIndex}">${loiterLabelChips(rule, zoneIndex)}</div>
+        <select class="rule-add-select tripwire-label-add" data-loiter-label-add="${zoneIndex}" aria-label="Limit which objects this rule counts">${tripwireLabelAddOptions(rule.labels)}</select>
+      </div>
+      <div class="tripwire-toggles">
+        ${tripwireToggleField('Record', `data-loiter-record="${zoneIndex}"`, rule.record_on_detect !== false, 'Record a clip when loitering is detected')}
+      </div>
+      <p class="muted tripwire-hint">Learns this area's normal dwell over time, then alerts on an unusually long stay. <a class="zone-assigned-link" href="/alerts">Set email / push alerts</a></p>
+    </div>`;
+}
+
+// Per-zone loitering card, rendered under the line-crossing card. Off by
+// default; enabling it starts learning the zone's normal dwell.
+function renderLoiterCard(zone, zoneIndex) {
+  const rule = loiterOf(zone);
+  const enabled = Boolean(rule && rule.enabled !== false);
+  return `
+    <div class="zone-tripwire-card zone-loiter-card${enabled ? ' is-enabled' : ''}" data-zone-loiter-for="${zoneIndex}">
+      <div class="zone-tripwire-head">
+        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">⏲</span><strong>Loitering</strong><span class="muted zone-tripwire-sub">Alert when an object lingers far longer than normal</span></div>
+        ${ruleToggleCell(`data-loiter-enabled="${zoneIndex}"`, enabled, 'Enable statistical loitering detection for this area', false)}
+      </div>
+      ${enabled ? loiterBody(rule, zoneIndex) : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to learn this area\'s normal dwell time and get alerted when something stays unusually long.</p>'}
+    </div>`;
+}
+
 function assignedObjectsMarkup(zone) {
   const labels = [...new Set((zone.object_rules || [])
     .filter((rule) => !['motion', 'face'].includes(String(rule.label || '').trim().toLowerCase()))
@@ -803,6 +896,7 @@ function renderObjectDetectionRules() {
           <select data-add-zone-rule="${zoneIndex}" class="rule-add-select" aria-label="Add an object to ${zoneName}">${addOptions}</select>
         </div>
         ${renderTripwireCard(zone, zoneIndex)}
+        ${renderLoiterCard(zone, zoneIndex)}
       </div>`;
   }).join('');
   bindObjectRuleControls();
@@ -825,6 +919,7 @@ function bindObjectRuleControls() {
   bindMotionControls();
   bindFaceControls();
   bindTripwireControls();
+  bindLoiterControls();
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
@@ -1049,6 +1144,96 @@ function bindTripwireControls() {
       if (!wire) return;
       wire.record_on_detect = cb.checked;
       // Flip the pill's On/Off label live without a full re-render.
+      const pill = cb.parentElement?.querySelector('span');
+      if (pill) pill.textContent = cb.checked ? 'On' : 'Off';
+      markZoneUnsaved();
+    });
+  });
+}
+
+// Loitering card bindings. Like the tripwire card, the enable toggle and label
+// edits re-render (so the card body updates) while the text/number inputs
+// mutate in place to keep focus; delivery lives on the Alerts page.
+function bindLoiterControls() {
+  const zoneAt = (index) => cameraDetection().zones[Number(index)];
+
+  document.querySelectorAll('[data-loiter-enabled]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const zone = zoneAt(cb.dataset.loiterEnabled);
+      if (!zone) return;
+      selectedZoneIndex = Number(cb.dataset.loiterEnabled);
+      if (cb.checked) {
+        ensureLoiter(zone);
+        liveEls.status.textContent = 'Loitering enabled - it will learn this area\'s normal dwell, then Save Zones.';
+      } else if (loiterOf(zone)) {
+        zone.loiter.enabled = false;
+      }
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-loiter-label-add]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const label = String(select.value || '').trim().toLowerCase();
+      if (!label) return;
+      const rule = loiterOf(zoneAt(select.dataset.loiterLabelAdd));
+      if (!rule) return;
+      rule.labels = Array.isArray(rule.labels) ? rule.labels : [];
+      if (!rule.labels.includes(label)) rule.labels.push(label);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-loiter-label-remove]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [zoneIndex, labelIndex] = String(button.dataset.loiterLabelRemove).split(':').map(Number);
+      const rule = loiterOf(zoneAt(zoneIndex));
+      if (!rule || !Array.isArray(rule.labels)) return;
+      rule.labels.splice(labelIndex, 1);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-loiter-name]').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const rule = loiterOf(zoneAt(inp.dataset.loiterName));
+      if (!rule) return;
+      rule.name = inp.value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-loiter-min-dwell]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const rule = loiterOf(zoneAt(inp.dataset.loiterMinDwell));
+      if (!rule) return;
+      const value = Math.max(1, Number.parseInt(inp.value, 10) || 1);
+      rule.min_dwell_seconds = value;
+      inp.value = value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-loiter-sensitivity]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const rule = loiterOf(zoneAt(inp.dataset.loiterSensitivity));
+      if (!rule) return;
+      const raw = Number(inp.value);
+      const value = Number.isFinite(raw) ? Math.max(0, Math.min(10, raw)) : 3;
+      rule.sensitivity = value;
+      inp.value = value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-loiter-record]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const rule = loiterOf(zoneAt(cb.dataset.loiterRecord));
+      if (!rule) return;
+      rule.record_on_detect = cb.checked;
       const pill = cb.parentElement?.querySelector('span');
       if (pill) pill.textContent = cb.checked ? 'On' : 'Off';
       markZoneUnsaved();

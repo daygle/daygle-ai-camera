@@ -1663,6 +1663,9 @@ input[type="file"] { padding: 10px; }
   background: rgba(251,191,36,.05);
 }
 .zone-tripwire-card.is-enabled { border-color: rgba(251,191,36,.5); }
+/* Loitering card: same layout as the line-crossing card, distinct violet accent. */
+.zone-loiter-card { border-color: rgba(167,139,250,.3); background: rgba(167,139,250,.05); }
+.zone-loiter-card.is-enabled { border-color: rgba(167,139,250,.55); }
 .zone-tripwire-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .zone-tripwire-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .zone-tripwire-title strong { font-size: 13px; }
