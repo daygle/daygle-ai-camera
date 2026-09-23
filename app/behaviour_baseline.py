@@ -318,3 +318,173 @@ def dwell_seconds(first_ts: Any, last_ts: Any) -> float | None:
     if not math.isfinite(start) or not math.isfinite(end):
         return None
     return max(0.0, end - start)
+
+
+# ─── Unusual time-of-day (Tier 2) ────────────────────────────────────────────
+# A second "learns your site" anomaly, sharing this module's shape but a
+# different learned quantity: per ``(zone, label)`` it accumulates, across the
+# days that pair was active, WHICH hours of the day normally saw activity, then
+# flags activity in a normally-quiet hour (e.g. a person in the driveway at
+# 3am). The baseline is ``{days, hours[24]}`` -- ``days`` distinct active days
+# committed, ``hours[h]`` how many of those days had activity in local hour h.
+# The activity probability for an hour is Laplace-smoothed so a never-active
+# hour is low but never exactly zero, and nothing fires until ``min_days`` of
+# history have accrued.
+DEFAULT_TIME_THRESHOLD = 0.15   # hour active on <= this fraction of days is "unusual"
+TIME_MIN_DAYS = 7               # committed active-days before the baseline is trusted
+TIME_ALPHA = 1.0                # Laplace smoothing pseudo-count
+
+
+def new_time_baseline() -> dict[str, Any]:
+    return {'days': 0.0, 'hours': [0.0] * 24}
+
+
+def _coerce_time_baseline(baseline: Any) -> dict[str, Any]:
+    out = new_time_baseline()
+    if not isinstance(baseline, dict):
+        return out
+    try:
+        days = float(baseline.get('days', 0.0))
+    except (TypeError, ValueError):
+        days = 0.0
+    out['days'] = max(0.0, days) if math.isfinite(days) else 0.0
+    hours = baseline.get('hours')
+    if isinstance(hours, list):
+        for index in range(24):
+            try:
+                value = float(hours[index]) if index < len(hours) else 0.0
+            except (TypeError, ValueError, IndexError):
+                value = 0.0
+            out['hours'][index] = max(0.0, value) if math.isfinite(value) else 0.0
+    return out
+
+
+def commit_time_day(baseline: Any, active_hours: Any) -> dict[str, Any]:
+    """Fold one day's per-hour activity into ``baseline``: ``days`` grows by one
+    and every hour in ``active_hours`` (a set/iterable of 0-23) is credited.
+    Returns the updated baseline."""
+    state = _coerce_time_baseline(baseline)
+    active: set[int] = set()
+    for hour in active_hours or []:
+        try:
+            hour_index = int(hour)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= hour_index < 24:
+            active.add(hour_index)
+    state['days'] += 1.0
+    for hour_index in active:
+        state['hours'][hour_index] += 1.0
+    return state
+
+
+def hour_activity_probability(baseline: Any, hour: Any, *, alpha: float = TIME_ALPHA) -> float:
+    """Laplace-smoothed probability that ``hour`` normally has activity:
+    ``(active_days + alpha) / (days + 2*alpha)``. An out-of-range hour returns
+    1.0 (never "unusual")."""
+    state = _coerce_time_baseline(baseline)
+    try:
+        hour_index = int(hour)
+    except (TypeError, ValueError):
+        return 1.0
+    if not 0 <= hour_index < 24:
+        return 1.0
+    return (state['hours'][hour_index] + alpha) / (state['days'] + 2.0 * alpha)
+
+
+def is_unusual_hour(
+    baseline: Any,
+    hour: Any,
+    *,
+    threshold: float = DEFAULT_TIME_THRESHOLD,
+    min_days: int = TIME_MIN_DAYS,
+) -> bool:
+    """True when ``hour`` is a normally-quiet hour for this baseline: at least
+    ``min_days`` of history AND an activity probability at or below
+    ``threshold``. Still-learning baselines never fire."""
+    state = _coerce_time_baseline(baseline)
+    if state['days'] < float(min_days):
+        return False
+    return hour_activity_probability(baseline, hour) <= max(0.0, float(threshold))
+
+
+def time_of_day_step(
+    today: Any,
+    baselines: Any,
+    cooldowns: Any,
+    observations: Any,
+    now: float,
+    *,
+    min_days: int = TIME_MIN_DAYS,
+) -> dict[str, Any]:
+    """Advance one detection cycle of unusual-time tracking. Pure (mutates the
+    three passed dicts, does no I/O).
+
+    ``today`` maps ``camera|zone|label`` to the in-progress day ``{day, hours}``;
+    ``baselines`` maps the same key to a ``{days, hours[24]}`` baseline;
+    ``cooldowns`` maps it to the last alert time. ``observations`` is the list of
+    detections inside a time-enabled zone THIS cycle, each::
+
+        {"key", "zone_id", "zone_name", "label", "track_id", "confidence",
+         "day", "hour", "threshold", "cooldown_seconds"}
+
+    where ``day`` is a local day ordinal and ``hour`` the local hour (0-23). When
+    a key's day rolls over, the previous day's active hours are committed to its
+    baseline (so it learns from finished days). Returns ``{"fires": [...],
+    "committed": int}``; a fire is activity in a normally-quiet hour past its
+    cooldown."""
+    if not isinstance(today, dict):
+        today = {}
+    if not isinstance(baselines, dict):
+        baselines = {}
+    if not isinstance(cooldowns, dict):
+        cooldowns = {}
+    fires: list[dict[str, Any]] = []
+    committed = 0
+
+    for obs in observations or []:
+        if not isinstance(obs, dict):
+            continue
+        key = obs.get('key')
+        if not key:
+            continue
+        try:
+            day = int(obs.get('day'))
+            hour = int(obs.get('hour'))
+        except (TypeError, ValueError):
+            continue
+        state = today.get(key)
+        if state is None:
+            today[key] = {'day': day, 'hours': {hour}}
+        elif state.get('day') != day:
+            baselines[key] = commit_time_day(baselines.get(key), state.get('hours'))
+            committed += 1
+            today[key] = {'day': day, 'hours': {hour}}
+        else:
+            state['hours'].add(hour)
+
+        try:
+            threshold = float(obs.get('threshold', DEFAULT_TIME_THRESHOLD))
+        except (TypeError, ValueError):
+            threshold = DEFAULT_TIME_THRESHOLD
+        if not is_unusual_hour(baselines.get(key), hour, threshold=threshold, min_days=min_days):
+            continue
+        try:
+            cooldown = max(0.0, float(obs.get('cooldown_seconds', 0)))
+        except (TypeError, ValueError):
+            cooldown = 0.0
+        if not _cooldown_ok(cooldowns.get(key), now, cooldown):
+            continue
+        cooldowns[key] = now
+        fires.append({
+            'zone_id': obs.get('zone_id'),
+            'zone_name': obs.get('zone_name'),
+            'label': obs.get('label'),
+            'track_id': obs.get('track_id'),
+            'hour': hour,
+            'probability': round(hour_activity_probability(baselines.get(key), hour), 4),
+            'days': int(_coerce_time_baseline(baselines.get(key))['days']),
+            'confidence': obs.get('confidence'),
+        })
+
+    return {'fires': fires, 'committed': committed}
