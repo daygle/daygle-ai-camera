@@ -166,7 +166,7 @@ function renderPolicies() {
     $('alertsList').innerHTML = `<div class="empty">${emptyMessage}</div>`;
     return;
   }
-  $('alertsList').innerHTML = rules.map((rule, index) => {
+  $('alertsList').innerHTML = `<div class="cameras-table-wrap alerts-policy-table-wrap"><table class="rule-table alerts-policy-table"><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Enabled</th><th scope="col">Email</th><th scope="col">Push</th><th scope="col" aria-label="Actions"></th></tr></thead><tbody>${rules.map((rule, index) => {
     const people = alertType === 'people';
     const sound = alertType === 'sound';
     const tripwire = alertType === 'tripwire';
@@ -180,7 +180,27 @@ function renderPolicies() {
     const cooldown = people ? rule.cooldown_minutes : rule.cooldown_seconds;
     const confidenceLabel = people ? 'Minimum Recognition Confidence' : sound ? 'Confidence Threshold' : 'Minimum Confidence';
     const cooldownLabel = people ? 'Cooldown (Minutes)' : 'Cooldown (Seconds)';
+    const policyNote = people
+      ? 'Recognized-person and stranger alerts use the face recognition rule store.'
+      : sound
+        ? 'Assigned on the Sounds page. Removing here unassigns this sound class from the camera.'
+        : tripwire
+          ? 'Drawn on the Zones page. Removing here deletes the line from the area.'
+          : loiter
+            ? 'Enabled on the Zones page. Removing here turns loitering off for the area.'
+            : time
+              ? 'Enabled on the Zones page. Removing here turns unusual-time off for the area.'
+              : 'Assigned on the Zones page. Removing here unassigns this item from the area.';
     return `
+    <tr class="alerts-policy-row ${rule.enabled !== false ? 'is-enabled' : ''}" data-rule-index="${index}">
+      <td class="alerts-policy-name"><strong>${escapeHtml(ruleLabel(rule))}</strong><span>Policy ${index + 1}</span></td>
+      <td>${escapeHtml(scopeLabel())}</td>
+      <td><label class="alerts-table-toggle"><input data-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''}><span>${rule.enabled !== false ? 'On' : 'Off'}</span></label></td>
+      <td><label class="alerts-table-toggle"><input data-field="email_enabled" type="checkbox" ${rule.email_enabled ? 'checked' : ''}><span>${rule.email_enabled ? 'On' : 'Off'}</span></label></td>
+      <td><label class="alerts-table-toggle"><input data-field="push_enabled" type="checkbox" ${rule.push_enabled ? 'checked' : ''}><span>${rule.push_enabled ? 'On' : 'Off'}</span></label></td>
+      <td class="alerts-table-actions"><button class="secondary alerts-policy-expand" data-expand-policy="${index}" type="button" aria-expanded="false">Settings</button><button class="btn-danger alerts-policy-remove" data-delete-rule type="button" aria-label="Remove ${escapeHtml(ruleLabel(rule))}">Remove</button></td>
+    </tr>
+    <tr class="alerts-policy-details-row" data-policy-details-for="${index}" hidden><td colspan="6">
     <article class="alerts-policy ${rule.enabled !== false ? 'is-enabled' : ''}" data-rule-index="${index}">
       <div class="alerts-policy-head"><div><span class="zones-panel-kicker">${escapeHtml(scopeLabel())} · Policy ${index + 1}</span><h3>${escapeHtml(ruleLabel(rule))}</h3></div><label class="toggle-control"><input data-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''}><span>${rule.enabled !== false ? 'Enabled' : 'Disabled'}</span></label></div>
       <div class="alerts-policy-grid">
@@ -194,25 +214,51 @@ function renderPolicies() {
         ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`
         : `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`}
       <label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(Array.isArray(rule.email_recipients) ? rule.email_recipients.join(', ') : rule.email_recipients || '')}" placeholder="alerts@example.com, me@example.com"></label>
-      <div class="alerts-policy-actions"><span class="muted">${people ? 'Recognized-person and stranger alerts use the face recognition rule store.' : sound ? 'Assigned on the Sounds page. Removing here unassigns this sound class from the camera.' : tripwire ? 'Drawn on the Zones page. Removing here deletes the line from the area.' : loiter ? 'Enabled on the Zones page. Removing here turns loitering off for the area.' : time ? 'Enabled on the Zones page. Removing here turns unusual-time off for the area.' : 'Assigned on the Zones page. Removing here unassigns this item from the area.'}</span><button class="btn-danger" data-delete-rule type="button">${people ? 'Remove Policy' : 'Remove'}</button></div>
-    </article>`;
-  }).join('');
-  $('alertsList').querySelectorAll('.alerts-policy').forEach((card) => {
+      <p class="muted alerts-policy-note">${policyNote}</p>
+    </article></td></tr>`;
+  }).join('')}</tbody></table></div>`;
+  $('alertsList').querySelectorAll('[data-field]').forEach((field) => field.addEventListener('change', () => {
+    const policyRow = field.closest('[data-rule-index], [data-policy-details-for]');
+    const index = Number(policyRow.dataset.ruleIndex ?? policyRow.dataset.policyDetailsFor);
+    const rule = rules[index];
+    const key = field.dataset.field;
+    if (field.type === 'checkbox') {
+      rule[key] = field.checked;
+      const summary = $('alertsList').querySelector(`.alerts-policy-row[data-rule-index="${index}"]`);
+      const details = $('alertsList').querySelector(`[data-policy-details-for="${index}"]`);
+      [summary, details].forEach((container) => container?.querySelectorAll(`[data-field="${key}"]`).forEach((matchingField) => {
+        matchingField.checked = field.checked;
+        const state = matchingField.closest('label')?.querySelector('span');
+        if (state && container === summary) state.textContent = field.checked ? 'On' : 'Off';
+        else if (state && key === 'enabled') state.textContent = field.checked ? 'Enabled' : 'Disabled';
+      }));
+      if (key === 'enabled') {
+        summary.classList.toggle('is-enabled', rule.enabled !== false);
+        details?.querySelector('.alerts-policy')?.classList.toggle('is-enabled', rule.enabled !== false);
+      }
+    } else if (key === 'email_recipients') rule[key] = alertType === 'people' ? field.value : field.value.split(',').map((item) => item.trim()).filter(Boolean);
+    else if (['min_confidence', 'max_confidence', 'confidence_threshold', 'cooldown_seconds', 'cooldown_minutes'].includes(key)) rule[key] = field.value === '' ? null : Number(field.value);
+    else if (key === 'person_id') {
+      rule.person_id = field.value || null;
+      rule.name = enrolledPeople.find((person) => String(person.id) === field.value)?.name || 'Unknown Person';
+      $('alertsList').querySelector(`.alerts-policy-row[data-rule-index="${index}"] .alerts-policy-name strong`).textContent = ruleLabel(rule);
+      $('alertsList').querySelector(`[data-policy-details-for="${index}"] h3`).textContent = ruleLabel(rule);
+    } else rule[key] = field.value || null;
+    if (key === 'class') rule.name = soundClasses.find((sound) => sound.id === field.value)?.label || field.value;
+    updateStats();
+  }));
+  $('alertsList').querySelectorAll('[data-expand-policy]').forEach((button) => button.addEventListener('click', () => {
+    const index = button.dataset.expandPolicy;
+    const details = $('alertsList').querySelector(`[data-policy-details-for="${index}"]`);
+    const expanded = button.getAttribute('aria-expanded') === 'true';
+    button.setAttribute('aria-expanded', String(!expanded));
+    button.textContent = expanded ? 'Settings' : 'Close';
+    details.hidden = expanded;
+  }));
+  $('alertsList').querySelectorAll('[data-delete-rule]').forEach((button) => {
+    const card = button.closest('[data-rule-index]');
     const rule = rules[Number(card.dataset.ruleIndex)];
-    card.querySelectorAll('[data-field]').forEach((field) => field.addEventListener('change', () => {
-      const key = field.dataset.field;
-      if (field.type === 'checkbox') rule[key] = field.checked;
-      else if (key === 'email_recipients') rule[key] = alertType === 'people' ? field.value : field.value.split(',').map((item) => item.trim()).filter(Boolean);
-      else if (['min_confidence', 'max_confidence', 'confidence_threshold', 'cooldown_seconds', 'cooldown_minutes'].includes(key)) rule[key] = field.value === '' ? null : Number(field.value);
-      else if (key === 'person_id') {
-        rule.person_id = field.value || null;
-        rule.name = enrolledPeople.find((person) => String(person.id) === field.value)?.name || 'Unknown Person';
-      } else rule[key] = field.value || null;
-      if (key === 'class') rule.name = soundClasses.find((sound) => sound.id === field.value)?.label || field.value;
-      card.classList.toggle('is-enabled', rule.enabled !== false);
-      updateStats();
-    }));
-    card.querySelector('[data-delete-rule]').addEventListener('click', () => {
+    button.addEventListener('click', () => {
       if (alertType === 'people') {
         const actualIndex = (faceRulesPayload.rules || []).indexOf(rule);
         if (actualIndex >= 0) faceRulesPayload.rules.splice(actualIndex, 1);

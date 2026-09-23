@@ -765,7 +765,7 @@ function renderTripwireCard(zone, zoneIndex) {
   return `
     <div class="zone-tripwire-card${enabled ? ' is-enabled' : ''}" data-zone-tripwire-for="${zoneIndex}">
       <div class="zone-tripwire-head">
-        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">⤢</span><strong>Line crossing</strong><span class="muted zone-tripwire-sub">Alert when an object crosses a line you draw</span></div>
+        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">⤢</span><strong>Line Crossing</strong><span class="muted zone-tripwire-sub">Alert when an object crosses a line you draw</span></div>
         ${ruleToggleCell(`data-tripwire-enabled="${zoneIndex}"`, enabled, 'Enable a directional line-crossing counter for this area', false)}
       </div>
       ${enabled ? tripwireBody(wire, zoneIndex) : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to draw a line across the footage and get alerted when a tracked object crosses it in the direction you choose.</p>'}
@@ -872,20 +872,11 @@ function renderTimeCard(zone, zoneIndex) {
   return `
     <div class="zone-tripwire-card zone-time-card${enabled ? ' is-enabled' : ''}" data-zone-time-for="${zoneIndex}">
       <div class="zone-tripwire-head">
-        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">🕒</span><strong>Unusual time</strong><span class="muted zone-tripwire-sub">Alert on activity at a normally-quiet hour</span></div>
+        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">🕒</span><strong>Unusual Time</strong><span class="muted zone-tripwire-sub">Alert on activity at a normally-quiet hour</span></div>
         ${ruleToggleCell(`data-time-enabled="${zoneIndex}"`, enabled, 'Enable unusual time-of-day detection for this area', false)}
       </div>
       ${enabled ? timeBody(rule, zoneIndex) : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to learn which hours this area is normally active and get alerted when something shows up at an odd hour.</p>'}
     </div>`;
-}
-
-function assignedObjectsMarkup(zone) {
-  const labels = [...new Set((zone.object_rules || [])
-    .filter((rule) => !['motion', 'face'].includes(String(rule.label || '').trim().toLowerCase()))
-    .map((rule) => String(rule.label || '').trim())
-    .filter(Boolean))];
-  const chips = labels.map((label) => `<span class="zone-object-chip" style="display:inline-flex;align-items:center;min-height:24px;padding:4px 9px;border:1px solid rgba(71,214,255,.24);border-radius:999px;color:var(--accent);background:rgba(71,214,255,.08);font-size:11px;font-weight:750;white-space:nowrap">${escapeHtml(titleCase(label.replace(/[_-]+/g, ' ')))}</span>`).join('');
-  return `<div class="zone-assigned-objects" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;grid-column:1 / -1" aria-label="Assigned objects for this zone"><span class="zone-assigned-label" style="flex-basis:100%;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase">Assigned Objects</span>${chips || '<span class="zone-assigned-empty" style="color:var(--muted);font-size:12px">None Yet</span>'}<a class="zone-assigned-link" style="margin-left:auto;color:var(--accent);font-size:11px;font-weight:750;text-decoration:none" href="/alerts">Manage In Alerts</a></div>`;
 }
 
 function renderZones() {
@@ -916,7 +907,6 @@ function renderZones() {
           ${ICONS.edit}
           <input data-zone-name="${index}" value="${zoneLabel}" placeholder="Zone name…" aria-label="Name for ${zoneLabel}" />
         </div>
-        ${assignedObjectsMarkup(zone)}
         <div class="zone-shape-field">
           <div class="zone-shape-head">
             <span>Shape</span>
@@ -1624,7 +1614,7 @@ function finishDraftPolygon() {
   normalizeZone(zones[selectedZoneIndex]);
   draftPolygon = null;
   drawingMode = false;
-  setAddZoneLabel('Draw polygon');
+  setAddZoneLabel('Draw Polygon');
   renderZones();
   refreshFrame();
   markZoneUnsaved();
@@ -1650,7 +1640,7 @@ function addFullFrameZone() {
   draftPolygon = null;
   drawingMode = false;
   zoneDrag = null;
-  setAddZoneLabel('Draw polygon');
+  setAddZoneLabel('Draw Polygon');
   normalizeZone(zones[selectedZoneIndex]);
   renderZones();
   refreshFrame();
@@ -1675,7 +1665,7 @@ function bindZoneDrawing() {
       draftPolygon ||= { points: [], preview: point };
       draftPolygon.points.push(point);
       draftPolygon.preview = point;
-      setAddZoneLabel(draftPolygon.points.length >= 3 ? 'Finish area' : 'Cancel drawing');
+      setAddZoneLabel(draftPolygon.points.length >= 3 ? 'Finish Area' : 'Cancel Drawing');
       renderDraftPolygon();
       liveEls.zoneOverlay.setPointerCapture(event.pointerId);
       return;
@@ -1781,7 +1771,7 @@ function toggleDrawingMode() {
   drawingMode = !drawingMode;
   draftPolygon = null;
   zoneDrag = null;
-  setAddZoneLabel(drawingMode ? 'Cancel drawing' : 'Draw polygon');
+  setAddZoneLabel(drawingMode ? 'Cancel Drawing' : 'Draw Polygon');
   renderZones();
 }
 
@@ -1855,7 +1845,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && drawingMode) {
     drawingMode = false;
     draftPolygon = null;
-    setAddZoneLabel('Draw polygon');
+    setAddZoneLabel('Draw Polygon');
     renderDraftPolygon();
   }
 });

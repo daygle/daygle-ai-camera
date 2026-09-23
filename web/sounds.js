@@ -226,7 +226,7 @@ function renderClassEditor(camera) {
   const tableHtml = `
     <div class="cameras-table-wrap">
       <table class="rule-table zone-rule-table">
-        <thead><tr><th scope="col">Sound</th><th scope="col">Detect</th><th scope="col">Min confidence</th><th scope="col">Record</th><th scope="col" class="cell-actions" aria-label="Actions"></th></tr></thead>
+        <thead><tr><th scope="col">Sound</th><th scope="col">Detect</th><th scope="col">Min confidence</th><th scope="col">Record</th><th scope="col" class="cell-actions">Actions</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
