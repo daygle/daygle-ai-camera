@@ -332,6 +332,36 @@ function ensureLoiter(zone) {
   return zone.loiter;
 }
 
+// ─── Behavioural unusual time-of-day rule (Tier 2) ──────────────────────────
+// A zone's optional unusual-time detector, stored on ``zone.time_of_day``.
+// Detection config (threshold, which objects, record) lives on the Zones card;
+// email/push/quiet-hours are configured on the Alerts page.
+function timeOf(zone) {
+  return zone && zone.time_of_day && typeof zone.time_of_day === 'object' ? zone.time_of_day : null;
+}
+
+function ensureTime(zone) {
+  const existing = timeOf(zone);
+  if (existing) {
+    existing.enabled = true;
+    return existing;
+  }
+  zone.time_of_day = {
+    enabled: true,
+    name: 'Unusual time',
+    labels: [],
+    threshold: 0.15,
+    cooldown_seconds: 1800,
+    record_on_detect: true,
+    email_enabled: false,
+    email_recipients: [],
+    push_enabled: false,
+    notify_start: null,
+    notify_end: null,
+  };
+  return zone.time_of_day;
+}
+
 function normalizeObjectRules(zone) {
   if (Array.isArray(zone.object_rules) && zone.object_rules.length) {
     return zone.object_rules.map((rule, ruleIndex) => ({ ...defaultObjectRule(rule?.label), ...rule, id: rule?.id || `${String(rule?.label || 'rule').trim().toLowerCase()}-${ruleIndex + 1}` }))
@@ -400,6 +430,10 @@ function normalizeZone(zone) {
   const loiter = normalizeLoiter(zone.loiter);
   if (loiter) zone.loiter = loiter;
   else if ('loiter' in zone) delete zone.loiter;
+  // And the optional unusual time-of-day rule (Tier 2).
+  const timeRule = normalizeTime(zone.time_of_day);
+  if (timeRule) zone.time_of_day = timeRule;
+  else if ('time_of_day' in zone) delete zone.time_of_day;
   updateZoneBounds(zone);
   return zone;
 }
@@ -794,6 +828,57 @@ function renderLoiterCard(zone, zoneIndex) {
     </div>`;
 }
 
+// Removable chips for the object labels an unusual-time rule counts.
+function timeLabelChips(rule, zoneIndex) {
+  const labels = rule && Array.isArray(rule.labels) ? rule.labels : [];
+  if (!labels.length) return '<span class="tripwire-any">Any object</span>';
+  return labels.map((label, labelIndex) => (
+    `<span class="zone-object-chip tripwire-chip">${escapeHtml(titleCase(label))}<button type="button" class="tripwire-chip-remove" data-time-label-remove="${zoneIndex}:${labelIndex}" title="Stop counting ${escapeHtml(titleCase(label))}" aria-label="Stop counting ${escapeHtml(titleCase(label))}">×</button></span>`
+  )).join('');
+}
+
+// The editable body of an enabled unusual-time card. Detection only (rarity
+// threshold, which objects, record); email/push/quiet-hours on the Alerts page.
+// The threshold is stored as a 0..1 fraction but shown as a percentage.
+function timeBody(rule, zoneIndex) {
+  const percent = Math.round(Math.max(0, Math.min(1, Number(rule.threshold ?? 0.15))) * 100);
+  return `
+    <div class="zone-tripwire-body">
+      <label class="sound-rule-field tripwire-name-field">
+        <span>Name</span>
+        <input type="text" data-time-name="${zoneIndex}" value="${escapeHtml(rule.name || 'Unusual time')}" maxlength="60" placeholder="Unusual time" />
+      </label>
+      <label class="sound-rule-field">
+        <span>Flag under (%)</span>
+        <input type="number" data-time-threshold="${zoneIndex}" min="0" max="100" step="1" value="${escapeHtml(percent)}" title="Consider an hour unusual when this area normally has activity on at most this percent of days. Lower = only the rarest hours fire." />
+      </label>
+      <div class="sound-rule-field tripwire-labels-field">
+        <span>Counts</span>
+        <div class="tripwire-labels" data-time-labels="${zoneIndex}">${timeLabelChips(rule, zoneIndex)}</div>
+        <select class="rule-add-select tripwire-label-add" data-time-label-add="${zoneIndex}" aria-label="Limit which objects this rule counts">${tripwireLabelAddOptions(rule.labels)}</select>
+      </div>
+      <div class="tripwire-toggles">
+        ${tripwireToggleField('Record', `data-time-record="${zoneIndex}"`, rule.record_on_detect !== false, 'Record a clip when activity happens at an unusual time')}
+      </div>
+      <p class="muted tripwire-hint">Learns which hours this area is normally active (needs about a week), then alerts on activity at a normally-quiet hour. <a class="zone-assigned-link" href="/alerts">Set email / push alerts</a></p>
+    </div>`;
+}
+
+// Per-zone unusual time-of-day card, rendered under the loitering card. Off by
+// default; enabling it starts learning the zone's normal active hours.
+function renderTimeCard(zone, zoneIndex) {
+  const rule = timeOf(zone);
+  const enabled = Boolean(rule && rule.enabled !== false);
+  return `
+    <div class="zone-tripwire-card zone-time-card${enabled ? ' is-enabled' : ''}" data-zone-time-for="${zoneIndex}">
+      <div class="zone-tripwire-head">
+        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">🕒</span><strong>Unusual time</strong><span class="muted zone-tripwire-sub">Alert on activity at a normally-quiet hour</span></div>
+        ${ruleToggleCell(`data-time-enabled="${zoneIndex}"`, enabled, 'Enable unusual time-of-day detection for this area', false)}
+      </div>
+      ${enabled ? timeBody(rule, zoneIndex) : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to learn which hours this area is normally active and get alerted when something shows up at an odd hour.</p>'}
+    </div>`;
+}
+
 function assignedObjectsMarkup(zone) {
   const labels = [...new Set((zone.object_rules || [])
     .filter((rule) => !['motion', 'face'].includes(String(rule.label || '').trim().toLowerCase()))
@@ -897,6 +982,7 @@ function renderObjectDetectionRules() {
         </div>
         ${renderTripwireCard(zone, zoneIndex)}
         ${renderLoiterCard(zone, zoneIndex)}
+        ${renderTimeCard(zone, zoneIndex)}
       </div>`;
   }).join('');
   bindObjectRuleControls();
@@ -920,6 +1006,7 @@ function bindObjectRuleControls() {
   bindFaceControls();
   bindTripwireControls();
   bindLoiterControls();
+  bindTimeControls();
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
@@ -1232,6 +1319,85 @@ function bindLoiterControls() {
   document.querySelectorAll('[data-loiter-record]').forEach((cb) => {
     cb.addEventListener('change', () => {
       const rule = loiterOf(zoneAt(cb.dataset.loiterRecord));
+      if (!rule) return;
+      rule.record_on_detect = cb.checked;
+      const pill = cb.parentElement?.querySelector('span');
+      if (pill) pill.textContent = cb.checked ? 'On' : 'Off';
+      markZoneUnsaved();
+    });
+  });
+}
+
+// Unusual time-of-day card bindings, mirroring the loiter card: enable + label
+// edits re-render; text/number inputs mutate in place; delivery on Alerts.
+function bindTimeControls() {
+  const zoneAt = (index) => cameraDetection().zones[Number(index)];
+
+  document.querySelectorAll('[data-time-enabled]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const zone = zoneAt(cb.dataset.timeEnabled);
+      if (!zone) return;
+      selectedZoneIndex = Number(cb.dataset.timeEnabled);
+      if (cb.checked) {
+        ensureTime(zone);
+        liveEls.status.textContent = 'Unusual time enabled - it will learn this area\'s normal hours (about a week), then Save Zones.';
+      } else if (timeOf(zone)) {
+        zone.time_of_day.enabled = false;
+      }
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-time-label-add]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const label = String(select.value || '').trim().toLowerCase();
+      if (!label) return;
+      const rule = timeOf(zoneAt(select.dataset.timeLabelAdd));
+      if (!rule) return;
+      rule.labels = Array.isArray(rule.labels) ? rule.labels : [];
+      if (!rule.labels.includes(label)) rule.labels.push(label);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-time-label-remove]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [zoneIndex, labelIndex] = String(button.dataset.timeLabelRemove).split(':').map(Number);
+      const rule = timeOf(zoneAt(zoneIndex));
+      if (!rule || !Array.isArray(rule.labels)) return;
+      rule.labels.splice(labelIndex, 1);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-time-name]').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const rule = timeOf(zoneAt(inp.dataset.timeName));
+      if (!rule) return;
+      rule.name = inp.value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-time-threshold]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const rule = timeOf(zoneAt(inp.dataset.timeThreshold));
+      if (!rule) return;
+      // Shown as a percentage; stored as a 0..1 fraction.
+      const percent = Number(inp.value);
+      const clamped = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 15;
+      rule.threshold = Math.round(clamped) / 100;
+      inp.value = Math.round(clamped);
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-time-record]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const rule = timeOf(zoneAt(cb.dataset.timeRecord));
       if (!rule) return;
       rule.record_on_detect = cb.checked;
       const pill = cb.parentElement?.querySelector('span');

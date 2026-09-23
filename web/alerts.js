@@ -27,6 +27,10 @@ const currentRules = () => {
     const rule = currentZone()?.loiter;
     return rule ? [rule] : [];
   }
+  if (alertType === 'time') {
+    const rule = currentZone()?.time_of_day;
+    return rule ? [rule] : [];
+  }
   return currentZone()?.object_rules || [];
 };
 
@@ -71,7 +75,8 @@ function allPolicies() {
   const soundPolicies = cameras.flatMap((camera) => camera.detection?.sound?.rules || []);
   const tripwirePolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.tripwire).filter(Boolean));
   const loiterPolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.loiter).filter(Boolean));
-  return [...objectPolicies, ...soundPolicies, ...tripwirePolicies, ...loiterPolicies, ...(faceRulesPayload.rules || [])].filter((rule) => rule.email_enabled || rule.push_enabled);
+  const timePolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.time_of_day).filter(Boolean));
+  return [...objectPolicies, ...soundPolicies, ...tripwirePolicies, ...loiterPolicies, ...timePolicies, ...(faceRulesPayload.rules || [])].filter((rule) => rule.email_enabled || rule.push_enabled);
 }
 
 function updateStats() {
@@ -102,7 +107,9 @@ function renderSelectors() {
           ? 'Line crossings are drawn - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
           : alertType === 'loiter'
             ? 'Loitering is enabled - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
-            : 'Add recognized-person and stranger alerts here. Enrol people on the Face Recognition page.';
+            : alertType === 'time'
+              ? 'Unusual time-of-day is enabled - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
+              : 'Add recognized-person and stranger alerts here. Enrol people on the Face Recognition page.';
   }
 }
 
@@ -111,6 +118,7 @@ function ruleLabel(rule) {
   if (alertType === 'people') return rule.name || 'Unknown Person';
   if (alertType === 'tripwire') return titleCase(rule.name || 'Tripwire');
   if (alertType === 'loiter') return titleCase(rule.name || 'Loitering');
+  if (alertType === 'time') return titleCase(rule.name || 'Unusual time');
   return String(rule.label || '').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
@@ -152,7 +160,9 @@ function renderPolicies() {
           ? 'No line crossing is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Line crossing and draw a line, then set its alerts here.'
           : alertType === 'loiter'
             ? 'No loitering rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Loitering, then set its alerts here.'
-            : 'No recognized-person alert policies yet. Add one below to get started.';
+            : alertType === 'time'
+              ? 'No unusual time-of-day rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Unusual time, then set its alerts here.'
+              : 'No recognized-person alert policies yet. Add one below to get started.';
     $('alertsList').innerHTML = `<div class="empty">${emptyMessage}</div>`;
     return;
   }
@@ -161,10 +171,11 @@ function renderPolicies() {
     const sound = alertType === 'sound';
     const tripwire = alertType === 'tripwire';
     const loiter = alertType === 'loiter';
-    // Tripwire and loiter are single per-zone behaviour rules: no confidence
-    // axis, and detection runs whenever enabled, so they show only a Notify
-    // window (no Detect-from/until) - just how each one notifies you.
-    const behaviour = tripwire || loiter;
+    const time = alertType === 'time';
+    // Tripwire, loiter and unusual-time are single per-zone behaviour rules: no
+    // confidence axis, and detection runs whenever enabled, so they show only a
+    // Notify window (no Detect-from/until) - just how each one notifies you.
+    const behaviour = tripwire || loiter || time;
     const confidence = people ? rule.min_confidence : sound ? rule.confidence_threshold : rule.min_confidence;
     const cooldown = people ? rule.cooldown_minutes : rule.cooldown_seconds;
     const confidenceLabel = people ? 'Minimum Recognition Confidence' : sound ? 'Confidence Threshold' : 'Minimum Confidence';
@@ -183,7 +194,7 @@ function renderPolicies() {
         ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`
         : `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`}
       <label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(Array.isArray(rule.email_recipients) ? rule.email_recipients.join(', ') : rule.email_recipients || '')}" placeholder="alerts@example.com, me@example.com"></label>
-      <div class="alerts-policy-actions"><span class="muted">${people ? 'Recognized-person and stranger alerts use the face recognition rule store.' : sound ? 'Assigned on the Sounds page. Removing here unassigns this sound class from the camera.' : tripwire ? 'Drawn on the Zones page. Removing here deletes the line from the area.' : loiter ? 'Enabled on the Zones page. Removing here turns loitering off for the area.' : 'Assigned on the Zones page. Removing here unassigns this item from the area.'}</span><button class="btn-danger" data-delete-rule type="button">${people ? 'Remove Policy' : 'Remove'}</button></div>
+      <div class="alerts-policy-actions"><span class="muted">${people ? 'Recognized-person and stranger alerts use the face recognition rule store.' : sound ? 'Assigned on the Sounds page. Removing here unassigns this sound class from the camera.' : tripwire ? 'Drawn on the Zones page. Removing here deletes the line from the area.' : loiter ? 'Enabled on the Zones page. Removing here turns loitering off for the area.' : time ? 'Enabled on the Zones page. Removing here turns unusual-time off for the area.' : 'Assigned on the Zones page. Removing here unassigns this item from the area.'}</span><button class="btn-danger" data-delete-rule type="button">${people ? 'Remove Policy' : 'Remove'}</button></div>
     </article>`;
   }).join('');
   $('alertsList').querySelectorAll('.alerts-policy').forEach((card) => {
@@ -213,6 +224,9 @@ function renderPolicies() {
       } else if (alertType === 'loiter') {
         const zone = currentZone();
         if (zone) delete zone.loiter;
+      } else if (alertType === 'time') {
+        const zone = currentZone();
+        if (zone) delete zone.time_of_day;
       } else {
         const allRules = alertType === 'sound' ? currentCamera().detection.sound.rules : currentZone().object_rules;
         const actualIndex = allRules.indexOf(rule);

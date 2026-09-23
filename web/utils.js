@@ -1235,6 +1235,36 @@ function normalizeLoiter(raw) {
   };
 }
 
+// Client mirror of app/zone_schema.py::normalize_zone_time (Tier-2 unusual
+// time-of-day), used by the Zones save path. Same contract as normalizeLoiter:
+// returns null when no rule is present so the field is dropped, else the
+// normalized policy with delivery/quiet-hours preserved.
+function normalizeTime(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  let threshold = Number(raw.threshold);
+  if (raw.threshold == null || !Number.isFinite(threshold)) threshold = 0.15;
+  threshold = Math.round(Math.max(0, Math.min(1, threshold)) * 10000) / 10000;
+  let cooldown = Number.parseInt(raw.cooldown_seconds, 10);
+  if (raw.cooldown_seconds == null || !Number.isFinite(cooldown)) cooldown = 1800;
+  cooldown = Math.max(0, cooldown);
+  const labels = Array.isArray(raw.labels)
+    ? [...new Set(raw.labels.map((label) => String(label).trim().toLowerCase()).filter(Boolean))]
+    : [];
+  return {
+    enabled: raw.enabled !== false,
+    name: String(raw.name || 'Unusual time').trim() || 'Unusual time',
+    labels,
+    threshold,
+    cooldown_seconds: cooldown,
+    record_on_detect: raw.record_on_detect !== false,
+    email_enabled: raw.email_enabled === true,
+    email_recipients: normalizeEmailList(raw.email_recipients),
+    push_enabled: raw.push_enabled === true,
+    notify_start: tripwireHhmm(raw.notify_start),
+    notify_end: tripwireHhmm(raw.notify_end),
+  };
+}
+
 // ─── User display preferences (date_format / time_format) ──────────────────
 // Populated by nav.js after /api/auth/me resolves, but exposed as early as
 // possible so every page (dashboard, events, alerts, recordings, etc.) renders
@@ -1647,7 +1677,7 @@ window.daygleUi = {
   // Behavioural tripwire geometry + normalisation (Zones canvas ↔ backend)
   TRIPWIRE_DIRECTIONS, roundTripwireCoord, tripwirePoint, tripwireZoneBounds,
   tripwireDefaultLine, tripwireOrientation, tripwireForwardNormal, tripwireMidpoint,
-  normalizeTripwire, normalizeLoiter,
+  normalizeTripwire, normalizeLoiter, normalizeTime,
   // Theme management
   setDaygleThemePref, getDaygleThemePref, applyDaygleTheme,
   watchDaygleSystemTheme, unwatchDaygleSystemTheme,
