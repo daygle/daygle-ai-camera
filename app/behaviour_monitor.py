@@ -368,6 +368,214 @@ def _emit_loiter(camera_id: str, settings: dict[str, Any], fire: dict[str, Any],
     logger.info('Loiter on %s: %s in %s (%.0fs, event %s)', camera_id, label, zone_name, dwell, event_id)
 
 
+# ─── Tier-2 behavioural intelligence: unusual time-of-day ────────────────────
+# Per-(camera, zone, label) hour-of-day baselines learn which local hours a
+# zone is normally active, and fire on activity in a normally-quiet hour. The
+# in-progress "today" map and the learned baselines are guarded by one lock; the
+# baseline map persists to the app_settings KV store (loaded once, flushed
+# throttled). The pure decision lives in ``behaviour_baseline.time_of_day_step``.
+_time_today: dict[str, dict[str, Any]] = {}
+_time_baselines: dict[str, dict[str, Any]] = {}
+_time_cooldowns: dict[str, float] = {}
+_time_lock = threading.Lock()
+_time_state: dict[str, Any] = {'loaded': False, 'dirty': False, 'last_flush': 0.0}
+_TIME_BASELINES_KEY = 'behaviour_time_baselines'
+_TIME_FLUSH_INTERVAL_SECONDS = 60.0
+
+
+def _enabled_zones_with_time(settings: Any) -> list[dict[str, Any]]:
+    zones = (settings.get('detection') or {}).get('zones', []) if isinstance(settings, dict) else []
+    out: list[dict[str, Any]] = []
+    for zone in zones or []:
+        if not isinstance(zone, dict) or zone.get('enabled') is False:
+            continue
+        rule = zone.get('time_of_day')
+        if isinstance(rule, dict) and rule.get('enabled') is not False:
+            out.append(zone)
+    return out
+
+
+def _ensure_time_loaded_locked() -> None:
+    if _time_state['loaded']:
+        return
+    _time_state['loaded'] = True
+    try:
+        raw = _state.database.get_setting(_TIME_BASELINES_KEY)
+    except Exception as exc:  # noqa: BLE001 - a missing/locked DB just means "start fresh"
+        logger.warning('Time-of-day baseline load failed: %s', exc)
+        return
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if isinstance(value, dict):
+                # commit_time_day coerces on read anyway; store as-is.
+                _time_baselines[str(key)] = value
+
+
+def _flush_time_baselines_locked(now: float, now_iso: str) -> None:
+    if not _time_state['dirty'] or (now - _time_state['last_flush']) < _TIME_FLUSH_INTERVAL_SECONDS:
+        return
+    try:
+        _state.database.set_setting(_TIME_BASELINES_KEY, dict(_time_baselines), now_iso)
+        _time_state['dirty'] = False
+        _time_state['last_flush'] = now
+    except Exception as exc:  # noqa: BLE001 - persistence is best-effort; keep learning in memory
+        logger.warning('Time-of-day baseline flush failed: %s', exc)
+
+
+def emit_time_of_day_anomalies(camera_id: str, settings: dict[str, Any], detections: list[dict[str, Any]]) -> int:
+    """Detect and emit unusual time-of-day anomalies for one detection cycle.
+
+    Learns, per (zone, label), which local hours a zone is normally active, and
+    fires when a tracked object appears in a normally-quiet hour. Returns the
+    number of anomalies emitted. Best-effort and fully isolated.
+    """
+    zones = _enabled_zones_with_time(settings)
+    if not zones:
+        return 0
+    from app.zone_detection import detection_matches_zone
+
+    now = time.time()
+    local = datetime.fromtimestamp(now)  # local wall-clock: "time of day" is local
+    hour = local.hour
+    day = local.toordinal()
+
+    observations: list[dict[str, Any]] = []
+    time_by_zone: dict[str, dict[str, Any]] = {}
+    seen_keys: set[str] = set()
+    for zone in zones:
+        rule = zone.get('time_of_day') or {}
+        zone_id = str(zone.get('id') or zone.get('name') or '')
+        zone_name = str(zone.get('name') or zone.get('id') or '').strip() or None
+        time_by_zone[zone_id] = rule
+        wanted = {str(label).strip().lower() for label in (rule.get('labels') or []) if str(label).strip()}
+        for det in detections or []:
+            if not isinstance(det, dict) or det.get('track_id') is None:
+                continue
+            label = str(det.get('label') or '').strip().lower()
+            if wanted and label not in wanted:
+                continue
+            if not detection_matches_zone(det, zone):
+                continue
+            key = f"{camera_id}|{zone_id}|{label}"
+            if key in seen_keys:
+                continue  # one observation per (zone, label) per cycle is enough
+            seen_keys.add(key)
+            try:
+                confidence = float(det.get('confidence') or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            observations.append({
+                'key': key,
+                'zone_id': zone_id,
+                'zone_name': zone_name,
+                'label': label,
+                'track_id': det.get('track_id'),
+                'confidence': confidence,
+                'day': day,
+                'hour': hour,
+                'threshold': rule.get('threshold', 0.15),
+                'cooldown_seconds': rule.get('cooldown_seconds', 1800),
+            })
+
+    if not observations:
+        return 0
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with _time_lock:
+        _ensure_time_loaded_locked()
+        result = behaviour_baseline.time_of_day_step(
+            _time_today, _time_baselines, _time_cooldowns, observations, now,
+        )
+        if result['committed']:
+            _time_state['dirty'] = True
+        if len(_time_cooldowns) > 4096:
+            cutoff = now - 86400
+            for stale in [k for k, ts in _time_cooldowns.items() if ts < cutoff]:
+                _time_cooldowns.pop(stale, None)
+        _flush_time_baselines_locked(now, now_iso)
+
+    fired = 0
+    for fire in result['fires']:
+        rule = time_by_zone.get(fire['zone_id']) or {}
+        try:
+            _emit_time(camera_id, settings, fire, rule, now_iso)
+            fired += 1
+        except Exception as exc:  # noqa: BLE001 - one anomaly must not break the loop
+            logger.warning('Time-of-day emit failed on %s: %s', camera_id, exc)
+    return fired
+
+
+def _emit_time(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], rule: dict[str, Any], now_iso: str) -> None:
+    from app.alert_dispatch import _rule_notify_active_now, deliver_alert_notifications
+    from app.utils import normalize_bool_setting, normalize_email_recipients
+
+    zone_name = fire.get('zone_name') or 'zone'
+    label = fire.get('label') or 'object'
+    try:
+        hour = int(fire.get('hour'))
+    except (TypeError, ValueError):
+        hour = 0
+    try:
+        confidence = float(fire.get('confidence') or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    email_enabled = normalize_bool_setting(rule.get('email_enabled'), False)
+    push_enabled = normalize_bool_setting(rule.get('push_enabled'), False)
+    email_recipients = normalize_email_recipients(rule.get('email_recipients') or [])
+    notify_enabled = email_enabled or push_enabled
+    camera_name = str((settings or {}).get('name') or '').strip() or None
+    rule_display = str(rule.get('name') or 'Unusual time').strip() or 'Unusual time'
+
+    metadata = {
+        'source': 'time_of_day',
+        'camera_id': camera_id,
+        'camera_name': camera_name,
+        'zone_id': fire.get('zone_id'),
+        'zone_name': fire.get('zone_name'),
+        'label': label,
+        'track_id': fire.get('track_id'),
+        'hour': hour,
+        'probability': fire.get('probability'),
+        'days_learned': fire.get('days'),
+        'confidence': round(confidence, 3),
+    }
+    event_id = _state.database.add_event(
+        created_at=now_iso, source='behaviour', snapshot_path=None,
+        detections=[], alert_triggered=notify_enabled, metadata=metadata,
+    )
+
+    recording_id = None
+    if normalize_bool_setting(rule.get('record_on_detect'), True):
+        recording_id = _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
+
+    rule_name = f'{zone_name} · {rule_display}'
+    message = f'{str(label).title()} in {zone_name} at an unusual time ({hour:02d}:00)'
+    notify_rule = {
+        'name': rule_name,
+        'email_enabled': email_enabled,
+        'push_enabled': push_enabled,
+        'email_recipients': email_recipients,
+        'notify_start': str(rule.get('notify_start') or '').strip() or None,
+        'notify_end': str(rule.get('notify_end') or '').strip() or None,
+    }
+    if notify_enabled and _rule_notify_active_now(notify_rule):
+        _state.database.add_alert(
+            created_at=now_iso, rule_name=rule_name, event_id=event_id,
+            label=label, confidence=confidence, message=message, recording_id=recording_id,
+        )
+        alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
+        thread = threading.Thread(
+            target=deliver_alert_notifications, args=([alert_payload], event_id, [notify_rule]),
+            name=f'time-notify-{event_id}', daemon=True,
+        )
+        with _state._notification_threads_lock:
+            _state._notification_threads[:] = [t for t in _state._notification_threads if t.is_alive()]
+            _state._notification_threads.append(thread)
+        thread.start()
+    logger.info('Unusual time on %s: %s in %s at %02d:00 (event %s)', camera_id, label, zone_name, hour, event_id)
+
+
 def _attach_recording(camera_id: str, settings: dict[str, Any], event_id: int, now_iso: str, label: str, confidence: float) -> int | None:
     try:
         from app.recording_extension import attach_event_recording

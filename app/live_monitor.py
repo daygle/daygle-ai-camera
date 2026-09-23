@@ -41,7 +41,7 @@ from app.object_settings import (
     update_still_dwell_alerts,
 )
 from app.object_tracking import update_object_tracks
-from app.behaviour_monitor import emit_loiter_anomalies, emit_tripwire_crossings
+from app.behaviour_monitor import emit_loiter_anomalies, emit_time_of_day_anomalies, emit_tripwire_crossings
 from app.recording_settings import effective_camera_live_settings
 from app.face_identity import annotate_face_identities, face_identity_metadata, unknown_face_alerts
 from app.face_detection_rules import known_face_rules_for_camera
@@ -702,6 +702,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         emit_loiter_anomalies(camera_id, settings, detections)
     except Exception as exc:  # noqa: BLE001
         logger.warning('Loiter check failed on %s: %s', camera_id, exc)
+    # Tier-2 behavioural intelligence: unusual time-of-day. Same freshly-tracked
+    # detections; learns each zone's normal active hours and flags activity in a
+    # normally-quiet hour. Also fully isolated and best-effort.
+    try:
+        emit_time_of_day_anomalies(camera_id, settings, detections)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('Time-of-day check failed on %s: %s', camera_id, exc)
     # Object settings (default mode + per-label overrides + still-alert
     # thresholds) drive both the still/moving filter and the still-dwell
     # tracker below, so resolve them once per cycle rather than reading the

@@ -118,6 +118,32 @@ class TimeOfDayStepTests(unittest.TestCase):
         self.assertEqual(out['fires'], [])
 
 
+class TimeZoneGatingTests(unittest.TestCase):
+    """The monitor's enabled-zone selector (pure; no DB/heavy deps)."""
+
+    def setUp(self) -> None:
+        from app import behaviour_monitor
+        self.mon = behaviour_monitor
+
+    def _settings(self, zones):
+        return {'name': 'Cam', 'detection': {'zones': zones}}
+
+    def test_selects_only_enabled_zones_with_enabled_rule(self) -> None:
+        settings = self._settings([
+            {'id': 'a', 'time_of_day': {'enabled': True}},
+            {'id': 'b', 'time_of_day': {'enabled': False}},
+            {'id': 'c', 'enabled': False, 'time_of_day': {'enabled': True}},
+            {'id': 'd'},
+            {'id': 'e', 'time_of_day': {}},
+        ])
+        ids = [z['id'] for z in self.mon._enabled_zones_with_time(settings)]
+        self.assertEqual(ids, ['a', 'e'])
+
+    def test_no_zones_or_bad_settings(self) -> None:
+        self.assertEqual(self.mon._enabled_zones_with_time({}), [])
+        self.assertEqual(self.mon._enabled_zones_with_time(None), [])
+
+
 class TimeSchemaTests(unittest.TestCase):
     def test_absent_keeps_zone_shape(self) -> None:
         zones = normalize_monitoring_zones([{'id': 'z1', 'name': 'Yard', 'points': [
