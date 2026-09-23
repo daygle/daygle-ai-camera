@@ -357,6 +357,16 @@ Loitering *learns your site*: it measures how long objects normally dwell in an 
 
 Each area learns from completed visits, so the effective threshold is `max(min dwell, normal + sensitivity × spread)`: a busy patio where people linger won't cry wolf, while a driveway where nobody stops fires at the floor. It works on day one from the minimum dwell and sharpens as history builds; the learned baselines persist across restarts. Also built on the object tracker — pure statistics, no extra model or GPU load.
 
+### Unusual time-of-day
+
+Catches *"something's here when nothing should be"*: each area learns which hours it is normally active, then alerts on activity at a normally-quiet hour (e.g. a person in the driveway at 3am).
+
+- Open `/zones`, select a camera and area, and turn on **Unusual time** in the detection panel.
+- Set **Flag under (%)** — an hour counts as unusual when the area normally has activity on at most that percent of days (lower = only the rarest hours fire). Optionally limit **Counts** to specific object classes, choose whether it records, then **Save Zones**.
+- Configure notifications on the **Alerts** page under the **Unusual time** type — email/push, recipients, a cooldown, and an optional **Notify From/Until** window.
+
+Hours are your **local** wall-clock time. The baseline needs about a week of history before it fires, and counts the days an area was active (so vacation days don't skew it); learned baselines persist across restarts. Pure statistics on the object tracker — no extra model or GPU load.
+
 ## Updating
 
 ### Local update
