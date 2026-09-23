@@ -521,6 +521,62 @@ def normalize_zone_loiter(zone: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def normalize_zone_time(zone: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize an optional per-zone behavioural **unusual time-of-day** rule
+    (Tier 2). Returns ``None`` when none is configured, so zones without one keep
+    their canonical shape.
+
+    Shape::
+
+        {
+            "enabled": bool,
+            "name": str,
+            "labels": [str, ...],       # object labels that count ([] = any)
+            "threshold": float,         # hour active on <= this fraction of days = unusual
+            "cooldown_seconds": int,
+            "record_on_detect": bool,
+            "email_enabled": bool,
+            "email_recipients": [str, ...],
+            "push_enabled": bool,
+            "notify_start": str | None, # HH:MM quiet-hours window (notify only)
+            "notify_end": str | None,
+        }
+
+    The learned per-(zone, label) hour-of-day baseline is NOT stored here -- this
+    is only the user-facing policy; the running statistics live with the
+    behaviour monitor.
+    """
+    raw = zone.get('time_of_day')
+    if not isinstance(raw, dict):
+        return None
+    try:
+        threshold = float(raw.get('threshold') if raw.get('threshold') is not None else 0.15)
+    except (TypeError, ValueError):
+        threshold = 0.15
+    if not math.isfinite(threshold):
+        threshold = 0.15
+    # An hour whose activity probability is at or below this fraction of active
+    # days counts as "unusual". Clamp to a sane 0..1 band.
+    threshold = max(0.0, min(1.0, threshold))
+    try:
+        cooldown = max(0, int(raw.get('cooldown_seconds') if raw.get('cooldown_seconds') is not None else 1800))
+    except (TypeError, ValueError):
+        cooldown = 1800
+    return {
+        'enabled': bool(raw.get('enabled', True)),
+        'name': str(raw.get('name') or 'Unusual time').strip() or 'Unusual time',
+        'labels': normalize_label_list(raw.get('labels')),
+        'threshold': round(threshold, 4),
+        'cooldown_seconds': cooldown,
+        'record_on_detect': bool(raw.get('record_on_detect', True)),
+        'email_enabled': bool(raw.get('email_enabled', False)),
+        'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
+        'push_enabled': bool(raw.get('push_enabled', False)),
+        'notify_start': normalize_hhmm(raw.get('notify_start')),
+        'notify_end': normalize_hhmm(raw.get('notify_end')),
+    }
+
+
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     if not isinstance(zones, list):
@@ -623,5 +679,9 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
         loiter = normalize_zone_loiter(zone)
         if loiter is not None:
             entry['loiter'] = loiter
+        # Optional Tier-2 unusual time-of-day rule.
+        time_rule = normalize_zone_time(zone)
+        if time_rule is not None:
+            entry['time_of_day'] = time_rule
         normalized.append(entry)
     return normalized
