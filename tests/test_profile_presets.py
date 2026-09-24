@@ -12,31 +12,28 @@ from app.profile_presets import (
 )
 
 
-def test_builtin_presets_have_day_and_night_values():
+def test_builtin_presets_are_separate_day_and_night_records():
     presets = list_presets(None)
-    assert len(presets) == len(BUILTIN_PRESETS)
+    assert len(presets) == len(BUILTIN_PRESETS) == 12
     assert {preset['id'] for preset in presets} == {
-        'cat-small-animal', 'balanced', 'maximum-recall', 'low-cpu', 'night-ir', 'fast-motion',
+        f'{group}-{mode}'
+        for group in ('cat-small-animal', 'balanced', 'maximum-recall', 'low-cpu', 'night-ir', 'fast-motion')
+        for mode in ('day', 'night')
     }
-    cat = get_preset(None, 'cat-small-animal')
-    assert cat is not None
-    assert cat['builtin'] is True
-    assert cat['day']['object_detection_region_boost'] is True
-    # Daytime tiling is off so a CPU host can sustain the fast cadence; region
-    # boost still recovers small moving cats. Night keeps tiling on at 2x2 --
-    # ~2x the pixels on a small cat for the bulk of the recall win, without the
-    # >2x GPU cost of 3x3 that risks throttle/backlog (dropped frames) on a
-    # thermally-marginal accelerator.
-    assert cat['day']['object_detection_tiling'] == 'off'
-    assert cat['night']['object_detection_tiling'] == '2x2'
-    assert cat['day']['detection_confirm_frames'] == 2
-    assert cat['day']['detection_confirm_window'] == 3
-    # Spatial IoU kept low (day matches night) so a small/distant moving cat is
-    # not dropped for failing to overlap its own box across cycles.
-    assert cat['day']['detection_confirm_iou'] == 0.05
-    assert cat['night']['detection_confirm_frames'] == 2
-    assert cat['night']['detection_confirm_window'] == 3
-    assert cat['night']['detection_confirm_iou'] == 0.05
+    assert {preset['mode'] for preset in presets} == {'day', 'night'}
+    assert all(preset['settings'] for preset in presets)
+
+    day = get_preset(None, 'cat-small-animal-day')
+    night = get_preset(None, 'cat-small-animal-night')
+    assert day is not None
+    assert night is not None
+    assert day['mode'] == 'day'
+    assert night['mode'] == 'night'
+    assert day['settings']['object_detection_region_boost'] is True
+    assert day['settings']['object_detection_tiling'] == 'off'
+    assert night['settings']['object_detection_tiling'] == '2x2'
+    assert day['settings']['detection_confirm_frames'] == 2
+    assert night['settings']['detection_confirm_frames'] == 2
 
 
 def test_recall_profiles_do_not_add_confirmation_latency():
@@ -46,40 +43,68 @@ def test_recall_profiles_do_not_add_confirmation_latency():
     for reduced inference work and noise resistance.
     """
     for preset in list_presets(None):
-        if preset['id'] == 'low-cpu':
+        if preset['id'].startswith('low-cpu-') or preset['id'].startswith('cat-small-animal-'):
             continue
-        for mode in ('day', 'night'):
-            if not preset[mode]:
-                continue
-            if preset['id'] == 'cat-small-animal':
-                continue
-            assert preset[mode]['detection_confirm_frames'] == 1
-            assert preset[mode]['detection_confirm_window'] == 1
+        assert preset['settings']['detection_confirm_frames'] == 1
+        assert preset['settings']['detection_confirm_window'] == 1
 
 
-def test_create_preset_slugifies_and_avoids_duplicate_ids():
+def test_create_preset_is_mode_specific_and_avoids_duplicate_ids():
     existing = list_presets(None)
-    first = create_preset({'name': 'Porch Cat!', 'day': {'detection_interval_seconds': 0.5}}, existing)
-    second = create_preset({'name': 'Porch Cat!', 'day': {'detection_interval_seconds': 0.4}}, existing + [first])
-    assert first['id'] == 'porch-cat'
-    assert second['id'] == 'porch-cat-2'
-    assert first['day']['detection_interval_seconds'] == 0.5
-    assert first['night'] == {}
+    first = create_preset({
+        'name': 'Porch Cat!',
+        'mode': 'day',
+        'settings': {'detection_interval_seconds': 0.5},
+    }, existing)
+    second = create_preset({
+        'name': 'Porch Cat!',
+        'mode': 'day',
+        'settings': {'detection_interval_seconds': 0.4},
+    }, existing + [first])
+    night = create_preset({
+        'name': 'Porch Cat!',
+        'mode': 'night',
+        'settings': {'detection_interval_seconds': 0.3},
+    }, existing + [first, second])
+
+    assert first['id'] == 'porch-cat-day'
+    assert second['id'] == 'porch-cat-day-2'
+    assert night['id'] == 'porch-cat-night'
+    assert first['mode'] == 'day'
+    assert first['settings']['detection_interval_seconds'] == 0.5
+    assert night['settings']['detection_interval_seconds'] == 0.3
+
+
+def test_legacy_combined_custom_presets_expand_into_modes():
+    custom = custom_presets([{
+        'id': 'porch-cat',
+        'name': 'Porch Cat',
+        'day': {'motion_pixel_threshold': 55},
+        'night': {'motion_pixel_threshold': 80},
+    }])
+    assert [(preset['id'], preset['mode']) for preset in custom] == [
+        ('porch-cat-day', 'day'),
+        ('porch-cat-night', 'night'),
+    ]
+    assert custom[0]['settings']['motion_pixel_threshold'] == 55
+    assert custom[1]['settings']['motion_pixel_threshold'] == 80
 
 
 def test_custom_presets_exclude_builtins_and_invalid_entries():
     raw = [
-        {'id': 'cat-small-animal', 'name': 'Spoofed built-in', 'builtin': True},
-        {'id': 'my-preset', 'name': 'My Preset', 'day': {'motion_pixel_threshold': 55}},
-        {'id': 'bad', 'name': '', 'day': {}},
+        {'id': 'balanced-day', 'name': 'Spoofed built-in', 'builtin': True},
+        {'id': 'my-preset-day', 'name': 'My Preset', 'mode': 'day', 'settings': {'motion_pixel_threshold': 55}},
+        {'id': 'bad', 'name': '', 'mode': 'day', 'settings': {}},
     ]
     custom = custom_presets(raw)
-    assert [preset['id'] for preset in custom] == ['my-preset']
-    assert get_preset(raw, 'cat-small-animal')['name'] == 'Cat / Small Animal'
+    assert [preset['id'] for preset in custom] == ['my-preset-day']
+    assert get_preset(raw, 'balanced-day')['name'] == 'Balanced (Day)'
 
 
-def test_normalize_preset_rejects_bad_names_and_ids():
+def test_normalize_preset_rejects_bad_names_ids_and_modes():
     with pytest.raises(ValueError, match='Preset name'):
-        normalize_preset({'id': 'valid-id', 'name': '', 'day': {}})
+        normalize_preset({'id': 'valid-id', 'name': '', 'mode': 'day', 'settings': {}})
     with pytest.raises(ValueError, match='Preset id'):
-        normalize_preset({'id': 'Not Valid!', 'name': 'Preset', 'day': {}})
+        normalize_preset({'id': 'Not Valid!', 'name': 'Preset', 'mode': 'day', 'settings': {}})
+    with pytest.raises(ValueError, match='Preset mode'):
+        normalize_preset({'id': 'valid-id', 'name': 'Preset', 'mode': 'evening', 'settings': {}})

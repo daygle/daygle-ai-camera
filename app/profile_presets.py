@@ -1,4 +1,4 @@
-"""Reusable camera day/night detection profile presets."""
+"""Reusable mode-specific camera detection profile presets."""
 from __future__ import annotations
 
 import re
@@ -10,10 +10,10 @@ _PRESET_ID_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
 _MAX_PRESETS = 100
 _MAX_NAME_LENGTH = 80
 
-# Shipped presets provide reusable defaults for either Day or Night. Cameras
-# can assign different presets to each side; the actual camera remains
-# responsible for choosing which profile is active at runtime.
-BUILTIN_PRESETS: tuple[dict[str, Any], ...] = (
+# Shipped presets provide reusable defaults for either Day or Night. The
+# source groups below are expanded into separate, mode-specific records below
+# so a preset can never contain settings for the other mode.
+_BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
     {
         'id': 'cat-small-animal',
         'name': 'Cat / Small Animal',
@@ -296,14 +296,51 @@ BUILTIN_PRESETS: tuple[dict[str, Any], ...] = (
 )
 
 
+BUILTIN_PRESETS: tuple[dict[str, Any], ...] = tuple(
+    {
+        'id': f"{group['id']}-{mode}",
+        'name': f"{group['name']} ({mode.capitalize()})",
+        'builtin': True,
+        'mode': mode,
+        'settings': dict(group[mode]),
+    }
+    for group in _BUILTIN_PRESET_GROUPS
+    for mode in ('day', 'night')
+)
+
+
 def _copy_preset(preset: dict[str, Any]) -> dict[str, Any]:
     return {
         'id': str(preset['id']),
         'name': str(preset['name']),
         'builtin': bool(preset.get('builtin', False)),
-        'day': dict(preset.get('day') or {}),
-        'night': dict(preset.get('night') or {}),
+        'mode': str(preset['mode']),
+        'settings': dict(preset.get('settings') or {}),
     }
+
+
+def _legacy_preset_items(raw: Any) -> list[dict[str, Any]]:
+    """Expand the former combined preset shape into Day/Night records."""
+    if not isinstance(raw, dict):
+        return []
+    if raw.get('mode') in {'day', 'night'} and isinstance(raw.get('settings'), dict):
+        return [raw]
+    base_id = str(raw.get('id') or '').strip().lower()
+    if not base_id or not any(isinstance(raw.get(mode), dict) for mode in ('day', 'night')):
+        return []
+    result = []
+    for mode in ('day', 'night'):
+        suffix = f'-{mode}'
+        migrated_id = base_id
+        if not migrated_id.endswith(suffix):
+            migrated_id = f'{base_id[:64 - len(suffix)]}{suffix}'
+        result.append({
+            **raw,
+            'id': migrated_id,
+            'mode': mode,
+            'settings': raw.get(mode) if isinstance(raw.get(mode), dict) else {},
+        })
+    return result
 
 
 def normalize_preset(raw: Any, *, preset_id: str | None = None, builtin: bool = False) -> dict[str, Any]:
@@ -312,25 +349,35 @@ def normalize_preset(raw: Any, *, preset_id: str | None = None, builtin: bool = 
     name = str(raw.get('name') or '').strip()
     if not name or len(name) > _MAX_NAME_LENGTH:
         raise ValueError(f'Preset name must be 1-{_MAX_NAME_LENGTH} characters.')
+    mode = str(raw.get('mode') or 'day').strip().lower()
+    if mode not in {'day', 'night'}:
+        raise ValueError('Preset mode must be day or night.')
     resolved_id = str(preset_id or raw.get('id') or '').strip().lower()
     if not _PRESET_ID_RE.fullmatch(resolved_id):
         raise ValueError('Preset id must contain lowercase letters, numbers, hyphens, or underscores.')
-    normalized = normalize_camera_detection_profiles({
-        'day': raw.get('day') if isinstance(raw.get('day'), dict) else {},
-        'night': raw.get('night') if isinstance(raw.get('night'), dict) else {},
-    })
+    settings = raw.get('settings') if isinstance(raw.get('settings'), dict) else raw.get(mode)
+    normalized = normalize_camera_detection_profiles({'day': settings if isinstance(settings, dict) else {}})['day']
     return {
         'id': resolved_id,
         'name': name,
         'builtin': builtin,
-        'day': normalized['day'],
-        'night': normalized['night'],
+        'mode': mode,
+        'settings': normalized,
     }
 
 
 def _slugify(name: str) -> str:
-    slug = re.sub(r'[^a-z0-9]+', '-', name.strip().lower()).strip('-')[:64]
-    return slug or 'preset'
+    return re.sub(r'[^a-z0-9]+', '-', name.strip().lower()).strip('-')[:64] or 'preset'
+
+
+def _expand_custom_item(item: Any) -> list[dict[str, Any]]:
+    result = []
+    for candidate in _legacy_preset_items(item):
+        try:
+            result.append(normalize_preset(candidate, builtin=False))
+        except ValueError:
+            continue
+    return result
 
 
 def list_presets(raw: Any) -> list[dict[str, Any]]:
@@ -338,14 +385,11 @@ def list_presets(raw: Any) -> list[dict[str, Any]]:
     seen = {preset['id'] for preset in result}
     if isinstance(raw, list):
         for item in raw[:_MAX_PRESETS]:
-            try:
-                preset = normalize_preset(item, builtin=False)
-            except ValueError:
-                continue
-            if preset['id'] in seen:
-                continue
-            result.append(preset)
-            seen.add(preset['id'])
+            for preset in _expand_custom_item(item):
+                if preset['id'] in seen:
+                    continue
+                result.append(preset)
+                seen.add(preset['id'])
     return result
 
 
@@ -353,7 +397,12 @@ def create_preset(raw: Any, existing: list[dict[str, Any]]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError('Preset must be an object.')
     name = str(raw.get('name') or '').strip()
+    mode = str(raw.get('mode') or 'day').strip().lower()
+    if mode not in {'day', 'night'}:
+        raise ValueError('Preset mode must be day or night.')
     base_id = _slugify(name)
+    if not base_id.endswith(f'-{mode}'):
+        base_id = f'{base_id[:64 - len(mode) - 1]}-{mode}'
     used = {preset['id'] for preset in existing}
     preset_id = base_id
     suffix = 2
@@ -361,7 +410,7 @@ def create_preset(raw: Any, existing: list[dict[str, Any]]) -> dict[str, Any]:
         suffix_text = f'-{suffix}'
         preset_id = f'{base_id[:64 - len(suffix_text)]}{suffix_text}'
         suffix += 1
-    return normalize_preset(raw, preset_id=preset_id, builtin=False)
+    return normalize_preset({**raw, 'mode': mode}, preset_id=preset_id, builtin=False)
 
 
 def get_preset(raw: Any, preset_id: str) -> dict[str, Any] | None:
@@ -374,10 +423,6 @@ def custom_presets(raw: Any) -> list[dict[str, Any]]:
         return []
     result = []
     for item in raw:
-        if not isinstance(item, dict) or item.get('builtin'):
-            continue
-        try:
-            result.append(normalize_preset(item, builtin=False))
-        except ValueError:
-            continue
+        if isinstance(item, dict) and not item.get('builtin'):
+            result.extend(_expand_custom_item(item))
     return result

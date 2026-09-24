@@ -55,6 +55,7 @@ evaluates.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.sound_detector import DEFAULT_RULES, SOUND_CLASSES
@@ -186,15 +187,28 @@ def normalize_camera_detection_profiles(
         return resolved
 
     # Day and Night remember different reusable presets. Migrate the former
-    # combined ``preset_id`` to both slots only when the independent ids are
-    # absent, preserving existing selections without forcing either side to a
-    # newly added built-in.
-    day_preset_id = _preset_id(raw.get('day_preset_id'))
-    night_preset_id = _preset_id(raw.get('night_preset_id'))
+    # combined ``preset_id`` to the mode-specific ids used by the flat preset
+    # catalog, while preserving any already-migrated side independently.
+    def _mode_preset_id(value: Any, mode: str) -> str | None:
+        resolved = _preset_id(value)
+        if not resolved or resolved.endswith(f'-{mode}') or re.search(rf'-{mode}-\d+$', resolved):
+            return resolved
+        base = resolved
+        if base.endswith('-day') or base.endswith('-night'):
+            base = base.rsplit('-', 1)[0]
+        suffix = f'-{mode}'
+        return f'{base[:64 - len(suffix)]}{suffix}'
+
+    day_preset_id = _mode_preset_id(raw.get('day_preset_id'), 'day')
+    night_preset_id = _mode_preset_id(raw.get('night_preset_id'), 'night')
     legacy_preset_id = _preset_id(raw.get('preset_id'))
     if legacy_preset_id:
-        day_preset_id = day_preset_id or legacy_preset_id
-        night_preset_id = night_preset_id or legacy_preset_id
+        for mode in ('day', 'night'):
+            migrated_id = _mode_preset_id(legacy_preset_id, mode)
+            if mode == 'day':
+                day_preset_id = day_preset_id or migrated_id
+            else:
+                night_preset_id = night_preset_id or migrated_id
     has_profiles = any(isinstance(raw.get(mode), dict) for mode in _CAMERA_MOTION_PROFILE_MODES)
     profiles: dict[str, dict[str, Any]] = {}
     for mode in _CAMERA_MOTION_PROFILE_MODES:

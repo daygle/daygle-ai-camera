@@ -161,7 +161,7 @@ async def update_camera(
 
 @router.get('/api/camera-profile-presets')
 def list_camera_profile_presets(request: Request, db=Depends(get_database)):
-    """List built-in and user-created reusable Day/Night presets."""
+    """List built-in and user-created mode-specific camera presets."""
     require_admin(request)
     return {'presets': list_presets(db.get_setting('camera_profile_presets'))}
 

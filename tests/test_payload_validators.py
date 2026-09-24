@@ -620,8 +620,8 @@ def test_validate_camera_settings_persists_profile_automation_keys(monkeypatch, 
             'source': 'schedule',
             'day_start': '05:45',
             'night_start': '20:15',
-            'day_preset_id': 'balanced',
-            'night_preset_id': 'night-ir',
+            'day_preset_id': 'balanced-day',
+            'night_preset_id': 'night-ir-night',
             'day': {'motion_pixel_threshold': 30},
             'night': {'motion_pixel_threshold': 110},
         },
@@ -629,8 +629,8 @@ def test_validate_camera_settings_persists_profile_automation_keys(monkeypatch, 
     assert out_full['detection_profiles']['source'] == 'schedule'
     assert out_full['detection_profiles']['day_start'] == '05:45'
     assert out_full['detection_profiles']['night_start'] == '20:15'
-    assert out_full['detection_profiles']['day_preset_id'] == 'balanced'
-    assert out_full['detection_profiles']['night_preset_id'] == 'night-ir'
+    assert out_full['detection_profiles']['day_preset_id'] == 'balanced-day'
+    assert out_full['detection_profiles']['night_preset_id'] == 'night-ir-night'
     assert out_full['detection_profiles']['day']['motion_pixel_threshold'] == 30
     assert out_full['detection_profiles']['night']['motion_pixel_threshold'] == 110
 
@@ -642,7 +642,7 @@ def test_validate_camera_settings_keeps_day_and_night_preset_ids_independent(mon
     current = {
         'id': 'cam-1',
         'detection_profiles': {
-            'day_preset_id': 'balanced',
+            'day_preset_id': 'balanced-day',
             'night_preset_id': 'maximum-recall',
         },
     }
@@ -708,8 +708,8 @@ def test_validate_camera_settings_auto_enables_solar_with_location(monkeypatch, 
     })
     assert out['detection_profiles']['source'] == 'solar'
     # Legacy combined selections migrate to both independent slots.
-    assert out['detection_profiles']['day_preset_id'] == 'cat-small-animal'
-    assert out['detection_profiles']['night_preset_id'] == 'cat-small-animal'
+    assert out['detection_profiles']['day_preset_id'] == 'cat-small-animal-day'
+    assert out['detection_profiles']['night_preset_id'] == 'cat-small-animal-night'
 
 
 def test_validate_camera_settings_leaves_solar_when_location_is_cleared(monkeypatch, pv):

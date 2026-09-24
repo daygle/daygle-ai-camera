@@ -20,7 +20,8 @@ test('cat profile shortcut is removed while reusable presets remain', () => {
   assert.doesNotMatch(source, /cat-profile-suggest-btn/);
   assert.doesNotMatch(source, /Suggest Cat Profiles/);
   assert.match(source, /profile-apply-day-btn/);
-  assert.match(source, /profile-save-preset-btn/);
+  assert.match(source, /profile-save-day-preset-btn/);
+  assert.match(source, /profile-save-night-preset-btn/);
 });
 
 test('PTZ Motion Detection switch is editable and collected into detection', () => {
@@ -93,11 +94,13 @@ test('day and night select and apply presets independently', () => {
 });
 
 test('camera editor exposes reusable preset lifecycle actions per profile', () => {
-  assert.match(source, /profile-save-preset-btn/);
+  assert.match(source, /profile-save-day-preset-btn/);
+  assert.match(source, /profile-save-night-preset-btn/);
   assert.match(source, /profile-update-day-preset-btn/);
   assert.match(source, /profile-update-night-preset-btn/);
   assert.match(source, /profile-delete-day-preset-btn/);
   assert.match(source, /profile-delete-night-preset-btn/);
   assert.match(source, /api\('\/api\/camera-profile-presets'/);
   assert.match(source, /api\('\/api\/camera-profile-presets\/'/);
+  assert.match(source, /mode: mode, settings: current\[mode\]/);
 });

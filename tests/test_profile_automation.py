@@ -14,8 +14,8 @@ from app.recording_settings import (
 def test_detection_profiles_normalize_performance_fields_and_legacy_fallback():
     profiles = normalize_camera_detection_profiles({
         'active': 'night',
-        'day_preset_id': 'balanced',
-        'night_preset_id': 'night-ir',
+        'day_preset_id': 'balanced-day',
+        'night_preset_id': 'night-ir-night',
         'night': {
             'detection_interval_seconds': '0.8',
             'detection_confirm_frames': 4,
@@ -25,8 +25,8 @@ def test_detection_profiles_normalize_performance_fields_and_legacy_fallback():
         },
     }, {'motion_pixel_threshold': 77})
     assert profiles['active'] == 'night'
-    assert profiles['day_preset_id'] == 'balanced'
-    assert profiles['night_preset_id'] == 'night-ir'
+    assert profiles['day_preset_id'] == 'balanced-day'
+    assert profiles['night_preset_id'] == 'night-ir-night'
     assert profiles['day']['motion_pixel_threshold'] == 77
     assert profiles['night']['motion_pixel_threshold'] == 77
     assert profiles['night']['detection_interval_seconds'] == 0.8

@@ -45,8 +45,8 @@ const PROFILE_MOTION_FIELDS = [
 ];
 const PROFILE_FIELDS = PROFILE_PERFORMANCE_FIELDS.concat(PROFILE_MOTION_FIELDS);
 
-function profilePresetOptionsHtml(selectedId) {
-  return cameraProfilePresets.map(function(preset) {
+function profilePresetOptionsHtml(mode, selectedId) {
+  return cameraProfilePresets.filter(function(preset) { return preset.mode === mode; }).map(function(preset) {
     return '<option value="' + escapeHtml(preset.id) + '"' + (preset.id === selectedId ? ' selected' : '') + '>' + escapeHtml(preset.name) + (preset.builtin ? ' (Built-in)' : '') + '</option>';
   }).join('');
 }
@@ -357,15 +357,16 @@ function buildEditFormHtml(camera, index) {
         '</div>' +
         '<div class="cam-edit-section">' +
           '<h4 class="cam-edit-section-title">Profile Presets</h4>' +
-          '<p class="form-help muted">Day and Night select reusable presets independently. Applying a preset changes only that profile and leaves the other profile untouched. You can also save the Day/Night values currently shown as a reusable preset. Nothing is saved until you save the camera.</p>' +
+          '<p class="form-help muted">Day and Night each have their own mode-specific presets. Each preset contains settings for only one mode, so applying a Night preset can never change the Day profile. Nothing is saved until you save the camera.</p>' +
           '<div class="form-grid profile-preset-grid">' +
-            '<label><span>Day Preset</span><select name="profile_day_preset"><option value="">Choose a Preset…</option>' + profilePresetOptionsHtml(camera.detection_profiles?.day_preset_id) + '</select></label>' +
-            '<label><span>Night Preset</span><select name="profile_night_preset"><option value="">Choose a Preset…</option>' + profilePresetOptionsHtml(camera.detection_profiles?.night_preset_id) + '</select></label>' +
+            '<label><span>Day Preset</span><select name="profile_day_preset"><option value="">Choose a Preset…</option>' + profilePresetOptionsHtml('day', camera.detection_profiles?.day_preset_id) + '</select></label>' +
+            '<label><span>Night Preset</span><select name="profile_night_preset"><option value="">Choose a Preset…</option>' + profilePresetOptionsHtml('night', camera.detection_profiles?.night_preset_id) + '</select></label>' +
           '</div>' +
           '<div class="button-row profile-preset-row">' +
             '<button type="button" class="secondary profile-apply-day-btn">Apply to Day</button>' +
             '<button type="button" class="secondary profile-apply-night-btn">Apply to Night</button>' +
-            '<button type="button" class="secondary profile-save-preset-btn">Save Current as Preset</button>' +
+            '<button type="button" class="secondary profile-save-day-preset-btn">Save Day Preset</button>' +
+            '<button type="button" class="secondary profile-save-night-preset-btn">Save Night Preset</button>' +
             '<button type="button" class="secondary profile-update-day-preset-btn" disabled>Update Day Preset</button>' +
             '<button type="button" class="secondary profile-update-night-preset-btn" disabled>Update Night Preset</button>' +
             '<button type="button" class="secondary profile-delete-day-preset-btn" disabled>Delete Day Preset</button>' +
@@ -451,7 +452,10 @@ function wireEditFormHandlers(index) {
   var nightPresetSelect = form.querySelector('[name="profile_night_preset"]');
   var applyDayButton = form.querySelector('.profile-apply-day-btn');
   var applyNightButton = form.querySelector('.profile-apply-night-btn');
-  var savePresetButton = form.querySelector('.profile-save-preset-btn');
+  var savePresetButtons = {
+    day: form.querySelector('.profile-save-day-preset-btn'),
+    night: form.querySelector('.profile-save-night-preset-btn'),
+  };
   var updatePresetButtons = {
     day: form.querySelector('.profile-update-day-preset-btn'),
     night: form.querySelector('.profile-update-night-preset-btn'),
@@ -508,7 +512,7 @@ function wireEditFormHandlers(index) {
   // Fill one profile section from a preset. The other mode and its selected
   // preset are never touched, so Day and Night remain fully independent.
   function applyPendingProfile(mode, preset, message) {
-    var values = preset[mode] || {};
+    var values = preset.settings || {};
     PROFILE_FIELDS.forEach(function(key) {
       var field = form.querySelector('[name="' + mode + '_' + profileFieldName(key) + '"]');
       if (!field) return;
@@ -536,21 +540,27 @@ function wireEditFormHandlers(index) {
   if (nightPresetSelect) nightPresetSelect.addEventListener('change', function() { syncPresetButtons('night'); });
   if (applyDayButton) applyDayButton.addEventListener('click', function() { requestApplyPreset('day'); });
   if (applyNightButton) applyNightButton.addEventListener('click', function() { requestApplyPreset('night'); });
-  if (savePresetButton) savePresetButton.addEventListener('click', async function() {
-    var name = window.prompt('Name this Day/Night preset:');
-    if (!name || !name.trim()) return;
-    savePresetButton.disabled = true;
-    try {
-      var current = collectFormData(form).detection_profiles;
-      var created = await api('/api/camera-profile-presets', { method: 'POST', body: JSON.stringify({ name: name.trim(), day: current.day, night: current.night }) });
-      cameraProfilePresets.push(created);
-      [dayPresetSelect, nightPresetSelect].forEach(function(select) {
+  ['day', 'night'].forEach(function(mode) {
+    var saveButton = savePresetButtons[mode];
+    if (saveButton) saveButton.addEventListener('click', async function() {
+      var modeLabel = mode === 'day' ? 'Day' : 'Night';
+      var name = window.prompt('Name this ' + modeLabel + ' preset:');
+      if (!name || !name.trim()) return;
+      saveButton.disabled = true;
+      try {
+        var current = collectFormData(form).detection_profiles;
+        var created = await api('/api/camera-profile-presets', {
+          method: 'POST',
+          body: JSON.stringify({ name: name.trim(), mode: mode, settings: current[mode] }),
+        });
+        cameraProfilePresets.push(created);
+        var select = mode === 'day' ? dayPresetSelect : nightPresetSelect;
         select?.insertAdjacentHTML('beforeend', '<option value="' + escapeHtml(created.id) + '">' + escapeHtml(created.name) + '</option>');
-      });
-      if (profileResult) profileResult.textContent = 'Preset saved: ' + created.name + '.';
-    } catch (err) {
-      if (!window.daygleAuth?.redirecting && profileResult) profileResult.textContent = err.message || 'Could not save preset.';
-    } finally { savePresetButton.disabled = false; }
+        if (profileResult) profileResult.textContent = modeLabel + ' preset saved: ' + created.name + '.';
+      } catch (err) {
+        if (!window.daygleAuth?.redirecting && profileResult) profileResult.textContent = err.message || 'Could not save preset.';
+      } finally { saveButton.disabled = false; }
+    });
   });
   ['day', 'night'].forEach(function(mode) {
     var updateButton = updatePresetButtons[mode];
@@ -566,8 +576,8 @@ function wireEditFormHandlers(index) {
           method: 'PUT',
           body: JSON.stringify({
             name: preset.name,
-            day: mode === 'day' ? current.day : preset.day,
-            night: mode === 'night' ? current.night : preset.night,
+            mode: mode,
+            settings: current[mode],
           }),
         });
         cameraProfilePresets = cameraProfilePresets.map(function(item) { return item.id === updated.id ? updated : item; });
