@@ -64,6 +64,31 @@ test('camera table exposes day and night profiles and editor can collapse', () =
   assert.doesNotMatch(source, /insertAdjacentHTML\('afterend', safeHtml\(\[formHtml\]\)\)/);
 });
 
+test('day and night profiles are edited in separate, always-visible sections', () => {
+  // Both sections render from their OWN stored values...
+  assert.match(source, /profileSectionHtml\(camera, 'day'\)/);
+  assert.match(source, /profileSectionHtml\(camera, 'night'\)/);
+  assert.match(source, /<h4 class="cam-edit-section-title">' \+ label \+ ' Profile<\/h4>/);
+  // ...and both are collected independently on save.
+  assert.match(source, /readProfileFromForm\(form, 'day'\)/);
+  assert.match(source, /readProfileFromForm\(form, 'night'\)/);
+  // Switching the Active Profile select must NOT reload stored values into
+  // the form: the old change handler silently discarded unsaved edits, which
+  // is what made profile updates look like they reverted.
+  assert.doesNotMatch(source, /profileSelect\.addEventListener\('change'/);
+  // Field names are namespaced per mode so the two editors cannot collide.
+  assert.match(source, /mode \+ '_' \+ profileFieldName\(key\)/);
+});
+
+test('a preset can be applied to the day slot, the night slot, or both', () => {
+  assert.match(source, /profile-apply-day-btn/);
+  assert.match(source, /profile-apply-night-btn/);
+  assert.match(source, /profile-apply-preset-btn/);
+  assert.match(source, /requestApplyPreset\(\['day'\]\)/);
+  assert.match(source, /requestApplyPreset\(\['night'\]\)/);
+  assert.match(source, /applyPendingProfiles\(preset, [^\n]*modes\)/);
+});
+
 test('camera editor exposes reusable preset lifecycle actions', () => {
   assert.match(source, /profile_preset/);
   assert.match(source, /profile-apply-preset-btn/);

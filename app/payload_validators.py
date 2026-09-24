@@ -123,6 +123,7 @@ from app.recording_settings import (
     _migrate_legacy_camera_motion,
     apply_active_camera_detection_profile,
     normalize_camera_detection_profiles,
+    normalize_camera_profiles_with_legacy,
     normalize_camera_ptz_settings,
     normalize_camera_recording_settings,
 )
@@ -465,7 +466,10 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
         raw_profiles['source'] = 'solar'
     elif current_source == 'solar':
         raw_profiles['source'] = 'manual'
-    updated['detection_profiles'] = normalize_camera_detection_profiles(raw_profiles, {**current, **updated})
+    # Flat overrides seed only a mode dict that is absent; rows that already
+    # carry profile dicts treat them as authoritative so a field cleared to
+    # "Global Default" is not refilled with the other profile's values.
+    updated['detection_profiles'] = normalize_camera_profiles_with_legacy(raw_profiles, {**current, **updated})
     apply_active_camera_detection_profile(updated)
     return updated
 

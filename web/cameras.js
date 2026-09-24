@@ -59,6 +59,128 @@ function cameraProfileValue(camera, mode, key) {
   return null;
 }
 
+// Field-name prefix for the split Day/Night profile editors. Performance
+// controls keep their historical `profile_<key>` suffix under a mode prefix
+// (`day_profile_...`), motion controls are prefixed directly (`day_motion_...`).
+function profileFieldName(key) {
+  return PROFILE_PERFORMANCE_FIELDS.includes(key) ? 'profile_' + key : key;
+}
+
+function parseProfileFieldValue(key, raw) {
+  if (raw === '') return null;
+  switch (key) {
+    case 'motion_pixel_threshold':
+    case 'ingest_frame_fps':
+    case 'detection_confirm_frames':
+    case 'detection_confirm_window':
+    case 'periodic_scan_interval_seconds':
+    case 'motion_frame_width':
+    case 'motion_frame_height': {
+      const intValue = parseInt(raw, 10);
+      return Number.isNaN(intValue) ? null : intValue;
+    }
+    case 'detection_interval_seconds':
+    case 'detection_confirm_iou':
+    case 'motion_gate_fraction':
+    case 'motion_scale_fraction':
+    case 'motion_background_alpha': {
+      const numberValue = Number(raw);
+      return Number.isNaN(numberValue) ? null : numberValue;
+    }
+    case 'background_detection_enabled':
+    case 'always_run_object_detection':
+    case 'object_detection_region_boost':
+    case 'motion_denoise':
+      return raw === 'true';
+    default:
+      return raw;
+  }
+}
+
+// Read one profile (day or night) from its own field group. A missing or
+// empty control reads as null, i.e. "Global Default" / inherit.
+function readProfileFromForm(form, mode) {
+  const profile = {};
+  PROFILE_FIELDS.forEach(function(key) {
+    const field = form.querySelector('[name="' + mode + '_' + profileFieldName(key) + '"]');
+    const raw = field ? String(field.value).trim() : '';
+    profile[key] = parseProfileFieldValue(key, raw);
+  });
+  return profile;
+}
+
+// One independently editable profile block (Day or Night). Both blocks render
+// side by side, each from ITS OWN stored values, so switching the Active
+// Profile select never re-fills or discards what is typed here.
+function profileSectionHtml(camera, mode) {
+  const label = mode === 'night' ? 'Night' : 'Day';
+  const attr = (value) => escapeHtml(value == null ? '' : String(value));
+  const storedValue = (key) => {
+    const value = cameraProfileValue(camera, mode, key);
+    return value === undefined ? null : value;
+  };
+  const fieldName = (key) => mode + '_' + profileFieldName(key);
+  const infoTip = (text) => '<span class="info-tip" data-tip="' + escapeHtml(text) + '" title="' + escapeHtml(text) + '" tabindex="0" aria-label="Help: ' + escapeHtml(text) + '"></span>';
+  const labelSpan = (opts) => '<span>' + opts.label + (opts.tip ? ' ' + infoTip(opts.tip) : '') + '</span>';
+  const numberField = (key, opts) =>
+    '<label>' + labelSpan(opts) +
+    '<input name="' + fieldName(key) + '" type="number" min="' + opts.min + '" max="' + opts.max + '" step="' + opts.step +
+    '" placeholder="' + escapeHtml(opts.placeholder) + '" value="' + attr(storedValue(key) ?? '') + '" /></label>';
+  const selectField = (key, opts) => {
+    const current = storedValue(key);
+    const items = [{ value: null, attr: '', label: 'Global Default' }].concat(opts.options);
+    return '<label>' + labelSpan(opts) + '<select name="' + fieldName(key) + '">' +
+      items.map(function(item) {
+        return '<option value="' + escapeHtml(item.attr) + '"' + (current === item.value ? ' selected' : '') + '>' + item.label + '</option>';
+      }).join('') +
+      '</select></label>';
+  };
+  const boolOptions = [
+    { value: true, attr: 'true', label: 'Enabled' },
+    { value: false, attr: 'false', label: 'Disabled' },
+  ];
+  const performanceControls =
+    selectField('background_detection_enabled', { label: 'Background Detection', options: boolOptions }) +
+    numberField('detection_interval_seconds', { label: 'Detection Interval (s)', min: '0.1', max: '10', step: '0.05', placeholder: 'Global Default (0.5)' }) +
+    numberField('ingest_frame_fps', { label: 'Detection Frame Rate (fps)', min: '1', max: '30', step: '1', placeholder: 'Global Default (4)' }) +
+    numberField('detection_confirm_frames', { label: 'Confirm Frames', min: '1', max: '10', step: '1', placeholder: 'Global Default (1)' }) +
+    numberField('detection_confirm_window', { label: 'Confirm Window', min: '1', max: '30', step: '1', placeholder: 'Global Default (1)' }) +
+    numberField('detection_confirm_iou', { label: 'Confirm Location (IoU)', min: '0', max: '0.9', step: '0.05', placeholder: 'Global Default (0)' }) +
+    selectField('always_run_object_detection', { label: 'Always Run Object Detection', options: boolOptions }) +
+    selectField('object_detection_region_boost', { label: 'Region Boost', options: boolOptions }) +
+    selectField('object_detection_tiling', { label: 'Object Detection Tiling', options: [
+      { value: 'off', attr: 'off', label: 'Off' },
+      { value: '2x2', attr: '2x2', label: '2 × 2' },
+      { value: '3x3', attr: '3x3', label: '3 × 3' },
+      { value: '4x4', attr: '4x4', label: '4 × 4' },
+    ] }) +
+    numberField('periodic_scan_interval_seconds', { label: 'Periodic Scan (s)', min: '0', max: '3600', step: '1', placeholder: 'Global Default (0)' }) +
+    numberField('motion_frame_width', { label: 'Motion Frame Width', min: '40', max: '640', step: '1', placeholder: 'Global Default (320)' }) +
+    numberField('motion_frame_height', { label: 'Motion Frame Height', min: '30', max: '480', step: '1', placeholder: 'Global Default (240)' });
+  const motionControls =
+    numberField('motion_pixel_threshold', { label: 'Pixel Threshold', tip: 'Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras.', min: '1', max: '255', step: '1', placeholder: 'Global Default (30)' }) +
+    numberField('motion_gate_fraction', { label: 'Gate Fraction', tip: 'Minimum fraction of pixels that must change before motion is declared.', min: '0.0001', max: '0.5', step: '0.0001', placeholder: 'Global Default (0.005)' }) +
+    numberField('motion_scale_fraction', { label: 'Scale Fraction', tip: 'Pixel change fraction that maps to 100% motion confidence.', min: '0.001', max: '1.0', step: '0.001', placeholder: 'Global Default (0.03)' }) +
+    numberField('motion_background_alpha', { label: 'Background Alpha', tip: 'How fast the background model adapts when no motion is detected.', min: '0.001', max: '0.5', step: '0.001', placeholder: 'Global Default (0.05)' }) +
+    selectField('motion_algorithm', { label: 'Motion Engine', tip: 'Background-subtraction engine for this camera. Leave on Global Default unless this camera needs a different engine.', options: [
+      { value: 'mog2', attr: 'mog2', label: 'MOG2' },
+      { value: 'diff', attr: 'diff', label: 'Diff (Legacy)' },
+    ] }) +
+    selectField('motion_denoise', { label: 'Denoise', tip: 'Morphological denoise of the motion mask for this camera. Leave on Global Default to follow the global setting.', options: boolOptions }) +
+    selectField('motion_shadow_suppression', { label: 'Shadow Suppression', tip: 'Reject cast shadows from motion alerts for this camera (MOG2 only). It does not filter YOLO object detections. On = always; Off = never (dark/IR scenes); Automatic = only while bright. Leave on Global Default to follow the global setting.', options: [
+      { value: 'on', attr: 'on', label: 'On' },
+      { value: 'off', attr: 'off', label: 'Off' },
+      { value: 'auto', attr: 'auto', label: 'Automatic (Day Only)' },
+    ] });
+  return '<div class="cam-edit-section">' +
+    '<h4 class="cam-edit-section-title">' + label + ' Profile</h4>' +
+    '<p class="form-help muted">' + label + ' settings apply while the ' + label + ' profile is active. Leave a value on Global Default to follow the live detection settings.</p>' +
+    '<div class="form-grid">' + performanceControls + '</div>' +
+    '<p class="form-help muted">' + label + ' motion overrides for this camera only. Leave blank to use the global defaults from Live Detection settings.</p>' +
+    '<div class="form-grid">' + motionControls + '</div>' +
+    '</div>';
+}
+
 function buildEditFormHtml(camera, index) {
   const backend = camera.backend || 'onvif';
   const isRtsp = backend === 'rtsp';
@@ -220,62 +342,34 @@ function buildEditFormHtml(camera, index) {
             '<label><span>Camera Timezone</span><input name="timezone" placeholder="e.g. Australia/Sydney" value="' + escapeHtml(camera.timezone || 'UTC') + '" /></label>' +
             '<label><span>Latitude</span><input name="latitude" type="number" min="-90" max="90" step="0.000001" placeholder="e.g. -33.8688" value="' + htmlAttr(camera.latitude != null ? camera.latitude : '') + '" /></label>' +
             '<label><span>Longitude</span><input name="longitude" type="number" min="-180" max="180" step="0.000001" placeholder="e.g. 151.2093" value="' + htmlAttr(camera.longitude != null ? camera.longitude : '') + '" /></label>' +
-          '</div>' +
-          '<div class="button-row">' +
-            '<button type="button" class="secondary profile-suggest-btn">Suggest Sunrise/Sunset</button>' +
-            '<span class="form-help muted profile-action-result" aria-live="polite"></span>' +
-          '</div>' +
-          '<p class="form-help muted">Choose which profile is active now. Solar mode refreshes sunrise/sunset times daily using this camera’s coordinates and timezone. The motion overrides below are edited for the selected profile. Existing cameras inherit their legacy settings into both profiles.</p>' +
-          '<p class="form-help muted">Runtime: <strong>' + escapeHtml(runtimeActive.charAt(0).toUpperCase() + runtimeActive.slice(1)) + '</strong> (' + escapeHtml(runtimeSourceLabel) + '). ' + escapeHtml(runtimeNote) + '</p>' +
-        '</div>' +
-        '<div class="cam-edit-section">' +
-          '<h4 class="cam-edit-section-title">Day/Night Performance</h4>' +
-          '<p class="form-help muted">These settings override Live Performance for this camera and profile. Leave values at their defaults unless this camera needs different day/night resource usage.</p>' +
-          '<div class="button-row profile-preset-row">' +
-            '<label><span>Preset</span><select name="profile_preset"><option value="">Choose a Preset…</option>' + profilePresetOptionsHtml(camera.detection_profiles?.preset_id) + '</select></label>' +
-            '<button type="button" class="secondary profile-apply-preset-btn">Apply Preset</button>' +
-            '<button type="button" class="secondary profile-save-preset-btn">Save Current as Preset</button>' +
-            '<button type="button" class="secondary profile-update-preset-btn" disabled>Update Preset</button>' +
-            '<button type="button" class="secondary profile-delete-preset-btn" disabled>Delete Preset</button>' +
-          '</div>' +
-          '<div class="form-grid">' +
-            '<label><span>Background Detection</span><select name="profile_background_detection_enabled">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'background_detection_enabled') == null ? ' selected' : '') + '>Global Default</option>' +
-              '<option value="true"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'background_detection_enabled') === true ? ' selected' : '') + '>Enabled</option>' +
-              '<option value="false"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'background_detection_enabled') === false ? ' selected' : '') + '>Disabled</option>' +
-            '</select></label>' +
-            '<label><span>Detection Interval (s)</span><input name="profile_detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="Global Default (0.5)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_interval_seconds') ?? '') + '" /></label>' +
-            '<label><span>Detection Frame Rate (fps)</span><input name="profile_ingest_frame_fps" type="number" min="1" max="30" step="1" placeholder="Global Default (4)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'ingest_frame_fps') ?? '') + '" /></label>' +
-            '<label><span>Confirm Frames</span><input name="profile_detection_confirm_frames" type="number" min="1" max="10" step="1" placeholder="Global Default (1)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_frames') ?? '') + '" /></label>' +
-            '<label><span>Confirm Window</span><input name="profile_detection_confirm_window" type="number" min="1" max="30" step="1" placeholder="Global Default (1)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_window') ?? '') + '" /></label>' +
-            '<label><span>Confirm Location (IoU)</span><input name="profile_detection_confirm_iou" type="number" min="0" max="0.9" step="0.05" placeholder="Global Default (0)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'detection_confirm_iou') ?? '') + '" /></label>' +
-            '<label><span>Always Run Object Detection</span><select name="profile_always_run_object_detection">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'always_run_object_detection') == null ? ' selected' : '') + '>Global Default</option>' +
-              '<option value="true"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'always_run_object_detection') === true ? ' selected' : '') + '>Enabled</option>' +
-              '<option value="false"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'always_run_object_detection') === false ? ' selected' : '') + '>Disabled</option>' +
-            '</select></label>' +
-            '<label><span>Region Boost</span><select name="profile_object_detection_region_boost">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_region_boost') == null ? ' selected' : '') + '>Global Default</option>' +
-              '<option value="true"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_region_boost') === true ? ' selected' : '') + '>Enabled</option>' +
-              '<option value="false"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_region_boost') === false ? ' selected' : '') + '>Disabled</option>' +
-            '</select></label>' +
-            '<label><span>Object Detection Tiling</span><select name="profile_object_detection_tiling">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') == null ? ' selected' : '') + '>Global Default</option>' +
-              '<option value="off"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') === 'off' ? ' selected' : '') + '>Off</option>' +
-              '<option value="2x2"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') === '2x2' ? ' selected' : '') + '>2 × 2</option>' +
-              '<option value="3x3"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') === '3x3' ? ' selected' : '') + '>3 × 3</option>' +
-              '<option value="4x4"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'object_detection_tiling') === '4x4' ? ' selected' : '') + '>4 × 4</option>' +
-            '</select></label>' +
             '<label><span>PTZ Motion Detection</span><select name="ptz_motion_detection">' +
               '<option value="auto"' + ((camera.detection?.ptz_motion_detection || 'auto') === 'auto' ? ' selected' : '') + '>Auto (Follow PTZ)</option>' +
               '<option value="on"' + (camera.detection?.ptz_motion_detection === 'on' ? ' selected' : '') + '>On</option>' +
               '<option value="off"' + (camera.detection?.ptz_motion_detection === 'off' ? ' selected' : '') + '>Off</option>' +
             '</select></label>' +
-            '<label><span>Periodic Scan (s)</span><input name="profile_periodic_scan_interval_seconds" type="number" min="0" max="3600" step="1" placeholder="Global Default (0)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'periodic_scan_interval_seconds') ?? '') + '" /></label>' +
-            '<label><span>Motion Frame Width</span><input name="profile_motion_frame_width" type="number" min="40" max="640" step="1" placeholder="Global Default (320)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_width') ?? '') + '" /></label>' +
-            '<label><span>Motion Frame Height</span><input name="profile_motion_frame_height" type="number" min="30" max="480" step="1" placeholder="Global Default (240)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_frame_height') ?? '') + '" /></label>' +
+          '</div>' +
+          '<div class="button-row">' +
+            '<button type="button" class="secondary profile-suggest-btn">Suggest Sunrise/Sunset</button>' +
+            '<span class="form-help muted profile-action-result" aria-live="polite"></span>' +
+          '</div>' +
+          '<p class="form-help muted">Choose which profile is active right now. Solar mode refreshes sunrise/sunset times daily using this camera’s coordinates and timezone. The Day and Night profiles below are edited independently - each keeps its own performance and motion overrides, and values left on Global Default follow the live detection settings. Existing cameras inherit their legacy settings into both profiles.</p>' +
+          '<p class="form-help muted">Runtime: <strong>' + escapeHtml(runtimeActive.charAt(0).toUpperCase() + runtimeActive.slice(1)) + '</strong> (' + escapeHtml(runtimeSourceLabel) + '). ' + escapeHtml(runtimeNote) + '</p>' +
+        '</div>' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Profile Presets</h4>' +
+          '<p class="form-help muted">Load a preset into the Day profile, the Night profile, or both below - each slot keeps whatever is already shown when you apply to the other one. You can also save the values currently shown as a reusable preset. Nothing is saved until you save the camera.</p>' +
+          '<div class="button-row profile-preset-row">' +
+            '<label><span>Preset</span><select name="profile_preset"><option value="">Choose a Preset…</option>' + profilePresetOptionsHtml(camera.detection_profiles?.preset_id) + '</select></label>' +
+            '<button type="button" class="secondary profile-apply-day-btn">Apply to Day</button>' +
+            '<button type="button" class="secondary profile-apply-night-btn">Apply to Night</button>' +
+            '<button type="button" class="secondary profile-apply-preset-btn">Apply to Both</button>' +
+            '<button type="button" class="secondary profile-save-preset-btn">Save Current as Preset</button>' +
+            '<button type="button" class="secondary profile-update-preset-btn" disabled>Update Preset</button>' +
+            '<button type="button" class="secondary profile-delete-preset-btn" disabled>Delete Preset</button>' +
           '</div>' +
         '</div>' +
+        profileSectionHtml(camera, 'day') +
+        profileSectionHtml(camera, 'night') +
         '<div class="cam-edit-section">' +
           '<h4 class="cam-edit-section-title">Stream</h4>' +
           '<div class="form-grid">' +
@@ -283,32 +377,6 @@ function buildEditFormHtml(camera, index) {
             '<label><span>Frame Buffer Drains <span class="info-tip" data-tip="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." title="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." tabindex="0" aria-label="Help: Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)."></span></span><input name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" value="' + htmlAttr(camera.stale_frame_grabs != null ? camera.stale_frame_grabs : '') + '" /></label>' +
           '</div>' +
           '<p class="form-help muted">Frame-buffer drains is a hint passed to the stream decoder. Leave FPS empty to auto-detect it from the stream; override it only if the detected value is wrong.</p>' +
-        '</div>' +
-        '<div class="cam-edit-section">' +
-          '<h4 class="cam-edit-section-title">Motion Detection Overrides</h4>' +
-          '<p class="form-help muted">Override the global motion settings for this camera only. Leave blank to use the global defaults from Live Detection settings.</p>' +
-          '<div class="form-grid">' +
-            '<label><span>Pixel Threshold <span class="info-tip" data-tip="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." title="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." tabindex="0" aria-label="Help: Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras."></span></span><input name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="Global Default (30)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_pixel_threshold') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_pixel_threshold') : '') + '" /></label>' +
-            '<label><span>Gate Fraction <span class="info-tip" data-tip="Minimum fraction of pixels that must change before motion is declared." title="Minimum fraction of pixels that must change before motion is declared." tabindex="0" aria-label="Help: Minimum fraction of pixels that must change before motion is declared."></span></span><input name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="Global Default (0.005)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_gate_fraction') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_gate_fraction') : '') + '" /></label>' +
-            '<label><span>Scale Fraction <span class="info-tip" data-tip="Pixel change fraction that maps to 100% motion confidence." title="Pixel change fraction that maps to 100% motion confidence." tabindex="0" aria-label="Help: Pixel change fraction that maps to 100% motion confidence."></span></span><input name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="Global Default (0.03)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_scale_fraction') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_scale_fraction') : '') + '" /></label>' +
-            '<label><span>Background Alpha <span class="info-tip" data-tip="How fast the background model adapts when no motion is detected." title="How fast the background model adapts when no motion is detected." tabindex="0" aria-label="Help: How fast the background model adapts when no motion is detected."></span></span><input name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="Global Default (0.05)" value="' + htmlAttr(cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_background_alpha') != null ? cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_background_alpha') : '') + '" /></label>' +
-            '<label><span>Motion Engine <span class="info-tip" data-tip="Background-subtraction engine for this camera. Leave on Global Default unless this camera needs a different engine." title="Background-subtraction engine for this camera. Leave on Global Default unless this camera needs a different engine." tabindex="0" aria-label="Help: Per-camera motion engine override."></span></span><select name="motion_algorithm">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') == null ? ' selected' : '') + '>Global Default</option>' +
-              '<option value="mog2"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') === 'mog2' ? ' selected' : '') + '>MOG2</option>' +
-              '<option value="diff"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_algorithm') === 'diff' ? ' selected' : '') + '>Diff (Legacy)</option>' +
-            '</select></label>' +
-            '<label><span>Denoise <span class="info-tip" data-tip="Morphological denoise of the motion mask for this camera. Leave on Global Default to follow the global setting." title="Morphological denoise of the motion mask for this camera. Leave on Global Default to follow the global setting." tabindex="0" aria-label="Help: Per-camera denoise override."></span></span><select name="motion_denoise">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_denoise') == null ? ' selected' : '') + '>Global Default</option>' +
-              '<option value="true"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_denoise') === true ? ' selected' : '') + '>Enabled</option>' +
-              '<option value="false"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_denoise') === false ? ' selected' : '') + '>Disabled</option>' +
-            '</select></label>' +
-            '<label><span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows from motion alerts for this camera (MOG2 only). It does not filter YOLO object detections. On = always; Off = never (dark/IR scenes); Automatic = only while bright. Leave on Global Default to follow the global setting." title="Reject cast shadows from motion alerts for this camera (MOG2 only). It does not filter YOLO object detections. On / Off / Automatic. Leave on Global Default to follow the global setting." tabindex="0" aria-label="Help: Per-camera shadow suppression override for motion alerts only (on/off/automatic)."></span></span><select name="motion_shadow_suppression">' +
-              '<option value=""' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_shadow_suppression') == null ? ' selected' : '') + '>Global Default</option>' +
-              '<option value="on"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_shadow_suppression') === 'on' ? ' selected' : '') + '>On</option>' +
-              '<option value="off"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_shadow_suppression') === 'off' ? ' selected' : '') + '>Off</option>' +
-              '<option value="auto"' + (cameraProfileValue(camera, camera.detection_profiles?.active || 'day', 'motion_shadow_suppression') === 'auto' ? ' selected' : '') + '>Automatic (Day Only)</option>' +
-            '</select></label>' +
-          '</div>' +
         '</div>' +
       '</div>' +
 
@@ -368,29 +436,17 @@ function wireEditFormHandlers(index) {
     });
   }
 
-  // Manual day/night profile selector. The existing motion controls edit the
-  // selected profile; switching profiles loads that profile's stored values.
-  var profileSelect = form.querySelector('[name="detection_profile"]');
-  if (profileSelect) {
-    profileSelect.addEventListener('change', function() {
-      var camera = cameras[index] || {};
-      var mode = this.value === 'night' ? 'night' : 'day';
-      PROFILE_FIELDS.forEach(function(key) {
-        var fieldName = PROFILE_PERFORMANCE_FIELDS.includes(key) ? 'profile_' + key : key;
-        var field = form.querySelector('[name="' + fieldName + '"]');
-        if (!field) return;
-        var suggested = form.__suggestedProfiles?.[mode];
-        var value = suggested && Object.prototype.hasOwnProperty.call(suggested, key)
-          ? suggested[key]
-          : cameraProfileValue(camera, mode, key);
-        field.value = value == null ? '' : String(value);
-      });
-    });
-  }
+  // Day and Night each have their own always-visible editor section, so the
+  // Active Profile select is purely the runtime choice now. Changing it must
+  // NOT re-fill any field: the old handler reloaded the stored camera into
+  // the form and silently discarded unsaved edits (settings appeared to
+  // revert whenever the profile select was touched).
 
   var suggestButton = form.querySelector('.profile-suggest-btn');
   var presetSelect = form.querySelector('[name="profile_preset"]');
   var applyPresetButton = form.querySelector('.profile-apply-preset-btn');
+  var applyDayButton = form.querySelector('.profile-apply-day-btn');
+  var applyNightButton = form.querySelector('.profile-apply-night-btn');
   var savePresetButton = form.querySelector('.profile-save-preset-btn');
   var updatePresetButton = form.querySelector('.profile-update-preset-btn');
   var deletePresetButton = form.querySelector('.profile-delete-preset-btn');
@@ -438,35 +494,43 @@ function wireEditFormHandlers(index) {
     if (updatePresetButton) updatePresetButton.disabled = !editable;
     if (deletePresetButton) deletePresetButton.disabled = !editable;
   }
-  function applyPendingProfiles(profiles, message) {
-    form.__selectedPresetId = profiles.id || null;
-    form.__suggestedProfiles = {
-      day: { ...(profiles.day || {}) },
-      night: { ...(profiles.night || {}) },
-    };
-    var activeMode = profileSelect?.value === 'night' ? 'night' : 'day';
-    PROFILE_FIELDS.forEach(function(key) {
-      var fieldName = PROFILE_PERFORMANCE_FIELDS.includes(key) ? 'profile_' + key : key;
-      var field = form.querySelector('[name="' + fieldName + '"]');
-      if (field && Object.prototype.hasOwnProperty.call(form.__suggestedProfiles[activeMode], key)) {
-        field.value = String(form.__suggestedProfiles[activeMode][key]);
-      }
+  // Fill the given profile section(s) from a preset. Only the targeted slots
+  // are touched, so one preset can be loaded into Day while Night keeps the
+  // values already shown (and vice versa).
+  function applyPendingProfiles(preset, message, modes) {
+    form.__selectedPresetId = preset.id || null;
+    (modes && modes.length ? modes : ['day', 'night']).forEach(function(mode) {
+      var values = preset[mode] || {};
+      PROFILE_FIELDS.forEach(function(key) {
+        var field = form.querySelector('[name="' + mode + '_' + profileFieldName(key) + '"]');
+        if (!field) return;
+        var hasValue = Object.prototype.hasOwnProperty.call(values, key) && values[key] != null;
+        field.value = hasValue ? String(values[key]) : '';
+      });
     });
+    if (presetSelect) presetSelect.value = preset.id || '';
+    syncPresetButtons();
     if (profileResult) profileResult.textContent = message;
   }
-  if (presetSelect) presetSelect.addEventListener('change', function() {
-    form.__selectedPresetId = presetSelect.value || null;
-    syncPresetButtons();
-  });
-  if (applyPresetButton) applyPresetButton.addEventListener('click', function() {
+  function requestApplyPreset(modes) {
     var preset = selectedPreset();
     if (!preset) {
       if (profileResult) profileResult.textContent = 'Choose a preset first.';
       return;
     }
-    if (!window.confirm('Apply the ' + preset.name + ' preset to both Day and Night profiles? Nothing is saved until you save the camera.')) return;
-    applyPendingProfiles(preset, preset.name + ' loaded. Review and save the camera.');
+    var slotLabel = modes.length === 2
+      ? 'both Day and Night profiles'
+      : (modes[0] === 'day' ? 'the Day profile' : 'the Night profile');
+    if (!window.confirm('Apply the ' + preset.name + ' preset to ' + slotLabel + '? Nothing is saved until you save the camera.')) return;
+    applyPendingProfiles(preset, preset.name + ' loaded into ' + slotLabel + '. Review and save the camera.', modes);
+  }
+  if (presetSelect) presetSelect.addEventListener('change', function() {
+    form.__selectedPresetId = presetSelect.value || null;
+    syncPresetButtons();
   });
+  if (applyPresetButton) applyPresetButton.addEventListener('click', function() { requestApplyPreset(['day', 'night']); });
+  if (applyDayButton) applyDayButton.addEventListener('click', function() { requestApplyPreset(['day']); });
+  if (applyNightButton) applyNightButton.addEventListener('click', function() { requestApplyPreset(['night']); });
   if (savePresetButton) savePresetButton.addEventListener('click', async function() {
     var name = window.prompt('Name this Day/Night preset:');
     if (!name || !name.trim()) return;
@@ -607,45 +671,17 @@ function collectFormData(form) {
   var cameraIndex = parseInt(getVal('camera_index'), 10);
   var existingProfiles = cameras[cameraIndex]?.detection_profiles || {};
   var activeProfile = getName('detection_profile') || existingProfiles.active || 'day';
-  var profile = { ...(existingProfiles[activeProfile] || {}) };
-  var profileValue = function(name, value) { profile[name] = value === '' ? null : value; };
-  profileValue('motion_pixel_threshold', (function() { var v = getName('motion_pixel_threshold'); return v !== '' ? parseInt(v, 10) : ''; })());
-  profileValue('motion_gate_fraction', (function() { var v = getName('motion_gate_fraction'); return v !== '' ? Number(v) : ''; })());
-  profileValue('motion_scale_fraction', (function() { var v = getName('motion_scale_fraction'); return v !== '' ? Number(v) : ''; })());
-  profileValue('motion_background_alpha', (function() { var v = getName('motion_background_alpha'); return v !== '' ? Number(v) : ''; })());
-  profileValue('motion_algorithm', getName('motion_algorithm'));
-  profileValue('motion_denoise', (function() { var v = getName('motion_denoise'); return v !== '' ? (v === 'true') : ''; })());
-  profileValue('motion_shadow_suppression', getName('motion_shadow_suppression'));
-  var profileNumber = function(name, parser) {
-    var value = getName('profile_' + name);
-    return value !== '' ? parser(value) : '';
-  };
-  var profileBool = function(name) {
-    var value = getName('profile_' + name);
-    return value !== '' ? value === 'true' : '';
-  };
-  profileValue('background_detection_enabled', profileBool('background_detection_enabled'));
-  profileValue('detection_interval_seconds', profileNumber('detection_interval_seconds', Number));
-  profileValue('ingest_frame_fps', profileNumber('ingest_frame_fps', function(value) { return parseInt(value, 10); }));
-  profileValue('detection_confirm_frames', profileNumber('detection_confirm_frames', function(value) { return parseInt(value, 10); }));
-  profileValue('detection_confirm_window', profileNumber('detection_confirm_window', function(value) { return parseInt(value, 10); }));
-  profileValue('detection_confirm_iou', profileNumber('detection_confirm_iou', Number));
-  profileValue('always_run_object_detection', profileBool('always_run_object_detection'));
-  profileValue('object_detection_region_boost', profileBool('object_detection_region_boost'));
-  profileValue('object_detection_tiling', getName('profile_object_detection_tiling'));
-  profileValue('periodic_scan_interval_seconds', profileNumber('periodic_scan_interval_seconds', function(value) { return parseInt(value, 10); }));
-  profileValue('motion_frame_width', profileNumber('motion_frame_width', function(value) { return parseInt(value, 10); }));
-  profileValue('motion_frame_height', profileNumber('motion_frame_height', function(value) { return parseInt(value, 10); }));
+  var dayProfile = readProfileFromForm(form, 'day');
+  var nightProfile = readProfileFromForm(form, 'night');
   var profiles = {
     active: activeProfile === 'night' ? 'night' : 'day',
     source: ['manual', 'schedule', 'solar', 'onvif'].includes(getName('profile_source')) ? getName('profile_source') : 'manual',
-    preset_id: form.__selectedPresetId || existingProfiles.preset_id || null,
+    preset_id: form.__selectedPresetId !== undefined ? (form.__selectedPresetId || null) : (existingProfiles.preset_id || null),
     day_start: getName('profile_day_start') || '07:00',
     night_start: getName('profile_night_start') || '19:00',
-    day: { ...(existingProfiles.day || {}), ...(form.__suggestedProfiles?.day || {}) },
-    night: { ...(existingProfiles.night || {}), ...(form.__suggestedProfiles?.night || {}) },
+    day: { ...dayProfile },
+    night: { ...nightProfile },
   };
-  profiles[activeProfile === 'night' ? 'night' : 'day'] = profile;
   return {
     id: getName('id') || ('camera-' + (cameras.length + 1)),
     name: getName('name'),

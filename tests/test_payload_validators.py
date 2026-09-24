@@ -631,6 +631,42 @@ def test_validate_camera_settings_persists_profile_automation_keys(monkeypatch, 
     assert out_full['detection_profiles']['night']['motion_pixel_threshold'] == 110
 
 
+def test_validate_camera_settings_does_not_refill_cleared_profile_field(monkeypatch, pv):
+    """Regression for "updating a profile appears to revert".
+
+    The camera's flat ``motion_pixel_threshold`` is only the projection of the
+    active (Day) profile. Saving a Night profile with that field cleared back
+    to Global Default must NOT refill it from the flat on the next save - the
+    cleared field has to survive the round trip.
+    """
+    from app.utils import normalize_bool_setting as real_bool
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok',
+                                    normalize_bool_setting=real_bool)
+    profiles = {
+        'active': 'day',
+        'day': {'motion_pixel_threshold': 30},
+        'night': {'motion_gate_fraction': 0.25},  # threshold cleared to Global Default
+    }
+    current = {
+        'id': 'cam-1',
+        'motion_pixel_threshold': 30,  # flat projection of the active day profile
+        'motion_algorithm': 'mog2',
+        'detection_profiles': profiles,
+    }
+    out = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'detection_profiles': {
+            'active': 'day',
+            'day': {'motion_pixel_threshold': 30},
+            'night': {'motion_gate_fraction': 0.25},
+        },
+    }, current=current)
+    assert out['detection_profiles']['day']['motion_pixel_threshold'] == 30
+    assert out['detection_profiles']['night'] == {'motion_gate_fraction': 0.25}
+    assert 'motion_pixel_threshold' not in out['detection_profiles']['night']
+    assert out['motion_pixel_threshold'] == 30  # active profile still projected
+
+
 def test_validate_camera_settings_auto_enables_solar_with_location(monkeypatch, pv):
     from app.utils import normalize_bool_setting as real_bool
     _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok',

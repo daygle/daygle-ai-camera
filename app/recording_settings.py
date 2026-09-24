@@ -207,10 +207,50 @@ def normalize_camera_detection_profiles(
     return result
 
 
+def normalize_camera_profiles_with_legacy(
+    raw_profiles: Any,
+    legacy_settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Normalize profiles, letting flat overrides seed only *missing* modes.
+
+    ``normalize_camera_detection_profiles`` merges the flat ``motion_*`` /
+    performance overrides under **every** mode dict. That is correct for a
+    legacy row (flat overrides only, no ``day``/``night`` dicts yet): the
+    flats seed both profiles, preserving pre-profile behaviour.
+
+    It is wrong for a row that already stores profile dicts. There the
+    camera's flat keys are only the *projection of the previously active
+    profile* (see ``apply_active_camera_detection_profile``), so merging them
+    under a partial dict silently refills fields the operator cleared back to
+    "Global Default" - with the *other* profile's values. That refill fired
+    on every save (``validate_camera_settings``), on every read
+    (``apply_active_camera_detection_profile``) and from the profile monitor's
+    persist, which is why profile edits looked like they reverted.
+
+    Rule: rows without profile dicts keep the legacy migration; rows with
+    profile dicts treat them as authoritative, using the flats only to seed a
+    mode dict that is absent entirely (partial/older writes).
+    """
+    raw = raw_profiles if isinstance(raw_profiles, dict) else {}
+    legacy = legacy_settings if isinstance(legacy_settings, dict) else {}
+    has_mode = any(isinstance(raw.get(mode), dict) for mode in _CAMERA_MOTION_PROFILE_MODES)
+    if not has_mode:
+        return normalize_camera_detection_profiles(raw, legacy)
+    seeded = dict(raw)
+    for mode in _CAMERA_MOTION_PROFILE_MODES:
+        if not isinstance(seeded.get(mode), dict):
+            seeded[mode] = {
+                key: value for key, value in legacy.items()
+                if key in CAMERA_MOTION_PROFILE_FIELDS and value is not None
+            }
+    return normalize_camera_detection_profiles(seeded, {})
+
+
 def apply_active_camera_detection_profile(settings: dict[str, Any]) -> dict[str, Any]:
     """Normalize profiles and project the selected profile onto legacy runtime keys."""
-    legacy = dict(settings)
-    profiles = normalize_camera_detection_profiles(settings.get('detection_profiles'), legacy)
+    profiles = normalize_camera_profiles_with_legacy(
+        settings.get('detection_profiles'), dict(settings),
+    )
     for key in CAMERA_MOTION_PROFILE_FIELDS:
         settings.pop(key, None)
     settings['detection_profiles'] = profiles

@@ -21,7 +21,7 @@ from app.config_facades import effective_cameras_config
 from app.ptz import probe_onvif_day_night
 from app.recording_settings import (
     apply_active_camera_detection_profile,
-    normalize_camera_detection_profiles,
+    normalize_camera_profiles_with_legacy,
 )
 
 logger = logging.getLogger('daygle.ai')
@@ -239,7 +239,7 @@ def poll_camera_profiles() -> None:
         camera_id = str(camera.get('id') or '')
         if not camera_id:
             continue
-        profiles = normalize_camera_detection_profiles(
+        profiles = normalize_camera_profiles_with_legacy(
             camera.get('detection_profiles'), camera,
         )
         solar_error = None
@@ -316,7 +316,7 @@ def poll_camera_profiles() -> None:
             decision = changed.pop(str(camera.get('id') or ''), None)
             if decision is None:
                 continue
-            current_profiles = normalize_camera_detection_profiles(
+            current_profiles = normalize_camera_profiles_with_legacy(
                 camera.get('detection_profiles'), camera,
             )
             if str(current_profiles.get('source') or 'manual') != decision['source']:

@@ -247,6 +247,55 @@ def test_apply_active_camera_detection_profile_projects_selected_values(rs):
     assert out['detection_profiles']['active'] == 'night'
 
 
+def test_normalize_camera_profiles_with_legacy_does_not_refill_cleared_fields(rs):
+    """Rows that already store profile dicts are authoritative.
+
+    The camera's flat ``motion_*`` keys are only the projection of the
+    previously ACTIVE profile (see ``apply_active_camera_detection_profile``).
+    Merging them under every mode dict -- which is what the plain normalizer
+    does for legacy rows -- refills any field the operator cleared back to
+    "Global Default" with the OTHER profile's value, on every save/read/poll.
+    That is the Cameras-page "my profile settings revert" bug.
+    """
+    current = {
+        # Flat projection of the active day profile.
+        'motion_pixel_threshold': 30,
+        'motion_algorithm': 'mog2',
+        'detection_profiles': {
+            'active': 'day',
+            'day': {'motion_pixel_threshold': 30, 'motion_algorithm': 'mog2'},
+            # Night's threshold was cleared to Global Default, so the key is
+            # absent from the stored profile rather than present-as-null.
+            'night': {'motion_gate_fraction': 0.25},
+        },
+    }
+    out = rs.normalize_camera_profiles_with_legacy(current['detection_profiles'], current)
+    assert out['day'] == {'motion_pixel_threshold': 30, 'motion_algorithm': 'mog2'}
+    assert out['night'] == {'motion_gate_fraction': 0.25}
+    assert 'motion_pixel_threshold' not in out['night']
+
+    # Round trip: applying the active profile must not re-seed night either.
+    settings = dict(current)
+    rs.apply_active_camera_detection_profile(settings)
+    assert settings['detection_profiles']['night'] == {'motion_gate_fraction': 0.25}
+    assert settings['motion_pixel_threshold'] == 30
+
+
+def test_normalize_camera_profiles_with_legacy_still_migrates_legacy_rows(rs):
+    """A row with no profile dicts keeps the old flat-seeds-both-modes
+    migration, and a mode that is absent entirely is still seeded."""
+    legacy = {'motion_pixel_threshold': 88, 'motion_algorithm': 'diff'}
+    out = rs.normalize_camera_profiles_with_legacy(None, legacy)
+    assert out['day'] == out['night'] == legacy
+
+    partial = {'active': 'night', 'night': {'motion_pixel_threshold': 90}}
+    out_partial = rs.normalize_camera_profiles_with_legacy(
+        partial, {'motion_pixel_threshold': 44},
+    )
+    assert out_partial['night']['motion_pixel_threshold'] == 90
+    assert out_partial['day']['motion_pixel_threshold'] == 44
+
+
 # -- normalize_camera_ptz_settings --------------------------------------
 
 def test_normalize_camera_ptz_settings_defaults_when_input_not_dict(rs):
