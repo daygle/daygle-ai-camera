@@ -122,7 +122,6 @@ from app.config_facades import (
 from app.recording_settings import (
     _migrate_legacy_camera_motion,
     apply_active_camera_detection_profile,
-    normalize_camera_detection_profiles,
     normalize_camera_profiles_with_legacy,
     normalize_camera_ptz_settings,
     normalize_camera_recording_settings,
