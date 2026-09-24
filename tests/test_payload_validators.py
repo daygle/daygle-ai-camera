@@ -653,7 +653,7 @@ def test_validate_camera_settings_keeps_day_and_night_preset_ids_independent(mon
     }, current=current)
 
     assert out['detection_profiles']['day_preset_id'] == 'fast-motion-day'
-    assert out['detection_profiles']['night_preset_id'] == 'maximum-recall'
+    assert out['detection_profiles']['night_preset_id'] == 'maximum-recall-night'
 
 
 def test_validate_camera_settings_does_not_refill_cleared_profile_field(monkeypatch, pv):
