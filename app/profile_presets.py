@@ -10,8 +10,9 @@ _PRESET_ID_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
 _MAX_PRESETS = 100
 _MAX_NAME_LENGTH = 80
 
-# Keep the shipped preset aligned with the Cameras page's cat suggestion. The
-# actual camera remains responsible for choosing Day/Night at runtime.
+# Shipped presets provide reusable defaults for either Day or Night. Cameras
+# can assign different presets to each side; the actual camera remains
+# responsible for choosing which profile is active at runtime.
 BUILTIN_PRESETS: tuple[dict[str, Any], ...] = (
     {
         'id': 'cat-small-animal',

@@ -13,13 +13,13 @@ test('camera profiles remain distinct day and night values', () => {
   assert.doesNotMatch(source, /const CAT_PROFILE_SUGGESTIONS = \{/);
   assert.match(source, /day: \{/);
   assert.match(source, /night: \{/);
-  assert.match(source, /applyPendingProfiles\(preset/);
+  assert.match(source, /applyPendingProfile\(mode, preset/);
 });
 
 test('cat profile shortcut is removed while reusable presets remain', () => {
   assert.doesNotMatch(source, /cat-profile-suggest-btn/);
   assert.doesNotMatch(source, /Suggest Cat Profiles/);
-  assert.match(source, /profile-apply-preset-btn/);
+  assert.match(source, /profile-apply-day-btn/);
   assert.match(source, /profile-save-preset-btn/);
 });
 
@@ -80,21 +80,24 @@ test('day and night profiles are edited in separate, always-visible sections', (
   assert.match(source, /mode \+ '_' \+ profileFieldName\(key\)/);
 });
 
-test('a preset can be applied to the day slot, the night slot, or both', () => {
+test('day and night select and apply presets independently', () => {
+  assert.match(source, /name="profile_day_preset"/);
+  assert.match(source, /name="profile_night_preset"/);
   assert.match(source, /profile-apply-day-btn/);
   assert.match(source, /profile-apply-night-btn/);
-  assert.match(source, /profile-apply-preset-btn/);
-  assert.match(source, /requestApplyPreset\(\['day'\]\)/);
-  assert.match(source, /requestApplyPreset\(\['night'\]\)/);
-  assert.match(source, /applyPendingProfiles\(preset, [^\n]*modes\)/);
+  assert.match(source, /requestApplyPreset\('day'\)/);
+  assert.match(source, /requestApplyPreset\('night'\)/);
+  assert.match(source, /day_preset_id: dayPresetId/);
+  assert.match(source, /night_preset_id: nightPresetId/);
+  assert.doesNotMatch(source, /Apply to Both/);
 });
 
-test('camera editor exposes reusable preset lifecycle actions', () => {
-  assert.match(source, /profile_preset/);
-  assert.match(source, /profile-apply-preset-btn/);
+test('camera editor exposes reusable preset lifecycle actions per profile', () => {
   assert.match(source, /profile-save-preset-btn/);
-  assert.match(source, /profile-update-preset-btn/);
-  assert.match(source, /profile-delete-preset-btn/);
+  assert.match(source, /profile-update-day-preset-btn/);
+  assert.match(source, /profile-update-night-preset-btn/);
+  assert.match(source, /profile-delete-day-preset-btn/);
+  assert.match(source, /profile-delete-night-preset-btn/);
   assert.match(source, /api\('\/api\/camera-profile-presets'/);
   assert.match(source, /api\('\/api\/camera-profile-presets\/'/);
 });

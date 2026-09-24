@@ -46,12 +46,15 @@ def test_recall_profiles_do_not_add_confirmation_latency():
     for reduced inference work and noise resistance.
     """
     for preset in list_presets(None):
-        if preset['id'] in {'low-cpu', 'cat-small-animal'}:
+        if preset['id'] == 'low-cpu':
             continue
-        assert preset['day']['detection_confirm_frames'] == 1
-        assert preset['day']['detection_confirm_window'] == 1
-        assert preset['night']['detection_confirm_frames'] == 1
-        assert preset['night']['detection_confirm_window'] == 1
+        for mode in ('day', 'night'):
+            if not preset[mode]:
+                continue
+            if preset['id'] == 'cat-small-animal':
+                continue
+            assert preset[mode]['detection_confirm_frames'] == 1
+            assert preset[mode]['detection_confirm_window'] == 1
 
 
 def test_create_preset_slugifies_and_avoids_duplicate_ids():
@@ -72,7 +75,7 @@ def test_custom_presets_exclude_builtins_and_invalid_entries():
     ]
     custom = custom_presets(raw)
     assert [preset['id'] for preset in custom] == ['my-preset']
-    assert list_presets(raw)[0]['name'] == 'Cat / Small Animal'
+    assert get_preset(raw, 'cat-small-animal')['name'] == 'Cat / Small Animal'
 
 
 def test_normalize_preset_rejects_bad_names_and_ids():

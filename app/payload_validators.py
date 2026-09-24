@@ -446,7 +446,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
         raw_profiles = dict(current_profiles)
         raw_profiles.update({
             key: value for key, value in payload_profiles.items()
-            if key in {'active', 'source', 'day_start', 'night_start', 'preset_id'}
+            if key in {'active', 'source', 'day_start', 'night_start', 'preset_id', 'day_preset_id', 'night_preset_id'}
         })
         for _profile_mode in ('day', 'night'):
             if isinstance(payload_profiles.get(_profile_mode), dict):

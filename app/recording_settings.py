@@ -179,9 +179,22 @@ def normalize_camera_detection_profiles(
         automation_source = 'manual'
     day_start = normalize_hhmm(raw.get('day_start')) or '07:00'
     night_start = normalize_hhmm(raw.get('night_start')) or '19:00'
-    preset_id = str(raw.get('preset_id') or '').strip().lower()
-    if not preset_id or len(preset_id) > 64 or any(character not in 'abcdefghijklmnopqrstuvwxyz0123456789_-' for character in preset_id):
-        preset_id = None
+    def _preset_id(value: Any) -> str | None:
+        resolved = str(value or '').strip().lower()
+        if not resolved or len(resolved) > 64 or any(character not in 'abcdefghijklmnopqrstuvwxyz0123456789_-' for character in resolved):
+            return None
+        return resolved
+
+    # Day and Night remember different reusable presets. Migrate the former
+    # combined ``preset_id`` to both slots only when the independent ids are
+    # absent, preserving existing selections without forcing either side to a
+    # newly added built-in.
+    day_preset_id = _preset_id(raw.get('day_preset_id'))
+    night_preset_id = _preset_id(raw.get('night_preset_id'))
+    legacy_preset_id = _preset_id(raw.get('preset_id'))
+    if legacy_preset_id:
+        day_preset_id = day_preset_id or legacy_preset_id
+        night_preset_id = night_preset_id or legacy_preset_id
     has_profiles = any(isinstance(raw.get(mode), dict) for mode in _CAMERA_MOTION_PROFILE_MODES)
     profiles: dict[str, dict[str, Any]] = {}
     for mode in _CAMERA_MOTION_PROFILE_MODES:
@@ -202,8 +215,10 @@ def normalize_camera_detection_profiles(
         'day': profiles['day'],
         'night': profiles['night'],
     }
-    if preset_id:
-        result['preset_id'] = preset_id
+    if day_preset_id:
+        result['day_preset_id'] = day_preset_id
+    if night_preset_id:
+        result['night_preset_id'] = night_preset_id
     return result
 
 

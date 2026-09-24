@@ -232,6 +232,20 @@ def test_normalize_camera_detection_profiles_rejects_invalid_values_and_keeps_ac
     assert out['night'] == {'motion_gate_fraction': 0.25, 'motion_denoise': False}
 
 
+def test_normalize_camera_detection_profiles_keeps_preset_ids_independent(rs):
+    out = rs.normalize_camera_detection_profiles({
+        'day_preset_id': 'balanced',
+        'night_preset_id': 'night-ir',
+    })
+    assert out['day_preset_id'] == 'balanced'
+    assert out['night_preset_id'] == 'night-ir'
+    assert 'preset_id' not in out
+
+    migrated = rs.normalize_camera_detection_profiles({'preset_id': 'balanced'})
+    assert migrated['day_preset_id'] == 'balanced'
+    assert migrated['night_preset_id'] == 'balanced'
+
+
 def test_apply_active_camera_detection_profile_projects_selected_values(rs):
     settings = {
         'motion_pixel_threshold': 30,
