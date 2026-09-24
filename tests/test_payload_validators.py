@@ -652,7 +652,7 @@ def test_validate_camera_settings_keeps_day_and_night_preset_ids_independent(mon
         'detection_profiles': {'day_preset_id': 'fast-motion'},
     }, current=current)
 
-    assert out['detection_profiles']['day_preset_id'] == 'fast-motion'
+    assert out['detection_profiles']['day_preset_id'] == 'fast-motion-day'
     assert out['detection_profiles']['night_preset_id'] == 'maximum-recall'
 
 
