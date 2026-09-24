@@ -45,7 +45,7 @@ from app.config_facades import (
 )
 from app.database import AUDIT_LOG_IMMUTABLE_TRIGGERS
 from app.label_groups import refresh_label_groups
-from app.recording_files import delete_recording_files
+from app.recording_files import delete_recording_files, delete_snapshot_files
 from app.media_utils import safe_storage_path
 from app.utils import normalize_bool_setting
 
@@ -682,7 +682,15 @@ def refresh_runtime_after_database_restore() -> None:
 def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
     recording_settings = effective_recording_config()
     if not force and (not normalize_bool_setting(recording_settings.get('auto_purge_enabled', True), True)):
-        return {'purged': 0, 'files_deleted': 0, 'bytes_deleted': 0, 'recordings': []}
+        return {
+            'purged': 0,
+            'files_deleted': 0,
+            'bytes_deleted': 0,
+            'snapshots_purged': 0,
+            'snapshot_files_deleted': 0,
+            'snapshot_bytes_deleted': 0,
+            'recordings': [],
+        }
     retention_days = int(recording_settings.get('retention_days', 14))
     max_storage_gb = int(recording_settings.get('max_storage_gb', 20))
     # ``older_than`` is already in canonical UTC ``+00:00`` form from
@@ -706,7 +714,17 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
             bytes_deleted += file_path.stat().st_size
             files_deleted += 1
     delete_recording_files(purged)
-    return {'purged': len(purged), 'files_deleted': files_deleted, 'bytes_deleted': bytes_deleted, 'recordings': purged}
+    expired_snapshots = _state.database.purge_snapshots_older_than(older_than)
+    snapshot_files_deleted, snapshot_bytes_deleted = delete_snapshot_files(expired_snapshots)
+    return {
+        'purged': len(purged),
+        'files_deleted': files_deleted,
+        'bytes_deleted': bytes_deleted,
+        'snapshots_purged': len(expired_snapshots),
+        'snapshot_files_deleted': snapshot_files_deleted,
+        'snapshot_bytes_deleted': snapshot_bytes_deleted,
+        'recordings': purged,
+    }
 
 
 def purge_camera_diagnostics_by_policy() -> int:

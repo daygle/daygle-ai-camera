@@ -296,6 +296,43 @@ def test_list_snapshots_applies_recording_scoping(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_retention_purge_deletes_expired_snapshot_but_keeps_event(tmp_path, monkeypatch):
+    """The recording retention purge removes expired snapshot files and detaches
+    them from events, while leaving the event rows available for history.
+    """
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        csrf = _login(admin)
+        old_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'expired.png')
+        recent_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'current.png')
+        old_id = main.database.add_event(
+            created_at='2000-01-01T00:00:00+00:00', source='motion',
+            snapshot_path=old_path, detections=[],
+        )
+        recent_id = main.database.add_event(
+            created_at=main.utc_now(), source='motion', snapshot_path=recent_path, detections=[],
+        )
+
+        status, _headers, purged = admin.request(
+            '/api/recordings/purge', method='POST', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert purged['snapshots_purged'] == 1
+        assert purged['snapshot_files_deleted'] == 1
+        assert not Path(old_path).exists()
+        assert Path(recent_path).exists()
+        assert main.database.get_event(old_id)['has_snapshot'] is False
+        assert main.database.get_event(recent_id)['has_snapshot'] is True
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_snapshots_page_serves_for_authenticated_user(tmp_path, monkeypatch):
     """GET /snapshots renders the page for any authenticated user."""
     app, _database_path = _load_app(tmp_path, monkeypatch)

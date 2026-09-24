@@ -50,7 +50,7 @@ Filter by camera ID, event type, or severity when investigating a specific strea
 **Settings** (`/settings`) is organised into five tabs:
 
 - **Detection & Live** - live refresh rates, detection interval, event merge window, background detection, and (under *Advanced Motion Tuning*) the low-level motion-gate values documented in [motion-detection.md](motion-detection.md).
-- **Recording** - event clip timing (pre/post-event, keep-recording-after-motion, max clip length), retention/auto-purge, and storage directories.
+- **Recording** - event clip timing (pre/post-event, keep-recording-after-motion, max clip length), retention/auto-purge, and storage directories. Retention purges expired recording media and detaches/deletes expired snapshot images while keeping their event history rows.
 - **Zones** - draw zones directly in the zone editor with **Draw polygon** or **Full Frame**, use the per-zone **Shape** control to convert areas between full frame and polygon, manage zone rules, and use the per-zone visibility controls to show or hide overlays while configuring the scene.
 - **Notifications** - push (ntfy), camera offline alerts, and email (SMTP) delivery, each with a test action.
 - **System** - software updates, Cloudflare Tunnel, database backup/restore, login security, and the Danger Zone. Software Updates appears above Cloudflare Tunnel; the tunnel card shows whether the service is running, stopped, unconfigured, or needs attention.
@@ -77,7 +77,7 @@ Open **Audit Log** (`/audit`) to review admin actions, including user creation, 
 
 ## Events and recordings
 
-Use **Events** (`/events`) as the single activity feed for object, motion, and sound detections. Filter by event type and time range. Alerted events show a notification badge; when available, **Snapshot** opens an annotated still image and **Recording** opens the linked clip.
+Use **Events** (`/events`) as the single activity feed for object, motion, and sound detections. Filter by event type and time range. Alerted events show a notification badge; when available, **Snapshot** opens an annotated still image and **Recording** opens the linked clip. The recording retention/auto-purge policy also removes expired snapshot images and detaches them from their event rows; the event history remains available without a snapshot.
 
 A single scene can produce multiple event rows in one recording. Use **Recordings** (`/recordings`) for clip search, playback, download, and deletion, or **Recordings Timeline** (`/recordings/timeline`) to view clips across a day. The inline player can show object overlays and detection details.
 

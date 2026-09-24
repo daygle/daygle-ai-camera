@@ -353,6 +353,37 @@ class EventsMixin:
             )
             return cursor.rowcount > 0
 
+    def purge_snapshots_older_than(self, older_than: str) -> list[dict[str, Any]]:
+        """Detach snapshots belonging to events older than the retention cutoff.
+
+        The caller owns the configured media files and deletes the returned
+        artifacts from disk. Event rows, detections, and linked recordings stay
+        intact; only the snapshot/thumbnail path columns are cleared.
+        """
+        older_than = _normalize_iso_to_utc(older_than) or older_than
+        with self.connect() as db:
+            rows = [dict(row) for row in db.execute(
+                """
+                SELECT * FROM events
+                WHERE created_at < ?
+                  AND (
+                    (snapshot_path IS NOT NULL AND snapshot_path != '')
+                    OR (thumbnail_path IS NOT NULL AND thumbnail_path != '')
+                  )
+                ORDER BY created_at ASC, id ASC
+                """,
+                (older_than,),
+            ).fetchall()]
+            if rows:
+                placeholders = ','.join('?' * len(rows))
+                ids = [int(row['id']) for row in rows]
+                db.execute(
+                    f"UPDATE events SET snapshot_path = NULL, thumbnail_path = NULL "
+                    f"WHERE id IN ({placeholders})",
+                    ids,
+                )
+            return rows
+
     def get_event(self, event_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()

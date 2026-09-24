@@ -18,6 +18,31 @@ def recording_track_sidecar_path(file_path: Path) -> Path:
     return file_path.with_name(f'{file_path.stem}.track.json')
 
 
+def delete_snapshot_files(events: list[dict[str, Any]]) -> tuple[int, int]:
+    """Delete event snapshot artifacts inside configured snapshot storage.
+
+    Returns ``(files_deleted, bytes_deleted)``. Invalid or out-of-tree paths are
+    skipped, matching the safety boundary used for recording media cleanup.
+    """
+    files_deleted = 0
+    bytes_deleted = 0
+    seen_paths: set[Path] = set()
+    for event in events:
+        for artifact_value in (event.get('snapshot_path'), event.get('thumbnail_path')):
+            artifact = safe_storage_path(artifact_value, roots=('snapshots_dir',))
+            if artifact is None or artifact in seen_paths:
+                continue
+            seen_paths.add(artifact)
+            if artifact.exists() and artifact.is_file():
+                try:
+                    bytes_deleted += artifact.stat().st_size
+                    artifact.unlink(missing_ok=True)
+                    files_deleted += 1
+                except OSError:
+                    continue
+    return files_deleted, bytes_deleted
+
+
 def delete_recording_files(
     recordings: list[dict[str, Any]],
     *,
