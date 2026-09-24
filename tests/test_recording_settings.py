@@ -241,9 +241,16 @@ def test_normalize_camera_detection_profiles_keeps_preset_ids_independent(rs):
     assert out['night_preset_id'] == 'night-ir-night'
     assert 'preset_id' not in out
 
-    migrated = rs.normalize_camera_detection_profiles({'preset_id': 'balanced'})
-    assert migrated['day_preset_id'] == 'balanced-day'
-    assert migrated['night_preset_id'] == 'balanced-night'
+    legacy = rs.normalize_camera_detection_profiles({'preset_id': 'balanced'})
+    assert 'day_preset_id' not in legacy
+    assert 'night_preset_id' not in legacy
+
+    old_independent = rs.normalize_camera_detection_profiles({
+        'day_preset_id': 'balanced',
+        'night_preset_id': 'night-ir',
+    })
+    assert old_independent['day_preset_id'] == 'balanced-day'
+    assert old_independent['night_preset_id'] == 'night-ir-night'
 
 
 def test_apply_active_camera_detection_profile_projects_selected_values(rs):

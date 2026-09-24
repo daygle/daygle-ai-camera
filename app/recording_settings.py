@@ -186,9 +186,10 @@ def normalize_camera_detection_profiles(
             return None
         return resolved
 
-    # Day and Night remember different reusable presets. Migrate the former
-    # combined ``preset_id`` to the mode-specific ids used by the flat preset
-    # catalog, while preserving any already-migrated side independently.
+    # Day and Night remember different reusable presets. Explicitly stored
+    # independent ids are normalized to the mode-specific catalog below.
+    # A legacy shared ``preset_id`` is intentionally not expanded: it is
+    # ambiguous which side the operator intended, so it must be selected again.
     def _mode_preset_id(value: Any, mode: str) -> str | None:
         resolved = _preset_id(value)
         if not resolved or resolved.endswith(f'-{mode}') or re.search(rf'-{mode}-\d+$', resolved):
@@ -201,14 +202,6 @@ def normalize_camera_detection_profiles(
 
     day_preset_id = _mode_preset_id(raw.get('day_preset_id'), 'day')
     night_preset_id = _mode_preset_id(raw.get('night_preset_id'), 'night')
-    legacy_preset_id = _preset_id(raw.get('preset_id'))
-    if legacy_preset_id:
-        for mode in ('day', 'night'):
-            migrated_id = _mode_preset_id(legacy_preset_id, mode)
-            if mode == 'day':
-                day_preset_id = day_preset_id or migrated_id
-            else:
-                night_preset_id = night_preset_id or migrated_id
     has_profiles = any(isinstance(raw.get(mode), dict) for mode in _CAMERA_MOTION_PROFILE_MODES)
     profiles: dict[str, dict[str, Any]] = {}
     for mode in _CAMERA_MOTION_PROFILE_MODES:

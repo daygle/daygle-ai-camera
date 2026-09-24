@@ -707,9 +707,9 @@ def test_validate_camera_settings_auto_enables_solar_with_location(monkeypatch, 
         },
     })
     assert out['detection_profiles']['source'] == 'solar'
-    # Legacy combined selections migrate to both independent slots.
-    assert out['detection_profiles']['day_preset_id'] == 'cat-small-animal-day'
-    assert out['detection_profiles']['night_preset_id'] == 'cat-small-animal-night'
+    # Legacy shared assignments are cleared so Day and Night remain explicit.
+    assert 'day_preset_id' not in out['detection_profiles']
+    assert 'night_preset_id' not in out['detection_profiles']
 
 
 def test_validate_camera_settings_leaves_solar_when_location_is_cleared(monkeypatch, pv):
