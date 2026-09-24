@@ -605,3 +605,50 @@ def test_h264_mp4_with_unsupported_audio_is_transcoded_for_playback(tmp_path, mo
     assert stream_path == _mu.recording_playback_sidecar_path(source_path)
     assert stream_path.exists()
     assert transcoded == [(source_path, stream_path)]
+
+
+def test_hevc_mp4_is_preserved_but_uses_h264_playback_sidecar(tmp_path, monkeypatch):
+    import app.media_utils as _media_utils
+
+    source_path = tmp_path / 'source.mp4'
+    source_path.write_bytes(b'hevc-video')
+    transcoded = []
+
+    def fake_transcode(input_path, output_path):
+        transcoded.append((input_path, output_path))
+        output_path.write_bytes(b'browser-h264-video')
+
+    monkeypatch.setattr(_media_utils, 'probe_video_codec', lambda _path: 'hevc')
+    monkeypatch.setattr(_media_utils, 'probe_audio_codec', lambda _path: 'aac')
+    monkeypatch.setattr(_media_utils, 'transcode_recording_to_mp4', fake_transcode)
+
+    stream_path = _media_utils.recording_stream_path(source_path)
+
+    assert stream_path == _media_utils.recording_playback_sidecar_path(source_path)
+    assert stream_path.exists()
+    assert transcoded == [(source_path, stream_path)]
+    assert _media_utils.is_hevc_codec('hevc')
+    assert _media_utils.is_hevc_codec('h265+')
+    assert _media_utils.normalize_video_codec('h265+') == 'hevc'
+    assert _media_utils.video_codec_label('h265+') == 'H.265/HEVC'
+
+
+def test_ffmpeg_decoder_availability_handles_h264_and_hevc(monkeypatch):
+    import app.media_utils as _media_utils
+
+    monkeypatch.setattr(_media_utils, '_FFMPEG', '/usr/bin/ffmpeg')
+
+    def fake_run(command, **_kwargs):
+        assert command == ['/usr/bin/ffmpeg', '-hide_banner', '-decoders']
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=' V.....D h264 ...\n VFS..D hevc ...\n',
+            stderr='',
+        )
+
+    monkeypatch.setattr(_media_utils.subprocess, 'run', fake_run)
+
+    assert _media_utils.ffmpeg_decoder_available('h264') is True
+    assert _media_utils.ffmpeg_decoder_available('h265+') is True
+    assert _media_utils.ffmpeg_decoder_available('vp9') is None

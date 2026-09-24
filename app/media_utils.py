@@ -10,6 +10,7 @@ Exported symbols:
 * ``probe_video_codec`` - first video-stream codec (e.g. ``'h264'``)
 * ``probe_audio_codec`` - first audio-stream codec (e.g. ``'aac'``)
 * ``probe_stream_codec`` - low-level codec probe via ``ffprobe``
+* ``ffmpeg_decoder_available`` - runtime decoder capability check
 * ``mp4_is_browser_playable`` - True when H.264 + compatible audio
 * ``probe_video_duration`` - clip duration in seconds
 * ``transcode_recording_to_mp4`` - convert a clip to browser-playable MP4
@@ -164,6 +165,78 @@ def probe_audio_codec(file_path: Path) -> str | None:
     return probe_stream_codec(file_path, 'a:0')
 
 
+# FFmpeg normally reports both H.265 and camera-vendor H.265+ streams as
+# ``hevc``. Keep the aliases here so callers can also handle metadata supplied
+# by an NVR/camera as ``h265`` or ``h265+`` without treating them as unrelated
+# codecs.
+H264_CODECS = frozenset({'h264', 'avc', 'avc1'})
+HEVC_CODECS = frozenset({'hevc', 'h265', 'h265+', 'hev1', 'hvc1'})
+
+
+def normalize_video_codec(codec: str | None) -> str | None:
+    """Return the stable codec family name for a video codec string."""
+    value = str(codec or '').strip().lower()
+    if not value:
+        return None
+    if value in H264_CODECS:
+        return 'h264'
+    if value in HEVC_CODECS:
+        return 'hevc'
+    return value
+
+
+def is_h264_codec(codec: str | None) -> bool:
+    return normalize_video_codec(codec) == 'h264'
+
+
+def is_hevc_codec(codec: str | None) -> bool:
+    return normalize_video_codec(codec) == 'hevc'
+
+
+def video_codec_label(codec: str | None) -> str | None:
+    """Return a stable human-readable label for H.264/H.265 codecs."""
+    normalized = normalize_video_codec(codec)
+    if normalized == 'h264':
+        return 'H.264/AVC'
+    if normalized == 'hevc':
+        return 'H.265/HEVC'
+    return str(codec).strip() if codec else None
+
+
+def ffmpeg_decoder_available(codec: str | None) -> bool | None:
+    """Return whether the runtime FFmpeg advertises a decoder for ``codec``.
+
+    ``None`` means the runtime capability could not be determined (for example,
+    FFmpeg is not installed). A false result is useful before starting a
+    camera worker: H.265+ is usually reported as ``hevc`` and needs the HEVC
+    decoder, while H.264 needs the H.264 decoder.
+    """
+    normalized = normalize_video_codec(codec)
+    if normalized not in {'h264', 'hevc'}:
+        return None
+    ffmpeg = _FFMPEG or shutil.which('ffmpeg')
+    if not ffmpeg:
+        return None
+    try:
+        result = subprocess.run(
+            [ffmpeg, '-hide_banner', '-decoders'],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    decoder = normalized
+    for line in (result.stdout or '').splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[1] == decoder:
+            return True
+    return False
+
+
 def probe_stream_codec(file_path: Path, stream_selector: str) -> str | None:
     if not file_path.exists() or file_path.stat().st_size <= 0:
         return None
@@ -182,7 +255,10 @@ def probe_stream_codec(file_path: Path, stream_selector: str) -> str | None:
 
 
 def mp4_is_browser_playable(file_path: Path) -> bool:
-    if probe_video_codec(file_path) != 'h264':
+    # HEVC/H.265+ recordings are intentionally not treated as directly
+    # browser-playable. ``recording_stream_path`` will create the H.264
+    # sidecar instead, while the original recording can remain stream-copied.
+    if not is_h264_codec(probe_video_codec(file_path)):
         return False
     audio_codec = probe_audio_codec(file_path)
     return audio_codec in {None, '', 'aac', 'mp3'}

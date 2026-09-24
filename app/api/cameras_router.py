@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.camera_config import _migrate_camera_id, _redact_camera, normalize_camera_id
 from app.config_facades import effective_cameras_config, get_camera_config
+from app.media_utils import ffmpeg_decoder_available, is_hevc_codec, video_codec_label
 from app.utils import build_stream_url
 from app.state import _camera_health_lock, _camera_health_state
 import app.state as _state
@@ -256,13 +258,41 @@ async def test_camera_connection(request: Request, recording_service=Depends(get
     if not ffprobe:
         raise HTTPException(status_code=503, detail='ffprobe is not installed - cannot test connection.')
     command = [ffprobe, '-v', 'quiet', '-rtsp_transport', 'tcp', '-i', stream_url,
-               '-show_entries', 'stream=codec_type', '-of', 'json']
+               '-show_entries', 'stream=codec_type,codec_name', '-of', 'json']
     try:
         result = await run_in_threadpool(
             subprocess.run, command, capture_output=True, timeout=8, check=False
         )
         if result.returncode == 0:
-            return {'online': True, 'message': 'Stream is reachable.'}
+            video_codec = None
+            try:
+                streams = (json.loads(result.stdout or '{}') or {}).get('streams', [])
+                video_stream = next((stream for stream in streams if stream.get('codec_type') == 'video'), {})
+                video_codec = str(video_stream.get('codec_name') or '').strip().lower() or None
+            except (TypeError, ValueError, json.JSONDecodeError):
+                # A reachable stream is still useful even if a camera returns
+                # unusual/incomplete ffprobe JSON.
+                video_codec = None
+            codec_label = video_codec_label(video_codec)
+            decoder_available = (
+                await run_in_threadpool(ffmpeg_decoder_available, video_codec)
+                if video_codec else None
+            )
+            message = 'Stream is reachable.'
+            if codec_label:
+                message = f'Stream is reachable ({codec_label}).'
+            if is_hevc_codec(video_codec) and decoder_available is False:
+                message = (
+                    f'Stream is reachable ({codec_label}), but the installed FFmpeg does not '
+                    'advertise an HEVC decoder. Recording may fail until FFmpeg is updated.'
+                )
+            return {
+                'online': True,
+                'message': message,
+                'video_codec': video_codec,
+                'video_codec_label': codec_label,
+                'hevc_decode_supported': decoder_available if is_hevc_codec(video_codec) else None,
+            }
         stderr = recording_service.redact_stream_credentials(result.stderr.decode('utf-8', errors='replace').strip())
         return {'online': False, 'message': f'Stream unreachable: {stderr[:300]}' if stderr else 'Stream unreachable.'}
     except subprocess.TimeoutExpired:

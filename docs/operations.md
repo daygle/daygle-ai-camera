@@ -31,7 +31,13 @@ seconds, so `docker ps` reports `healthy` / `unhealthy` based on it.
 
 Use **Cameras** (`/cameras`) to review each configured camera and the camera health summary. The health endpoint tracks online and offline state so administrators can quickly identify streams that need attention.
 
-Use the camera connection test before saving a new stream URL or ONVIF configuration. If a camera supports PTZ, enable PTZ in the camera editor and verify the protocol, port, address, and speed before sending movement commands.
+Use the camera connection test before saving a new stream URL or ONVIF configuration. The test reports the detected video codec and checks whether the installed FFmpeg advertises the matching decoder. If a camera supports PTZ, enable PTZ in the camera editor and verify the protocol, port, address, and speed before sending movement commands.
+
+### H.264, H.265, and H.265+ streams
+
+Daygle accepts H.264/AVC and H.265/HEVC RTSP streams. Camera-vendor H.265+ streams are handled as HEVC when FFmpeg can decode the resulting bitstream; H.265+ is not a separate codec standard. The shared recording workers stream-copy the camera codec into prebuffer and continuous-recording segments, while browser playback creates an H.264 sidecar for HEVC recordings because HEVC support in browsers is inconsistent.
+
+For reliable AI detection, use the H.264 detection/ingest stream and reserve H.265 or H.265+ for the main/recording stream. If the connection test reports that FFmpeg lacks the HEVC decoder, update the FFmpeg package or choose standard H.265/H.264 output on the camera. A proprietary H.265+ bitstream that FFmpeg cannot decode cannot be made compatible by the application.
 
 ## Camera log
 

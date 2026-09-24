@@ -680,7 +680,7 @@ function wireEditFormHandlers(index) {
       try {
         var res = await api('/api/cameras/test-connection', { method: 'POST', body: JSON.stringify(payload) });
         if (resultEl) {
-          resultEl.textContent = res.online ? 'Connected' : (res.message || 'Unreachable');
+          resultEl.textContent = res.online ? (res.message || 'Connected') : (res.message || 'Unreachable');
           resultEl.style.color = res.online ? 'var(--color-success, #22c55e)' : 'var(--color-error, #ef4444)';
         }
       } catch (err) {
