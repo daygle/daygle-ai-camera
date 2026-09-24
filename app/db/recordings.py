@@ -431,7 +431,13 @@ class RecordingsMixin:
             db.execute("DELETE FROM recordings WHERE id = ?", (recording_id,))
             return dict(row)
 
-    def purge_recordings(self, *, older_than: str | None = None, max_storage_bytes: int | None = None) -> list[dict[str, Any]]:
+    def purge_recordings(
+        self,
+        *,
+        older_than: str | None = None,
+        max_storage_bytes: int | None = None,
+        _linked_event_ids: list[int] | None = None,
+    ) -> list[dict[str, Any]]:
         # Normalise the age cutoff to canonical UTC ``+00:00`` form so the
         # SQLite string comparison against row ``started_at`` values (which
         # are also canonical UTC ``+00:00`` after ``add_recording``'s
@@ -484,6 +490,20 @@ class RecordingsMixin:
             if not purge_ids:
                 return []
             rows = [row for row in candidates if int(row["id"]) in purge_ids]
+            if _linked_event_ids is not None:
+                placeholders = ','.join('?' * len(rows))
+                linked_rows = db.execute(
+                    f"""
+                    SELECT DISTINCT id FROM events
+                    WHERE recording_id IN ({placeholders})
+                       OR id IN (SELECT event_id FROM recordings WHERE id IN ({placeholders}))
+                       OR id IN (
+                           SELECT event_id FROM alert_history WHERE recording_id IN ({placeholders})
+                       )
+                    """,
+                    [rid for rid in purge_ids] * 3,
+                ).fetchall()
+                _linked_event_ids.extend(int(row['id']) for row in linked_rows)
             self._purge_recording_children(db, [int(row["id"]) for row in rows])
             db.executemany("DELETE FROM recordings WHERE id = ?", [(row["id"],) for row in rows])
             return rows

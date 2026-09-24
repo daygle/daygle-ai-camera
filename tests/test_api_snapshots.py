@@ -296,10 +296,8 @@ def test_list_snapshots_applies_recording_scoping(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
-def test_retention_purge_deletes_expired_snapshot_but_keeps_event(tmp_path, monkeypatch):
-    """The recording retention purge removes expired snapshot files and detaches
-    them from events, while leaving the event rows available for history.
-    """
+def test_retention_purge_deletes_event_when_recording_media_is_removed(tmp_path, monkeypatch):
+    """Retention removes an event and its snapshot when its only recording is purged."""
     app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
 
@@ -314,19 +312,36 @@ def test_retention_purge_deletes_expired_snapshot_but_keeps_event(tmp_path, monk
             created_at='2000-01-01T00:00:00+00:00', source='motion',
             snapshot_path=old_path, detections=[],
         )
+        old_recording_path = tmp_path / 'data' / 'recordings' / 'expired.mp4'
+        old_recording_path.parent.mkdir(parents=True, exist_ok=True)
+        old_recording_path.write_bytes(b'old media')
+        main.database.add_recording(
+            event_id=old_id, camera_id='front',
+            started_at='2000-01-01T00:00:00+00:00',
+            ended_at='2000-01-01T00:00:30+00:00', duration_seconds=30,
+            file_path=str(old_recording_path), thumbnail_path=None, source='camera',
+            created_at='2000-01-01T00:00:00+00:00', trigger_type='motion',
+            trigger_label=None,
+        )
         recent_id = main.database.add_event(
             created_at=main.utc_now(), source='motion', snapshot_path=recent_path, detections=[],
+        )
+        old_sound_id = main.database.add_event(
+            created_at='2000-01-01T00:00:00+00:00', source='sound',
+            snapshot_path=None, detections=[],
         )
 
         status, _headers, purged = admin.request(
             '/api/recordings/purge', method='POST', headers={'X-CSRF-Token': csrf},
         )
         assert status == 200
-        assert purged['snapshots_purged'] == 1
+        assert purged['events_purged'] == 2
         assert purged['snapshot_files_deleted'] == 1
         assert not Path(old_path).exists()
+        assert not old_recording_path.exists()
         assert Path(recent_path).exists()
-        assert main.database.get_event(old_id)['has_snapshot'] is False
+        assert main.database.get_event(old_id) is None
+        assert main.database.get_event(old_sound_id) is None
         assert main.database.get_event(recent_id)['has_snapshot'] is True
     finally:
         server.should_exit = True

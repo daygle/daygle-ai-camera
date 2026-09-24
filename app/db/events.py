@@ -353,36 +353,83 @@ class EventsMixin:
             )
             return cursor.rowcount > 0
 
-    def purge_snapshots_older_than(self, older_than: str) -> list[dict[str, Any]]:
-        """Detach snapshots belonging to events older than the retention cutoff.
+    def purge_events_without_recordings(self, event_ids: list[int]) -> list[dict[str, Any]]:
+        """Delete supplied events when no surviving recording still backs them."""
+        if not event_ids:
+            return []
+        placeholders = ','.join('?' * len(event_ids))
+        with self.connect() as db:
+            rows = db.execute(
+                f"""
+                SELECT e.*
+                FROM events e
+                WHERE e.id IN ({placeholders})
+                  AND NOT EXISTS (
+                      SELECT 1 FROM recordings r
+                      WHERE r.id = e.recording_id OR r.event_id = e.id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM alert_history ah
+                      JOIN recordings r ON r.id = ah.recording_id
+                      WHERE ah.event_id = e.id
+                  )
+                ORDER BY e.created_at ASC, e.id ASC
+                """,
+                [int(event_id) for event_id in event_ids],
+            ).fetchall()
+            if not rows:
+                return []
+            events = []
+            for row in rows:
+                event = dict(row)
+                event['metadata'] = json.loads(event.get('metadata') or '{}')
+                events.append(event)
+            purged_ids = [int(event['id']) for event in events]
+            purge_placeholders = ','.join('?' * len(purged_ids))
+            self._purge_event_children(db, purged_ids)
+            db.execute(f"DELETE FROM events WHERE id IN ({purge_placeholders})", purged_ids)
+            return events
 
-        The caller owns the configured media files and deletes the returned
-        artifacts from disk. Event rows, detections, and linked recordings stay
-        intact; only the snapshot/thumbnail path columns are cleared.
+    def purge_expired_events_without_recordings(self, older_than: str) -> list[dict[str, Any]]:
+        """Delete old events that no longer have any associated recording media.
+
+        This handles frameless sound events and snapshot-only events after the
+        corresponding recording rows have already been removed by retention.
         """
         older_than = _normalize_iso_to_utc(older_than) or older_than
         with self.connect() as db:
             rows = [dict(row) for row in db.execute(
                 """
-                SELECT * FROM events
-                WHERE created_at < ?
-                  AND (
-                    (snapshot_path IS NOT NULL AND snapshot_path != '')
-                    OR (thumbnail_path IS NOT NULL AND thumbnail_path != '')
+                SELECT e.*
+                FROM events e
+                WHERE e.created_at < ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM recordings r
+                      WHERE r.id = e.recording_id OR r.event_id = e.id
                   )
-                ORDER BY created_at ASC, id ASC
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM alert_history ah
+                      JOIN recordings r ON r.id = ah.recording_id
+                      WHERE ah.event_id = e.id
+                  )
+                ORDER BY e.created_at ASC, e.id ASC
                 """,
                 (older_than,),
             ).fetchall()]
-            if rows:
-                placeholders = ','.join('?' * len(rows))
-                ids = [int(row['id']) for row in rows]
-                db.execute(
-                    f"UPDATE events SET snapshot_path = NULL, thumbnail_path = NULL "
-                    f"WHERE id IN ({placeholders})",
-                    ids,
-                )
-            return rows
+            if not rows:
+                return []
+            events = []
+            for row in rows:
+                event = dict(row)
+                event['metadata'] = json.loads(event.get('metadata') or '{}')
+                events.append(event)
+            event_ids = [int(event['id']) for event in events]
+            placeholders = ','.join('?' * len(event_ids))
+            self._purge_event_children(db, event_ids)
+            db.execute(f"DELETE FROM events WHERE id IN ({placeholders})", event_ids)
+            return events
 
     def get_event(self, event_id: int) -> dict[str, Any] | None:
         with self.connect() as db:

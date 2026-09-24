@@ -686,7 +686,7 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
             'purged': 0,
             'files_deleted': 0,
             'bytes_deleted': 0,
-            'snapshots_purged': 0,
+            'events_purged': 0,
             'snapshot_files_deleted': 0,
             'snapshot_bytes_deleted': 0,
             'recordings': [],
@@ -705,7 +705,14 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
         (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
     )
     max_storage_bytes = max_storage_gb * 1024 * 1024 * 1024
-    purged = _state.database.purge_recordings(older_than=older_than, max_storage_bytes=max_storage_bytes)
+    # Capture linked events while the recording rows still exist. Events with
+    # another surviving recording are retained by the database cleanup below.
+    linked_event_ids: list[int] = []
+    purged = _state.database.purge_recordings(
+        older_than=older_than,
+        max_storage_bytes=max_storage_bytes,
+        _linked_event_ids=linked_event_ids,
+    )
     bytes_deleted = 0
     files_deleted = 0
     for recording in purged:
@@ -714,13 +721,19 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
             bytes_deleted += file_path.stat().st_size
             files_deleted += 1
     delete_recording_files(purged)
-    expired_snapshots = _state.database.purge_snapshots_older_than(older_than)
-    snapshot_files_deleted, snapshot_bytes_deleted = delete_snapshot_files(expired_snapshots)
+    # Remove events whose only media was the recordings just purged, then
+    # age out older frameless/snapshot-only events. The database methods keep
+    # events that are still backed by another recording.
+    removed_events = _state.database.purge_events_without_recordings(linked_event_ids)
+    removed_events.extend(
+        _state.database.purge_expired_events_without_recordings(older_than)
+    )
+    snapshot_files_deleted, snapshot_bytes_deleted = delete_snapshot_files(removed_events)
     return {
         'purged': len(purged),
         'files_deleted': files_deleted,
         'bytes_deleted': bytes_deleted,
-        'snapshots_purged': len(expired_snapshots),
+        'events_purged': len(removed_events),
         'snapshot_files_deleted': snapshot_files_deleted,
         'snapshot_bytes_deleted': snapshot_bytes_deleted,
         'recordings': purged,
