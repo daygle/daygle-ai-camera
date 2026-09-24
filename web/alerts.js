@@ -53,6 +53,39 @@ function defaultPeopleRule(personId, personName) {
   };
 }
 
+function isWithinDetectWindow(start, end, nowHm, equalMeansAlways = true) {
+  const startText = String(start || '').trim();
+  const endText = String(end || '').trim();
+  if (!startText || !endText || (equalMeansAlways && startText === endText)) return true;
+  return startText <= endText
+    ? startText <= nowHm && nowHm <= endText
+    : nowHm >= startText || nowHm <= endText;
+}
+
+function clockInTimezone(date, timezone) {
+  const options = { timeZone: timezone || 'UTC', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-GB', options).formatToParts(date);
+  } catch {
+    parts = new Intl.DateTimeFormat('en-GB', { ...options, timeZone: 'UTC' }).formatToParts(date);
+  }
+  const hour = parts.find((part) => part.type === 'hour')?.value || '00';
+  const minute = parts.find((part) => part.type === 'minute')?.value || '00';
+  return `${hour}:${minute}`;
+}
+
+function policyStatus(rule, type, now = new Date(), timezone = window.daygleAuth?.user?.timezone || 'UTC') {
+  if (rule.enabled === false) return { className: 'is-disabled', label: 'Disabled', title: 'This policy is disabled.' };
+  if (type !== 'object' && type !== 'sound') return { className: 'is-enabled', label: 'Enabled', title: 'This policy is enabled.' };
+  const schedules = type === 'object' ? ensureAlertSchedules(rule) : [rule];
+  const nowHm = clockInTimezone(now, timezone);
+  const active = schedules.some((schedule) => isWithinDetectWindow(schedule.active_start, schedule.active_end, nowHm, type !== 'sound'));
+  return active
+    ? { className: 'is-in-schedule', label: 'In schedule', title: 'Enabled and currently within a detect window.' }
+    : { className: 'is-out-of-schedule', label: 'Outside schedule', title: 'Enabled, but outside all detect windows.' };
+}
+
 function defaultAlertSchedule() {
   return {
     id: `schedule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -219,6 +252,23 @@ function scopeRequiresZone() {
   return alertType !== 'sound';
 }
 
+function updatePolicyStatus(row, rule) {
+  const status = policyStatus(rule, alertType);
+  row.classList.remove('is-enabled', 'is-in-schedule', 'is-out-of-schedule', 'is-disabled');
+  row.classList.add(status.className);
+  row.title = status.title;
+  const state = row.querySelector('.alerts-policy-state');
+  if (state) state.textContent = status.label;
+}
+
+function refreshPolicyStatuses() {
+  const rules = currentRules();
+  $('alertsList').querySelectorAll('.alerts-policy-row').forEach((row) => {
+    const rule = rules[Number(row.dataset.ruleIndex)];
+    if (rule) updatePolicyStatus(row, rule);
+  });
+}
+
 function renderPolicies() {
   const rules = currentRules();
   updateStats();
@@ -245,6 +295,7 @@ function renderPolicies() {
     $('alertsList').innerHTML = `<div class="empty">${emptyMessage}</div>`;
     return;
   }
+  const statusNow = new Date();
   $('alertsList').innerHTML = `<div class="cameras-table-wrap alerts-policy-table-wrap"><table class="rule-table alerts-policy-table"><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Enabled</th><th scope="col">Email</th><th scope="col">Push</th><th scope="col" aria-label="Actions"></th></tr></thead><tbody>${rules.map((rule, index) => {
     const people = alertType === 'people';
     const sound = alertType === 'sound';
@@ -262,6 +313,7 @@ function renderPolicies() {
     const schedules = alertType === 'object' ? ensureAlertSchedules(rule) : [];
     const emailEnabled = alertType === 'object' ? schedules.some((schedule) => schedule.email_enabled) : rule.email_enabled;
     const pushEnabled = alertType === 'object' ? schedules.some((schedule) => schedule.push_enabled) : rule.push_enabled;
+    const status = policyStatus(rule, alertType, statusNow);
     const policyNote = people
       ? 'Recognized-person and stranger alerts use the face recognition rule store.'
       : sound
@@ -274,8 +326,8 @@ function renderPolicies() {
               ? 'Enabled on the Zones page. Removing here turns unusual-time off for the area.'
               : 'Assigned on the Zones page. Removing here unassigns this item from the area.';
     return `
-    <tr class="alerts-policy-row ${rule.enabled !== false ? 'is-enabled' : ''}" data-rule-index="${index}">
-      <td class="alerts-policy-name"><strong>${escapeHtml(ruleLabel(rule))}</strong><span>Policy ${index + 1}</span></td>
+    <tr class="alerts-policy-row ${status.className}" data-rule-index="${index}" title="${escapeHtml(status.title)}">
+      <td class="alerts-policy-name"><strong>${escapeHtml(ruleLabel(rule))}</strong><span>Policy ${index + 1}</span><span class="alerts-policy-state">${escapeHtml(status.label)}</span></td>
       <td>${escapeHtml(scopeLabel())}</td>
       <td><label class="alerts-table-toggle"><input data-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''}><span>${rule.enabled !== false ? 'On' : 'Off'}</span></label></td>
       <td><label class="alerts-table-toggle"><input data-field="email_enabled" type="checkbox" ${emailEnabled ? 'checked' : ''}><span>${emailEnabled ? 'On' : 'Off'}</span></label></td>
@@ -338,7 +390,6 @@ function renderPolicies() {
         else if (state && key === 'enabled') state.textContent = field.checked ? 'Enabled' : 'Disabled';
       }));
       if (key === 'enabled') {
-        summary.classList.toggle('is-enabled', rule.enabled !== false);
         details?.querySelector('.alerts-policy')?.classList.toggle('is-enabled', rule.enabled !== false);
       }
     } else if (key === 'email_recipients') rule[key] = alertType === 'people' ? field.value : field.value.split(',').map((item) => item.trim()).filter(Boolean);
@@ -350,6 +401,7 @@ function renderPolicies() {
       $('alertsList').querySelector(`[data-policy-details-for="${index}"] h3`).textContent = ruleLabel(rule);
     } else rule[key] = field.value || null;
     if (key === 'class') rule.name = soundClasses.find((sound) => sound.id === field.value)?.label || field.value;
+    if (summary) updatePolicyStatus(summary, rule);
     updateStats();
   }));
   $('alertsList').querySelectorAll('[data-add-schedule]').forEach((button) => button.addEventListener('click', () => {
@@ -423,6 +475,10 @@ function renderPolicies() {
     });
   });
 }
+
+window.addEventListener('daygle:auth-state-changed', refreshPolicyStatuses);
+window.daygleAuthReady?.then(refreshPolicyStatuses);
+setInterval(refreshPolicyStatuses, 30_000);
 
 $('cameraSelect').addEventListener('change', () => { cameraIndex = Number($('cameraSelect').value); zoneIndex = 0; renderSelectors(); renderPolicies(); });
 $('zoneSelect').addEventListener('change', () => { zoneIndex = Number($('zoneSelect').value); renderPolicies(); });

@@ -69,3 +69,36 @@ test('explicit schedules retain separate channels, windows, and recipients', () 
   assert.equal(rule.push_enabled, true);
   assert.deepEqual(rehome(rule.email_recipients), ['day@example.com', 'night@example.com']);
 });
+
+const statusStart = source.indexOf('function isWithinDetectWindow(');
+const statusEnd = source.indexOf('function defaultAlertSchedule()', statusStart);
+assert.ok(statusStart >= 0 && statusEnd > statusStart, 'alerts.js status helpers should be present');
+const statusSandbox = {
+  window: { daygleAuth: { user: { timezone: 'America/Los_Angeles' } } },
+  ensureAlertSchedules(rule) {
+    return Array.isArray(rule.alert_schedules) && rule.alert_schedules.length ? rule.alert_schedules : [rule];
+  },
+};
+vm.createContext(statusSandbox);
+vm.runInContext(`${source.slice(statusStart, statusEnd)}; globalThis.isWithinDetectWindow = isWithinDetectWindow; globalThis.clockInTimezone = clockInTimezone; globalThis.policyStatus = policyStatus;`, statusSandbox);
+
+test('detect window status matches admin timezone, including boundaries and overnight schedules', () => {
+  const now = new Date('2026-06-01T15:00:00Z'); // 08:00 in Los Angeles
+  assert.equal(statusSandbox.clockInTimezone(now, 'America/Los_Angeles'), '08:00');
+  assert.equal(statusSandbox.isWithinDetectWindow('07:30', '08:00', '08:00'), true);
+  assert.equal(statusSandbox.isWithinDetectWindow('22:00', '06:00', '04:30'), true);
+  assert.equal(statusSandbox.isWithinDetectWindow('22:00', '06:00', '12:00'), false);
+  assert.equal(statusSandbox.isWithinDetectWindow('09:00', null, '12:00'), true);
+  assert.equal(statusSandbox.isWithinDetectWindow('08:00', '08:00', '12:00'), true);
+});
+
+test('policy status distinguishes disabled, active, and outside-window policies', () => {
+  const now = new Date('2026-06-01T15:00:00Z'); // 08:00 in Los Angeles
+  assert.equal(statusSandbox.policyStatus({ enabled: false }, 'object', now).className, 'is-disabled');
+  assert.equal(statusSandbox.policyStatus({ enabled: true, alert_schedules: [
+    { active_start: '07:00', active_end: '08:00' },
+    { active_start: '20:00', active_end: '22:00' },
+  ] }, 'object', now).className, 'is-in-schedule');
+  assert.equal(statusSandbox.policyStatus({ enabled: true, active_start: '09:00', active_end: '17:00' }, 'sound', now).className, 'is-out-of-schedule');
+  assert.equal(statusSandbox.policyStatus({ enabled: true, active_start: '08:00', active_end: '08:00' }, 'sound', now).className, 'is-in-schedule');
+});
