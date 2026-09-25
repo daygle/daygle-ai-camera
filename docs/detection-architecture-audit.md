@@ -139,6 +139,13 @@ self-invalidate via their settings signature, but the GLOBAL (no-camera) form
 has no settings argument to hash, so a rule edit or a profile switch left it
 serving the previous floor for up to the 5 s TTL.
 
+Note on scope: a Day/Night profile switch does not by itself move a rule
+floor. Profile mode dicts carry tuning fields (confirmation window, tiling,
+always-on, motion tuning), not zones. What a switch changes is the settings
+dict the hot path hashes, and the profile monitor persists straight to the
+database without going through the API — which is why it has to clear the
+global cache itself.
+
 `tests/test_confidence_floor_settings_boundary.py` covers the API boundary
 rather than the in-memory dict: single-camera save, bulk save, profile switch,
 zone disable, and cross-camera isolation, with every read going through

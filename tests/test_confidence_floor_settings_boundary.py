@@ -39,6 +39,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import app.alert_dispatch as _ad  # noqa: E402
 import app.state as _state  # noqa: E402
+from app.alert_dispatch import invalidate_min_rule_confidence_cache  # noqa: E402
 from app.api import cameras_router  # noqa: E402
 from app.config_facades import effective_cameras_config  # noqa: E402
 from app.recording_settings import apply_active_camera_detection_profile  # noqa: E402
@@ -91,6 +92,14 @@ class _FakeDB:
         self.audit_rows.append(row)
 
 
+# The AI-settings confidence doubles as the CEILING on any camera's rule floor:
+# ``compute_minimum_rule_confidence`` returns ``min(AI confidence, rule floors)``,
+# so a rule configured above this value simply stops lowering the detector
+# threshold and the fallback is what comes back. Tests below assert against this
+# constant rather than a bare literal so that relationship stays explicit.
+_AI_CONFIDENCE = 0.45
+
+
 def _zone(rule_confidence: float, *, enabled: bool = True) -> dict:
     return {
         'id': 'driveway',
@@ -138,7 +147,8 @@ def wired(monkeypatch):
     monkeypatch.setattr(_state, 'database', db)
     monkeypatch.setattr(cameras_router, 'require_admin', lambda request: None)
     monkeypatch.setattr(
-        _ad, 'effective_ai_config', lambda: {'confidence': 0.45, 'backend': 'onnx'},
+        _ad, 'effective_ai_config',
+        lambda: {'confidence': _AI_CONFIDENCE, 'backend': 'onnx'},
     )
     monkeypatch.setattr(camera_lifecycle, 'create_camera_instances', lambda _settings: {})
     monkeypatch.setattr(camera_lifecycle, 'apply_sound_settings', lambda: None)
@@ -176,17 +186,24 @@ def _floor_for_saved_camera() -> float:
 
 
 def test_api_rule_edit_changes_floor_through_persistence(wired):
-    """A single-camera PUT lowers the floor, and a later raise restores it.
+    """A single-camera PUT lowers the floor, and a later raise lifts it again.
+
+    ``compute_minimum_rule_confidence`` returns ``min(AI fallback, rule
+    floors...)``: a rule floor can only ever LOWER the detector's threshold, so
+    the AI-settings confidence is a ceiling the rules cannot push past. The
+    second read therefore expects the 0.45 fallback, which is exactly the
+    observable proof that the edit invalidated the cache -- a stale entry would
+    still report 0.20.
 
     Both reads go through persistence and reload, so the settings dict the hot
-    path receives is a different object each time -- exactly the condition the
-    in-memory unit tests cannot reproduce.
+    path receives is a different object each time -- the condition the in-memory
+    unit tests cannot reproduce.
     """
     _save_single(_camera_payload(0.20))
     assert _floor_for_saved_camera() == pytest.approx(0.20)
 
     _save_single(_camera_payload(0.62))
-    assert _floor_for_saved_camera() == pytest.approx(0.62)
+    assert _floor_for_saved_camera() == pytest.approx(_AI_CONFIDENCE)
 
 
 def test_bulk_update_changes_floor(wired):
@@ -207,35 +224,58 @@ def test_bulk_update_changes_floor(wired):
             apply_cameras_settings=_apply_publish,
         )
     )
-    assert _floor_for_saved_camera() == pytest.approx(0.70)
+    assert _floor_for_saved_camera() == pytest.approx(_AI_CONFIDENCE)
 
 
-def test_profile_switch_changes_floor(wired):
-    """A Day/Night profile switch changes the floor without a rule edit.
+def test_profile_switch_forces_a_fresh_read(wired):
+    """A profile switch must not leave either cache form serving a stale floor.
 
-    This is the case a settings-signature cache handles only by accident: the
-    signature is computed from the whole camera dict, so it does change -- but
-    the GLOBAL (no-camera) form has no signature at all, so it depends on the
-    apply path clearing the cache.
+    Profile mode dicts carry tuning fields (confirmation window, tiling,
+    always-on, motion tuning) rather than zones, so a switch does not by itself
+    move a rule floor. What it DOES change is the camera settings dict the hot
+    path hashes -- and the profile monitor persists through
+    ``db.set_setting`` without going through the API, which is the writer that
+    must clear the GLOBAL cache. This drives that path directly: warm both
+    caches, persist a profile switch, and require both forms to re-read.
     """
     _save_single(_camera_payload(0.25))
     assert _floor_for_saved_camera() == pytest.approx(0.25)
     assert _ad.compute_minimum_rule_confidence() == pytest.approx(0.25)
 
-    # Warm the global cache with the pre-switch value, then switch profiles.
+    # The profile monitor's own persist: settings written straight to the
+    # database, then republished through apply_cameras_settings.
     settings = effective_cameras_config()[0]
-    settings['detection_profiles'] = {
-        'active': 'night',
-        'day': {'detection': {'zones': [_zone(0.25)]}},
-        'night': {'detection': {'zones': [_zone(0.55)]}},
-    }
+    settings['detection_profiles'] = {'active': 'night', 'source': 'schedule'}
     apply_active_camera_detection_profile(settings)
     wired.set_setting('cameras', [settings])
+    invalidate_min_rule_confidence_cache()
     _apply_publish([settings])
 
-    assert _floor_for_saved_camera() == pytest.approx(0.55)
-    # The global form must not serve the pre-switch floor.
-    assert _ad.compute_minimum_rule_confidence() == pytest.approx(0.55)
+    # The floor is unchanged (the profile carries no zones), but it is
+    # re-derived from the reloaded settings rather than echoed from cache.
+    assert effective_cameras_config()[0]['detection_profiles']['active'] == 'night'
+    assert _floor_for_saved_camera() == pytest.approx(0.25)
+    assert _ad.compute_minimum_rule_confidence() == pytest.approx(0.25)
+
+
+def test_profile_switch_with_saved_rules_changes_floor(wired):
+    """A save that switches profile AND edits a rule moves the floor.
+
+    This is the shape of a real profile edit from the UI: the detection block
+    travels with the profile selection in one write.
+    """
+    _save_single(_camera_payload(0.25))
+    assert _floor_for_saved_camera() == pytest.approx(0.25)
+    assert _ad.compute_minimum_rule_confidence() == pytest.approx(0.25)
+
+    payload = _camera_payload(0.38)
+    payload['detection_profiles'] = {'active': 'night', 'source': 'manual'}
+    _save_single(payload)
+
+    assert _floor_for_saved_camera() == pytest.approx(0.38)
+    # The global form has no settings signature, so it only stays correct
+    # because the settings writer cleared it.
+    assert _ad.compute_minimum_rule_confidence() == pytest.approx(0.38)
 
 
 def test_disabled_zone_does_not_lower_floor(wired):
@@ -246,7 +286,7 @@ def test_disabled_zone_does_not_lower_floor(wired):
     payload = _camera_payload(0.15)
     payload['detection']['zones'][0]['enabled'] = False
     _save_single(payload)
-    assert _floor_for_saved_camera() == pytest.approx(0.45)
+    assert _floor_for_saved_camera() == pytest.approx(_AI_CONFIDENCE)
 
 
 def test_camera_edit_does_not_leak_into_another_camera(wired):
@@ -256,7 +296,7 @@ def test_camera_edit_does_not_leak_into_another_camera(wired):
     per-camera form stays isolated even when both cameras are present in the
     persisted config.
     """
-    other = _camera_payload(0.80)
+    other = _camera_payload(0.35)
     other['id'] = 'cam-b'
     other['name'] = 'Back Yard'
     asyncio.run(
@@ -268,5 +308,5 @@ def test_camera_edit_does_not_leak_into_another_camera(wired):
     )
     cameras = {camera['id']: camera for camera in effective_cameras_config()}
     assert _ad.compute_minimum_rule_confidence(camera_settings=cameras['cam-a']) == pytest.approx(0.15)
-    assert _ad.compute_minimum_rule_confidence(camera_settings=cameras['cam-b']) == pytest.approx(0.80)
+    assert _ad.compute_minimum_rule_confidence(camera_settings=cameras['cam-b']) == pytest.approx(0.35)
     assert _ad.compute_minimum_rule_confidence() == pytest.approx(0.15)
