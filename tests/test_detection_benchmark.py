@@ -115,6 +115,47 @@ def test_difficult_detections_are_ignored_instead_of_counted_as_false_positives(
     assert result["overall"]["map_50"] == 0.0
 
 
+def test_parse_label_thresholds_and_apply_per_label_floor():
+    thresholds = evaluate_detection.parse_label_thresholds('Person=0.50, car=0.70')
+    assert thresholds == {'person': 0.5, 'car': 0.7}
+
+    detections = [
+        {'label': 'person', 'confidence': 0.49},
+        {'label': 'person', 'confidence': 0.50},
+        {'label': 'car', 'confidence': 0.69},
+    ]
+    assert evaluate_detection._apply_label_thresholds(detections, thresholds) == [
+        {'label': 'person', 'confidence': 0.50},
+    ]
+
+
+def test_post_pipeline_delegates_confirmation_settings(monkeypatch):
+    calls = []
+
+    def fake_confirm(camera_id, detections, **kwargs):
+        calls.append((camera_id, detections, kwargs))
+        return detections
+
+    monkeypatch.setitem(
+        sys.modules,
+        'app.detection_state',
+        SimpleNamespace(confirm_object_detections=fake_confirm),
+    )
+    args = SimpleNamespace(
+        label_thresholds={'person': 0.5},
+        confirm_frames=2,
+        confirm_window=3,
+        confirm_iou=0.2,
+    )
+    detections = [{'label': 'person', 'confidence': 0.8}]
+
+    assert evaluate_detection._apply_post_pipeline('eval', detections, args) == detections
+    assert calls == [(
+        'eval', detections,
+        {'required_frames': 2, 'window_frames': 3, 'location_iou': 0.2},
+    )]
+
+
 def test_confidence_sweep_writes_comparison_report(tmp_path, monkeypatch):
     output = tmp_path / "reports" / "sweep.json"
 
@@ -155,6 +196,24 @@ def test_quality_gate_reports_metrics_below_floor():
     assert failures == [
         "precision 0.750000 is below 0.800000",
         "map@0.5 0.400000 is below 0.500000",
+    ]
+
+
+def test_quality_gate_targets_post_pipeline_when_selected():
+    args = SimpleNamespace(
+        post_pipeline=True,
+        fail_below_precision=0.8,
+        fail_below_recall=None,
+        fail_below_f1=None,
+        fail_below_map_50=None,
+    )
+    report = {
+        'benchmark': {'overall': {'precision': 0.95, 'recall': 0.95, 'map_50': 0.95}},
+        'post_pipeline_benchmark': {'overall': {'precision': 0.70, 'recall': 0.90, 'map_50': 0.80}},
+    }
+
+    assert evaluate_detection._quality_gate_failures(report, args) == [
+        'precision 0.700000 is below 0.800000',
     ]
 
 
@@ -230,3 +289,50 @@ def test_evaluate_adds_quality_report_when_ground_truth_is_supplied(tmp_path, mo
     assert report["benchmark"]["overall"]["precision"] == 1.0
     assert report["benchmark"]["overall"]["recall"] == 1.0
     assert report["benchmark"]["overall"]["map_50"] == 1.0
+
+
+def test_evaluate_reports_post_pipeline_quality_separately(tmp_path, monkeypatch):
+    annotation = tmp_path / 'labels.json'
+    annotation.write_text(
+        json.dumps({'frames': [{'index': 0, 'objects': [
+            {'label': 'person', 'box': [0.1, 0.1, 0.2, 0.4]},
+        ]}]}),
+        encoding='utf-8',
+    )
+    state_module = SimpleNamespace(
+        _MOTION_FRAME_W=320, _MOTION_FRAME_H=240,
+        _frame_motion_mog2={}, _frame_motion_mog2_meta={},
+        _frame_motion_prev={}, _frame_motion_last_frame={},
+        _frame_motion_last_gray={},
+    )
+    monkeypatch.setitem(sys.modules, 'app.state', state_module)
+    monkeypatch.setitem(
+        sys.modules, 'app.detection_state',
+        SimpleNamespace(detect_frame_motion=lambda *a, **k: (True, 0.5, None, 0.1)),
+    )
+    monkeypatch.setattr(evaluate_detection, '_iter_frames', lambda source, limit: iter(['frame']))
+
+    class Detector:
+        available = True
+
+        def detect_frame(self, frame, confidence):
+            return [{'label': 'person', 'confidence': 0.4, 'box': {
+                'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4,
+            }}]
+
+    monkeypatch.setattr(evaluate_detection, '_build_detector', lambda args: Detector())
+    args = SimpleNamespace(
+        input='unused', model='model.onnx', labels='labels.txt', confidence=0.45,
+        detector_confidence=0.45, input_size=640, algorithm='mog2', denoise=True,
+        shadow='on', pixel_threshold=30.0, gate_fraction=0.005, scale_fraction=0.03,
+        frame_width=320, frame_height=240, gated=False, tiling=None, limit=None,
+        annotate=None, ground_truth=str(annotation), iou_threshold=0.5,
+        post_pipeline=True, label_thresholds={'person': 0.5}, confirm_frames=1,
+        confirm_window=1, confirm_iou=0.0,
+    )
+
+    report = evaluate_detection.evaluate(args)
+
+    assert report['benchmark']['overall']['precision'] == 1.0
+    assert report['post_pipeline_benchmark']['overall']['precision'] == 0.0
+    assert report['post_pipeline_benchmark']['overall']['predicted_boxes'] == 0

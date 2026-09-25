@@ -21,7 +21,9 @@ Full motion + object evaluation with a model, night shadow handling on auto::
 
 Quality benchmarking uses ``--ground-truth annotations.json`` to calculate
 class-aware precision, recall, F1, AP@0.5, and mAP@0.5:0.95 from labeled frames.
-The JSON format and workflow are documented in ``docs/detection-benchmarking.md``.
+For Items 11–12 tuning studies, ``--post-pipeline`` compares the raw detector
+with per-label rule floors and the live N-of-M confirmation stage. The JSON
+format and workflow are documented in ``docs/detection-benchmarking.md``.
 
 Nothing here writes to the app database or config; it only reads frames. An
 explicit ``--output`` path writes only the generated JSON report.
@@ -129,6 +131,90 @@ def _validated_object(value: Any, context: str) -> dict[str, Any]:
         "label": label.strip().casefold(),
         "box": _validated_box(value.get("box"), f"{context}.box"),
         "difficult": difficult,
+    }
+
+
+def parse_label_thresholds(value: str | None) -> dict[str, float]:
+    """Parse ``person=0.50,car=0.60`` into normalized label thresholds."""
+    if not value:
+        return {}
+    thresholds: dict[str, float] = {}
+    for item in value.split(','):
+        item = item.strip()
+        if not item:
+            continue
+        if '=' not in item:
+            raise ValueError(f"invalid label threshold {item!r}; expected label=value")
+        label, raw_threshold = (part.strip() for part in item.split('=', 1))
+        if not label:
+            raise ValueError("label thresholds must include a non-empty label")
+        threshold = _validated_confidence(raw_threshold, f"label threshold {label}")
+        thresholds[label.casefold()] = threshold
+    if not thresholds:
+        raise ValueError("--label-thresholds must include at least one label=value")
+    return thresholds
+
+
+def _apply_label_thresholds(
+    detections: list[dict[str, Any]], thresholds: dict[str, float]
+) -> list[dict[str, Any]]:
+    """Apply the action-level per-label rule floor used by live zones."""
+    if not thresholds:
+        return detections
+    return [
+        detection for detection in detections
+        if float(detection.get('confidence') or 0.0)
+        >= thresholds.get(str(detection.get('label') or '').strip().casefold(), 0.0)
+    ]
+
+
+def _apply_post_pipeline(
+    camera_id: str,
+    detections: list[dict[str, Any]],
+    args: argparse.Namespace,
+) -> list[dict[str, Any]]:
+    """Apply the benchmark's confirmation stage after inference.
+
+    Zone matching is intentionally not simulated here because the benchmark
+    annotation schema describes objects, not camera zone policy. The label rule
+    and N-of-M stages are the policy-independent parts that can be compared
+    fairly across clips; zone-specific validation remains a separate fixture.
+    """
+    filtered = _apply_label_thresholds(
+        detections, getattr(args, 'label_thresholds', {}) or {}
+    )
+    required = int(getattr(args, 'confirm_frames', 1))
+    if required <= 1:
+        return filtered
+    from app.detection_state import confirm_object_detections
+    return confirm_object_detections(
+        camera_id,
+        filtered,
+        required_frames=required,
+        window_frames=int(getattr(args, 'confirm_window', required) or required),
+        location_iou=float(getattr(args, 'confirm_iou', 0.0) or 0.0),
+    )
+
+
+def _evaluation_prediction(
+    detection: dict[str, Any], frame_index: int
+) -> dict[str, Any]:
+    """Convert detector output into the benchmark's normalized record shape."""
+    return {
+        'frame': frame_index,
+        'label': str(detection.get('label') or '?').strip().casefold(),
+        'box': _validated_box(
+            (
+                detection.get('box', {}).get('x'),
+                detection.get('box', {}).get('y'),
+                detection.get('box', {}).get('width'),
+                detection.get('box', {}).get('height'),
+            ),
+            f'prediction at frame {frame_index}',
+        ),
+        'confidence': _validated_confidence(
+            detection.get('confidence'), f'prediction at frame {frame_index}'
+        ),
     }
 
 
@@ -382,7 +468,7 @@ def _build_detector(args: argparse.Namespace):
     detector = OnnxYoloDetector(
         model_path=args.model,
         labels_path=args.labels,
-        confidence=args.confidence,
+        confidence=float(getattr(args, 'detector_confidence', args.confidence)),
         input_size=args.input_size,
     )
     if not detector.available:
@@ -409,6 +495,14 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         store.pop(cam, None)
 
     detector = _build_detector(args)
+    post_pipeline = bool(getattr(args, 'post_pipeline', False))
+    post_frame_predictions: dict[int, list[dict[str, Any]]] = {}
+    if post_pipeline and int(getattr(args, 'confirm_frames', 1)) > 1:
+        confirm_lock = getattr(state, 'live_detection_confirm_lock', None)
+        confirm_history = getattr(state, 'live_detection_confirm_history', None)
+        if confirm_lock is not None and isinstance(confirm_history, dict):
+            with confirm_lock:
+                confirm_history.pop(cam, None)
     annotate_dir = Path(args.annotate) if args.annotate else None
     if annotate_dir:
         annotate_dir.mkdir(parents=True, exist_ok=True)
@@ -449,16 +543,20 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             frame_predictions.setdefault(frames - 1, [])
         detections: list[dict[str, Any]] = []
         # Match the live default (always-on) unless --gated is requested.
-        if detector is not None and (has_motion or not args.gated):
+        inference_ran = detector is not None and (has_motion or not args.gated)
+        if inference_ran:
             t1 = time.perf_counter()
-            detections = detector.detect_frame(frame, confidence=args.confidence)
+            detections = detector.detect_frame(
+                frame,
+                confidence=float(getattr(args, 'detector_confidence', args.confidence)),
+            )
             if args.tiling:
                 from app.region_detection import detect_with_tiling, parse_tile_grid
                 grid = parse_tile_grid(args.tiling)
                 if grid is not None:
                     detections = detect_with_tiling(
                         detector, frame, detections, cols=grid[0], rows=grid[1],
-                        confidence=args.confidence,
+                        confidence=float(getattr(args, 'detector_confidence', args.confidence)),
                     )
             detect_ms.append((time.perf_counter() - t1) * 1000.0)
             if detections:
@@ -467,27 +565,20 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 label = str(det.get("label") or "?")
                 label_counts[label] = label_counts.get(label, 0) + 1
                 label_confidences.setdefault(label, []).append(float(det.get("confidence") or 0.0))
-            if ground_truth is not None and frames - 1 in ground_truth:
-                for det in detections:
-                    frame_predictions[frames - 1].append(
-                        {
-                            "frame": frames - 1,
-                            "label": str(det.get("label") or "?").strip().casefold(),
-                            "box": _validated_box(
-                                (
-                                    det.get("box", {}).get("x"),
-                                    det.get("box", {}).get("y"),
-                                    det.get("box", {}).get("width"),
-                                    det.get("box", {}).get("height"),
-                                ),
-                                f"prediction at frame {frames - 1}",
-                            ),
-                            "confidence": _validated_confidence(
-                                det.get("confidence"),
-                                f"prediction at frame {frames - 1}",
-                            ),
-                        }
+            quality_detections = detections
+            if post_pipeline:
+                quality_detections = _apply_post_pipeline(cam, detections, args)
+                if ground_truth is not None and frames - 1 in ground_truth:
+                    post_frame_predictions.setdefault(frames - 1, [])
+                    post_frame_predictions[frames - 1].extend(
+                        _evaluation_prediction(det, frames - 1)
+                        for det in quality_detections
                     )
+            if ground_truth is not None and frames - 1 in ground_truth:
+                frame_predictions[frames - 1].extend(
+                    _evaluation_prediction(det, frames - 1)
+                    for det in detections
+                )
 
         if annotate_dir is not None:
             annotated = frame.copy()
@@ -521,8 +612,22 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             predictions,
             getattr(args, "iou_threshold", 0.5),
         )
+        if post_pipeline:
+            post_predictions = [
+                prediction
+                for index in sorted(post_frame_predictions)
+                for prediction in post_frame_predictions[index]
+            ]
+            post_benchmark = evaluate_detections(
+                {index: ground_truth[index] for index in sorted(evaluated_frames)},
+                post_predictions,
+                getattr(args, "iou_threshold", 0.5),
+            )
+        else:
+            post_benchmark = None
     else:
         benchmark = None
+        post_benchmark = None
 
     report = {
         "input": str(args.input),
@@ -551,9 +656,16 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             "algorithm": args.algorithm, "denoise": args.denoise, "shadow": args.shadow,
             "pixel_threshold": args.pixel_threshold, "gate_fraction": args.gate_fraction,
             "scale_fraction": args.scale_fraction, "confidence": args.confidence,
+            "detector_confidence": float(getattr(args, 'detector_confidence', args.confidence)),
             "frame_size": [args.frame_width, args.frame_height],
+            "post_pipeline": post_pipeline,
+            "label_thresholds": dict(sorted((getattr(args, 'label_thresholds', {}) or {}).items())),
+            "confirm_frames": int(getattr(args, 'confirm_frames', 1)),
+            "confirm_window": int(getattr(args, 'confirm_window', getattr(args, 'confirm_frames', 1)) or getattr(args, 'confirm_frames', 1)),
+            "confirm_iou": float(getattr(args, 'confirm_iou', 0.0) or 0.0),
         },
         "benchmark": benchmark,
+        "post_pipeline_benchmark": post_benchmark,
     }
     return report
 
@@ -565,7 +677,9 @@ def _quality_gate_failures(report: dict[str, Any], args: argparse.Namespace) -> 
         "f1": ("f1", args.fail_below_f1),
         "map@0.5": ("map_50", args.fail_below_map_50),
     }
-    benchmark = report.get("benchmark")
+    benchmark = report.get(
+        "post_pipeline_benchmark" if getattr(args, "post_pipeline", False) else "benchmark"
+    )
     if not benchmark:
         return ["quality thresholds require --ground-truth"]
     quality = benchmark["overall"]
@@ -574,6 +688,19 @@ def _quality_gate_failures(report: dict[str, Any], args: argparse.Namespace) -> 
         for name, (key, minimum) in thresholds.items()
         if minimum is not None and float(quality[key]) < float(minimum)
     ]
+
+
+def _print_per_label_quality(report: dict[str, Any], key: str, title: str) -> None:
+    benchmark = report.get(key)
+    if not benchmark or not benchmark.get('per_label'):
+        return
+    print(f"  {title} per-label precision/recall/F1/AP:")
+    for label, metrics in sorted(benchmark['per_label'].items()):
+        print(
+            f"    {label:<16} {metrics['precision']:.3f} / "
+            f"{metrics['recall']:.3f} / {metrics['f1']:.3f} / "
+            f"{metrics['ap']:.3f} (support={metrics['support']})"
+        )
 
 
 def _print_human(report: dict[str, Any]) -> None:
@@ -599,7 +726,7 @@ def _print_human(report: dict[str, Any]) -> None:
             print("  (no detections)")
     if report.get("benchmark"):
         b = report["benchmark"]["overall"]
-        print("\nQuality")
+        print("\nQuality (detector output)")
         print(
             f"  precision/recall/f1 : {b['precision']:.3f} / "
             f"{b['recall']:.3f} / {b['f1']:.3f}"
@@ -610,6 +737,21 @@ def _print_human(report: dict[str, Any]) -> None:
             f"  TP / FP / FN       : {b['true_positives']} / "
             f"{b['false_positives']} / {b['false_negatives']}"
         )
+        _print_per_label_quality(report, 'benchmark', 'detector')
+    if report.get("post_pipeline_benchmark"):
+        p = report["post_pipeline_benchmark"]["overall"]
+        print("\nQuality (post-pipeline)")
+        print(
+            f"  precision/recall/f1 : {p['precision']:.3f} / "
+            f"{p['recall']:.3f} / {p['f1']:.3f}"
+        )
+        print(f"  mAP@0.5            : {p['map_50']:.3f}")
+        print(f"  mAP@0.5:0.95       : {p['map_50_95']:.3f}")
+        print(
+            f"  TP / FP / FN       : {p['true_positives']} / "
+            f"{p['false_positives']} / {p['false_negatives']}"
+        )
+        _print_per_label_quality(report, 'post_pipeline_benchmark', 'post-pipeline')
     print()
 
 
@@ -633,6 +775,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gated", action="store_true",
                         help="Only run object detection on motion frames (the legacy CPU-saving gate). "
                              "Default runs it every frame, matching the always-on live default.")
+    parser.add_argument(
+        "--post-pipeline", action="store_true",
+        help="Evaluate label-rule thresholds and temporal N-of-M confirmation after inference. "
+             "Zone matching is not simulated because annotations describe objects, not zone policy.",
+    )
+    parser.add_argument(
+        "--label-thresholds",
+        help="Per-label rule floors for --post-pipeline, e.g. person=0.50,car=0.60.",
+    )
+    parser.add_argument(
+        "--confirm-frames", type=int, default=1,
+        help="Post-pipeline detections required in the confirmation window (default: 1).",
+    )
+    parser.add_argument(
+        "--confirm-window", type=int,
+        help="Post-pipeline confirmation window; defaults to --confirm-frames.",
+    )
+    parser.add_argument(
+        "--confirm-iou", type=float, default=0.0,
+        help="Optional post-pipeline spatial persistence IoU (0 disables it).",
+    )
     parser.add_argument("--limit", type=int, help="Stop after N frames.")
     parser.add_argument("--annotate", help="Directory to write annotated frames into.")
     parser.add_argument("--ground-truth", help="JSON annotations for precision/recall and mAP.")
@@ -666,6 +829,19 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--confidence-sweep values must be between 0 and 1")
     if not 0.0 < args.iou_threshold <= 1.0:
         parser.error("--iou-threshold must be greater than 0 and at most 1")
+    try:
+        args.label_thresholds = parse_label_thresholds(args.label_thresholds)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if not 1 <= args.confirm_frames <= 10:
+        parser.error("--confirm-frames must be between 1 and 10")
+    args.confirm_window = args.confirm_frames if args.confirm_window is None else args.confirm_window
+    if not args.confirm_frames <= args.confirm_window <= 30:
+        parser.error("--confirm-window must be at least --confirm-frames and at most 30")
+    if not 0.0 <= args.confirm_iou <= 0.9:
+        parser.error("--confirm-iou must be between 0 and 0.9")
+    if args.label_thresholds and not args.post_pipeline:
+        parser.error("--label-thresholds requires --post-pipeline")
     quality_limits = {
         "--fail-below-precision": args.fail_below_precision,
         "--fail-below-recall": args.fail_below_recall,
@@ -684,6 +860,8 @@ def main(argv: list[str] | None = None) -> int:
     for confidence in confidences:
         run_args = argparse.Namespace(**vars(args))
         run_args.confidence = confidence
+        label_floor = min(run_args.label_thresholds.values()) if run_args.label_thresholds else confidence
+        run_args.detector_confidence = min(confidence, label_floor)
         reports.append(evaluate(run_args))
     report: dict[str, Any] = (
         reports[0]
