@@ -177,21 +177,31 @@ function boxIoU(a, b) {
 function matchDetection(candidates, target) {
   if (!Array.isArray(candidates) || !candidates.length) return null;
   const targetLabel = String(target?.label || '').toLowerCase();
+  const targetTrackId = Number.isInteger(target?.track_id) && target.track_id > 0 ? target.track_id : null;
   const targetBox = target?.box;
   let best = null;
   let bestIoU = 0;
+  let bestHasTrackMatch = false;
   let nearest = null;
   let nearestDist = Infinity;
   for (const candidate of candidates) {
     if (String(candidate?.label || '').toLowerCase() !== targetLabel) continue;
+    const candidateTrackId = Number.isInteger(candidate?.track_id) && candidate.track_id > 0 ? candidate.track_id : null;
+    // A stable tracker id is stronger evidence than label/overlap when two
+    // same-class objects cross. Without this guard interpolation can jump a
+    // box from one person/car to the other, which looks like a delayed or
+    // drifting overlay even when the timestamps are correct.
+    if (targetTrackId && candidateTrackId && targetTrackId !== candidateTrackId) continue;
+    const hasTrackMatch = targetTrackId && candidateTrackId === targetTrackId;
     if (!candidate?.box || !targetBox) {
       if (!nearest) nearest = candidate;
       continue;
     }
     const iou = boxIoU(candidate.box, targetBox);
-    if (iou > bestIoU) {
+    if (iou > bestIoU || (hasTrackMatch && !bestHasTrackMatch)) {
       bestIoU = iou;
       best = candidate;
+      bestHasTrackMatch = Boolean(hasTrackMatch);
     }
     const dx = (candidate.box.x + candidate.box.width / 2) - (targetBox.x + targetBox.width / 2);
     const dy = (candidate.box.y + candidate.box.height / 2) - (targetBox.y + targetBox.height / 2);

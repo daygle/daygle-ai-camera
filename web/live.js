@@ -64,6 +64,12 @@ const DEFAULT_DETECTION_STATUS_REFRESH_MS = 2000;
 const CLOSE_DRAFT_DISTANCE_PX = 20;
 let refreshTimer;
 let detectionStatusTimer;
+// Blob URLs are used for the single-camera image so the browser can read the
+// server's X-Frame-Timestamp response header; an <img src> request cannot expose
+// response headers to JavaScript. Keep the previous URL alive until the new
+// image has loaded so a refresh never produces a transient blank frame.
+let liveFrameObjectUrl = '';
+let liveFramePreviousObjectUrl = '';
 let snapshotRefreshMs = DEFAULT_SNAPSHOT_REFRESH_MS;
 let detectionStatusRefreshMs = DEFAULT_DETECTION_STATUS_REFRESH_MS;
 // CSRF token is now shared via window.daygleAuth (set by loadAuth() via
@@ -94,16 +100,27 @@ let liveStreamSource = 'detection';
 let liveAiTrackEnabled = true;
 let liveAiTrackDetections = null;
 let liveAiTrackPrevDetections = null;
-// Wall-clock time (ms) at which each sample was received, so the overlay can
-// be projected onto the frame currently on screen.
+// Source-clock time (ms) of each detection sample. The server now sends the
+// ingest file's capture timestamp with the status payload; using that instead
+// of the API response arrival time is what keeps boxes attached to the frame
+// actually visible. The fallback is performance.now() for older servers or
+// direct-camera responses that do not carry a timestamp.
 let liveAiTrackCaptureMs = 0;
 let liveAiTrackPrevCaptureMs = 0;
+let liveAiTrackUsesFrameTimestamp = false;
+// Timestamp of the image currently displayed and the performance-clock reading
+// when it loaded. Together they form the source clock for the RAF loop.
+let liveAiTrackFrameTimestamp = 0;
+let liveAiTrackFramePerformanceMs = 0;
 // updated_at of the last ingested monitor sample, so polling faster than the
 // monitor's detection interval does not re-ingest the same cycle (which would
 // zero out the projection velocity).
 let lastServerTrackUpdatedAt = null;
 let liveRafId = null;
-const LIVE_AI_TRACK_MAX_LEAD_MS = 1500;
+// The status endpoint is polled every 2s by default, so allow projection over
+// one full poll interval. A hard cap still prevents an old box from drifting
+// indefinitely when inference or the status feed stalls.
+const LIVE_AI_TRACK_MAX_LEAD_MS = 2500;
 // Stop drawing once the monitor stops reporting (camera backoff, detector
 // stalled) so the last box does not linger after the object has left. The
 // window is a few monitor cycles wide; an empty cycle clears boxes sooner.
@@ -155,11 +172,23 @@ function drawLiveOverlay() {
   if (!ctx) return;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, liveEls.liveAiTrackCanvas.width, liveEls.liveAiTrackCanvas.height);
+  // Detections are produced from the detection ingest. The optional recording
+  // stream can have a different camera delay/FOV, so drawing those boxes on it
+  // is inherently unsafe; keep the high-res preview clean until the operator
+  // switches back to the matching Detection stream.
+  if (liveStreamSource === 'recording') return;
   if (!liveAiTrackEnabled || !liveAiTrackDetections?.length) return;
+
+  // The image response includes the exact ingest-file capture timestamp. Use
+  // that source clock for both staleness and projection. Falling back to the
+  // browser monotonic clock preserves behaviour against older servers.
+  const sourceNowMs = liveAiTrackFrameTimestamp > 0 && liveAiTrackFramePerformanceMs > 0
+    ? liveAiTrackFrameTimestamp * 1000 + (performance.now() - liveAiTrackFramePerformanceMs)
+    : performance.now();
 
   // Drop boxes whose source sample has gone stale (slow/stalled inference) so the
   // overlay clears instead of trailing the object after it has left the frame.
-  if (liveAiTrackCaptureMs > 0 && performance.now() - liveAiTrackCaptureMs > LIVE_AI_TRACK_STALE_MS) {
+  if (liveAiTrackCaptureMs > 0 && sourceNowMs - liveAiTrackCaptureMs > LIVE_AI_TRACK_STALE_MS) {
     liveAiTrackDetections = null;
     liveAiTrackPrevDetections = null;
     return;
@@ -172,7 +201,7 @@ function drawLiveOverlay() {
       liveAiTrackDetections,
       liveAiTrackPrevCaptureMs,
       liveAiTrackCaptureMs,
-      performance.now(),
+      sourceNowMs,
       LIVE_AI_TRACK_MAX_LEAD_MS,
     );
   }
@@ -245,7 +274,7 @@ function isAllCameraMode() {
   return pageMode === 'live' && viewMode === 'all';
 }
 
-function refreshFrame() {
+async function refreshFrame() {
   if (!selectedCamera || document.hidden) return;
   if (isAllCameraMode()) {
     renderCameraGridFrames();
@@ -253,7 +282,27 @@ function refreshFrame() {
   }
   if (liveEls.frame.dataset.loading === 'true') return;
   liveEls.frame.dataset.loading = 'true';
-  liveEls.frame.src = snapshotUrl();
+  try {
+    const response = await fetch(snapshotUrl(), {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { Accept: 'image/jpeg' },
+    });
+    if (!response.ok) throw new Error(`Snapshot request failed (${response.status})`);
+    const frameTimestamp = Number(response.headers.get('X-Frame-Timestamp'));
+    liveEls.frame.dataset.frameTimestamp = Number.isFinite(frameTimestamp) && frameTimestamp > 0
+      ? String(frameTimestamp)
+      : '';
+    const nextObjectUrl = URL.createObjectURL(await response.blob());
+    liveFramePreviousObjectUrl = liveFrameObjectUrl;
+    liveFrameObjectUrl = nextObjectUrl;
+    liveEls.frame.src = nextObjectUrl;
+  } catch (error) {
+    liveEls.frame.dataset.loading = 'false';
+    if (!window.daygleAuth?.redirecting) {
+      liveEls.status.textContent = error.message;
+    }
+  }
 }
 
 function renderCameraGridFrames() {
@@ -746,8 +795,21 @@ function renderDetectionStatus(summary) {
 // until the stale guard clears them.
 function ingestServerTrackDetections(payload) {
   if (!liveAiTrackEnabled || !payload || !['checked', 'alerted'].includes(payload.state)) return;
+  // The motion-only telemetry update is published before inference starts. Do
+  // not let that transient empty sample clear the last good box while ONNX is
+  // still running; the completed status update will arrive in the same cycle.
+  if (payload.reason === 'Motion sample measured.') return;
   if (payload.updated_at && payload.updated_at === lastServerTrackUpdatedAt) return;
   lastServerTrackUpdatedAt = payload.updated_at || null;
+  const frameTimestamp = Number(payload.frame_timestamp);
+  const hasFrameTimestamp = Number.isFinite(frameTimestamp) && frameTimestamp > 0;
+  if (liveAiTrackUsesFrameTimestamp !== hasFrameTimestamp) {
+    // Do not calculate a velocity between an epoch timestamp and performance.now();
+    // the first timestamped sample must establish a new clock domain.
+    liveAiTrackPrevDetections = null;
+    liveAiTrackPrevCaptureMs = 0;
+  }
+  liveAiTrackUsesFrameTimestamp = hasFrameTimestamp;
   liveAiTrackPrevDetections = liveAiTrackDetections;
   liveAiTrackPrevCaptureMs = liveAiTrackCaptureMs;
   liveAiTrackDetections = (payload.detections || [])
@@ -755,7 +817,7 @@ function ingestServerTrackDetections(payload) {
     // track_id rides along so the overlay can show each object's stable
     // identity; motion_state shows the still/moving classification.
     .map((d) => ({ label: d.label, confidence: d.confidence, box: d.box, motion_state: d.motion_state, track_id: d.track_id }));
-  liveAiTrackCaptureMs = performance.now();
+  liveAiTrackCaptureMs = hasFrameTimestamp ? frameTimestamp * 1000 : performance.now();
   drawLiveOverlay();
 }
 
@@ -905,6 +967,12 @@ function renderCameraOptions() {
 
 liveEls.frame.addEventListener('load', () => {
   liveEls.frame.dataset.loading = 'false';
+  liveAiTrackFrameTimestamp = Number(liveEls.frame.dataset.frameTimestamp) || 0;
+  liveAiTrackFramePerformanceMs = performance.now();
+  if (liveFramePreviousObjectUrl && liveFramePreviousObjectUrl !== liveFrameObjectUrl) {
+    URL.revokeObjectURL(liveFramePreviousObjectUrl);
+    liveFramePreviousObjectUrl = '';
+  }
   if (isZonesPage) syncZoneOverlayToImage(); // syncZoneOverlayToImage defined in zones.js
   liveEls.status.textContent = selectedCamera?.name || 'Camera';
   liveEls.status.classList.add('live-status-online');
@@ -1165,4 +1233,6 @@ init().catch((error) => {
 window.addEventListener('beforeunload', () => {
   clearInterval(refreshTimer);
   clearInterval(detectionStatusTimer);
+  if (liveFrameObjectUrl) URL.revokeObjectURL(liveFrameObjectUrl);
+  if (liveFramePreviousObjectUrl) URL.revokeObjectURL(liveFramePreviousObjectUrl);
 });

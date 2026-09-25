@@ -566,6 +566,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         state='checked',
         reason='Motion sample measured.',
         detections=[],
+        frame_timestamp=frame_capture_ts,
         motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction, motion_signal=motion_signal,
         camera_motion=camera_motion,
     )
@@ -600,7 +601,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # CPU-saving motion gate (inference only when motion fires).
     always_run_object_detection = normalize_bool_setting(live_settings.get('always_run_object_detection'), True)
     if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections) and (not always_run_object_detection):
-        update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+        update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
     detector_method_available = hasattr(
         _state.detector,
@@ -618,6 +619,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             reason=detector_reason,
             ai=ai_state,
             detections=[],
+            frame_timestamp=frame_capture_ts,
             motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction,
         )
         return None
@@ -660,7 +662,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         # detector was reported healthy; letting either escape kills the worker
         # path and leaves stale live status until the next external request.
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
-        update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[], motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+        update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[], frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
     # Secondary face-detector pass (opt-in): runs a dedicated face model
     # alongside the primary object detector so COCO objects and faces are
@@ -937,7 +939,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     object_reason = _below_threshold_object_reason(detections, _monitored_zones)
     if not alert_detections and not _unknown_face_alerts and not _known_face_rule_alerts:
         reason = _no_object_match_reason(detections, raw_labels, _monitored_zones)
-        update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+        update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
     triggered = _state.alerts.process(alert_detections, rules=zone_rules)
     # Dwell alerts are first-class in-app alerts added directly to ``triggered``

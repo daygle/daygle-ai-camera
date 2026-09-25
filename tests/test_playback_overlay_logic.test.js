@@ -85,6 +85,13 @@ test('sampleTrackAtTime interpolates through a short missed sample', () => {
   assert.ok(sampled[0].box.x > 0 && sampled[0].box.x < 0.2);
 });
 
+test('matchDetection keeps same-class objects attached to their stable track id', () => {
+  const first = { label: 'person', track_id: 4, box: box(0.10) };
+  const second = { label: 'person', track_id: 9, box: box(0.70) };
+  const target = { label: 'person', track_id: 9, box: box(0.72) };
+  assert.equal(sandbox.matchDetection([first, second], target).track_id, 9);
+});
+
 
 test('sampleTrackAtTime stops drawing after the track hold window', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sampleTrackAtTime(track, 5.1))), []);

@@ -120,9 +120,6 @@ let overlayEnabled = true;
 let overlayRafId = null;
 let overlayVfcHandle = null;
 let overlayResizeObserver;
-// Estimated frame duration (seconds) used to project detection boxes one
-// frame ahead of the VFC mediaTime or currentTime.
-let _frameDuration = 1 / 30; // default 30fps, updated on each VFC frame
 
 const DAY_SECONDS = 24 * 60 * 60;
 const TIMELINE_ROW_HEIGHT = 42;
@@ -220,28 +217,20 @@ function startOverlayRaf() {
   const video = els.clipPlayer;
   if (!video) return;
   // Uses requestVideoFrameCallback for frame-accurate sync with the video
-  // decoder. The callback provides `mediaTime` - the exact PTS of the frame
-  // being displayed. We project one frame ahead (mediaTime + frameDuration)
-  // so the overlay paints boxes where the object will be when the next frame
-  // hits the screen, compensating for the 1-frame VFC-to-composite delay.
-  // Falls back to rAF + currentTime when VFC is unavailable (older browsers).
+  // decoder. `mediaTime` is the PTS of the frame currently presented; do not
+  // add a speculative one-frame lead here. A lead can make a moving object
+  // appear ahead of the footage, while the actual compositor delay is already
+  // represented by the callback timing. Falls back to currentTime when VFC is
+  // unavailable (older browsers).
   const useVfc = typeof video.requestVideoFrameCallback === 'function';
 
-  let prevVfcTime = 0;
   function onVfcFrame(now, metadata) {
     if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
       overlayRafId = null;
       overlayVfcHandle = null;
       return;
     }
-    // Estimate frame duration from the delta between consecutive VFC frames
-    // (clamped to a reasonable 10-200ms range to filter outliers).
     const mediaTime = metadata && typeof metadata.mediaTime === 'number' ? metadata.mediaTime : null;
-    if (mediaTime !== null && prevVfcTime > 0) {
-      const dt = mediaTime - prevVfcTime;
-      if (dt >= 0.01 && dt <= 0.2) _frameDuration = dt;
-    }
-    if (mediaTime !== null) prevVfcTime = mediaTime;
     drawClipOverlay(mediaTime);
     overlayVfcHandle = video.requestVideoFrameCallback(onVfcFrame);
   }
@@ -287,17 +276,12 @@ function drawClipOverlay(vfcMediaTime) {
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
 
-  // Use the VFC-provided mediaTime (exact frame PTS) and project one frame
-  // ahead. This compensates for the inherent 1-frame delay between VFC
-  // firing (after the frame was sent to compositor) and the overlay paint
-  // being displayed (on the next frame). Falls back to currentTime (with
-  // forward projection) for the rAF path or when VFC isn't available.
-  let playerTime;
-  if (typeof vfcMediaTime === 'number' && Number.isFinite(vfcMediaTime)) {
-    playerTime = vfcMediaTime + _frameDuration;
-  } else {
-    playerTime = Number(els.clipPlayer.currentTime || 0) + _frameDuration;
-  }
+  // Use the VFC-provided mediaTime (exact PTS of the displayed frame). When
+  // VFC is unavailable, currentTime is the closest equivalent. Avoid adding a
+  // synthetic frame duration: it shifts every moving box ahead of the footage.
+  const playerTime = typeof vfcMediaTime === 'number' && Number.isFinite(vfcMediaTime)
+    ? vfcMediaTime
+    : Number(els.clipPlayer.currentTime || 0);
 
   // The saved detection track replays the boxes the live monitor computed
   // while the clip recorded, so playback never runs inference. Clips without

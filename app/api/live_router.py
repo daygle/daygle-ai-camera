@@ -90,7 +90,11 @@ def live_snapshot(request: Request, camera_id: str | None = None, stream: str = 
                 sample[0],
                 captured_ts=sample[1],
             )
-            return Response(content=sample[0], media_type='image/jpeg')
+            return Response(
+                content=sample[0],
+                media_type='image/jpeg',
+                headers={'X-Frame-Timestamp': f'{float(sample[1]):.6f}'},
+            )
     try:
         selected_camera = get_camera_instance(camera_id)
     except HTTPException:
@@ -109,5 +113,9 @@ def live_snapshot(request: Request, camera_id: str | None = None, stream: str = 
             width=frame.get('width'),
             height=frame.get('height'),
         )
-        return Response(content=image_bytes, media_type='image/jpeg')
+        return Response(
+            content=image_bytes,
+            media_type='image/jpeg',
+            headers={'X-Frame-Timestamp': f'{float(frame.get("timestamp") or time.time()):.6f}'},
+        )
     raise HTTPException(status_code=503, detail='Live snapshots require an ONVIF/RTSP camera backend.')
