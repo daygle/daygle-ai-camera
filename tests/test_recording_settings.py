@@ -379,10 +379,11 @@ def test_normalize_camera_ptz_settings_falls_back_on_non_numeric(rs):
 # -- _normalize_camera_sound_settings ----------------------------------
 
 def test_normalize_camera_sound_settings_collapses_non_dict_input(rs):
-    """Non-dict input collapses to ``{'enabled': False, 'rules': []}``."""
-    assert rs._normalize_camera_sound_settings(None) == {'enabled': False, 'rules': []}
-    assert rs._normalize_camera_sound_settings('hi') == {'enabled': False, 'rules': []}
-    assert rs._normalize_camera_sound_settings(['list', 'of', 'rules']) == {'enabled': False, 'rules': []}
+    """Non-dict input resets sound detection to disabled defaults."""
+    expected = {'enabled': False, 'detection_interval_seconds': 0.5, 'rules': []}
+    assert rs._normalize_camera_sound_settings(None) == expected
+    assert rs._normalize_camera_sound_settings('hi') == expected
+    assert rs._normalize_camera_sound_settings(['list', 'of', 'rules']) == expected
 
 
 def test_normalize_camera_sound_settings_filters_unknown_rule_classes(monkeypatch, rs):
@@ -491,7 +492,7 @@ def test_normalize_camera_sound_settings_drops_rules_when_class_lacks_default(mo
         'enabled': True,
         'rules': [{'class': 'siren', 'confidence_threshold': 0.8}],
     })
-    assert out == {'enabled': True, 'rules': []}
+    assert out == {'enabled': True, 'detection_interval_seconds': 0.5, 'rules': []}
 
 
 # -- _migrate_legacy_camera_motion --------------------------------------
