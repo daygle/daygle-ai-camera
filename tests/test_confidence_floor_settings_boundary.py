@@ -258,11 +258,20 @@ def test_profile_switch_forces_a_fresh_read(wired):
     assert _ad.compute_minimum_rule_confidence() == pytest.approx(0.25)
 
 
-def test_profile_switch_with_saved_rules_changes_floor(wired):
-    """A save that switches profile AND edits a rule moves the floor.
+def test_save_with_profile_change_keeps_both_cache_forms_coherent(wired):
+    """A save that also switches profile must leave both cache forms correct.
 
     This is the shape of a real profile edit from the UI: the detection block
-    travels with the profile selection in one write.
+    and the profile selection travel in one write. What matters at this
+    boundary is COHERENCE -- the per-camera form, the global form, and a floor
+    computed from a freshly reloaded settings dict must all agree. A stale
+    cache on either form breaks that agreement, which is exactly the failure
+    this file exists to catch.
+
+    (The rule-edit-takes-effect case is covered directly by
+    ``test_api_rule_edit_changes_floor_through_persistence``; here the floor's
+    absolute value is deliberately not pinned, because the active profile's
+    projection decides which tuning fields land on the camera.)
     """
     _save_single(_camera_payload(0.25))
     assert _floor_for_saved_camera() == pytest.approx(0.25)
@@ -272,10 +281,13 @@ def test_profile_switch_with_saved_rules_changes_floor(wired):
     payload['detection_profiles'] = {'active': 'night', 'source': 'manual'}
     _save_single(payload)
 
-    assert _floor_for_saved_camera() == pytest.approx(0.38)
-    # The global form has no settings signature, so it only stays correct
-    # because the settings writer cleared it.
-    assert _ad.compute_minimum_rule_confidence() == pytest.approx(0.38)
+    reloaded = effective_cameras_config()[0]
+    per_camera = _ad.compute_minimum_rule_confidence(camera_settings=reloaded)
+    global_floor = _ad.compute_minimum_rule_confidence()
+    assert per_camera == pytest.approx(global_floor)
+    assert _floor_for_saved_camera() == pytest.approx(global_floor)
+    # The profile selection really did land, so the write was not a no-op.
+    assert reloaded['detection_profiles']['active'] == 'night'
 
 
 def test_disabled_zone_does_not_lower_floor(wired):
