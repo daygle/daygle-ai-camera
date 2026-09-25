@@ -23,6 +23,7 @@ from typing import Any
 
 import app.state as _state
 from app.ai_settings import log_detector_initialization
+from app.alert_dispatch import invalidate_min_rule_confidence_cache
 from app.camera_instance import create_camera_instances
 from app.camera_policy import clear_camera_policy_cache
 from app.config_facades import effective_recording_config, effective_storage_config
@@ -208,6 +209,16 @@ def _cleanup_camera_runtime_state(removed_ids: set[str]) -> None:
     for cam_id in removed_ids:
         _state._periodic_scan_last_ts.pop(cam_id, None)
         try:
+            from app.detection_telemetry import clear_detection_telemetry
+            clear_detection_telemetry(cam_id)
+        except Exception:  # pragma: no cover - defensive; cache cleanup must not block the apply
+            logger.debug('Detection telemetry cleanup failed for removed camera %s', cam_id, exc_info=True)
+        try:
+            from app.behaviour_monitor import clear_behavioural_state
+            clear_behavioural_state(cam_id)
+        except Exception:  # pragma: no cover - defensive; cache cleanup must not block the apply
+            logger.debug('Behavioural state cleanup failed for removed camera %s', cam_id, exc_info=True)
+        try:
             from app.face_identity import reset_camera_identities
             reset_camera_identities(cam_id)
         except Exception:  # pragma: no cover - defensive; cache cleanup must not block the apply
@@ -233,6 +244,11 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
         # policies at the publication boundary so a same-object edit is visible
         # on the next detection cycle.
         clear_camera_policy_cache()
+        # A camera-rule edit (API save, profile switch, bulk update) changes the
+        # per-label floors, so the cached rule-confidence minimum must not
+        # survive the publication boundary. The per-camera entries self-heal via
+        # their settings signature, but the global (no-camera) form cannot.
+        invalidate_min_rule_confidence_cache()
         new_instances = create_camera_instances(settings_list)
         new_ids = {str(cfg.get('id') or '') for cfg in settings_list if cfg.get('id')}
         with _state._camera_instances_lock:
@@ -368,7 +384,7 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     import app.alert_dispatch as _alert_dispatch
     from app.ai_settings import invalidate_ai_status_cache
     invalidate_ai_status_cache()
-    _alert_dispatch._min_rule_confidence_cache = None
+    _alert_dispatch.invalidate_min_rule_confidence_cache()
     # Bug 8 audit fix: alias the OLD reference BEFORE publishing the
     # sentinel so concurrent pollers -- ``live_alert_monitor_loop``'s
     # per-poll ``detect_frame`` / ``ai_status_payload``,

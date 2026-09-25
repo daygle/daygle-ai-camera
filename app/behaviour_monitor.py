@@ -26,6 +26,118 @@ logger = logging.getLogger('daygle.ai')
 _tripwire_last_fired: dict[str, float] = {}
 _tripwire_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# Camera-motion pause token (Item 10, P2 follow-up)
+# ---------------------------------------------------------------------------
+# The live monitor already SKIPS the behavioural engines while the camera-motion
+# guard is active. That alone is not enough: a pause is only "conservative" if
+# the first sample after resume cannot be influenced by presence accumulated
+# BEFORE the camera moved. A PTZ pan makes every tracked box jump in image
+# space, so without a reset the first post-motion cycle can read as a subject
+# that has been loitering for the whole pan, or as a line crossing caused by
+# the pan rather than by a subject.
+#
+# This token makes the pause explicit and gives it semantics:
+#
+#   * ONSET  (motion becomes active)  -> transitional state is dropped, so the
+#     engines resume from nothing rather than from pre-pan presence.
+#   * RESUME (motion clears)          -> the same reset, so the first post-motion
+#     sample starts a fresh visit and a fresh crossing test.
+#
+# Baselines (learned distributions) and cooldowns are deliberately PRESERVED:
+# a 0.4 s nudge must not erase an hour of learning or let the same anomaly
+# re-fire immediately after the camera settles.
+_behaviour_pause: dict[str, bool] = {}
+_behaviour_pause_lock = threading.Lock()
+
+PAUSE_ONSET = 'onset'
+PAUSE_RESUME = 'resume'
+
+
+def sync_behaviour_pause(camera_id: str, camera_motion_active: bool) -> str | None:
+    """Track camera-motion suppression and reset behavioural state on a transition.
+
+    Call once per detection cycle with the camera-motion verdict BEFORE running
+    the behavioural engines. Returns ``'onset'``, ``'resume'``, or ``None`` when
+    the suppression state did not change, so the caller can log/telemetry the
+    transition without recomputing it.
+
+    The reset drops per-camera TRANSITIONAL state only:
+
+    * loiter presence (an in-progress visit) for this camera;
+    * the time-of-day per-day observation tally for this camera;
+    * tripwire per-track cooldowns for this camera.
+
+    Learned baselines and the remaining cameras' state are untouched.
+    """
+    key = str(camera_id)
+    try:
+        with _behaviour_pause_lock:
+            previous = _behaviour_pause.get(key, False)
+            if bool(camera_motion_active) == previous:
+                return None
+            _behaviour_pause[key] = bool(camera_motion_active)
+            transition = PAUSE_ONSET if camera_motion_active else PAUSE_RESUME
+        if transition == PAUSE_ONSET:
+            logger.debug('Behavioural engines paused for %s (camera motion onset)', key)
+        else:
+            logger.debug('Behavioural engines resumed for %s (camera motion cleared)', key)
+        reset_behavioural_state(key)
+        return transition
+    except Exception as exc:  # noqa: BLE001 - pause bookkeeping must never break a cycle
+        logger.debug('Behavioural pause sync failed for %s: %s', key, exc)
+        return None
+
+
+def reset_behavioural_state(camera_id: str) -> None:
+    """Drop per-camera transitional behavioural state accumulated before a pause.
+
+    Safe to call unconditionally; each map is simply re-seeded empty for this
+    camera. Best-effort per store so one failing lock cannot leave the rest of
+    the state stale. The pause FLAG is not touched: use
+    :func:`clear_behavioural_state` to forget a camera entirely.
+    """
+    key = str(camera_id)
+    try:
+        with _loiter_lock:
+            _loiter_presence.pop(key, None)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug('Loiter presence reset failed for %s: %s', key, exc)
+    try:
+        with _time_lock:
+            _time_today.pop(key, None)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug('Time-of-day state reset failed for %s: %s', key, exc)
+    try:
+        prefix = f'{key}|'
+        with _tripwire_lock:
+            for stale in [k for k in _tripwire_last_fired if k.startswith(prefix)]:
+                _tripwire_last_fired.pop(stale, None)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug('Tripwire cooldown reset failed for %s: %s', key, exc)
+
+
+def behaviour_paused(camera_id: str) -> bool:
+    """Whether the behavioural engines are currently suppressed for this camera."""
+    with _behaviour_pause_lock:
+        return bool(_behaviour_pause.get(str(camera_id), False))
+
+
+def clear_behavioural_state(camera_id: str) -> None:
+    """Forget a camera entirely (deletion / config prune).
+
+    Same transitional-state reset as a pause transition, but the camera's pause
+    flag is dropped too, so a camera that is later re-added with the same id
+    starts unsuppressed instead of inheriting a stale "paused" verdict.
+    """
+    key = str(camera_id)
+    try:
+        with _behaviour_pause_lock:
+            _behaviour_pause.pop(key, None)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug('Behavioural pause flag reset failed for %s: %s', key, exc)
+    reset_behavioural_state(key)
+
 
 def _enabled_zones_with_tripwire(settings: Any) -> list[dict[str, Any]]:
     zones = (settings.get('detection') or {}).get('zones', []) if isinstance(settings, dict) else []

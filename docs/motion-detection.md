@@ -26,7 +26,15 @@ If enough pixels have changed, it declares motion. A quiet whole-frame signal do
 
 ### Layer 2 - YOLO object detection
 
-This runs when Layer 1 says motion was detected, when a per-zone motion rule fires from the diff mask, or when a periodic scan is due (see below). It runs the full YOLO neural network on the frame and identifies specific objects - person, car, dog, etc. - with bounding boxes and confidence scores. The active model (a YOLOv8, YOLO11, or YOLO26 variant) is selected on the **ONNX** page; see [ai-detection.md](ai-detection.md).
+By default this runs on **every** detection cycle, in parallel with Layer 1 - a
+still, slow, or low-contrast subject is never hidden from the detector because
+the pixel diff was quiet. Only when you disable **Always Run Object Detection**
+does Layer 1 gate it, in which case it runs when Layer 1 says motion was
+detected, when a per-zone motion rule fires from the diff mask, or when a
+periodic scan is due (see below). It runs the full YOLO neural network on the
+frame and identifies specific objects - person, car, dog, etc. - with bounding
+boxes and confidence scores. The active model (a YOLOv8, YOLO11, or YOLO26
+variant) is selected on the **ONNX** page; see [ai-detection.md](ai-detection.md).
 
 These results are then matched against your zone rules. If a zone covers the area where an object was detected and you have a rule for that object label, an alert and/or recording fires.
 
@@ -79,9 +87,37 @@ For evidence-based threshold selection, add a normalized ground-truth JSON file
 with `--ground-truth`. The evaluator then reports class-aware precision, recall,
 F1, AP@0.5, and mAP@0.5:0.95. It can also replay one dataset across several
 confidence floors with `--confidence-sweep 0.25,0.35,0.45,0.55` and save the
-comparison as JSON with `--output`. See [Object Detection
+comparison as JSON with `--output`. It can replay the **whole alerting decision**
+(zone scope, N-of-M confirmation, the alert/record decision) with
+`--post-pipeline --camera-config`, and compare the always-on and motion-gated
+operating modes with `--scenarios`. See [Object Detection
 Benchmarking](detection-benchmarking.md) for the annotation format, dataset
 coverage guidance, metric definitions, and regression workflow.
+
+### Diagnosing a missed detection on a running camera
+
+When a camera did not alert on something you saw, the question is usually
+*which stage dropped it*. `GET /api/live/detection-telemetry` (optionally with
+`?camera_id=...`) answers that directly:
+
+```json
+{
+  "last_cycle": {
+    "inference_mode": "always_on",
+    "camera_motion": false,
+    "candidates": {"detected": 3, "after_motion_mode": 1, "after_zone_scope": 1,
+                   "after_confirmation": 0, "alertable": 0},
+    "rejected": {"motion_mode": 2, "confirmation": 1}
+  },
+  "totals": {"cycles": 412, "candidates_detected": 908, "candidates_alertable": 133}
+}
+```
+
+Read it as a funnel: `after_motion_mode` far below `detected` means the
+still/moving filter is eating your subject (check the label's detection mode);
+`after_confirmation` at zero with detections present means the N-of-M window is
+never filling; a `camera_motion: true` in `last_cycle` means a PTZ move
+suppressed the cycle and the behavioural engines were paused for it.
 
 ## Recommended setup for maximum reliability
 
@@ -510,9 +546,18 @@ This is correct behaviour - lights genuinely change a large fraction of pixels. 
 
 ## How the layers interact - example timeline
 
+The timeline below shows the **default** configuration: **Always Run Object
+Detection is ON**, so Layer 2 runs on every cycle and never waits on Layer 1.
+A second timeline shows the same scene with the motion gate restored, which is
+what you get after disabling that setting.
+
+### Default (always-on object detection)
+
 ```
 00:00  Camera is quiet. Background model is stable.
-       Layer 1: no motion. YOLO skipped. ✓
+       Layer 1: no motion ✓
+       Layer 2: YOLO runs (always-on) → nothing found
+       Layer 3: silent (no pixel motion in any zone)
 
 00:05  Person enters frame and walks toward door.
        Layer 1: motion detected (confidence 0.72)
@@ -522,8 +567,41 @@ This is correct behaviour - lights genuinely change a large fraction of pixels. 
 
 00:20  Person reaches door and stops. Stands still.
        Layer 1: pixel diff drops below gate → no motion
+       Layer 3: silent (no pixel motion in any zone)
+       Layer 2: YOLO STILL RUNS → "person 89%" → detection continues ✓
+                (this is the "person stands still and disappears" gap being closed)
+       Background model: starts slowly adapting toward stationary person
+
+03:00  Person leaves frame.
+       Layer 1: motion detected briefly as they exit → alert fires
+       Layer 2: YOLO runs → nothing found → detections stop
+
+03:30  Scene is quiet again. Background resets to empty doorway.
+```
+
+Note what the always-on timeline does **not** need: a periodic scan. Every
+stationary-subject case above was caught by a normal cycle. If you use the
+default, leave **Periodic Scan Interval** at `0`.
+
+### Motion-gated mode (Always Run Object Detection disabled)
+
+The same scene on a low-power host that cannot run YOLO continuously. The trade
+is recall: a subject that never trips the pixel gate can be missed between scans.
+
+```
+00:00  Camera is quiet. Background model is stable.
+       Layer 1: no motion
+       Layer 2: SKIPPED (motion gate closed) ✓
+
+00:05  Person enters frame and walks toward door.
+       Layer 1: motion detected (confidence 0.72) → gate opens
+       Layer 3: motion zone rule fires → motion alert ✓
+       Layer 2: YOLO runs → "person 91%" → person rule alert + recording starts ✓
+
+00:20  Person reaches door and stops. Stands still.
+       Layer 1: pixel diff drops below gate → no motion
        Layer 3: silent
-       Layer 2: YOLO skipped
+       Layer 2: SKIPPED - the person is now invisible until something changes
        Background model: starts slowly adapting toward stationary person
 
 00:50  (Periodic scan = 30s - fires at 00:50)
@@ -537,9 +615,11 @@ This is correct behaviour - lights genuinely change a large fraction of pixels. 
 03:00  Person leaves frame.
        Layer 1: motion detected briefly as they exit → alert fires
        (Next periodic scan: YOLO finds nothing → detections stop)
-
-03:30  Scene is quiet again. Background resets to empty doorway.
 ```
+
+**Periodic Scan Interval is the mitigation for stationary subjects in this mode,
+and it is load-bearing**: set it to `0` on a motion-gated camera and a person
+who stops walking simply stops being detected.
 
 ---
 
@@ -574,4 +654,4 @@ With the default **MOG2** engine and **Shadow Suppression** on, cast shadows are
 
 ### First frame after startup or camera reconnect
 
-When the app starts or a camera reconnects after an outage, the first delivered frame becomes the baseline background. If a person is already standing in the scene at that moment, they will not be detected by the motion gate until they move. The **Periodic Scan** setting mitigates this: the first scheduled scan runs YOLO regardless of the gate and will detect anyone present.
+When the app starts or a camera reconnects after an outage, the first delivered frame becomes the baseline background. If a person is already standing in the scene at that moment, the **motion gate** will not report them until they move - but with the default **Always Run Object Detection**, Layer 2 runs on that very cycle and identifies them anyway, so no wait is needed. On a motion-gated camera, the **Periodic Scan** setting is the mitigation: the first scheduled scan runs YOLO regardless of the gate and will detect anyone present.

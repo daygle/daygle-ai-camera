@@ -19,6 +19,7 @@ import app.state as _state
 from app.auth import utc_now
 from app.config_facades import effective_cameras_config
 from app.ptz import probe_onvif_day_night
+from app.alert_dispatch import invalidate_min_rule_confidence_cache
 from app.recording_settings import (
     apply_active_camera_detection_profile,
     normalize_camera_profiles_with_legacy,
@@ -347,7 +348,12 @@ def poll_camera_profiles() -> None:
             _state.database.set_setting('cameras', persisted, utc_now())
         except Exception as exc:  # persistence failure must not stop detection
             logger.warning('Could not persist automatic day/night profile change: %s', exc)
-
+        if changed:
+            # A profile switch can change this camera's per-label rule floors
+            # (Day/Night presets carry their own confirm/tiling settings), and
+            # the global rule-confidence form has no settings signature to
+            # self-invalidate on. Drop the cache at the persist boundary.
+            invalidate_min_rule_confidence_cache()
 
 def _monitor_loop() -> None:
     next_poll = 0.0

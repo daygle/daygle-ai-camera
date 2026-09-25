@@ -28,8 +28,9 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 
 - `docs/ai-detection.md` - ONNX object detection: models, precision, device, and advanced tuning
 - `docs/face-recognition.md` - face recognition: embedding models, enrolment, matching, and privacy
-- `docs/motion-detection.md` - motion detection and object rule tuning
+- `docs/motion-detection.md` - motion detection, object rule tuning, and detection telemetry
 - `docs/detection-architecture-audit.md` - Item 10 detection architecture re-audit and follow-up plan
+- `docs/detection-benchmarking.md` - labeled detection benchmarks, post-pipeline tuning validation, and quality gates
 - `docs/sound-detection.md` - sound detection, audio rules, and runtime setup
 - `docs/operations.md` - health, logs, backups, and service operation
 

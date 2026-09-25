@@ -21,9 +21,13 @@ Full motion + object evaluation with a model, night shadow handling on auto::
 
 Quality benchmarking uses ``--ground-truth annotations.json`` to calculate
 class-aware precision, recall, F1, AP@0.5, and mAP@0.5:0.95 from labeled frames.
-For Items 11–12 tuning studies, ``--post-pipeline`` compares the raw detector
-with per-label rule floors and the live N-of-M confirmation stage. The JSON
-format and workflow are documented in ``docs/detection-benchmarking.md``.
+``--post-pipeline`` replays the production decision path after inference (label
+rule floors, tracking, camera/zone scope, N-of-M confirmation, and the post-zone
+action decision), so a tuning study measures what actually alerts rather than
+what the model alone produced. ``--camera-config`` supplies the real zone policy
+and ``--scenarios`` reports the always-on and motion-gated operating modes
+separately. The JSON format and workflow are documented in
+``docs/detection-benchmarking.md``.
 
 Nothing here writes to the app database or config; it only reads frames. An
 explicit ``--output`` path writes only the generated JSON report.
@@ -168,32 +172,152 @@ def _apply_label_thresholds(
     ]
 
 
+def load_camera_config(path: str | Path) -> dict[str, Any]:
+    """Load and validate the camera settings used to replay zone policy.
+
+    The evaluator otherwise replays a POLICY-FREE pipeline, which cannot answer
+    the question a zone-scoped operator actually has: "my person rule did not
+    fire - was that the detector, or my zone geometry?". This accepts a camera
+    settings object shaped like the app's own ``detection`` block (the same
+    structure persisted by ``PUT /api/cameras``), so an operator can export
+    their real configuration rather than hand-writing a benchmark fixture.
+    """
+    config_path = Path(path)
+    try:
+        document = json.loads(config_path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f'could not read camera config {config_path}: {exc}') from exc
+    if not isinstance(document, dict):
+        raise ValueError('camera config must be a JSON object')
+    detection = document.get('detection', {})
+    if detection is None:
+        detection = {}
+    if not isinstance(detection, dict):
+        raise ValueError('camera config detection must be an object')
+    zones = detection.get('zones', []) or []
+    if not isinstance(zones, list):
+        raise ValueError('camera config detection.zones must be an array')
+    for index, zone in enumerate(zones):
+        if not isinstance(zone, dict):
+            raise ValueError(f'camera config zone[{index}] must be an object')
+        for key in ('x', 'y', 'width', 'height'):
+            if key in zone and zone[key] is not None:
+                try:
+                    float(zone[key])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f'camera config zone[{index}].{key} must be a number'
+                    ) from exc
+        rules = zone.get('object_rules', []) or []
+        if not isinstance(rules, list):
+            raise ValueError(f'camera config zone[{index}].object_rules must be an array')
+        for rule_index, rule in enumerate(rules):
+            if not isinstance(rule, dict):
+                raise ValueError(
+                    f'camera config zone[{index}].object_rules[{rule_index}] '
+                    'must be an object'
+                )
+    validated = dict(document)
+    validated['detection'] = {**detection, 'zones': zones}
+    validated.setdefault('id', 'eval')
+    return validated
+
+
+def label_thresholds_from_camera_config(settings: dict[str, Any]) -> dict[str, float]:
+    """Derive per-label rule floors from a camera's enabled object rules.
+
+    Mirrors how the live path builds its per-label behaviour: each enabled,
+    non-motion object rule's ``min_confidence`` is the floor for its label. A
+    label with several rules takes the LOWEST floor, because that is the value
+    the detector must clear for the camera to see the object at all.
+    """
+    thresholds: dict[str, float] = {}
+    for zone in (settings.get('detection') or {}).get('zones', []) or []:
+        if not isinstance(zone, dict) or zone.get('enabled', True) is False:
+            continue
+        for rule in zone.get('object_rules') or []:
+            if not isinstance(rule, dict) or not rule.get('enabled', True):
+                continue
+            label = str(rule.get('label') or '').strip().casefold()
+            if not label or label == 'motion':
+                continue
+            try:
+                confidence = float(rule.get('min_confidence'))
+            except (TypeError, ValueError):
+                continue
+            if label not in thresholds or confidence < thresholds[label]:
+                thresholds[label] = confidence
+    return thresholds
+
+
 def _apply_post_pipeline(
     camera_id: str,
     detections: list[dict[str, Any]],
     args: argparse.Namespace,
-) -> list[dict[str, Any]]:
-    """Apply the benchmark's confirmation stage after inference.
+    settings: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Replay the production decision path after inference.
 
-    Zone matching is intentionally not simulated here because the benchmark
-    annotation schema describes objects, not camera zone policy. The label rule
-    and N-of-M stages are the policy-independent parts that can be compared
-    fairly across clips; zone-specific validation remains a separate fixture.
+    Stage order matches ``process_live_stream_alerts`` so the benchmark measures
+    the alerting decision, not just the model:
+
+    1. per-label rule floors (``--label-thresholds``, or the camera's own rules
+       when ``--camera-config`` is supplied);
+    2. tracking (``update_object_tracks``) so the stable track ids and
+       displacement history the live path depends on exist here too;
+    3. camera/zone scope filtering (``filter_detections_for_camera``);
+    4. N-of-M temporal confirmation (``--confirm-frames``/``--confirm-window``);
+    5. the post-zone action decision (alert rules + record-on-detect), which is
+       what actually decides whether an event fires.
+
+    Returns the actionable detections plus per-stage survivor counts. Without a
+    camera config, stages 3 and 5 are skipped and reported as such, so a run
+    can never imply zone coverage it did not measure.
     """
-    filtered = _apply_label_thresholds(
+    stage_counts: dict[str, int] = {'detected': len(detections)}
+    candidates = _apply_label_thresholds(
         detections, getattr(args, 'label_thresholds', {}) or {}
     )
+    stage_counts['after_label_rules'] = len(candidates)
+    if not candidates:
+        return [], stage_counts
+
+    from app.object_tracking import update_object_tracks
+    tracked = update_object_tracks(camera_id, candidates)
+    stage_counts['tracked'] = len(tracked)
+
+    scoped = tracked
+    if settings is not None:
+        from app.zone_detection import filter_detections_for_camera
+        scoped = filter_detections_for_camera(tracked, settings)
+    stage_counts['after_zone_scope'] = len(scoped)
+
+    confirmed = scoped
     required = int(getattr(args, 'confirm_frames', 1))
-    if required <= 1:
-        return filtered
-    from app.detection_state import confirm_object_detections
-    return confirm_object_detections(
-        camera_id,
-        filtered,
-        required_frames=required,
-        window_frames=int(getattr(args, 'confirm_window', required) or required),
-        location_iou=float(getattr(args, 'confirm_iou', 0.0) or 0.0),
-    )
+    if required > 1:
+        from app.detection_state import confirm_object_detections
+        confirmed = confirm_object_detections(
+            camera_id,
+            scoped,
+            required_frames=required,
+            window_frames=int(getattr(args, 'confirm_window', required) or required),
+            location_iou=float(getattr(args, 'confirm_iou', 0.0) or 0.0),
+        )
+    stage_counts['after_confirmation'] = len(confirmed)
+
+    if settings is None:
+        stage_counts['actionable'] = len(confirmed)
+        return confirmed, stage_counts
+
+    from app.zone_detection import zone_alert_detections, zone_record_on_detect
+    alerting = zone_alert_detections(settings, confirmed)
+    alerting_ids = {id(detection) for detection in alerting}
+    record_only = [
+        detection for detection in confirmed
+        if id(detection) not in alerting_ids and zone_record_on_detect(detection, settings)
+    ]
+    stage_counts['actionable'] = len(alerting) + len(record_only)
+    return alerting + record_only, stage_counts
 
 
 def _evaluation_prediction(
@@ -496,13 +620,23 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
 
     detector = _build_detector(args)
     post_pipeline = bool(getattr(args, 'post_pipeline', False))
+    camera_config = getattr(args, 'camera_config', None)
     post_frame_predictions: dict[int, list[dict[str, Any]]] = {}
-    if post_pipeline and int(getattr(args, 'confirm_frames', 1)) > 1:
+    post_stage_totals: dict[str, int] = {}
+    if post_pipeline:
+        # Isolate every per-camera post-pipeline store this run will touch
+        # (confirmation window + tracker), so a clip never inherits history
+        # from a previous run in the same process.
         confirm_lock = getattr(state, 'live_detection_confirm_lock', None)
         confirm_history = getattr(state, 'live_detection_confirm_history', None)
         if confirm_lock is not None and isinstance(confirm_history, dict):
             with confirm_lock:
                 confirm_history.pop(cam, None)
+        tracks_lock = getattr(state, '_object_tracks_lock', None)
+        tracks = getattr(state, '_object_tracks', None)
+        if tracks_lock is not None and isinstance(tracks, dict):
+            with tracks_lock:
+                tracks.pop(cam, None)
     annotate_dir = Path(args.annotate) if args.annotate else None
     if annotate_dir:
         annotate_dir.mkdir(parents=True, exist_ok=True)
@@ -567,7 +701,11 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 label_confidences.setdefault(label, []).append(float(det.get("confidence") or 0.0))
             quality_detections = detections
             if post_pipeline:
-                quality_detections = _apply_post_pipeline(cam, detections, args)
+                quality_detections, stage_counts = _apply_post_pipeline(
+                    cam, detections, args, camera_config,
+                )
+                for stage, count in stage_counts.items():
+                    post_stage_totals[stage] = post_stage_totals.get(stage, 0) + count
                 if ground_truth is not None and frames - 1 in ground_truth:
                     post_frame_predictions.setdefault(frames - 1, [])
                     post_frame_predictions[frames - 1].extend(
@@ -659,6 +797,9 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             "detector_confidence": float(getattr(args, 'detector_confidence', args.confidence)),
             "frame_size": [args.frame_width, args.frame_height],
             "post_pipeline": post_pipeline,
+            "camera_config": str(camera_config) if camera_config else None,
+            "zone_policy_replayed": camera_config is not None,
+            "inference_mode": "motion_gated" if args.gated else "always_on",
             "label_thresholds": dict(sorted((getattr(args, 'label_thresholds', {}) or {}).items())),
             "confirm_frames": int(getattr(args, 'confirm_frames', 1)),
             "confirm_window": int(getattr(args, 'confirm_window', getattr(args, 'confirm_frames', 1)) or getattr(args, 'confirm_frames', 1)),
@@ -666,6 +807,13 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         },
         "benchmark": benchmark,
         "post_pipeline_benchmark": post_benchmark,
+        "post_pipeline_stages": {
+            stage: {
+                'total': total,
+                'per_frame': round(total / frames, 3) if frames else 0.0,
+            }
+            for stage, total in sorted(post_stage_totals.items())
+        } if post_pipeline else None,
     }
     return report
 
@@ -707,6 +855,8 @@ def _print_human(report: dict[str, Any]) -> None:
     m = report["motion"]
     o = report["objects"]
     print(f"\nEvaluated {report['frames']} frame(s) from {report['input']}")
+    if report.get('settings', {}).get('inference_mode'):
+        print(f"Inference mode: {report['settings']['inference_mode']}")
     print("\nMotion")
     print(f"  motion frames : {m['frames_with_motion']} ({m['motion_rate'] * 100:.1f}%)")
     print(f"  changed frac  : p50={m['changed_fraction']['p50']} p95={m['changed_fraction']['p95']} max={m['changed_fraction']['max']}")
@@ -752,6 +902,15 @@ def _print_human(report: dict[str, Any]) -> None:
             f"{p['false_positives']} / {p['false_negatives']}"
         )
         _print_per_label_quality(report, 'post_pipeline_benchmark', 'post-pipeline')
+    if report.get('post_pipeline_stages'):
+        print("\nPost-pipeline stages (total survivor count across frames)")
+        for stage, info in report['post_pipeline_stages'].items():
+            print(f"  {stage:<26} {info['total']:<8} ({info['per_frame']}/frame)")
+        if not report['settings'].get('zone_policy_replayed'):
+            print(
+                "  note: zone scope and the post-zone action decision were NOT "
+                "replayed (no --camera-config). Add one to measure them."
+            )
     print()
 
 
@@ -777,12 +936,25 @@ def main(argv: list[str] | None = None) -> int:
                              "Default runs it every frame, matching the always-on live default.")
     parser.add_argument(
         "--post-pipeline", action="store_true",
-        help="Evaluate label-rule thresholds and temporal N-of-M confirmation after inference. "
-             "Zone matching is not simulated because annotations describe objects, not zone policy.",
+        help="Replay the production decision path after inference: label-rule floors, "
+             "tracking, camera/zone scope, N-of-M confirmation, and the post-zone "
+             "action decision. Zone and action stages need --camera-config.",
+    )
+    parser.add_argument(
+        "--camera-config",
+        help="JSON camera settings (the persisted 'detection' block) used to replay "
+             "zone scope and the post-zone action decision. Requires --post-pipeline.",
+    )
+    parser.add_argument(
+        "--scenarios", action="store_true",
+        help="Run both inference scenarios (always-on and motion-gated) over the same "
+             "input and report each separately, so a camera can be sized for its "
+             "actual operating mode.",
     )
     parser.add_argument(
         "--label-thresholds",
-        help="Per-label rule floors for --post-pipeline, e.g. person=0.50,car=0.60.",
+        help="Per-label rule floors for --post-pipeline, e.g. person=0.50,car=0.60. "
+             "Defaults to the per-label floors in --camera-config.",
     )
     parser.add_argument(
         "--confirm-frames", type=int, default=1,
@@ -833,6 +1005,18 @@ def main(argv: list[str] | None = None) -> int:
         args.label_thresholds = parse_label_thresholds(args.label_thresholds)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.camera_config and not args.post_pipeline:
+        parser.error("--camera-config requires --post-pipeline")
+    if args.camera_config:
+        try:
+            args.camera_config = load_camera_config(args.camera_config)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if not args.label_thresholds:
+            # Mirror the live path: a camera's own enabled object rules define
+            # its per-label floors, so the benchmark measures the camera as
+            # actually configured rather than an invented policy.
+            args.label_thresholds = label_thresholds_from_camera_config(args.camera_config)
     if not 1 <= args.confirm_frames <= 10:
         parser.error("--confirm-frames must be between 1 and 10")
     args.confirm_window = args.confirm_frames if args.confirm_window is None else args.confirm_window
@@ -842,6 +1026,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--confirm-iou must be between 0 and 0.9")
     if args.label_thresholds and not args.post_pipeline:
         parser.error("--label-thresholds requires --post-pipeline")
+    if args.scenarios and not args.input:
+        parser.error("--scenarios requires --input")
     quality_limits = {
         "--fail-below-precision": args.fail_below_precision,
         "--fail-below-recall": args.fail_below_recall,
@@ -856,18 +1042,43 @@ def main(argv: list[str] | None = None) -> int:
     if args.ground_truth is not None and not args.model:
         parser.error("--ground-truth requires --model")
 
+    # Scenario expansion: the SAME clip replayed under both inference modes.
+    # Always-on is the live default; motion-gated is the CPU-saving mode a
+    # camera may be switched to. Their recall differs by construction (a
+    # subject that never moves enough to clear the gate is invisible in gated
+    # mode), so sizing a floor requires both numbers, not one blended figure.
+    scenarios: list[tuple[str, bool]] = []
+    if args.scenarios:
+        scenarios = [('always_on', False), ('motion_gated', True)]
+    else:
+        scenarios = [('always_on' if not args.gated else 'motion_gated', bool(args.gated))]
+
     reports = []
+    scenario_reports: dict[str, Any] = {}
     for confidence in confidences:
-        run_args = argparse.Namespace(**vars(args))
-        run_args.confidence = confidence
-        label_floor = min(run_args.label_thresholds.values()) if run_args.label_thresholds else confidence
-        run_args.detector_confidence = min(confidence, label_floor)
-        reports.append(evaluate(run_args))
+        for scenario_name, gated in scenarios:
+            run_args = argparse.Namespace(**vars(args))
+            run_args.confidence = confidence
+            run_args.gated = gated
+            label_floor = min(run_args.label_thresholds.values()) if run_args.label_thresholds else confidence
+            run_args.detector_confidence = min(confidence, label_floor)
+            run_report = evaluate(run_args)
+            reports.append(run_report)
+            if args.scenarios:
+                scenario_reports.setdefault(scenario_name, []).append(run_report)
     report: dict[str, Any] = (
         reports[0]
         if len(reports) == 1
         else {"input": str(args.input), "confidence_sweep": reports}
     )
+    if args.scenarios:
+        report = {
+            "input": str(args.input),
+            "scenarios": {
+                name: (runs[0] if len(runs) == 1 else {"confidence_sweep": runs})
+                for name, runs in scenario_reports.items()
+            },
+        }
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -877,10 +1088,18 @@ def main(argv: list[str] | None = None) -> int:
     elif args.json:
         print(json.dumps(report, indent=2))
     else:
-        for index, run_report in enumerate(reports):
+        label_index = 0
+        for run_report in reports:
+            header_parts = []
+            if args.scenarios:
+                header_parts.append(str(run_report.get('settings', {}).get('inference_mode') or '?'))
             if len(reports) > 1:
-                print(f"\n=== confidence {confidences[index]:.3f} ===")
+                confidence_index = label_index % len(confidences)
+                header_parts.append(f"confidence {confidences[confidence_index]:.3f}")
+            if header_parts:
+                print(f"\n=== {' / '.join(header_parts)} ===")
             _print_human(run_report)
+            label_index += 1
     failures = []
     if any(value is not None for value in quality_limits.values()):
         failures = [

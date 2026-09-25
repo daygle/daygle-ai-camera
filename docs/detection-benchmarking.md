@@ -140,8 +140,21 @@ The JSON report keeps both views:
 
 - `benchmark` is the detector output after the global confidence floor and
   optional tiling;
-- `post_pipeline_benchmark` applies the per-label rule floors and the same
-  N-of-M confirmation function used by live monitoring.
+- `post_pipeline_benchmark` applies the full production decision path.
+
+`--post-pipeline` replays the same stages in the same order as
+`process_live_stream_alerts`:
+
+| Stage | What it does | Reported key |
+| --- | --- | --- |
+| label rule floors | drops detections under their per-label rule threshold | `after_label_rules` |
+| tracking | stamps stable track ids and displacement history | `tracked` |
+| camera/zone scope | keeps detections this camera actually monitors | `after_zone_scope` |
+| N-of-M confirmation | the live confirmation window | `after_confirmation` |
+| post-zone action decision | alert rules + record-on-detect | `actionable` |
+
+Survivor counts per stage land in `post_pipeline_stages`, so a tuning change
+can be attributed to a specific stage rather than guessed at.
 
 `--confirm-frames 1` disables confirmation. `--confirm-window` defaults to the
 required frame count. `--confirm-iou 0` uses label-only persistence; a positive
@@ -154,6 +167,52 @@ live distinction between a shared detector floor and per-zone action rules.
 Labels without an explicit threshold remain visible to the benchmark; they are
 not silently treated as disabled rules.
 
+### Replaying your real zone policy
+
+Zone matching and the action decision need a camera's own configuration. Pass it
+with `--camera-config`; the file is a camera settings object shaped like the
+persisted `detection` block, so you can export what the app already stores:
+
+```bash
+python scripts/evaluate_detection.py \
+  --input fixtures/front-door-frames \
+  --ground-truth fixtures/front-door.json \
+  --model models/yolo11n.onnx \
+  --post-pipeline \
+  --camera-config fixtures/front-door-camera.json \
+  --confirm-frames 2 --confirm-window 3 \
+  --output reports/front-door-tuned.json
+```
+
+With a camera config, `--label-thresholds` is optional: it defaults to the
+camera's own per-label rule floors, so the run measures the camera as actually
+configured instead of an invented policy. Override it to study a different
+threshold.
+
+**Without `--camera-config` the zone and action stages are not measured.** The
+report says so explicitly (`zone_policy_replayed: false`) and the human output
+prints a note, so a run can never imply zone coverage it did not exercise.
+
+### Comparing operating modes
+
+`--scenarios` replays the same clip under both inference modes and reports each
+separately:
+
+```bash
+python scripts/evaluate_detection.py \
+  --input fixtures/front-door-frames \
+  --ground-truth fixtures/front-door.json \
+  --model models/yolo11n.onnx \
+  --post-pipeline --scenarios --output reports/front-door-modes.json
+```
+
+Always-on is the live default; motion-gated is the CPU-saving mode. Their
+recall differs **by construction**: a subject that never trips the pixel gate is
+invisible in motion-gated mode. Sizing a floor from one blended number hides
+exactly the regression that matters, so measure the mode the camera will
+actually run in — and if you intend to run both, check the gated number before
+choosing thresholds.
+
 For a threshold study, hold the input, annotations, model, IoU threshold, and
 inference strategy constant. Compare at least:
 
@@ -161,18 +220,13 @@ inference strategy constant. Compare at least:
 2. lower and higher global floors with `--confidence-sweep`;
 3. per-label floors using `--label-thresholds`;
 4. `1-of-1` versus `2-of-3` confirmation;
-5. label-only versus spatial confirmation with `--confirm-iou`.
+5. label-only versus spatial confirmation with `--confirm-iou`;
+6. always-on versus motion-gated with `--scenarios`.
 
 Choose an operating point from the measured precision/recall trade-off. A
 higher floor or stronger confirmation is not automatically better if it
 removes valid small or low-light subjects. Keep negative scenes in the dataset;
 they are what make false-positive reductions visible.
-
-This mode intentionally does not claim to simulate zone matching. Zone policy
-depends on camera-specific geometry, monitor flags, and action settings that
-are not part of the object ground-truth schema. Validate those with a separate
-camera/zone fixture or an event-level replay after the model and confirmation
-choices are stable.
 
 ## 6. Make it a regression check
 
@@ -197,6 +251,6 @@ python scripts/evaluate_detection.py \
 
 A failed floor exits with status `1`. Pin thresholds against the model, labels,
 and fixture version so a model upgrade is an explicit decision rather than an
-accidental regression. When running a confidence sweep, every selected confidence floor must pass the configured gates. Store the input
+accidental regression. When running a confidence sweep, every selected confidence floor must pass the configured gates — and with `--scenarios`, **every scenario** must pass, so a camera that silently loses recall under the motion gate cannot go green on its always-on number alone. Store the input
 fixture version, model/labels version, and selected operating point with the
 report so a later threshold change is explainable.

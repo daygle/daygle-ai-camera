@@ -102,44 +102,89 @@ Relevant tests include `tests/test_motion_shape_guard.py`,
 
 ## Prioritized follow-ups
 
-### P1 — make the benchmark represent the production decision path
+All five follow-ups raised by this audit are now implemented. What each one
+does and where it lives:
 
-`scripts/evaluate_detection.py` measures base detection, optional region/tile
-inference, motion timing, and labeled object quality. It does not yet replay
-tracking, zone matching, N-of-M confirmation, or the post-zone action decision.
-Add a versioned post-pipeline prediction mode with scenario breakdowns for
-motion-gated and always-on operation. Keep the current base metrics as the
-stable detector benchmark so changes to alerting policy do not silently rewrite
-model-quality history.
+### P1 — benchmark represents the production decision path (DONE)
 
-### P1 — explicitly test confidence-floor invalidation across settings writers
+`scripts/evaluate_detection.py --post-pipeline` now replays the full decision
+path in the same order as `process_live_stream_alerts`: per-label rule floors →
+tracking → camera/zone scope → N-of-M confirmation → the post-zone action
+decision. `--camera-config` supplies a real camera settings object (the
+persisted `detection` block), so zone geometry and the alert/record decision are
+measured rather than assumed; without it the run reports
+`zone_policy_replayed: false` and says so in the human output instead of
+implying coverage it did not measure. `--label-thresholds` defaults to the
+camera's own per-label rule floors, so the default run measures the camera as
+actually configured.
 
-Per-camera rule edits now invalidate through a settings signature. Add an
-integration test at the settings/profile API boundary (including a profile
-switch and a zone disable) to prove the same behavior when settings arrive via
-persistence and reload, not only when a test mutates the in-memory dict.
+`--scenarios` replays the same clip under BOTH operating modes and reports each
+separately, because their recall differs by construction: a subject that never
+trips the pixel gate is invisible in motion-gated mode and visible in
+always-on mode. Sizing a floor from one blended number hides exactly the
+regression that matters.
 
-### P2 — define behavioral pause/resume semantics
+The base `benchmark` block is unchanged and remains the stable detector-quality
+metric, so a change to alerting policy cannot silently rewrite model-quality
+history; the tuned result lives in `post_pipeline_benchmark`, and the CI
+quality gates can target either.
 
-Camera motion now prevents new behavioral observations. The next design step is
-an explicit pause token or state reset at motion onset/resume so old track
-presence cannot influence the first post-motion loiter/time-of-day sample. The
-current behavior is conservative: it emits no behavior event during the motion
-window.
+### P1 — confidence-floor invalidation across settings writers (DONE)
 
-### P2 — expand end-to-end architecture telemetry
+`app.alert_dispatch.invalidate_min_rule_confidence_cache()` is now called by
+every writer that can change a rule: `apply_cameras_settings` (which covers the
+single-camera PUT, the bulk list PUT, and any caller that publishes settings)
+and the profile monitor's persist. The gap was real: per-camera entries
+self-invalidate via their settings signature, but the GLOBAL (no-camera) form
+has no settings argument to hash, so a rule edit or a profile switch left it
+serving the previous floor for up to the 5 s TTL.
 
-Record, per camera and cycle, whether inference was always-on or motion-gated,
-whether camera motion was active, how many candidates survived each stage, and
-whether a candidate was rejected by zone, motion mode, or confirmation. This
-will make future regressions measurable without relying on log-line correlation.
+`tests/test_confidence_floor_settings_boundary.py` covers the API boundary
+rather than the in-memory dict: single-camera save, bulk save, profile switch,
+zone disable, and cross-camera isolation, with every read going through
+persistence and reload so the hot path receives freshly constructed settings
+dicts. The database double implements `_settings_cache_gen`, so
+`app.config_facades` exercises its real caching path instead of the
+always-rebuild path a plain double would take.
 
-### P3 — reconcile remaining benchmark and documentation examples
+### P2 — behavioral pause/resume semantics (DONE)
 
-The motion guide has been corrected to describe parallel default motion/object
-signals. Remaining timeline examples that describe quiet-frame YOLO skips
-should either be explicitly labeled “motion-gated mode” or updated to show the
-always-on default.
+`app.behaviour_monitor.sync_behaviour_pause(camera_id, active)` makes the
+suppression explicit and resets per-camera TRANSITIONAL state on BOTH the onset
+and the resume edge: loiter presence, the time-of-day daily tally, and
+tripwire per-track cooldowns. Learned baselines and remaining cooldowns are
+deliberately preserved, so a 0.4 s PTZ nudge cannot erase an hour of learning
+or let the same anomaly re-fire the moment the camera settles.
+`clear_behavioural_state` additionally drops the pause flag, so a
+removed-and-re-added camera starts unsuppressed.
+
+Without this, a pan moves every tracked box in image space and the first
+post-motion sample could read a pre-pan visit as a long loiter, or a pan-induced
+step as a line crossing.
+
+### P2 — end-to-end architecture telemetry (DONE)
+
+`app/detection_telemetry.py` records, per camera and per cycle: the inference
+mode (`always_on` / `motion_gated` / `skipped_no_motion` /
+`skipped_no_detector` / `error`), whether camera motion was active and why, how
+many candidates survived each stage (`detected`, `after_motion_mode`,
+`after_camera_filter`, `after_confirmation`, `alertable`), and how many were
+rejected by `motion_mode`, `camera_scope`, `zone`, `confirmation`, or
+`camera_motion`. Both a bounded rolling window of raw cycles and process-lifetime
+totals are kept, so "what just happened" and "how does this camera normally
+behave" are both answerable.
+
+Exposed at `GET /api/live/detection-telemetry` (optionally per camera).
+Recording is a dict append under one lock and never raises; telemetry is pruned
+in the same pass that clears a removed camera's motion state.
+
+### P3 — documentation examples reconciled (DONE)
+
+`docs/motion-detection.md` now leads with the always-on timeline (the default)
+and presents the motion-gated timeline as the explicit opt-in mode it is. The
+Layer 2 overview and the "first frame after startup" note were corrected to stop
+implying a quiet frame skips YOLO, and the periodic scan is called out as
+load-bearing ONLY in motion-gated mode.
 
 ## Verification record
 

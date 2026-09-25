@@ -102,6 +102,22 @@ _per_camera_min_rule_confidence_cache: dict[str, tuple[float, float, str]] = {}
 _min_rule_confidence_lock = threading.Lock()
 
 
+def invalidate_min_rule_confidence_cache() -> None:
+    """Drop every cached rule-confidence floor.
+
+    The per-camera entries already self-invalidate on a settings-signature
+    change, but the GLOBAL (no-camera) form has no settings argument to hash,
+    so a rule edit made through the API or the profile monitor would leave it
+    serving the previous floor for up to ``_MIN_RULE_CONFIDENCE_TTL``. Every
+    settings writer that can change a rule calls this so the next read is
+    correct immediately rather than eventually.
+    """
+    global _min_rule_confidence_cache
+    with _min_rule_confidence_lock:
+        _min_rule_confidence_cache = None
+        _per_camera_min_rule_confidence_cache.clear()
+
+
 def compute_minimum_rule_confidence(fallback: float | None = None, camera_settings: dict | None = None) -> float:
     """Return the lowest min_confidence across enabled object rules.
 

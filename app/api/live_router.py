@@ -11,6 +11,7 @@ from app.auth_gates import require_user
 from app.config_facades import get_camera_config
 from app.deps import get_recording_service
 from app.detection_status import live_detection_status_payload
+from app.detection_telemetry import detection_telemetry_payload
 from app.utils import build_stream_url
 from app.zone_detection import get_camera_instance
 
@@ -58,6 +59,20 @@ def live_detection_status_api(request: Request, camera_id: str | None = None):
     # accidentally moves this path into PUBLIC_PATHS.
     require_user(request)
     return live_detection_status_payload(camera_id)
+
+
+@router.get('/api/live/detection-telemetry')
+def live_detection_telemetry_api(request: Request, camera_id: str | None = None):
+    """Per-camera pipeline telemetry: which stages ran and where candidates went.
+
+    Reports, per cycle, whether inference ran always-on or under the
+    motion gate, whether the camera-motion guard suppressed the cycle, how many
+    candidates survived each stage, and how many were rejected by zone, motion
+    mode, camera scope, or confirmation. Without ``camera_id`` the response
+    aggregates every camera.
+    """
+    require_user(request)
+    return detection_telemetry_payload(camera_id)
 
 
 @router.get('/api/live/snapshot')

@@ -31,6 +31,20 @@ from app.detection_state import (
     record_live_detection_history,
 )
 from app.detection_status import _camera_has_live_alert_stream, update_live_detection_status
+from app.detection_telemetry import (
+    MODE_ALWAYS_ON,
+    MODE_ERROR,
+    MODE_MOTION_GATED,
+    MODE_SKIPPED_NO_DETECTOR,
+    MODE_SKIPPED_NO_MOTION,
+    REJECT_CAMERA_MOTION,
+    REJECT_CAMERA_SCOPE,
+    REJECT_CONFIRMATION,
+    REJECT_MOTION_MODE,
+    REJECT_ZONE,
+    prune_detection_telemetry,
+    record_detection_cycle,
+)
 from app.object_settings import (
     annotate_motion_states,
     effective_object_settings,
@@ -41,7 +55,13 @@ from app.object_settings import (
     update_still_dwell_alerts,
 )
 from app.object_tracking import update_object_tracks
-from app.behaviour_monitor import emit_loiter_anomalies, emit_time_of_day_anomalies, emit_tripwire_crossings
+from app.behaviour_monitor import (
+    clear_behavioural_state,
+    emit_loiter_anomalies,
+    emit_time_of_day_anomalies,
+    emit_tripwire_crossings,
+    sync_behaviour_pause,
+)
 from app.recording_settings import effective_camera_live_settings
 from app.inference_scheduler import LiveInferenceScheduler
 from app.face_identity import annotate_face_identities, face_identity_metadata, unknown_face_alerts
@@ -431,6 +451,11 @@ def _prune_frame_motion_state() -> None:
         with _state.live_detection_confirm_lock:
             for cid in stale:
                 _state.live_detection_confirm_history.pop(cid, None)
+        # A removed camera must not leave a permanent telemetry entry (or stale
+        # behavioural presence) behind in the same pruning pass.
+        prune_detection_telemetry(active_ids)
+        for cid in stale:
+            clear_behavioural_state(cid)
         logger.debug('Pruned stale motion state for cameras: %s', stale)
 
 def live_alert_monitor_loop() -> None:
@@ -691,6 +716,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     ai_config = effective_ai_config()
     if not normalize_bool_setting(ai_config.get('enabled'), True):
         update_live_detection_status(camera_id, state='skipped', reason='AI detection is disabled.', detections=[])
+        record_detection_cycle(
+            camera_id,
+            inference_mode=MODE_SKIPPED_NO_DETECTOR,
+        )
         return None
     if enforce_interval:
         now = time.time()
@@ -785,6 +814,39 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     camera_motion = update_camera_motion(
         camera_id, raw_motion_fraction, allow_auto_detection=_allow_auto_motion,
     )
+    # Explicit behavioural pause token. Suppressing the engines while the camera
+    # moves is not enough on its own: a pan moves every tracked box in image
+    # space, so the FIRST sample after resume could otherwise read a
+    # pre-pan visit as a long loiter or a pan-induced line crossing. The token
+    # drops per-camera transitional state on both the onset and the resume edge
+    # (learned baselines and cooldowns survive, so a 0.4s nudge cannot erase
+    # an hour of learning or re-fire the same anomaly).
+    sync_behaviour_pause(camera_id, bool(camera_motion.get('active')))
+    # Per-cycle pipeline telemetry (see app/detection_telemetry.py). Populated
+    # as the cycle advances so a diagnostics reader can attribute a missed
+    # detection to a specific stage instead of correlating log lines.
+    _telemetry_candidates: dict[str, int] = {}
+    _telemetry_rejected: dict[str, int] = {}
+
+    def _telemetry_finish(
+        inference_mode: str,
+        *,
+        event_created: bool = False,
+        error: bool = False,
+    ) -> None:
+        try:
+            record_detection_cycle(
+                camera_id,
+                inference_mode=MODE_ERROR if error else inference_mode,
+                camera_motion=bool(camera_motion.get('active')),
+                camera_motion_reason=camera_motion.get('reason'),
+                frame_motion=bool(frame_has_motion),
+                candidates=dict(_telemetry_candidates),
+                rejected=dict(_telemetry_rejected),
+                event_created=event_created,
+            )
+        except Exception as exc:  # noqa: BLE001 - telemetry must never break a cycle
+            logger.debug('Detection telemetry failed for %s: %s', camera_id, exc)
     # A motion-gate error is not evidence of motion, but it must not suppress
     # the independent object-detection path: some callers provide detector-
     # compatible input that the optional motion decoder cannot parse. Keep the
@@ -840,6 +902,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     always_run_object_detection = normalize_bool_setting(live_settings.get('always_run_object_detection'), True)
     if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections) and (not always_run_object_detection):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+        _telemetry_finish(MODE_SKIPPED_NO_MOTION)
         return None
     detector_method_available = hasattr(
         _state.detector,
@@ -860,7 +923,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             frame_timestamp=frame_capture_ts,
             motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction,
         )
+        _telemetry_finish(MODE_SKIPPED_NO_DETECTOR)
         return None
+    # Name the inference path this cycle actually took, so a diagnostics reader
+    # can tell an always-on camera from one running under the CPU-saving gate.
+    _telemetry_mode = (
+        MODE_ALWAYS_ON if always_run_object_detection else MODE_MOTION_GATED
+    )
 
     # Motion-only rules are independent of ONNX. If the object detector is
     # unavailable but a motion zone fired, continue with an empty object list
@@ -901,6 +970,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         # path and leaves stale live status until the next external request.
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
         update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[], frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+        _telemetry_finish(_telemetry_mode, error=True)
         return None
     # Secondary face-detector pass (opt-in): runs a dedicated face model
     # alongside the primary object detector so COCO objects and faces are
@@ -916,6 +986,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         camera_id=camera_id, settings=settings, live_settings=live_settings,
     )
     detections = normalize_detection_boxes_for_frame(detections, frame)
+    _telemetry_candidates['detected'] = len(detections)
     # Stamp stable track ids on EVERY detection BEFORE the moving/still filter so
     # the tracker's ``track_displacement`` annotation (net box motion over recent
     # cycles) is available to it. Without it the pixel mask alone governs, and an
@@ -989,12 +1060,22 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # is moving, otherwise still (no mask -> still). Motion-zone rules (Layer
     # 3) are a separate pixel-diff axis and are unaffected. Surviving
     # detections carry a ``motion_state`` annotation for overlays/status.
+    _detected_count = len(detections)
     detections = filter_detections_by_motion_mode(
         detections, diff_mask, object_settings,
         camera_motion=camera_motion['active'],
     )
+    _telemetry_candidates['after_motion_mode'] = len(detections)
+    _telemetry_rejected[REJECT_MOTION_MODE] = max(
+        0, _detected_count - len(detections),
+    )
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
+    _camera_scope_input = len(detections)
     object_detections = filter_detections_for_camera(detections, settings)
+    _telemetry_candidates['after_camera_filter'] = len(object_detections)
+    _telemetry_rejected[REJECT_CAMERA_SCOPE] = max(
+        0, _camera_scope_input - len(object_detections),
+    )
     # Object detector boxes are authoritative over generic motion boxes. This
     # suppresses only motion regions explained by a concrete object that the
     # camera actually accepts; unrelated motion remains available for
@@ -1015,10 +1096,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # the confirmation window, filtering noise whose false detections jump
     # around the frame each cycle (rain/snow streaks, IR sensor noise, foliage).
     _confirm_iou = live_settings.get('detection_confirm_iou', 0.0)
+    _confirm_input = len(object_detections)
     object_detections = confirm_object_detections(
         camera_id, object_detections,
         required_frames=_confirm_frames, window_frames=_confirm_window,
         location_iou=_confirm_iou,
+    )
+    _telemetry_candidates['after_confirmation'] = len(object_detections)
+    _telemetry_rejected[REJECT_CONFIRMATION] = max(
+        0, _confirm_input - len(object_detections),
     )
     # (Track ids were stamped earlier, before the confirmation gate, so the
     # motion-mode filter could read ``track_displacement``; the ids still
@@ -1155,7 +1241,19 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         if detection.get('motion_state') != 'unknown'
         or object_detection_allowed_during_camera_motion(detection, object_settings)
     ]
+    if camera_motion['active']:
+        # A pan stamps every surviving detection ``unknown``. Those whose label
+        # mode does not allow alerting during camera motion stay visible but
+        # cannot alert or record until the camera settles -- count them so a
+        # missed alert during a pan is attributable rather than mysterious.
+        _telemetry_rejected[REJECT_CAMERA_MOTION] = max(
+            0, len(object_detections) - len(alertable_object_detections),
+        )
     object_alert_detections = zone_alert_detections(settings, alertable_object_detections) if _zone_match_needed else list(alertable_object_detections)
+    if _zone_match_needed:
+        _telemetry_rejected[REJECT_ZONE] = max(
+            0, len(alertable_object_detections) - len(object_alert_detections),
+        )
     record_only_detections = [d for d in alertable_object_detections if zone_record_on_detect(d, settings) and (not zone_object_rule_matches(settings, d, action='alert'))] if _zone_match_needed else []
     # Keep every firing motion zone in the playback track. Retaining only the
     # strongest zone made multi-zone motion clips show a box for one region while
@@ -1175,6 +1273,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         alert_detections.append({**_mot, 'label': 'motion', 'motion_event': True})
     for _dwell in dwell_detections:
         alert_detections.append(_dwell)
+    _telemetry_candidates['alertable'] = (
+        len(object_alert_detections) + len(record_only_detections)
+    )
     _monitored_zones = [
         z for z in (settings.get('detection') or {}).get('zones', [])
         if z.get('enabled', True) and z.get('monitor_objects', True)
@@ -1183,6 +1284,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if not alert_detections and not _unknown_face_alerts and not _known_face_rule_alerts:
         reason = _no_object_match_reason(detections, raw_labels, _monitored_zones)
         update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+        _telemetry_finish(_telemetry_mode)
         return None
     triggered = _state.alerts.process(alert_detections, rules=zone_rules)
     # Dwell alerts are first-class in-app alerts added directly to ``triggered``
@@ -1342,6 +1444,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         # for objects that never left). A NEW object's anchor is untouched.
         _remember_track_event(camera_id, _track_ids_by_label)
         update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+        _telemetry_finish(_telemetry_mode)
         return None
     event_time = frame_capture_time
     if frame_is_numpy:
@@ -1386,4 +1489,5 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     ]
     email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
     update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Detections found. No new alert event was created because no alert rule matched, or a matching rule is still in cooldown.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, _state.camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+    _telemetry_finish(_telemetry_mode, event_created=event_id is not None)
     return event_id

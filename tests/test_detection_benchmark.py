@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import threading as _threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -141,6 +142,13 @@ def test_post_pipeline_delegates_confirmation_settings(monkeypatch):
         'app.detection_state',
         SimpleNamespace(confirm_object_detections=fake_confirm),
     )
+    # The tracker runs before confirmation in the production stage order, so
+    # stub it out to keep this test focused on the confirmation arguments.
+    monkeypatch.setitem(
+        sys.modules,
+        'app.object_tracking',
+        SimpleNamespace(update_object_tracks=lambda camera_id, detections: detections),
+    )
     args = SimpleNamespace(
         label_thresholds={'person': 0.5},
         confirm_frames=2,
@@ -149,7 +157,10 @@ def test_post_pipeline_delegates_confirmation_settings(monkeypatch):
     )
     detections = [{'label': 'person', 'confidence': 0.8}]
 
-    assert evaluate_detection._apply_post_pipeline('eval', detections, args) == detections
+    result, stages = evaluate_detection._apply_post_pipeline('eval', detections, args)
+    assert result == detections
+    assert stages['detected'] == 1
+    assert stages['after_confirmation'] == 1
     assert calls == [(
         'eval', detections,
         {'required_frames': 2, 'window_frames': 3, 'location_iou': 0.2},
@@ -304,11 +315,18 @@ def test_evaluate_reports_post_pipeline_quality_separately(tmp_path, monkeypatch
         _frame_motion_mog2={}, _frame_motion_mog2_meta={},
         _frame_motion_prev={}, _frame_motion_last_frame={},
         _frame_motion_last_gray={},
+        live_detection_confirm_lock=_threading.Lock(),
+        live_detection_confirm_history={},
+        _object_tracks_lock=_threading.Lock(),
+        _object_tracks={},
     )
     monkeypatch.setitem(sys.modules, 'app.state', state_module)
     monkeypatch.setitem(
         sys.modules, 'app.detection_state',
-        SimpleNamespace(detect_frame_motion=lambda *a, **k: (True, 0.5, None, 0.1)),
+        SimpleNamespace(
+            detect_frame_motion=lambda *a, **k: (True, 0.5, None, 0.1),
+            confirm_object_detections=lambda cam, dets, **k: dets,
+        ),
     )
     monkeypatch.setattr(evaluate_detection, '_iter_frames', lambda source, limit: iter(['frame']))
 
@@ -328,7 +346,7 @@ def test_evaluate_reports_post_pipeline_quality_separately(tmp_path, monkeypatch
         frame_width=320, frame_height=240, gated=False, tiling=None, limit=None,
         annotate=None, ground_truth=str(annotation), iou_threshold=0.5,
         post_pipeline=True, label_thresholds={'person': 0.5}, confirm_frames=1,
-        confirm_window=1, confirm_iou=0.0,
+        confirm_window=1, confirm_iou=0.0, camera_config=None,
     )
 
     report = evaluate_detection.evaluate(args)
@@ -336,3 +354,211 @@ def test_evaluate_reports_post_pipeline_quality_separately(tmp_path, monkeypatch
     assert report['benchmark']['overall']['precision'] == 1.0
     assert report['post_pipeline_benchmark']['overall']['precision'] == 0.0
     assert report['post_pipeline_benchmark']['overall']['predicted_boxes'] == 0
+
+
+# ---------------------------------------------------------------------------
+# Post-pipeline zone/track replay and scenario breakdowns
+# ---------------------------------------------------------------------------
+
+
+def test_load_camera_config_validates_and_defaults_id(tmp_path):
+    config = tmp_path / 'camera.json'
+    config.write_text(
+        json.dumps({'detection': {'zones': [{'id': 'z', 'x': 0, 'y': 0, 'width': 1, 'height': 1}]}}),
+        encoding='utf-8',
+    )
+    loaded = evaluate_detection.load_camera_config(config)
+    assert loaded['id'] == 'eval'
+    assert loaded['detection']['zones'][0]['id'] == 'z'
+
+
+@pytest.mark.parametrize('payload, message', [
+    (['not', 'an', 'object'], 'must be a JSON object'),
+    ({'detection': {'zones': 'nope'}}, 'zones must be an array'),
+    ({'detection': {'zones': [{'x': 'left'}]}}, 'x must be a number'),
+    ({'detection': {'zones': [{'object_rules': 'nope'}]}}, 'object_rules must be an array'),
+])
+def test_load_camera_config_rejects_malformed_policy(tmp_path, payload, message):
+    config = tmp_path / 'camera.json'
+    config.write_text(json.dumps(payload), encoding='utf-8')
+    with pytest.raises(ValueError, match=message):
+        evaluate_detection.load_camera_config(config)
+
+
+def test_label_thresholds_from_camera_config_takes_lowest_floor():
+    settings = {'detection': {'zones': [
+        {'enabled': True, 'object_rules': [
+            {'label': 'Person', 'min_confidence': 0.40, 'enabled': True},
+            {'label': 'person', 'min_confidence': 0.25, 'enabled': True},
+            {'label': 'car', 'min_confidence': 0.60, 'enabled': True},
+            # Disabled rules and motion rules must not shape the floors.
+            {'label': 'dog', 'min_confidence': 0.05, 'enabled': False},
+            {'label': 'motion', 'min_confidence': 0.01, 'enabled': True},
+        ]},
+        {'enabled': False, 'object_rules': [
+            {'label': 'boat', 'min_confidence': 0.02, 'enabled': True},
+        ]},
+    ]}}
+    assert evaluate_detection.label_thresholds_from_camera_config(settings) == {
+        'person': 0.25, 'car': 0.60,
+    }
+
+
+def test_post_pipeline_replays_zone_scope_and_action_decision(monkeypatch):
+    """Zone scope and the post-zone action decision gate the final set."""
+    monkeypatch.setitem(
+        sys.modules, 'app.object_tracking',
+        SimpleNamespace(update_object_tracks=lambda camera_id, detections: detections),
+    )
+    monkeypatch.setitem(
+        sys.modules, 'app.detection_state',
+        SimpleNamespace(confirm_object_detections=lambda cam, dets, **k: dets),
+    )
+    # A detection outside the zone is dropped by scope; the in-zone one is kept.
+    monkeypatch.setitem(
+        sys.modules, 'app.zone_detection',
+        SimpleNamespace(
+            filter_detections_for_camera=lambda dets, settings: [
+                d for d in dets if d['label'] == 'person'
+            ],
+            zone_alert_detections=lambda settings, dets: list(dets),
+            zone_record_on_detect=lambda det, settings: True,
+        ),
+    )
+    args = SimpleNamespace(
+        label_thresholds={}, confirm_frames=1, confirm_window=1, confirm_iou=0.0,
+    )
+    detections = [
+        {'label': 'person', 'confidence': 0.9},
+        {'label': 'cat', 'confidence': 0.9},
+    ]
+
+    result, stages = evaluate_detection._apply_post_pipeline(
+        'eval', detections, args, {'detection': {'zones': []}},
+    )
+
+    assert [d['label'] for d in result] == ['person']
+    assert stages['after_zone_scope'] == 1
+    assert stages['actionable'] == 1
+
+
+def test_post_pipeline_without_camera_config_skips_zone_stages(monkeypatch):
+    """Without a camera config the run must not imply zone coverage."""
+    monkeypatch.setitem(
+        sys.modules, 'app.object_tracking',
+        SimpleNamespace(update_object_tracks=lambda camera_id, detections: detections),
+    )
+    args = SimpleNamespace(
+        label_thresholds={}, confirm_frames=1, confirm_window=1, confirm_iou=0.0,
+    )
+    result, stages = evaluate_detection._apply_post_pipeline(
+        'eval', [{'label': 'person', 'confidence': 0.9}], args,
+    )
+    assert len(result) == 1
+    assert stages['after_zone_scope'] == 1
+    assert stages['actionable'] == 1
+
+
+def test_evaluate_reports_post_pipeline_stage_counts(tmp_path, monkeypatch):
+    annotation = tmp_path / 'labels.json'
+    annotation.write_text(
+        json.dumps({'frames': [{'index': 0, 'objects': [
+            {'label': 'person', 'box': [0.1, 0.1, 0.2, 0.4]},
+        ]}]}), encoding='utf-8',
+    )
+    state_module = SimpleNamespace(
+        _MOTION_FRAME_W=320, _MOTION_FRAME_H=240,
+        _frame_motion_mog2={}, _frame_motion_mog2_meta={},
+        _frame_motion_prev={}, _frame_motion_last_frame={},
+        _frame_motion_last_gray={},
+        live_detection_confirm_lock=_threading.Lock(),
+        live_detection_confirm_history={},
+        _object_tracks_lock=_threading.Lock(),
+        _object_tracks={},
+    )
+    monkeypatch.setitem(sys.modules, 'app.state', state_module)
+    monkeypatch.setitem(
+        sys.modules, 'app.detection_state',
+        SimpleNamespace(
+            detect_frame_motion=lambda *a, **k: (True, 0.5, None, 0.1),
+            confirm_object_detections=lambda cam, dets, **k: dets,
+        ),
+    )
+    monkeypatch.setattr(evaluate_detection, '_iter_frames', lambda source, limit: iter(['frame']))
+
+    class Detector:
+        available = True
+
+        def detect_frame(self, frame, confidence):
+            return [{'label': 'person', 'confidence': 0.8, 'box': {
+                'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4,
+            }}]
+
+    monkeypatch.setattr(evaluate_detection, '_build_detector', lambda args: Detector())
+    args = SimpleNamespace(
+        input='unused', model='model.onnx', labels='labels.txt', confidence=0.45,
+        detector_confidence=0.45, input_size=640, algorithm='mog2', denoise=True,
+        shadow='on', pixel_threshold=30.0, gate_fraction=0.005, scale_fraction=0.03,
+        frame_width=320, frame_height=240, gated=False, tiling=None, limit=None,
+        annotate=None, ground_truth=str(annotation), iou_threshold=0.5,
+        post_pipeline=True, label_thresholds={}, confirm_frames=1,
+        confirm_window=1, confirm_iou=0.0, camera_config=None,
+    )
+
+    report = evaluate_detection.evaluate(args)
+
+    stages = report['post_pipeline_stages']
+    assert stages['detected']['total'] == 1
+    assert stages['actionable']['total'] == 1
+    assert report['settings']['zone_policy_replayed'] is False
+
+
+def test_scenarios_runs_both_inference_modes(tmp_path, monkeypatch):
+    """--scenarios evaluates always-on AND motion-gated over the same input."""
+    annotation = tmp_path / 'labels.json'
+    annotation.write_text(
+        json.dumps({'frames': [{'index': 0, 'objects': [
+            {'label': 'person', 'box': [0.1, 0.1, 0.2, 0.4]},
+        ]}]}), encoding='utf-8',
+    )
+    state_module = SimpleNamespace(
+        _MOTION_FRAME_W=320, _MOTION_FRAME_H=240,
+        _frame_motion_mog2={}, _frame_motion_mog2_meta={},
+        _frame_motion_prev={}, _frame_motion_last_frame={},
+        _frame_motion_last_gray={},
+        live_detection_confirm_lock=_threading.Lock(),
+        live_detection_confirm_history={},
+        _object_tracks_lock=_threading.Lock(),
+        _object_tracks={},
+    )
+    monkeypatch.setitem(sys.modules, 'app.state', state_module)
+    # A frame with NO motion: always-on still runs inference, motion-gated does
+    # not, which is exactly the recall difference a scenario run must expose.
+    monkeypatch.setitem(
+        sys.modules, 'app.detection_state',
+        SimpleNamespace(detect_frame_motion=lambda *a, **k: (False, 0.0, None, 0.0)),
+    )
+    monkeypatch.setattr(evaluate_detection, '_iter_frames', lambda source, limit: iter(['frame']))
+
+    class Detector:
+        available = True
+
+        def __init__(self):
+            self.calls = 0
+
+        def detect_frame(self, frame, confidence):
+            self.calls += 1
+            return [{'label': 'person', 'confidence': 0.8, 'box': {
+                'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4,
+            }}]
+
+    shared_detector = Detector()
+    monkeypatch.setattr(evaluate_detection, '_build_detector', lambda args: shared_detector)
+    monkeypatch.setattr(evaluate_detection, '_iter_frames', lambda source, limit: iter(['frame']))
+
+    assert evaluate_detection.main([
+        '--input', 'unused', '--model', 'model.onnx',
+        '--ground-truth', str(annotation), '--scenarios', '--json',
+    ]) == 0
+    # Two scenarios over one motion-free frame: always-on inferred, gated did not.
+    assert shared_detector.calls == 1
