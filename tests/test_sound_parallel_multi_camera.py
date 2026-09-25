@@ -224,11 +224,8 @@ def test_apply_sound_settings_records_per_camera_in_parallel(monkeypatch):
 
     # Stub the DB + recording attach so we only measure the per-camera dispatch.
     class _FakeDB:
-        def add_event(self, **kw):
+        def add_event_with_alerts(self, **kw):
             return 1
-
-        def add_alert(self, **kw):
-            return None
 
     monkeypatch.setattr(_state, "database", _FakeDB())
 

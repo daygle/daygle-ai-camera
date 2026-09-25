@@ -248,7 +248,13 @@ def _build_effective_storage_config() -> dict[str, Any]:
 
 
 def effective_auth_config() -> dict[str, Any]:
-    return cached_snapshot(_state.database, 'auth', lambda: _build_effective_auth_config())
+    # Auth is request-time configuration rather than a per-camera hot-path
+    # snapshot.  Keep this merge live because ``_state.auth_config`` is a
+    # supported compatibility layer that tests and embedding hosts may update
+    # without writing the database; a generation-only cache would silently
+    # freeze those trusted-proxy changes until the next persisted settings
+    # write.  The raw database value is still cached by SettingsRepoMixin.
+    return copy.deepcopy(_build_effective_auth_config())
 
 
 def _build_effective_auth_config() -> dict[str, Any]:
