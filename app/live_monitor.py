@@ -820,7 +820,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         if force_scan:
             diff_mask = None
     # Per-zone motion rules score independently of the frame-wide gate.
-    motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction)
+    motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, frame_size=(_frame_w, _frame_h))
     # Require the same motion zone to be active in two analyzed frames before
     # allowing it to create an event or recording. The raw motion telemetry and
     # object-detection path remain immediate; only motion-zone actions wait for

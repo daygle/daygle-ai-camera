@@ -42,6 +42,29 @@ class MotionPipelineTests(unittest.TestCase):
         self.assertEqual(_zone_pixel_motion_fraction(stale_mask, settings['detection']['zones'][0]), 0.0)
         self.assertEqual(zone_motion_detections(settings, diff_mask=stale_mask), [])
 
+    def test_zone_motion_accepts_camera_local_mask_shape(self):
+        settings = {
+            'detection': {'zones': [{
+                'id': 'local', 'enabled': True, 'monitor_motion': True,
+                'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                'object_rules': [{'label': 'motion', 'enabled': True, 'min_confidence': 0.1}],
+            }]},
+        }
+        local_mask = np.ones((20, 30), dtype=bool)
+
+        self.assertEqual(
+            zone_motion_detections(settings, diff_mask=local_mask, frame_size=(30, 20)),
+            [self._expected_motion_detection('local')],
+        )
+
+    @staticmethod
+    def _expected_motion_detection(zone_id):
+        return {
+            'confidence': 1.0,
+            'zone_id': zone_id, 'zone_name': zone_id,
+            'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0},
+        }
+
     def test_object_detection_suppresses_overlapping_motion_box(self):
         car = {'label': 'car', 'box': {'x': 0.2, 'y': 0.2, 'width': 0.4, 'height': 0.3}}
         motion = {'label': 'motion', 'motion_event': True, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.4, 'height': 0.3}}

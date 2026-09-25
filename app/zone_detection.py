@@ -417,11 +417,16 @@ def _zone_motion_pixel_box(diff_mask: Any, zone: dict[str, Any]) -> dict[str, fl
         return None
 
 
-def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
+def _zone_pixel_motion_fraction(
+    diff_mask: Any,
+    zone: dict[str, Any],
+    expected_shape: tuple[int, int] | None = None,
+) -> float:
     """Return the fraction of pixels inside a zone's bounding box that changed.
 
-    ``diff_mask`` is the boolean (H×W) array from ``detect_frame_motion`` at
-    the camera-local motion thumbnail resolution.
+    ``diff_mask`` is the boolean (H×W) array from ``detect_frame_motion``.  The
+    live monitor supplies the camera-local expected shape; direct legacy callers
+    retain the process-default shape check.
     """
     zone_id = str(zone.get('id') or zone.get('name') or id(zone))
     try:
@@ -432,6 +437,14 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
         # comparisons and can leak NaN confidence into an event payload.
         if getattr(diff_mask, 'ndim', None) != 2 or not all(int(value) > 0 for value in diff_mask.shape):
             logger.debug('Ignoring invalid pixel-motion mask for zone %r with shape %s', zone_id, getattr(diff_mask, 'shape', None))
+            return 0.0
+        if expected_shape is None:
+            expected_shape = (int(_state._MOTION_FRAME_H), int(_state._MOTION_FRAME_W))
+        if tuple(int(value) for value in diff_mask.shape) != tuple(expected_shape):
+            logger.debug(
+                'Ignoring stale pixel-motion mask for zone %r with shape %s; expected %s',
+                zone_id, getattr(diff_mask, 'shape', None), expected_shape,
+            )
             return 0.0
         bounds = _zone_pixel_bounds(diff_mask, zone)
         if bounds is None:
@@ -463,11 +476,13 @@ def zone_motion_detections(
     diff_mask: Any = None,
     gate_fraction: float | None = None,
     scale_fraction: float | None = None,
+    frame_size: tuple[int, int] | None = None,
 ) -> list[dict[str, Any]]:
     if gate_fraction is None:
         gate_fraction = _state._MOTION_GATE_FRACTION
     if scale_fraction is None:
         scale_fraction = _state._MOTION_SCALE_FRACTION
+    expected_shape = None if frame_size is None else (int(frame_size[1]), int(frame_size[0]))
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
     if not zones:
@@ -489,7 +504,7 @@ def zone_motion_detections(
             zone_scale = scale_fraction
         zone_fraction = -1.0
         if diff_mask is not None:
-            zone_fraction = _zone_pixel_motion_fraction(diff_mask, zone)
+            zone_fraction = _zone_pixel_motion_fraction(diff_mask, zone, expected_shape=expected_shape)
             if zone_fraction < zone_gate:
                 continue
             zone_confidence = round(min(1.0, zone_fraction / max(zone_scale, 1e-09)), 3)
