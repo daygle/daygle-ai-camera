@@ -75,6 +75,14 @@ detection counts and mean confidence, and per-frame timing - so you can pick
 the legacy motion-gated path, or `--json` for machine-readable output. It only
 reads frames - nothing is written to the app database or config.
 
+For evidence-based threshold selection, add a normalized ground-truth JSON file
+with `--ground-truth`. The evaluator then reports class-aware precision, recall,
+F1, AP@0.5, and mAP@0.5:0.95. It can also replay one dataset across several
+confidence floors with `--confidence-sweep 0.25,0.35,0.45,0.55` and save the
+comparison as JSON with `--output`. See [Object Detection
+Benchmarking](detection-benchmarking.md) for the annotation format, dataset
+coverage guidance, metric definitions, and regression workflow.
+
 ## Recommended setup for maximum reliability
 
 Out of the box, Daygle runs object detection on **every** cycle, decoupled from motion (the [Always Run Object Detection](#always-run-object-detection) default) - the configuration that gives the most reliable object recall. This is worth understanding because it shapes how the layers interact:
