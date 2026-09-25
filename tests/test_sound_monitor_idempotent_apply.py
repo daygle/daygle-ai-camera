@@ -108,7 +108,7 @@ def test_changed_rules_restart_only_that_camera(monkeypatch, caplog):
     # cam-2 rules unchanged -> detector kept, no restart log line for it.
     assert _state._sound_detectors['cam-2'].started is False
     started_lines = [r.message for r in caplog.records if 'Sound monitor started for camera' in r.message]
-    assert started_lines == ['Sound monitor started for camera cam-1 (rules=[\'dog_bark\'])']
+    assert started_lines == ['Sound monitor started for camera cam-1 (rules=[\'dog_bark\'], interval=0.50s)']
 
 
 def test_dead_detector_is_restarted_even_when_config_unchanged(monkeypatch):

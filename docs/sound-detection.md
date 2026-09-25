@@ -59,6 +59,25 @@ The sound backend stores YAMNet assets in `models/` alongside object detection m
 7. Save the sound settings.
 8. Open **YAMNet TFLite** (`/yamnet-tflite`) to confirm the backend is active.
 
+## Check Interval
+
+Each camera on `/sounds` has a **Check Interval** (0.1-0.5 s, default 0.5).
+This is how often the classifier runs.
+
+The analysis window itself never changes: every check scores a full 1-second
+window of audio, and consecutive windows overlap. Short, sharp sounds (a
+doorbell, a single glass break, one bark) stay fully inside a window at any
+interval - raising the value means the audio is *sampled* less often, not
+truncated. Per-class cooldowns already prevent the overlap from alerting twice
+for one sound, so a longer interval cannot produce duplicate alerts either.
+
+It is the main CPU lever for sound detection: at 0.5 s the model classifies
+twice a second per sound-enabled camera, and CPU use scales linearly with
+1/interval. 0.2 s cuts it to 40% of the default, which is usually still far
+below the latency anyone notices for an alert that has to be reviewed anyway.
+Changing the interval restarts that camera's sound detector so the new cadence
+takes effect immediately.
+
 ## Tuning tips
 
 - Raise thresholds when normal background noise creates false alerts.
@@ -67,6 +86,7 @@ The sound backend stores YAMNet assets in `models/` alongside object detection m
 - Test close to the camera microphone. A camera that has clear video may still have poor audio quality.
 - If a camera has multiple RTSP profiles, choose one that includes audio.
 - Sound detection notifications are filtered out of the `/application-log` viewer to reduce log noise. Use `/camera-log` and the dashboard event history to investigate sound-triggered alerts instead.
+- On a busy host, raise the Check Interval before lowering thresholds: a camera checked less often costs less CPU without making short sounds easier to miss.
 
 ## Troubleshooting
 

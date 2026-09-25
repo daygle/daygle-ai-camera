@@ -73,7 +73,9 @@ from __future__ import annotations
 import io
 import logging
 import time
+from bisect import bisect_left, bisect_right
 from collections import deque
+from itertools import islice
 from typing import Any
 
 import app.state as _state
@@ -155,13 +157,34 @@ def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts
 
     Returns ``[{"t": seconds_from_start, "detections": [...]}]`` or ``None``
     when the history has no samples inside the window (camera idle, monitor
-    disabled, or the clip predates the in-memory history)."""
+    disabled, or the clip predates the in-memory history).
+
+    The history is append-ordered by capture timestamp, so the window is found
+    with a bisect and only the matching slice is walked. The previous version
+    copied the whole deque -- up to ``detection_history_minutes`` x 120 samples
+    per camera -- on every playback request and then threw almost all of it
+    away; a 15s clip needs a couple of dozen entries out of a couple of
+    thousand."""
     if not camera_id or end_ts <= start_ts:
         return None
     with _state.live_detection_history_lock:
-        samples = list(_state.live_detection_history.get(str(camera_id), ()))
-    track = [{'t': round(sample_ts - start_ts, 3), 'detections': sample_detections} for sample_ts, sample_detections in samples if start_ts <= sample_ts <= end_ts]
+        history = _state.live_detection_history.get(str(camera_id))
+        if not history:
+            return None
+        # bisect with a key avoids comparing the sample lists themselves. The
+        # deque is mutated under this same lock by the monitor, so the bounds
+        # cannot move between the two searches.
+        first = bisect_left(history, start_ts, key=_history_sample_ts)
+        last = bisect_right(history, end_ts, key=_history_sample_ts)
+        track = [
+            {'t': round(sample_ts - start_ts, 3), 'detections': sample_detections}
+            for sample_ts, sample_detections in islice(history, first, last)
+        ]
     return track or None
+
+
+def _history_sample_ts(item: tuple[float, Any]) -> float:
+    return item[0]
 
 
 def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:

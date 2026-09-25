@@ -1224,7 +1224,8 @@ def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
     assert out['detection_confirm_window'] == 1
     assert set(out.keys()) == {
         'snapshot_refresh_ms', 'detection_status_refresh_ms',
-        'detection_interval_seconds', 'event_debounce_seconds',
+        'detection_interval_seconds', 'face_detection_interval_seconds',
+        'event_debounce_seconds',
         'background_detection_enabled', 'always_run_object_detection',
         'object_detection_region_boost', 'object_detection_tiling',
         'detection_history_minutes',

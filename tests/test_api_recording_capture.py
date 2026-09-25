@@ -440,17 +440,20 @@ def test_clip_has_video_stream_rejects_declared_stream_with_zero_packets(tmp_pat
 
     def fake_run(command, *_args, **_kwargs):
         calls.append(command)
-        if '-show_entries' in command and command[command.index('-show_entries') + 1] == 'stream=codec_name':
-            return subprocess.CompletedProcess(command, 0, stdout='h264\n', stderr='')
-        if '-show_entries' in command and command[command.index('-show_entries') + 1] == 'stream=nb_read_packets':
-            return subprocess.CompletedProcess(command, 0, stdout='0\n', stderr='')
-        raise AssertionError(f'unexpected ffprobe command: {command}')
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout='{"streams":[{"codec_name":"h264","duration":"2.5","nb_read_packets":"0"}],"format":{"duration":"2.5"}}',
+            stderr='',
+        )
 
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffprobe')
     monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
 
     assert RecordingService.clip_has_video_stream(clip) is False
-    assert len(calls) == 2
+    assert RecordingService.clip_video_packet_count(clip) == 0
+    assert RecordingService.clip_duration_seconds(clip) == pytest.approx(2.5)
+    assert len(calls) == 1
 
 
 def test_write_rtsp_clip_keeps_clip_with_video_stream(tmp_path, monkeypatch):

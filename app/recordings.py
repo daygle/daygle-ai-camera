@@ -49,6 +49,21 @@ class RecordingService:
     # while keeping event timing reasonably granular.
     PREBUFFER_SEGMENT_SECONDS = 4
     PREBUFFER_SEGMENT_GLOB = 'segment-*.mp4'
+    # How long a segment timeline stays memoised. One event render asks for the
+    # same directory three times within milliseconds (collect the window,
+    # resolve real durations, then the audio sidecars), each time globbing and
+    # stat'ing every segment on disk. Two seconds collapses that into one scan
+    # while a later event still sees whatever the ingest wrote in between.
+    # Deletions drop the cache outright rather than waiting it out.
+    SEGMENT_TIMELINE_CACHE_SECONDS = 2.0
+    SEGMENT_TIMELINE_CACHE_MAX_ENTRIES = 64
+    # One event used to launch up to six ffprobe processes while validating and
+    # measuring the render, then validating the mux. Keep completed probe
+    # results keyed by the file identity so those consumers share one process
+    # per generated clip while bounding the cache across retained recordings.
+    VIDEO_PROBE_CACHE_MAX_ENTRIES = 64
+    _video_probe_lock = threading.Lock()
+    _video_probe_cache: dict[str, tuple[tuple[int, int, int], dict[str, Any]]] = {}
     # Reconnect pacing for a prebuffer ingest worker whose ffmpeg keeps dying
     # without ever staying up (dead/flapping RTSP link). Mirrors the OpenCV
     # capture path in ``camera_backend`` so an unreachable camera backs off
@@ -168,6 +183,9 @@ class RecordingService:
         self.audio_dir.mkdir(parents=True, exist_ok=True)
         self._prebuffer_lock = threading.Lock()
         self._prebuffer_workers: dict[str, dict[str, Any]] = {}
+        # Memoised timelines: cache key -> (built_at, directory_mtime_ns, timed).
+        self._segment_timeline_lock = threading.Lock()
+        self._segment_timeline_cache: dict[str, tuple[float, int, list[tuple[Path, float, float]]]] = {}
         # Per-camera timestamp of the last prebuffer restart; used to debounce
         # rapid ping-pong restarts when two callers (e.g. live-monitor loop and
         # an API-driven prime) alternate different stream URLs for the same
@@ -1124,6 +1142,10 @@ class RecordingService:
             # ``tests/test_stop_join_timeout_diagnostic.py``.
             if existing:
                 self._stop_worker(existing, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
+                # The new worker starts a fresh segment sequence (and possibly
+                # a different camera's footage after a URL change), so any
+                # memoised timeline for this camera is about to be wrong.
+                self._invalidate_segment_timeline_cache()
             if restart_reason == 'stream_url_changed':
                 self._audio_disabled_marker(camera_key).unlink(missing_ok=True)
 
@@ -1522,12 +1544,18 @@ class RecordingService:
 
     def _prune_prebuffer_segments(self, camera_dir: Path, keep_seconds: int) -> None:
         cutoff = time.time() - max(keep_seconds, 5)
+        removed = False
         for segment in list(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB)) + list(camera_dir.glob('segment-*.ts')):
             try:
                 if segment.stat().st_mtime < cutoff:
                     segment.unlink(missing_ok=True)
+                    removed = True
             except OSError:
                 continue
+        if removed:
+            # A memoised timeline that still lists a pruned segment would hand a
+            # deleted path to ffmpeg, so drop it now rather than wait out the TTL.
+            self._invalidate_segment_timeline_cache()
 
     def _prune_stale_ingest_logs(self, max_age_seconds: float = 300.0) -> None:
         cutoff = time.time() - max_age_seconds
@@ -1643,8 +1671,7 @@ class RecordingService:
         out.sort(key=lambda item: item[1])
         return out
 
-    @staticmethod
-    def _segment_timeline(camera_dir: Path, glob_pattern: str, nominal_seconds: float) -> list[tuple[Path, float, float]]:
+    def _segment_timeline(self, camera_dir: Path, glob_pattern: str, nominal_seconds: float) -> list[tuple[Path, float, float]]:
         """Return ``(path, content_start_ts, content_end_ts)`` for every segment
         in ``camera_dir``, oldest first.
 
@@ -1656,9 +1683,28 @@ class RecordingService:
 
         Each file is stat()'d exactly once inside a try/except: the rolling
         pruner deletes segments concurrently, so a check-then-stat would race and
-        raise FileNotFoundError out of the sort. Missing files are skipped."""
-        if not camera_dir.exists():
+        raise FileNotFoundError out of the sort. Missing files are skipped.
+
+        The result is memoised for ``SEGMENT_TIMELINE_CACHE_SECONDS`` so the
+        three scans one render performs collapse into one. A single directory
+        ``stat`` invalidates the entry when ffmpeg creates/finalises a segment
+        or the pruner deletes one; explicit lifecycle invalidation remains as
+        an immediate safeguard (see :meth:`_invalidate_segment_timeline_cache`).
+        """
+        try:
+            directory_mtime_ns = camera_dir.stat().st_mtime_ns
+        except OSError:
             return []
+        cache_key = f'{camera_dir}|{glob_pattern}|{nominal_seconds}'
+        built_at = time.monotonic()
+        with self._segment_timeline_lock:
+            cached = self._segment_timeline_cache.get(cache_key)
+            if (
+                cached is not None
+                and cached[1] == directory_mtime_ns
+                and built_at - cached[0] < self.SEGMENT_TIMELINE_CACHE_SECONDS
+            ):
+                return cached[2]
         stamped: list[tuple[Path, float]] = []
         for segment in camera_dir.glob(glob_pattern):
             try:
@@ -1677,7 +1723,18 @@ class RecordingService:
             start = prev_end if gap is not None and 0 < gap <= nominal_seconds * 1.5 else end - nominal_seconds
             timed.append((segment, start, end))
             prev_end = end
+        with self._segment_timeline_lock:
+            # Bounded: one entry per (camera, kind), and cameras come and go, so
+            # drop everything rather than grow without limit.
+            if len(self._segment_timeline_cache) >= self.SEGMENT_TIMELINE_CACHE_MAX_ENTRIES:
+                self._segment_timeline_cache.clear()
+            self._segment_timeline_cache[cache_key] = (built_at, directory_mtime_ns, timed)
         return timed
+
+    def _invalidate_segment_timeline_cache(self) -> None:
+        """Drop memoised segment timelines after a deletion or worker restart."""
+        with self._segment_timeline_lock:
+            self._segment_timeline_cache.clear()
 
     def _collect_prebuffer_segments(self, camera_key: str, start_ts: float, end_ts: float) -> tuple[list[Path], float | None]:
         """Return the segments whose footage overlaps [start_ts, end_ts] plus
@@ -2471,6 +2528,59 @@ class RecordingService:
             return '(credentials-only change)'
         return f'{a} -> {b}'
 
+    @classmethod
+    def _probe_clip(cls, file_path: Path) -> tuple[bool, dict[str, Any]]:
+        """Return ``(probe_succeeded, payload)`` for one immutable media file.
+
+        Codec, packet count, stream duration, and container duration are
+        collected by a single ffprobe invocation. Completed results are shared
+        by the render validator, duration reader, and post-mux validator, keyed
+        by inode/size/nanosecond mtime so replacement or mutation cannot reuse
+        stale metadata.
+        """
+        try:
+            stat_result = file_path.stat()
+        except OSError:
+            return False, {}
+        if stat_result.st_size <= 0:
+            return False, {}
+        signature = (stat_result.st_ino, stat_result.st_size, stat_result.st_mtime_ns)
+        cache_key = str(file_path)
+        with cls._video_probe_lock:
+            cached = cls._video_probe_cache.get(cache_key)
+            if cached is not None and cached[0] == signature:
+                return True, cached[1]
+        ffprobe = shutil.which('ffprobe')
+        if not ffprobe:
+            return False, {}
+        command = [
+            ffprobe,
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-count_packets',
+            '-show_entries',
+            'stream=codec_name,duration,nb_read_packets:format=duration',
+            '-of', 'json',
+            str(file_path),
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return False, {}
+        if result.returncode != 0:
+            payload: dict[str, Any] = {'streams': [], 'format': {}}
+        else:
+            try:
+                parsed = json.loads(result.stdout or '{}')
+            except (TypeError, ValueError, json.JSONDecodeError):
+                parsed = {}
+            payload = parsed if isinstance(parsed, dict) else {'streams': [], 'format': {}}
+        with cls._video_probe_lock:
+            if len(cls._video_probe_cache) >= cls.VIDEO_PROBE_CACHE_MAX_ENTRIES:
+                cls._video_probe_cache.clear()
+            cls._video_probe_cache[cache_key] = (signature, payload)
+        return True, payload
+
     @staticmethod
     def clip_has_video_stream(file_path: Path) -> bool:
         """True if the clip actually contains a decodable video stream.
@@ -2478,30 +2588,28 @@ class RecordingService:
         ffmpeg can exit 0 while discarding every corrupt video frame (we pass
         +discardcorrupt / ignore_err to survive flaky RTSP), leaving a non-empty
         file with no video stream, or with a declared video stream but zero video
-        packets. Such a clip is unplayable, so callers verify the output rather
-        than trusting the return code alone."""
+        packets. One combined ffprobe supplies both checks, avoiding the second
+        process that used to count packets after the codec-only probe.
+        """
         if not file_path.exists() or file_path.stat().st_size <= 0:
             return False
-        ffprobe = shutil.which('ffprobe')
-        if not ffprobe:
+        probe_succeeded, payload = RecordingService._probe_clip(file_path)
+        if not probe_succeeded:
             # Can't verify without ffprobe; assume the non-empty file is usable.
             return True
-        command = [
-            ffprobe,
-            '-v', 'error',
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=codec_name',
-            '-of', 'csv=p=0',
-            str(file_path),
-        ]
-        try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
-        except (OSError, subprocess.SubprocessError):
-            return True
-        if result.returncode != 0 or not result.stdout.strip():
+        streams = payload.get('streams')
+        if not isinstance(streams, list) or not streams or not isinstance(streams[0], dict):
             return False
-        packet_count = RecordingService.clip_video_packet_count(file_path)
-        return packet_count is None or packet_count > 0
+        stream = streams[0]
+        if not str(stream.get('codec_name') or '').strip():
+            return False
+        raw_packet_count = stream.get('nb_read_packets')
+        if raw_packet_count is None or str(raw_packet_count).strip().upper() == 'N/A':
+            return True
+        try:
+            return int(raw_packet_count) > 0
+        except (TypeError, ValueError):
+            return True
 
     @staticmethod
     def clip_video_packet_count(file_path: Path) -> int | None:
@@ -2513,30 +2621,18 @@ class RecordingService:
         """
         if not file_path.exists() or file_path.stat().st_size <= 0:
             return 0
-        ffprobe = shutil.which('ffprobe')
-        if not ffprobe:
+        probe_succeeded, payload = RecordingService._probe_clip(file_path)
+        if not probe_succeeded:
             return None
-        command = [
-            ffprobe,
-            '-v', 'error',
-            '-select_streams', 'v:0',
-            '-count_packets',
-            '-show_entries', 'stream=nb_read_packets',
-            '-of', 'csv=p=0',
-            str(file_path),
-        ]
-        try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
-        except (OSError, subprocess.SubprocessError):
+        streams = payload.get('streams')
+        if not isinstance(streams, list) or not streams or not isinstance(streams[0], dict):
             return None
-        if result.returncode != 0:
-            return None
-        raw_value = result.stdout.strip()
-        if not raw_value or raw_value.upper() == 'N/A':
+        raw_value = streams[0].get('nb_read_packets')
+        if raw_value is None or str(raw_value).strip().upper() == 'N/A':
             return None
         try:
             return max(0, int(raw_value))
-        except ValueError:
+        except (TypeError, ValueError):
             return None
 
     @staticmethod
@@ -2553,27 +2649,14 @@ class RecordingService:
     @staticmethod
     def clip_video_duration_seconds(file_path: Path) -> float | None:
         """Duration of the first video stream, ignoring audio/container length."""
-        if not file_path.exists() or file_path.stat().st_size <= 0:
+        probe_succeeded, payload = RecordingService._probe_clip(file_path)
+        if not probe_succeeded:
             return None
-        ffprobe = shutil.which('ffprobe')
-        if not ffprobe:
-            return None
-        command = [
-            ffprobe,
-            '-v', 'error',
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=duration',
-            '-of', 'csv=p=0',
-            str(file_path),
-        ]
-        try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
-        except (OSError, subprocess.SubprocessError):
-            return None
-        if result.returncode != 0:
+        streams = payload.get('streams')
+        if not isinstance(streams, list) or not streams or not isinstance(streams[0], dict):
             return None
         try:
-            value = float(result.stdout.strip())
+            value = float(streams[0].get('duration'))
         except (TypeError, ValueError):
             return None
         return value if value > 0 else None
@@ -2582,27 +2665,16 @@ class RecordingService:
     def clip_container_duration_seconds(file_path: Path) -> float | None:
         """Container duration fallback for files whose video stream duration is
         not available. This is less reliable for corrupted renders because audio
-        can keep the container duration long after video frames stop."""
-        if not file_path.exists() or file_path.stat().st_size <= 0:
+        can keep the container duration long after video frames stop.
+        """
+        probe_succeeded, payload = RecordingService._probe_clip(file_path)
+        if not probe_succeeded:
             return None
-        ffprobe = shutil.which('ffprobe')
-        if not ffprobe:
-            return None
-        command = [
-            ffprobe,
-            '-v', 'error',
-            '-show_entries', 'format=duration',
-            '-of', 'csv=p=0',
-            str(file_path),
-        ]
-        try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
-        except (OSError, subprocess.SubprocessError):
-            return None
-        if result.returncode != 0:
+        format_info = payload.get('format')
+        if not isinstance(format_info, dict):
             return None
         try:
-            value = float(result.stdout.strip())
+            value = float(format_info.get('duration'))
         except (TypeError, ValueError):
             return None
         return value if value > 0 else None

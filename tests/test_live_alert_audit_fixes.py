@@ -394,9 +394,16 @@ def test_live_pipeline_captures_unknown_face_for_review(tmp_path, monkeypatch):
         def embed_face(self, _crop):
             return np.ones(512, dtype=np.float32)
 
+    recognition = FakeRecognition()
     monkeypatch.setattr(main._state, 'detector', FakeObjectDetector())
     monkeypatch.setattr(main._state, 'face_detector', FakeFaceDetector(), raising=False)
-    monkeypatch.setattr(_fi, 'get_face_recognition_service', lambda: FakeRecognition())
+    monkeypatch.setattr(_fi, 'get_face_recognition_service', lambda: recognition)
+    # The cadence gate only runs the secondary model when this camera has a
+    # consumer. Model this test's fake recognition service as the configured,
+    # loaded service that consumes faces for unknown-person review.
+    monkeypatch.setattr(_lm, 'effective_face_recognition_config', lambda: {'enabled': True})
+    import app.face_recognition_service as _frs
+    monkeypatch.setattr(_frs, 'get_face_recognition_service', lambda: recognition)
     monkeypatch.setattr(_lm, 'detect_frame_motion', lambda *a, **k: (False, 0.0, None, 0.0))
 
     _fi.reset_camera_identities('camera-face')

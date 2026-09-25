@@ -99,12 +99,12 @@ def test_clip_duration_seconds_prefers_video_stream_duration(tmp_path, monkeypat
     clip.write_bytes(b'not-empty')
 
     def fake_run(command, *_args, **_kwargs):
-        show_entries = command[command.index('-show_entries') + 1]
-        if show_entries == 'stream=duration':
-            return subprocess.CompletedProcess(command, 0, stdout='3.250000\n', stderr='')
-        if show_entries == 'format=duration':
-            return subprocess.CompletedProcess(command, 0, stdout='87.000000\n', stderr='')
-        raise AssertionError(f'unexpected ffprobe command: {command}')
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout='{"streams":[{"codec_name":"h264","duration":"3.250000","nb_read_packets":"78"}],"format":{"duration":"87.000000"}}',
+            stderr='',
+        )
 
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffprobe')
     monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)

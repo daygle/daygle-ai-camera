@@ -621,6 +621,7 @@ class SoundDetector:
         device_index: int | None = None,
         rtsp_url: str | None = None,
         sample_duration_seconds: float = 1.0,
+        detection_interval_seconds: float = 0.5,
         audio_segment_provider: Callable[[float], list[tuple[Any, float]]] | None = None,
     ) -> None:
         self.on_detect = on_detect
@@ -629,6 +630,17 @@ class SoundDetector:
         self.device_index = device_index
         self.rtsp_url = rtsp_url
         self.sample_duration_seconds = sample_duration_seconds
+        # How often YAMNet classifies a window. The WINDOW stays at
+        # ``sample_duration_seconds`` so a short transient is still fully
+        # inside one window; only the HOP between windows is configurable, so
+        # raising this trades detection sampling rate for CPU and never
+        # truncates the audio being classified. Clamped to half a window at
+        # most (a longer hop would leave gaps in coverage) and 0.1s at least.
+        try:
+            interval = float(detection_interval_seconds)
+        except (TypeError, ValueError):
+            interval = 0.5
+        self.detection_interval_seconds = max(0.1, min(max(0.1, sample_duration_seconds) / 2, interval))
         # For source='ingest': returns audio WAV segments (path, mtime) written
         # after the given timestamp by the shared per-camera ingest, so sound
         # detection reuses that single RTSP connection instead of opening its own.
@@ -646,6 +658,17 @@ class SoundDetector:
         self._status_lock = threading.Lock()
 
     # ------------------------------------------------------------------
+    def _hop_samples(self, chunk_samples: int) -> int:
+        """How far to advance the sliding window between classifications.
+
+        Derived from ``detection_interval_seconds`` rather than hard-coded to
+        half the window, so the sampling rate is the same on every audio
+        source. Clamped so the hop can never exceed the window itself (which
+        would silently drop audio) nor fall below one sample.
+        """
+        hop = int(SAMPLE_RATE * self.detection_interval_seconds)
+        return max(1, min(chunk_samples, hop))
+
     @property
     def status(self) -> str:
         with self._status_lock:
@@ -831,7 +854,7 @@ class SoundDetector:
                 callback=_callback,
             ):
                 while not self._stop_event.is_set():
-                    self._stop_event.wait(self.sample_duration_seconds / 2)
+                    self._stop_event.wait(self.detection_interval_seconds)
                     with buffer_lock:
                         chunk = buffer.copy()
                     self._handle_chunk(chunk)
@@ -856,7 +879,7 @@ class SoundDetector:
         preload_thread.start()
 
         chunk_samples = int(SAMPLE_RATE * self.sample_duration_seconds)
-        overlap_samples = chunk_samples // 2
+        hop_samples = self._hop_samples(chunk_samples)
         bytes_per_sample = 2  # s16le
 
         cmd = [
@@ -881,7 +904,7 @@ class SoundDetector:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
                 raw_buf = bytearray()
                 need_bytes = chunk_samples * bytes_per_sample
-                advance_bytes = overlap_samples * bytes_per_sample
+                advance_bytes = hop_samples * bytes_per_sample
 
                 while not self._stop_event.is_set() and proc.poll() is None:
                     chunk = proc.stdout.read(need_bytes - len(raw_buf))
@@ -913,12 +936,17 @@ class SoundDetector:
         ingest, so sound detection adds no extra RTSP connection.
 
         Segments (16 kHz mono s16le) are appended to a rolling buffer and
-        classified in 50%-overlapping windows - the same sliding-window scheme
+        classified in overlapping windows - the same sliding-window scheme
         the microphone/RTSP paths use. Classifying each 1s segment in isolation
         (the previous behaviour) split short transients across the segment
         boundary, halving their energy in each window and missing barks, glass
         breaks, single doorbell chimes, etc. Per-class cooldowns in
-        _handle_chunk prevent the overlap from double-alerting on one sound."""
+        _handle_chunk prevent the overlap from double-alerting on one sound.
+
+        The window LENGTH is fixed at ``sample_duration_seconds`` (so a short
+        transient is always fully inside one window); only the HOP between
+        windows is the camera's ``detection_interval_seconds``, which trades
+        sampling rate for CPU."""
         if self.audio_segment_provider is None:
             logger.warning('Sound monitor: ingest source selected but no audio segment provider')
             self._set_status('unavailable: no audio provider')
@@ -930,8 +958,7 @@ class SoundDetector:
         preload_thread.start()
 
         chunk_samples = max(1, int(SAMPLE_RATE * self.sample_duration_seconds))
-        overlap_samples = chunk_samples // 2
-        advance_samples = max(1, chunk_samples - overlap_samples)
+        advance_samples = self._hop_samples(chunk_samples)
         # Cap the buffer so a detection stall / segment gap can't grow it without
         # bound; keep at most a few windows of recent audio.
         max_buffer_samples = chunk_samples * 4

@@ -107,8 +107,8 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
         notify_thread.start()
 
 
-def _sound_rules_fingerprint(enabled_rules: list[dict[str, Any]]) -> str:
-    """Canonical fingerprint of a camera's enabled sound rules.
+def _sound_rules_fingerprint(enabled_rules: list[dict[str, Any]], detection_interval_seconds: float = 0.5) -> str:
+    """Canonical fingerprint of a camera's sound-detection configuration.
 
     ``apply_sound_settings`` compares this against a running detector's stored
     fingerprint to decide whether that detector is still valid (see the
@@ -116,13 +116,19 @@ def _sound_rules_fingerprint(enabled_rules: list[dict[str, Any]]) -> str:
     ``_normalize_camera_sound_settings``, so a canonical JSON dump is a stable
     identity for the rule set; sorting by class makes it insensitive to
     client-side rule ordering, which UI saves can permute without changing
-    behavior. Stored on each detector as ``sound_rules_fingerprint``.
+    behavior. The classification interval is part of the identity because it
+    only takes effect on a detector that is (re)started - a camera whose
+    interval changed must not be left running on the old cadence.
+    Stored on each detector as ``sound_rules_fingerprint``.
     """
     normalized = sorted(
         ({key: value for key, value in rule.items()} for rule in enabled_rules),
         key=lambda item: str(item.get('class') or ''),
     )
-    return json.dumps(normalized, sort_keys=True, default=str)
+    return json.dumps(
+        {'interval_seconds': float(detection_interval_seconds), 'rules': normalized},
+        sort_keys=True, default=str,
+    )
 
 
 def _make_sound_detect_callback(camera_id: str):
@@ -195,7 +201,7 @@ def apply_sound_settings(*, prime: bool = False) -> None:
             with _state._sound_statuses_lock:
                 _state._sound_statuses[cam_id] = {'state': 'disabled', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None}
             continue
-        fingerprint = _sound_rules_fingerprint(enabled_rules)
+        fingerprint = _sound_rules_fingerprint(enabled_rules, sound_cfg.get('detection_interval_seconds', 0.5))
         current = existing.get(cam_id)
         if current is not None and getattr(current, 'sound_rules_fingerprint', None) == fingerprint and current.running:
             # Unchanged rules on a live detector: leave it alone. No stop, no
@@ -220,7 +226,11 @@ def apply_sound_settings(*, prime: bool = False) -> None:
     for cam_id, cam, stream_url, enabled_rules, fingerprint in to_start:
         if prime:
             _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=cam_id, recording_config=_state.camera_event_recording_config(cam))
-        det = SoundDetector(on_detect=_make_sound_detect_callback(cam_id), rules=enabled_rules, source='ingest', sample_duration_seconds=1.0, audio_segment_provider=lambda after, _cid=cam_id: _state.recording_service.audio_segments_after(_cid, after))
+        # The classification interval is read from the camera's own sound
+        # settings: it is a per-camera cost/latency trade (how often YAMNet
+        # runs), not a global one.
+        interval_seconds = (cam.get('detection') or {}).get('sound', {}).get('detection_interval_seconds', 0.5)
+        det = SoundDetector(on_detect=_make_sound_detect_callback(cam_id), rules=enabled_rules, source='ingest', sample_duration_seconds=1.0, detection_interval_seconds=interval_seconds, audio_segment_provider=lambda after, _cid=cam_id: _state.recording_service.audio_segments_after(_cid, after))
         # Idempotency marker for the next apply: see _sound_rules_fingerprint.
         det.sound_rules_fingerprint = fingerprint
         det.start()
@@ -228,7 +238,7 @@ def apply_sound_settings(*, prime: bool = False) -> None:
             _state._sound_detectors[cam_id] = det
         with _state._sound_statuses_lock:
             _state._sound_statuses[cam_id] = {'state': 'listening', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': det.backend}
-        logger.info('Sound monitor started for camera %s (rules=%s)', cam_id, [r.get('class') for r in enabled_rules])
+        logger.info('Sound monitor started for camera %s (rules=%s, interval=%.2fs)', cam_id, [r.get('class') for r in enabled_rules], interval_seconds)
 
 
 def stop_sound_monitor() -> None:

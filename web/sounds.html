@@ -95,6 +95,9 @@
             <option value="false">Disabled</option>
             <option value="true">Enabled (RTSP Audio)</option>
           </select></label>
+        <label>
+          <span>Check Interval (s) <span class="info-tip" data-tip="How often the sound classifier runs. Each check still analyses a full 1-second window, so short sounds are never cut short - raising this only samples the audio less often, which cuts CPU. 0.5 checks twice a second. Changing it restarts this camera's sound detector." title="How often the sound classifier runs. Each check still analyses a full 1-second window, so short sounds are never cut short." tabindex="0" aria-label="Help: How often the sound classifier runs."></span></span>
+          <input id="soundDetectionInterval" type="number" min="0.1" max="0.5" step="0.05" placeholder="0.5" aria-label="Sound detection interval in seconds" /></label>
       </form>
 
       <div id="soundStatusPanel" style="margin-top:1rem"></div>

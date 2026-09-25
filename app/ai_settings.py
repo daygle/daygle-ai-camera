@@ -293,8 +293,26 @@ def active_ai_config_source() -> str:
     return 'default'
 
 
+# Whether the interpreter can import onnxruntime, probed once per process.
+# ``importlib.util.find_spec`` walks ``sys.path`` and stats every entry, and
+# ``ai_status_payload`` (which calls it) runs on every detection cycle AND on
+# every /api/status poll - so several times a second per camera. Whether a
+# running interpreter can import the package cannot change while it runs, so
+# the answer is probed once and remembered. Tests that need a specific answer
+# monkeypatch this function itself, which still overrides the cache.
+_ORT_INSTALLED: bool | None = None
+
+
 def onnx_runtime_installed() -> bool:
-    return importlib.util.find_spec('onnxruntime') is not None
+    global _ORT_INSTALLED
+    if _ORT_INSTALLED is None:
+        try:
+            _ORT_INSTALLED = importlib.util.find_spec('onnxruntime') is not None
+        except (ImportError, ValueError):
+            # A broken/partial install can raise rather than return None; treat
+            # it as unavailable instead of letting every status poll 500.
+            _ORT_INSTALLED = False
+    return _ORT_INSTALLED
 
 
 def model_exists(ai_settings: dict[str, Any]) -> bool:

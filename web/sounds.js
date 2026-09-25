@@ -8,6 +8,7 @@ requireElements(['soundCameraSelect', 'soundEnabled', 'soundStatusPanel']);
 
 const cameraSelect = document.getElementById('soundCameraSelect');
 const soundEnabled = document.getElementById('soundEnabled');
+const soundDetectionInterval = document.getElementById('soundDetectionInterval');
 const statusPanel = document.getElementById('soundStatusPanel');
 const saveBtn = document.getElementById('saveSoundSettingsBtn');
 const reloadBtn = document.getElementById('reloadSoundsBtn');
@@ -76,6 +77,15 @@ function detectorSoundClassCount(camera) {
 
 function detectorSoundConfigured(camera) {
   return detectorSoundConfig(camera).enabled === true;
+}
+
+// The classifier's sampling rate. 0.5 preserves the historical cadence (a full
+// 1s window classified twice a second); 0.1 samples ten times a second. The
+// window length never changes, so a bark or a doorbell is never truncated -
+// only how often overlapping windows are checked.
+function detectorSoundInterval(camera) {
+  const value = Number(detectorSoundConfig(camera).detection_interval_seconds);
+  return Number.isFinite(value) ? value : 0.5;
 }
 
 function detectorHasRtspConfig(camera) {
@@ -323,6 +333,10 @@ function renderEditor() {
   saveBtn.disabled = !camera;
   reloadBtn.disabled = !camera;
   soundEnabled.value = String(detectorSoundConfigured(camera));
+  if (soundDetectionInterval) {
+    soundDetectionInterval.disabled = !camera;
+    soundDetectionInterval.value = String(detectorSoundInterval(camera));
+  }
   renderStatus();
   renderClassEditor(camera);
 }
@@ -359,6 +373,10 @@ async function saveSoundDetection() {
         sound: {
           ...detectorSoundConfig(item),
           enabled: soundEnabled.value === 'true',
+          detection_interval_seconds: Math.min(
+            0.5,
+            Math.max(0.1, Number(soundDetectionInterval?.value) || 0.5),
+          ),
         },
       },
     }

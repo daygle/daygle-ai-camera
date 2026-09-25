@@ -338,6 +338,15 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raw = {}
     enabled = normalize_bool_setting(raw.get('enabled'), False)
+    # How often the classifier runs for this camera. The analysis window stays
+    # 1s; only the hop between windows moves, so a short transient is never
+    # truncated. 0.5 preserves the historical cadence (a 50%-overlapping
+    # window every half second); higher values cut YAMNet CPU proportionally.
+    try:
+        interval = float(raw.get('detection_interval_seconds', 0.5))
+    except (TypeError, ValueError):
+        interval = 0.5
+    detection_interval_seconds = round(max(0.1, min(0.5, interval)), 3)
     raw_rules = raw.get('rules') if isinstance(raw.get('rules'), list) else []
     saved: dict[str, dict[str, Any]] = {}
     for r in raw_rules:
@@ -384,7 +393,7 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
             'notify_start': normalize_hhmm(r.get('notify_start')),
             'notify_end': normalize_hhmm(r.get('notify_end')),
         })
-    return {'enabled': enabled, 'rules': rules}
+    return {'enabled': enabled, 'detection_interval_seconds': detection_interval_seconds, 'rules': rules}
 
 
 def _migrate_legacy_camera_motion(detection: dict[str, Any]) -> None:
