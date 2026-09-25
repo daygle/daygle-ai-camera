@@ -21,7 +21,7 @@ from app.alert_dispatch import (
 )
 from app.camera_health import _check_cameras_health
 from app.camera_instance import read_ingest_frame
-from app.config_facades import effective_ai_config, effective_email_alert_settings, effective_live_config
+from app.config_facades import effective_ai_config, effective_email_alert_settings, effective_face_recognition_config, effective_live_config
 from app.detection_state import (
     confirm_motion_detections,
     confirm_object_detections,
@@ -43,8 +43,9 @@ from app.object_settings import (
 from app.object_tracking import update_object_tracks
 from app.behaviour_monitor import emit_loiter_anomalies, emit_time_of_day_anomalies, emit_tripwire_crossings
 from app.recording_settings import effective_camera_live_settings
+from app.inference_scheduler import LiveInferenceScheduler
 from app.face_identity import annotate_face_identities, face_identity_metadata, unknown_face_alerts
-from app.face_detection_rules import known_face_rules_for_camera
+from app.face_detection_rules import effective_face_detection_rules, known_face_rules_for_camera
 from app.region_detection import (
     detect_with_region_boost,
     detect_with_tiling,
@@ -184,6 +185,163 @@ def _camera_has_direct_frame_source(camera_id: str) -> bool:
     return instance is not None and callable(getattr(instance, 'read_jpeg', None))
 
 
+# ---------------------------------------------------------------------------
+# Central inference scheduling
+# ---------------------------------------------------------------------------
+# Background detection used to spawn one daemon thread per camera, each of
+# which then blocked on the shared detector's inference semaphore. With more
+# cameras than the semaphore allows, the extra threads sat in staging holding
+# their slots, and a thread that finally got the semaphore could be working on
+# a decision it had started before the backlog existed. The scheduler below is
+# the single admission point: one job per camera (newest wins), fair
+# round-robin, priority for recording cameras, one global concurrency limit,
+# and queue wait measured separately from run time.
+
+def _scheduler_max_workers() -> int:
+    """Global inference concurrency, mirroring the detector's own semaphore.
+
+    ``max_concurrent_inferences`` already caps how many inferences may run at
+    once; applying the same number here means cameras queue at the door instead
+    of piling N threads onto one lock. Never raises: a settings read failure
+    falls back to the conservative single-worker default rather than taking the
+    detection loop down with it.
+    """
+    try:
+        configured = int(effective_ai_config().get('max_concurrent_inferences') or 1)
+    except Exception:
+        configured = 1
+    return max(1, min(16, configured))
+
+
+def _camera_is_priority(camera_id: str) -> bool:
+    """A camera that is recording right now is served before idle cameras.
+
+    An event clip that is already being written is worth finishing before a
+    quiet camera's next check; a missed detection on that recording costs more
+    than a few hundred ms of delay on the other.
+    """
+    with _state.active_rtsp_recordings_lock:
+        return camera_id in _state.active_rtsp_recordings
+
+
+def _scheduler_claim(camera_id: str) -> None:
+    with _state.live_detection_worker_lock:
+        _state.active_live_detection_cameras.add(camera_id)
+
+
+def _scheduler_release(camera_id: str) -> None:
+    with _state.live_detection_worker_lock:
+        _state.active_live_detection_cameras.discard(camera_id)
+
+
+def _scheduler_report_timing(camera_id: str, timing: dict[str, Any]) -> None:
+    """Surface queue wait next to (not mixed into) execution time.
+
+    A slow model and a starved queue are different problems; the live status
+    payload keeps them as separate numbers so the Live page and the API can
+    tell which one is hurting.
+    """
+    if not timing:
+        return
+    try:
+        update_live_detection_status(
+            camera_id,
+            inference_wait_ms=int(round(float(timing.get('wait_seconds') or 0.0) * 1000)),
+            inference_ms=int(round(float(timing.get('run_seconds') or 0.0) * 1000)),
+            inference_queue_depth=int(timing.get('queue_depth') or 0),
+        )
+    except Exception as exc:  # pragma: no cover - defensive: status must never break a cycle
+        logger.debug('Scheduler timing report failed for %s: %s', camera_id, exc)
+
+
+# The concurrency limit is a settings value, so it can change at runtime, but
+# reading it costs a settings lookup: re-read it at most every few seconds
+# rather than on every camera of every monitor cycle.
+_SCHEDULER_WORKERS_REFRESH_SECONDS = 5.0
+_scheduler_workers_refreshed_at = 0.0
+
+
+def get_live_inference_scheduler() -> LiveInferenceScheduler:
+    """Return the process-wide scheduler, creating and starting it on demand.
+
+    Created lazily (rather than at monitor start) so the Live page's
+    foreground detection path can reach it even if background detection was
+    disabled, and so tests can inject their own.
+    """
+    global _scheduler_workers_refreshed_at
+    scheduler = getattr(_state, 'live_inference_scheduler', None)
+    if scheduler is None:
+        scheduler = LiveInferenceScheduler(
+            _run_scheduled_detection,
+            is_priority=_camera_is_priority,
+            on_claim=_scheduler_claim,
+            on_release=_scheduler_release,
+            on_complete=_scheduler_report_timing,
+            max_workers=_scheduler_max_workers(),
+        )
+        _state.live_inference_scheduler = scheduler
+        _scheduler_workers_refreshed_at = time.time()
+    now = time.time()
+    if now - _scheduler_workers_refreshed_at >= _SCHEDULER_WORKERS_REFRESH_SECONDS:
+        _scheduler_workers_refreshed_at = now
+        scheduler.set_max_workers(_scheduler_max_workers())
+    scheduler.start()
+    return scheduler
+
+
+def read_live_detection_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:
+    """Return the newest available frame for ``camera_id``, or ``None``.
+
+    Called by the scheduler when a job actually runs, NOT when it is queued, so
+    a job that waited behind a backlog still processes the newest frame
+    available rather than the one that existed when it was submitted.
+    """
+    sample = read_ingest_frame(camera_id)
+    if sample is not None:
+        return sample
+    # Prefer a direct camera frame when the shared ingest has not produced one
+    # yet. The previous early return here made this fallback unreachable for
+    # ONVIF/direct cameras, which left their live status stuck at Waiting and
+    # prevented both motion telemetry and alerts from running.
+    cam_instance = _state.camera_instances.get(camera_id)
+    if cam_instance is not None and callable(getattr(cam_instance, 'read_jpeg', None)):
+        try:
+            import cv2
+            import numpy as np
+            jpeg_bytes, _frame_meta = cam_instance.read_jpeg()
+            img = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if img is not None:
+                h, w = img.shape[:2]
+                return img, {'frame_number': 0, 'timestamp': time.time(), 'width': w, 'height': h}
+        except Exception as exc:
+            logger.debug('Direct frame fallback failed for camera %s: %s', camera_id, exc)
+    if not _state.recording_service.ingest_has_produced_frame(camera_id):
+        return None
+    schedule_live_camera_backoff(camera_id, 'No fresh frame available from the camera ingest.')
+    return None
+
+
+def _run_scheduled_detection(image: Any, frame: dict[str, Any], camera_cfg: dict[str, Any]) -> None:
+    """Background detection cycle: run it, or back the camera off on failure."""
+    camera_id = str(camera_cfg.get('id') or 'camera')
+    try:
+        clear_live_camera_backoff(camera_id)
+        process_live_stream_alerts(image, frame, camera_cfg, enforce_interval=False)
+    except Exception as exc:
+        logger.warning('Background live alert check failed for camera %s: %s', camera_id, exc)
+        schedule_live_camera_backoff(camera_id, str(exc))
+
+
+def _run_foreground_live_detection(image: Any, frame: dict[str, Any], camera_cfg: dict[str, Any]) -> None:
+    """Live-page fallback cycle: a failure surfaces on the page, not as a backoff."""
+    camera_id = str(camera_cfg.get('id') or 'camera')
+    try:
+        process_live_stream_alerts(image, frame, camera_cfg, enforce_interval=False)
+    except Exception as exc:
+        logger.warning('Live detection failed for camera %s: %s', camera_id, exc)
+        update_live_detection_status(camera_id, state='error', reason=str(exc), detections=[])
+
+
 def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> int:
     if live_settings is None:
         live_settings = effective_live_config()
@@ -220,50 +378,27 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             _state.live_detection_last_checked[camera_id] = now
             _state.active_live_detection_cameras.add(camera_id)
 
-        # Bind BOTH the camera id and its config as default args (evaluated
-        # now, per loop iteration). ``selected_config`` was previously read as
-        # a free variable, which late-binds: the daemon thread runs after the
-        # loop has advanced, so in a multi-camera setup every detection thread
-        # saw a LATER camera's config -- evaluating this camera's frame against
-        # the wrong camera's zones/rules. Snapshotting it as a default arg (like
-        # ``cid``) captures the correct per-iteration value.
-        def _detect_bg(cid: str=camera_id, cfg: dict[str, Any]=selected_config) -> None:
-            camera_cfg = dict(cfg)
-            try:
-                sample = read_ingest_frame(cid)
-                if sample is None:
-                    # Prefer a direct camera frame when the shared ingest has
-                    # not produced one yet. The previous early return here made
-                    # this fallback unreachable for ONVIF/direct cameras, which
-                    # left their live status stuck at Waiting and prevented both
-                    # motion telemetry and alerts from running.
-                    cam_instance = _state.camera_instances.get(cid)
-                    if cam_instance is not None and callable(getattr(cam_instance, 'read_jpeg', None)):
-                        try:
-                            import cv2
-                            import numpy as np
-                            jpeg_bytes, _frame_meta = cam_instance.read_jpeg()
-                            img = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
-                            if img is not None:
-                                h, w = img.shape[:2]
-                                sample = (img, {'frame_number': 0, 'timestamp': time.time(), 'width': w, 'height': h})
-                        except Exception as exc:
-                            logger.debug('Direct frame fallback failed for camera %s: %s', cid, exc)
-                    if sample is None:
-                        if not _state.recording_service.ingest_has_produced_frame(cid):
-                            return
-                        schedule_live_camera_backoff(cid, 'No fresh frame available from the camera ingest.')
-                        return
-                image, frame = sample
-                clear_live_camera_backoff(cid)
-                process_live_stream_alerts(image, frame, camera_cfg, enforce_interval=False)
-            except Exception as exc:
-                logger.warning('Background live alert check failed for camera %s: %s', cid, exc)
-                schedule_live_camera_backoff(cid, str(exc))
-            finally:
-                with _state.live_detection_worker_lock:
-                    _state.active_live_detection_cameras.discard(cid)
-        threading.Thread(target=_detect_bg, name=f'live-detection-{camera_id}', daemon=True).start()
+        # Snapshot the camera config NOW: the job runs later (possibly after
+        # the loop has advanced to another camera), so it must carry its own
+        # copy rather than a reference to whatever ``selected_config`` points
+        # at by then. This is the same late-binding fix the old per-camera
+        # thread closure used default arguments for.
+        camera_cfg = dict(selected_config)
+        scheduler = get_live_inference_scheduler()
+        submitted = scheduler.submit(
+            camera_id,
+            camera_cfg,
+            # Read the frame when the job RUNS, not when it is queued: latest
+            # frame wins, so a job that waited behind a backlog still scores
+            # the newest picture instead of a stale one.
+            lambda cid=camera_id: read_live_detection_frame(cid),
+            interval=detection_interval_seconds,
+        )
+        if not submitted:
+            # The scheduler is stopped (shutdown). Release the claim we took
+            # above rather than leaving the camera marked busy forever.
+            _scheduler_release(camera_id)
+            continue
         processed += 1
     return processed
 
@@ -339,6 +474,14 @@ def stop_live_alert_monitor() -> None:
     if _state.live_alert_monitor_thread and _state.live_alert_monitor_thread.is_alive():
         _state.live_alert_monitor_thread.join(timeout=5)
     _state.live_alert_monitor_thread = None
+    # Stop the shared scheduler too: its workers would otherwise keep serving
+    # queued cameras after detection was supposed to have stopped. Dropping the
+    # instance makes the next ``get_live_inference_scheduler()`` build a fresh
+    # one, so a restart-in-place (settings apply) is clean.
+    scheduler = getattr(_state, 'live_inference_scheduler', None)
+    if scheduler is not None:
+        scheduler.stop()
+        _state.live_inference_scheduler = None
 
 
 # ---------------------------------------------------------------------------
@@ -387,26 +530,126 @@ def queue_live_stream_alerts(
         _state.live_detection_last_checked[camera_id] = now
         _state.active_live_detection_cameras.add(camera_id)
 
-    def detect() -> None:
-        try:
-            process_live_stream_alerts(image_bytes, frame, settings, enforce_interval=False)
-        except Exception as exc:
-            logger.warning('Live detection failed for camera %s: %s', camera_id, exc)
-            update_live_detection_status(camera_id, state='error', reason=str(exc), detections=[])
-        finally:
-            with _state.live_detection_worker_lock:
-                _state.active_live_detection_cameras.discard(camera_id)
-    threading.Thread(target=detect, name=f'live-detection-{camera_id}', daemon=True).start()
+    # The same scheduler as the background path: a foreground request queues
+    # behind whatever inference is already running rather than grabbing a
+    # thread and blocking on the detector's semaphore. The frame is the one the
+    # page just fetched, so it is replayed as-is instead of being re-read.
+    submitted = get_live_inference_scheduler().submit(
+        camera_id,
+        dict(settings),
+        lambda: (image_bytes, frame),
+        runner=_run_foreground_live_detection,
+        interval=detection_interval_seconds,
+    )
+    if not submitted:
+        with _state.live_detection_worker_lock:
+            _state.active_live_detection_cameras.discard(camera_id)
 
 
-def merge_secondary_face_detections(image: Any, detections: list, confidence: float | None = None) -> list:
+def _camera_has_face_zone_rules(settings: dict[str, Any]) -> bool:
+    """True when any enabled zone on this camera carries a ``face`` object rule.
+
+    Such a rule is alerted by the AlertEngine off the ``face`` label, so a
+    camera with one MUST keep running the face pass -- even when no
+    face-detection rule and no identity annotation would otherwise want it.
+    """
+    for zone in (settings.get('detection') or {}).get('zones', []):
+        if not zone.get('enabled', True):
+            continue
+        for rule in zone.get('object_rules') or []:
+            if rule.get('enabled', True) and str(rule.get('label') or '').strip().lower() == 'face':
+                return True
+    return False
+
+
+def camera_uses_face_detections(camera_id: str, settings: dict[str, Any]) -> bool:
+    """True when anything on this camera can consume a ``face`` detection.
+
+    A camera with nothing to do with faces should not pay for a second ONNX
+    pass every cycle: both models scan the same frame, so an idle face model
+    roughly doubles per-cycle inference cost for detections that are then
+    dropped. Three things can want a face here, and any one of them is enough:
+
+    * a face-detection rule (per-person or the ``_unknown`` stranger rule) that
+      is enabled and not pinned to a different camera -- a zone-scoped rule
+      still counts, because a face anywhere in frame can land in that zone;
+    * a zone ``face`` object rule on this camera (AlertEngine);
+    * face recognition enabled with a loaded model, which stamps identities on
+      events and captures unknown faces for review whether or not any rule
+      alerts on them.
+
+    Deliberately conservative: anything unrecognised counts as "in use" rather
+    than risking a silently dead face feature.
+    """
+    if _camera_has_face_zone_rules(settings or {}):
+        return True
+    try:
+        rules = (effective_face_detection_rules().get('rules') or []) if camera_id else []
+    except Exception as exc:  # pragma: no cover - defensive: never fail a cycle on a settings read
+        logger.debug('Face rule lookup failed for camera %s: %s', camera_id, exc)
+        return True
+    for rule in rules:
+        if not normalize_bool_setting(rule.get('enabled'), False):
+            continue
+        rule_camera = str(rule.get('camera_id') or '').strip()
+        if rule_camera and rule_camera != str(camera_id or '').strip():
+            continue
+        return True
+    try:
+        from app.face_recognition_service import get_face_recognition_service
+        if normalize_bool_setting(effective_face_recognition_config().get('enabled'), False) and getattr(
+            get_face_recognition_service(), 'available', False
+        ):
+            return True
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug('Face recognition lookup failed for camera %s: %s', camera_id, exc)
+        return True
+    return False
+
+
+def face_detection_pass_due(camera_id: str, live_settings: dict[str, Any] | None) -> bool:
+    """Claim this camera's face-pass slot, honouring ``face_detection_interval_seconds``.
+
+    The face model runs on its own, slower clock than object detection: the
+    last-run stamp lives in its own dict (not ``live_detection_last_checked``)
+    so the object cadence is unaffected. The stamp is written only when the
+    pass is genuinely due and about to run, so a camera that skipped a cycle
+    (backoff, hidden tab) is immediately eligible again instead of waiting out
+    the remainder of an interval it never consumed.
+    """
+    try:
+        interval = max(0.1, min(10.0, float((live_settings or {}).get('face_detection_interval_seconds', 1.0))))
+    except (TypeError, ValueError):
+        interval = 1.0
+    now = time.time()
+    with _state.live_detection_worker_lock:
+        if now - float(_state.face_detection_last_checked.get(camera_id, 0.0) or 0.0) < interval:
+            return False
+        _state.face_detection_last_checked[camera_id] = now
+    return True
+
+
+def merge_secondary_face_detections(
+    image: Any,
+    detections: list,
+    confidence: float | None = None,
+    *,
+    camera_id: str = '',
+    settings: dict[str, Any] | None = None,
+    live_settings: dict[str, Any] | None = None,
+) -> list:
     """Run the optional secondary face detector and merge its results.
 
-    The secondary detector is a dedicated face model that runs alongside the
-    primary object model so both COCO objects and faces are detected in the
-    same cycle. Returns the input list unchanged when the face detector is not
-    configured/loaded; a failing pass is logged and skipped rather than taking
-    down the whole detection cycle.
+    The secondary detector is a dedicated face model that scans the same frame
+    as the primary object model. Returns the input list unchanged when the face
+    detector is not configured/loaded, when the camera has no consumer for face
+    detections, or when this camera's face interval has not elapsed yet (see
+    :func:`camera_uses_face_detections` and
+    :func:`face_detection_pass_due`); a failing pass is logged and skipped
+    rather than taking down the whole detection cycle.
+
+    Callers that pass no ``camera_id`` (unit tests, the snapshot path) keep the
+    historical behaviour: run the pass, unconditionally.
 
     ``confidence`` is deliberately left as ``None`` by the live caller so the
     face detector applies its OWN configured threshold (the Face Confidence
@@ -418,6 +661,11 @@ def merge_secondary_face_detections(image: Any, detections: list, confidence: fl
     face_detector = getattr(_state, 'face_detector', None)
     if face_detector is None or not getattr(face_detector, 'available', False):
         return detections
+    if camera_id:
+        if not camera_uses_face_detections(camera_id, settings or {}):
+            return detections
+        if not face_detection_pass_due(camera_id, live_settings):
+            return detections
     try:
         if isinstance(image, bytes):
             face_detections = face_detector.detect_image(image, confidence=confidence)
@@ -665,7 +913,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # label flows through rules/alerts exactly like any other object label.
     # No explicit confidence: the face detector uses its configured Face
     # Confidence setting (see docstring).
-    detections = merge_secondary_face_detections(image, detections)
+    # The pass runs on its own clock (face_detection_interval_seconds) and not
+    # at all when nothing on this camera consumes a face detection, so object
+    # detection keeps its full cadence and its sub-second alert latency.
+    detections = merge_secondary_face_detections(
+        image, detections,
+        camera_id=camera_id, settings=settings, live_settings=live_settings,
+    )
     detections = normalize_detection_boxes_for_frame(detections, frame)
     # Stamp stable track ids on EVERY detection BEFORE the moving/still filter so
     # the tracker's ``track_displacement`` annotation (net box motion over recent
@@ -883,13 +1137,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Zone-scoped faces need the geometry-stamping pass too, even when no
     # zone monitors OBJECTS: without it face detections skip zone matching and
     # the AlertEngine would fire zone-face rules for faces anywhere in frame.
-    has_face_zone_rules = any(
-        zone.get('enabled', True) and any(
-            rule.get('enabled', True) and str(rule.get('label') or '').strip().lower() == 'face'
-            for rule in zone.get('object_rules') or []
-        )
-        for zone in (settings.get('detection') or {}).get('zones', [])
-    )
+    has_face_zone_rules = _camera_has_face_zone_rules(settings)
     _zone_match_needed = has_object_zone_rules or has_face_zone_rules
     # Detections remain visible while the camera moves. PTZ invalidates the
     # moving/still classification, so permit only labels configured for Any;

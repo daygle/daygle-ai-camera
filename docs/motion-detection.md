@@ -283,6 +283,36 @@ How often each camera is checked. At `0.5` seconds, each camera is checked twice
 
 Default: `0.5`
 
+### Face Detection Interval (s)
+
+How often the **secondary face model** scans the frame, independently of the
+Detection Interval above. When a face model is enabled alongside an object
+model, both scan the same frame, so a face pass on every cycle roughly doubles
+per-cycle inference cost.
+
+Two rules govern when the face model runs at all:
+
+- **Cameras with nothing to do with faces never run it.** A camera skips the
+  pass entirely unless it has an enabled face-detection rule (per-person or the
+  stranger/`_unknown` rule), an enabled zone `face` object rule, or face
+  recognition switched on with a loaded model - the last of which keeps
+  identity names on events and unknown-face captures for review working.
+- **Cameras that do use faces run it on this interval.** Object detection keeps
+  the Detection Interval above and its sub-second alert latency; face rows
+  (overlays, face events, face-rule alerts) simply appear at this cadence.
+
+Raising it is the cheap way to cut GPU use on deployments where face alerts do
+not need sub-second latency. Note that a face rule paired with **Confirm Frames**
+above 1 should be checked afterwards: a face is only present on the cycles the
+face model runs, so a long confirm window over a slow face cadence may never be
+satisfied.
+
+The value is also available per camera (and per Day/Night profile) on the camera
+edit form, so a busy daytime profile can keep object detection fast while the
+night profile stretches the face pass.
+
+Default: `1` (1 Hz - half the face-model cost of the 2 Hz object default)
+
 ---
 
 ### Confirm Frames / Confirm Window

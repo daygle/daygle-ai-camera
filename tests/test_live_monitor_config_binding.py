@@ -1,12 +1,17 @@
-"""Regression test: each background detection thread must use ITS OWN camera's
+"""Regression test: each scheduled detection job must use ITS OWN camera's
 config, not a later camera's.
 
-``run_live_alert_monitor_once`` spawns a daemon thread per camera. The thread's
-closure previously read ``selected_config`` as a free variable, which late-binds
+``run_live_alert_monitor_once`` used to spawn a daemon thread per camera. The
+thread's closure read ``selected_config`` as a free variable, which late-binds
 to whatever the loop variable points at when the thread actually runs -- in a
 multi-camera setup that is a LATER camera's config, so a camera's frame was
-evaluated against the wrong camera's zones/rules. The per-iteration config is
-now snapshotted as a default argument (like the camera id already was).
+evaluated against the wrong camera's zones/rules.
+
+Detection now goes through the central scheduler
+(``app.inference_scheduler``), which has the same hazard in a different shape:
+a job runs later than it was submitted, so it must carry a snapshot of its own
+camera's config. These tests capture SUBMISSIONS instead of threads and run them
+by hand, which is the same late-binding exposure.
 """
 
 from __future__ import annotations
@@ -23,19 +28,39 @@ import app.state as _state  # noqa: E402
 import app.live_monitor as live_monitor  # noqa: E402
 
 
-class _CapturingThread:
-    """Stand-in for threading.Thread that records the target without running it,
-    so the test can invoke the closures AFTER the dispatch loop has advanced
-    ``selected_config`` to the last camera -- the exact condition that exposes a
-    late-bound free variable."""
+class _CapturingScheduler:
+    """Stand-in for the live inference scheduler that records submissions
+    without running them, so the test can execute the jobs AFTER the dispatch
+    loop has advanced ``selected_config`` to the last camera -- the exact
+    condition that exposes a late-bound free variable."""
 
     captured: list = []
 
-    def __init__(self, *args, target=None, name=None, daemon=None, **kwargs):
-        self._target = target
+    def __init__(self):
+        self.jobs: list[tuple[str, dict, object]] = []
+
+    def set_max_workers(self, _count):
+        return None
 
     def start(self):
-        _CapturingThread.captured.append(self._target)
+        return None
+
+    def submit(self, camera_id, settings, read_frame, **_kwargs):
+        self.jobs.append((camera_id, settings, read_frame))
+        return True
+
+    def run_all(self, runner):
+        for camera_id, settings, read_frame in self.jobs:
+            sample = read_frame()
+            assert sample is not None
+            image, frame = sample
+            runner(image, frame, settings)
+
+
+def _install_capturing_scheduler(monkeypatch) -> _CapturingScheduler:
+    scheduler = _CapturingScheduler()
+    monkeypatch.setattr(live_monitor, 'get_live_inference_scheduler', lambda: scheduler)
+    return scheduler
 
 
 def test_direct_camera_without_ingest_stream_is_monitored(monkeypatch):
@@ -44,7 +69,6 @@ def test_direct_camera_without_ingest_stream_is_monitored(monkeypatch):
     import cv2
     import numpy as np
 
-    _CapturingThread.captured = []
     recorded: list[tuple[str, str]] = []
     ok, encoded = cv2.imencode('.jpg', np.zeros((8, 8, 3), dtype=np.uint8))
     assert ok
@@ -53,7 +77,6 @@ def test_direct_camera_without_ingest_stream_is_monitored(monkeypatch):
         def read_jpeg(self):
             return encoded.tobytes(), {'timestamp': time.time(), 'width': 8, 'height': 8}
 
-    monkeypatch.setattr(live_monitor.threading, 'Thread', _CapturingThread)
     monkeypatch.setattr(live_monitor, '_camera_has_live_alert_stream', lambda _cfg: False)
     monkeypatch.setattr(live_monitor, 'build_stream_url', lambda _cfg: '')
     monkeypatch.setattr(live_monitor, 'read_ingest_frame', lambda _cid: None)
@@ -69,20 +92,19 @@ def test_direct_camera_without_ingest_stream_is_monitored(monkeypatch):
 
     monkeypatch.setattr(live_monitor, 'process_live_stream_alerts', _fake_process)
 
+    scheduler = _install_capturing_scheduler(monkeypatch)
     live_monitor.run_live_alert_monitor_once(
         {'background_detection_enabled': True, 'detection_interval_seconds': 0}
     )
 
-    assert len(_CapturingThread.captured) == 1
-    _CapturingThread.captured[0]()
+    assert len(scheduler.jobs) == 1
+    scheduler.run_all(live_monitor._run_scheduled_detection)
     assert recorded == [('cam-direct', '8')]
 
 
-def test_each_detection_thread_uses_its_own_camera_config(monkeypatch):
-    _CapturingThread.captured = []
+def test_each_scheduled_job_uses_its_own_camera_config(monkeypatch):
     recorded: list[tuple[str, str]] = []
 
-    monkeypatch.setattr(live_monitor.threading, 'Thread', _CapturingThread)
     monkeypatch.setattr(live_monitor, '_camera_has_live_alert_stream', lambda cfg: True)
     monkeypatch.setattr(live_monitor, 'build_stream_url', lambda cfg: '')  # skip prebuffer
     monkeypatch.setattr(_state, 'camera_event_recording_config', lambda cfg: {}, raising=False)
@@ -103,19 +125,51 @@ def test_each_detection_thread_uses_its_own_camera_config(monkeypatch):
     _state.live_detection_last_checked = {}
     _state.live_detection_retry_after = {}
 
+    scheduler = _install_capturing_scheduler(monkeypatch)
     live_monitor.run_live_alert_monitor_once(
         {'background_detection_enabled': True, 'detection_interval_seconds': 0}
     )
 
     # The loop has finished; selected_config now points at the LAST camera.
-    # Running the captured closures now is what exposed the late-binding bug.
-    assert len(_CapturingThread.captured) == 2
-    for target in _CapturingThread.captured:
-        target()
+    # Running the captured jobs now is what exposes the late-binding bug.
+    assert len(scheduler.jobs) == 2
+    scheduler.run_all(live_monitor._run_scheduled_detection)
 
     # Each recorded (frame, config-id) pair must be self-consistent: the frame
     # read for camera X must have been evaluated against camera X's config.
     assert sorted(recorded) == [('img-cam-a', 'cam-a'), ('img-cam-b', 'cam-b')], recorded
+
+
+def test_camera_is_claimed_while_its_job_is_queued_or_running(monkeypatch):
+    """The scheduler takes over the per-camera duplicate suppression the old
+    per-camera threads did: a camera with a job outstanding must stay in
+    ``active_live_detection_cameras`` until that job finishes, otherwise the
+    monitor would stack duplicate work behind the queue."""
+    monkeypatch.setattr(live_monitor, '_camera_has_live_alert_stream', lambda cfg: True)
+    monkeypatch.setattr(live_monitor, 'build_stream_url', lambda cfg: '')
+    monkeypatch.setattr(_state, 'camera_event_recording_config', lambda cfg: {}, raising=False)
+    monkeypatch.setattr(live_monitor, 'read_ingest_frame',
+                        lambda cid: (f'img-{cid}', {'timestamp': time.time(), 'width': 10, 'height': 10}))
+    monkeypatch.setattr(live_monitor, 'clear_live_camera_backoff', lambda *a, **k: None)
+    monkeypatch.setattr(live_monitor, 'process_live_stream_alerts', lambda *a, **k: None)
+
+    _state.cameras_config = [{'id': 'cam-a', 'name': 'A'}]
+    _state.active_live_detection_cameras = set()
+    _state.live_detection_last_checked = {}
+    _state.live_detection_retry_after = {}
+
+    scheduler = _install_capturing_scheduler(monkeypatch)
+    live_monitor.run_live_alert_monitor_once(
+        {'background_detection_enabled': True, 'detection_interval_seconds': 0}
+    )
+    assert 'cam-a' in _state.active_live_detection_cameras
+
+    # A second pass while the first job is still outstanding must not queue
+    # more work for the same camera.
+    live_monitor.run_live_alert_monitor_once(
+        {'background_detection_enabled': True, 'detection_interval_seconds': 0}
+    )
+    assert len(scheduler.jobs) == 1
 
 
 class _ExplodingDetector:

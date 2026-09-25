@@ -84,6 +84,15 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'snapshot_refresh_ms': 500,
     'detection_status_refresh_ms': 2000,
     'detection_interval_seconds': 0.5,
+    # Cadence of the SECONDARY face-model pass, independent of the object
+    # detector above. Both models scan the same frame, so on a camera with
+    # faces enabled the face model is what turns a 2 Hz object pass into a 4 Hz
+    # combined one. 1.0 s halves that cost while object detection keeps its
+    # sub-second alert latency; deployments that need a face alert inside a
+    # second can lower it, and cameras with no face rules can leave it alone
+    # (the pass is skipped entirely for them - see
+    # app.live_monitor.camera_uses_face_detections).
+    'face_detection_interval_seconds': 1.0,
     'event_debounce_seconds': 10.0,
     # Temporal confirmation gate (all object labels). ``1`` disables the gate
     # and allows the first confident detection to alert or record. Higher values

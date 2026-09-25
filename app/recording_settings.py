@@ -65,6 +65,7 @@ from app.utils import normalize_bool_setting, normalize_email_recipients, normal
 CAMERA_MOTION_PROFILE_FIELDS = (
     'background_detection_enabled',
     'detection_interval_seconds',
+    'face_detection_interval_seconds',
     'ingest_frame_fps',
     'detection_confirm_frames',
     'detection_confirm_window',
@@ -92,6 +93,10 @@ def _normalize_profile_value(key: str, value: Any) -> int | float | str | bool |
         return None
     try:
         if key == 'detection_interval_seconds':
+            return round(max(0.1, min(10.0, float(value))), 3)
+        if key == 'face_detection_interval_seconds':
+            # Same 0.1-10 bounds as the validator so a profile can pin the face
+            # pass to every object cycle (0.1) or decouple it entirely (10).
             return round(max(0.1, min(10.0, float(value))), 3)
         if key == 'ingest_frame_fps':
             return max(1, min(30, int(value)))

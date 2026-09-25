@@ -11,6 +11,7 @@ const liveEls = {
   streamDetailFps: document.getElementById('streamDetailFps'),
   streamDetailFpsLive: document.getElementById('streamDetailFpsLive'),
   streamDetailSource: document.getElementById('streamDetailSource'),
+  streamDetailQueue: document.getElementById('streamDetailQueue'),
   detectionSubtitle: document.getElementById('liveDetectionSubtitle'),
   detectionStatus: document.getElementById('liveDetectionStatus'),
   detectionState: document.getElementById('liveDetectionState'),
@@ -866,6 +867,7 @@ async function refreshDetectionStatus() {
       updateFrameHeader(selectedCamera);
     }
     ingestServerTrackDetections(payload);
+    renderInferenceTiming(payload);
     renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus, soundEnabled));
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect
@@ -877,6 +879,23 @@ async function refreshDetectionStatus() {
       message: `Live AI status unavailable: ${error.message}`,
     });
   }
+}
+
+// The central inference scheduler reports how long a camera waited for the
+// shared inference slot separately from how long its cycle then took. Both are
+// shown together because they mean different things: a growing wait is the
+// detector being oversubscribed, a long run is a slow model.
+function renderInferenceTiming(payload) {
+  const el = liveEls.streamDetailQueue;
+  if (!el) return;
+  const wait = Number(payload?.inference_wait_ms);
+  const run = Number(payload?.inference_ms);
+  if (!Number.isFinite(wait) || !Number.isFinite(run)) {
+    el.textContent = '-';
+    return;
+  }
+  const format = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`);
+  el.textContent = `wait ${format(wait)} / run ${format(run)}`;
 }
 
 function formatMotionPixelPercent(fraction) {

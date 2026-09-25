@@ -110,6 +110,9 @@ automatically, and any reload warning is surfaced in the Status panel.
 - **Concurrent Cameras** - how many cameras can run ONNX inference at the same
   time. Default: 1 (serialised). Set this to your camera count so each camera
   gets its own inference slot and one slow camera cannot block another.
+  This is also the scheduler's global limit: cameras are admitted here, not by
+  a pile of threads all blocking on the model's semaphore (see
+  [Detection scheduling](#detection-scheduling)).
 - **Min Confidence** - minimum confidence score (0-1) a detection must reach to
   be reported. Detections below this are discarded before alert matching.
   Per-label thresholds on the Zones page override this global value. Default:
@@ -155,6 +158,30 @@ touch these. Change one at a time so you can attribute any per-frame impact.
   label file. These are managed by the Model Library above.
 
 ---
+
+## Detection scheduling
+
+Every camera detection cycle - background monitor and Live-page alike - is
+admitted through one scheduler (`app/inference_scheduler.py`) rather than a
+thread per camera. The rules it enforces:
+
+- **Latest frame wins.** Each camera has at most one job waiting, and the frame
+  is read when the job *runs*, not when it is queued. A camera that waited
+  behind a backlog is scored on the newest picture, and a second request
+  replaces the first instead of stacking behind it.
+- **Fair round-robin.** Pending cameras are served oldest-request-first, so a
+  busy neighbour cannot starve a quiet one.
+- **Priority.** A camera that is recording right now is served before idle
+  cameras, as is one whose previous cycle finished more than two detection
+  intervals ago (it is already behind).
+- **One global concurrency limit**, taken from *Concurrent Cameras* above, so
+  cameras queue at the door rather than blocking on the model's semaphore.
+- **Wait and run are measured separately.** The Live page's stream details card
+  shows `wait / run` for the selected camera's last cycle, and the same numbers
+  ride on `GET /api/live/detection-status` as `inference_wait_ms`,
+  `inference_ms` and `inference_queue_depth`. A growing wait means the detector
+  is oversubscribed (raise Concurrent Cameras, or lengthen the detection
+  interval); a long run means the model itself is slow.
 
 ## Region boost and tiled inference diagnostics
 

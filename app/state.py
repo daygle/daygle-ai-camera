@@ -152,6 +152,21 @@ _live_backoff_lock: threading.Lock = threading.Lock()
 live_detection_worker_lock: threading.Lock = threading.Lock()
 active_live_detection_cameras: set = set()
 live_detection_last_checked: dict = {}
+# Last epoch second the SECONDARY face pass actually ran for a camera. Kept
+# apart from ``live_detection_last_checked`` (the object-detection cadence) so
+# the two can run at different rates: object detection stays at the configured
+# detection interval while face inference is throttled by
+# ``face_detection_interval_seconds``. Only written when the pass really runs,
+# so a camera with no face consumers stays eligible for its next check.
+face_detection_last_checked: dict = {}
+
+# Central live-inference scheduler (app.inference_scheduler.LiveInferenceScheduler
+# or None). Every camera detection cycle -- background monitor and Live-page
+# foreground alike -- is admitted through it, so a camera keeps at most one job
+# waiting, the newest request wins, and the detector's inference concurrency is
+# applied at one place instead of by N threads blocking on its semaphore.
+# Built lazily by app.live_monitor.get_live_inference_scheduler().
+live_inference_scheduler: Any = None
 
 live_alert_monitor_stop: threading.Event = threading.Event()
 live_alert_monitor_thread: threading.Thread | None = None

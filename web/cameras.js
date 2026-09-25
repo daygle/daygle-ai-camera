@@ -33,6 +33,7 @@ function setMessage(text, isError = false) {
 
 const PROFILE_PERFORMANCE_FIELDS = [
   'background_detection_enabled', 'detection_interval_seconds',
+  'face_detection_interval_seconds',
   'ingest_frame_fps', 'detection_confirm_frames', 'detection_confirm_window',
   'detection_confirm_iou', 'always_run_object_detection',
   'object_detection_region_boost', 'object_detection_tiling',
@@ -80,6 +81,7 @@ function parseProfileFieldValue(key, raw) {
       return Number.isNaN(intValue) ? null : intValue;
     }
     case 'detection_interval_seconds':
+    case 'face_detection_interval_seconds':
     case 'detection_confirm_iou':
     case 'motion_gate_fraction':
     case 'motion_scale_fraction':
@@ -142,6 +144,7 @@ function profileSectionHtml(camera, mode) {
   const performanceControls =
     selectField('background_detection_enabled', { label: 'Background Detection', options: boolOptions }) +
     numberField('detection_interval_seconds', { label: 'Detection Interval (s)', min: '0.1', max: '10', step: '0.05', placeholder: 'Global Default (0.5)' }) +
+    numberField('face_detection_interval_seconds', { label: 'Face Detection Interval (s)', min: '0.1', max: '10', step: '0.05', placeholder: 'Global Default (1)' }) +
     numberField('ingest_frame_fps', { label: 'Detection Frame Rate (fps)', min: '1', max: '30', step: '1', placeholder: 'Global Default (4)' }) +
     numberField('detection_confirm_frames', { label: 'Confirm Frames', min: '1', max: '10', step: '1', placeholder: 'Global Default (1)' }) +
     numberField('detection_confirm_window', { label: 'Confirm Window', min: '1', max: '30', step: '1', placeholder: 'Global Default (1)' }) +
