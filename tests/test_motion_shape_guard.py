@@ -1,12 +1,11 @@
 """Regression test: a stale-sized motion background must self-heal, not pin the
 camera to fail-open motion.
 
-``_MOTION_FRAME_W/H`` are global and read outside the ``_frame_motion_lock``, so
-a concurrent live-settings frame-size change can leave a per-camera background
-sized to the OLD dimensions. The subsequent ``current - background`` would then
-raise on every frame, and the ``except`` handler (which never resets the
-background) would pin the camera to fail-open ``motion=True`` forever.
-``detect_frame_motion`` now treats a shape mismatch like a first frame.
+Motion engines use a per-camera model signature and self-heal when a camera's
+local thumbnail size changes.  The live monitor passes that size explicitly so
+cameras with different profiles cannot resize one another's state.  The
+regression tests also preserve the shape-mismatch self-healing guard used by
+standalone callers that rely on the legacy global defaults.
 """
 
 from __future__ import annotations
@@ -86,7 +85,36 @@ def test_mog2_rebuilds_model_on_frame_size_change(monkeypatch):
     has_motion, conf, mask, _frac = detect_frame_motion(cam, _img(100, 120), algorithm='mog2')
     assert has_motion is False and conf == 0.0 and mask is None
     assert _state._frame_motion_mog2_meta[cam][:2] == (60, 45)
-    assert cam not in _state._frame_motion_error_cameras
-
     _state._frame_motion_mog2.pop(cam, None)
     _state._frame_motion_mog2_meta.pop(cam, None)
+
+
+def test_camera_local_frame_sizes_do_not_invalidate_each_other(monkeypatch):
+    """Two cameras may use different Day/Night thumbnail sizes concurrently."""
+    cam_small = "camera-local-small"
+    cam_large = "camera-local-large"
+    for camera_id in (cam_small, cam_large):
+        _state._frame_motion_prev.pop(camera_id, None)
+        _state._frame_motion_last_frame.pop(camera_id, None)
+        _state._frame_motion_last_gray.pop(camera_id, None)
+        _state._frame_motion_mog2.pop(camera_id, None)
+        _state._frame_motion_mog2_meta.pop(camera_id, None)
+
+    monkeypatch.setattr(_state, "_MOTION_FRAME_W", 99)
+    monkeypatch.setattr(_state, "_MOTION_FRAME_H", 77)
+    detect_frame_motion(cam_small, _img(100, 120), algorithm="diff", frame_size=(40, 30))
+    detect_frame_motion(cam_large, _img(100, 120), algorithm="diff", frame_size=(60, 45))
+    assert _state._frame_motion_prev[cam_small].shape == (30, 40)
+    assert _state._frame_motion_prev[cam_large].shape == (45, 60)
+
+    detect_frame_motion(cam_small, _img(100, 120), algorithm="mog2", frame_size=(40, 30))
+    detect_frame_motion(cam_large, _img(100, 120), algorithm="mog2", frame_size=(60, 45))
+    assert _state._frame_motion_mog2_meta[cam_small][:2] == (40, 30)
+    assert _state._frame_motion_mog2_meta[cam_large][:2] == (60, 45)
+
+    for camera_id in (cam_small, cam_large):
+        _state._frame_motion_prev.pop(camera_id, None)
+        _state._frame_motion_last_frame.pop(camera_id, None)
+        _state._frame_motion_last_gray.pop(camera_id, None)
+        _state._frame_motion_mog2.pop(camera_id, None)
+        _state._frame_motion_mog2_meta.pop(camera_id, None)

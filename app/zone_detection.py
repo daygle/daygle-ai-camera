@@ -62,11 +62,10 @@ Cluster membership (21 helpers, 290 lines original):
 
 - ``_zone_pixel_motion_fraction`` -- numpy-based per-zone motion
   pixel fraction using the boolean ``diff_mask`` from
-  ``detect_frame_motion`` at ``main._MOTION_FRAME_H × main._MOTION_FRAME_W``
-  resolution. Reads ``main._MOTION_FRAME_W`` and
-  ``main._MOTION_FRAME_H``. Falls back to bounds derived from
-  ``zone['points']`` when the rectangle fields are missing so
-  polygon-only zones can still be measured.
+  ``detect_frame_motion``. Geometry is taken from the mask's own shape so
+  cameras may use different motion thumbnail sizes concurrently. Falls back to
+  bounds derived from ``zone['points']`` when the rectangle fields are missing
+  so polygon-only zones can still be measured.
 
 - ``zone_motion_detections`` -- per-camera motion-to-detection
   converter. Reads each zone's motion rule (``zone_motion_min_confidence``
@@ -152,10 +151,10 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
   handlers and the helper all read/write the same dict)
 - ``main.HTTPException`` (``get_camera_instance`` -- re-exported from
   ``fastapi`` at the top of main.py)
-- ``main._MOTION_FRAME_W`` / ``main._MOTION_FRAME_H``
-  (``_zone_pixel_motion_fraction`` -- read at call time inside the
-  function body, not as a default, so Pool C call-time resolution is
-  sufficient)
+- ``app.state._MOTION_FRAME_W`` / ``app.state._MOTION_FRAME_H`` remain only
+  as legacy defaults for standalone motion callers. Live camera profiles pass a
+  local size to ``detect_frame_motion``; zone scoring uses the returned mask
+  shape and does not read those globals.
 - ``main._MOTION_GATE_FRACTION`` / ``main._MOTION_SCALE_FRACTION``
   (``zone_motion_detections`` -- bound to default-arg expressions at
   module-load time of this module; both constants are populated on
@@ -333,8 +332,8 @@ def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, m
 
 def _zone_pixel_bounds(diff_mask: Any, zone: dict[str, Any]) -> tuple[int, int, int, int] | None:
     """Return the zone's pixel slice ``(px1, py1, px2, py2)`` inside the
-    motion thumbnail (``main._MOTION_FRAME_W × main._MOTION_FRAME_H``), or
-    ``None`` when the zone geometry cannot be resolved.
+    motion thumbnail (the mask's own ``H × W`` shape), or ``None`` when the zone
+    geometry cannot be resolved.
 
     Zone coordinates are normalised (0-1) and are converted to pixel indices
     before slicing, falling back to ``zone.points`` when the rectangle fields
@@ -367,10 +366,11 @@ def _zone_pixel_bounds(diff_mask: Any, zone: dict[str, Any]) -> tuple[int, int, 
         # NaN confidence that later serialises to invalid JSON. The ``max(px1+1,
         # ...)`` below then guarantees ``px2 > px1`` (and ``py2 > py1``), so the
         # slice is always at least 1px and the fraction is always finite.
-        px1 = max(0, min(_state._MOTION_FRAME_W - 1, int(x * _state._MOTION_FRAME_W)))
-        py1 = max(0, min(_state._MOTION_FRAME_H - 1, int(y * _state._MOTION_FRAME_H)))
-        px2 = min(_state._MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * _state._MOTION_FRAME_W))))
-        py2 = min(_state._MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * _state._MOTION_FRAME_H))))
+        frame_h, frame_w = diff_mask.shape
+        px1 = max(0, min(frame_w - 1, int(x * frame_w)))
+        py1 = max(0, min(frame_h - 1, int(y * frame_h)))
+        px2 = min(frame_w, max(px1 + 1, int(round((x + w) * frame_w))))
+        py2 = min(frame_h, max(py1 + 1, int(round((y + h) * frame_h))))
         return (px1, py1, px2, py2)
     except (TypeError, ValueError) as exc:
         logger.debug('Expected error resolving pixel bounds for zone %r: %s', zone_id, exc)
@@ -400,8 +400,7 @@ def _zone_motion_pixel_box(diff_mask: Any, zone: dict[str, Any]) -> dict[str, fl
         y0 = int(changed[0].min()) + py1
         x1 = int(changed[1].max()) + px1
         y1 = int(changed[0].max()) + py1
-        frame_w = max(1, int(_state._MOTION_FRAME_W))
-        frame_h = max(1, int(_state._MOTION_FRAME_H))
+        frame_h, frame_w = diff_mask.shape
         return {
             'x': round(max(0.0, min(1.0, x0 / frame_w)), 4),
             'y': round(max(0.0, min(1.0, y0 / frame_h)), 4),
@@ -422,7 +421,7 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
     """Return the fraction of pixels inside a zone's bounding box that changed.
 
     ``diff_mask`` is the boolean (H×W) array from ``detect_frame_motion`` at
-    ``main._MOTION_FRAME_H × main._MOTION_FRAME_W`` resolution.
+    the camera-local motion thumbnail resolution.
     """
     zone_id = str(zone.get('id') or zone.get('name') or id(zone))
     try:
@@ -431,14 +430,8 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
         # array when a camera resolution or motion-frame size changed between
         # producers; ``np.mean(empty)`` is NaN, which bypasses normal threshold
         # comparisons and can leak NaN confidence into an event payload.
-        if getattr(diff_mask, 'ndim', None) != 2:
-            return 0.0
-        if diff_mask.shape != (_state._MOTION_FRAME_H, _state._MOTION_FRAME_W):
-            logger.debug(
-                'Ignoring pixel-motion mask for zone %r with shape %s; expected (%d, %d)',
-                zone_id, getattr(diff_mask, 'shape', None),
-                _state._MOTION_FRAME_H, _state._MOTION_FRAME_W,
-            )
+        if getattr(diff_mask, 'ndim', None) != 2 or not all(int(value) > 0 for value in diff_mask.shape):
+            logger.debug('Ignoring invalid pixel-motion mask for zone %r with shape %s', zone_id, getattr(diff_mask, 'shape', None))
             return 0.0
         bounds = _zone_pixel_bounds(diff_mask, zone)
         if bounds is None:

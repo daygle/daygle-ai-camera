@@ -725,17 +725,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # huge per-frame motion thumbnail on the hot path and waste CPU/memory.
     _frame_w = max(40, min(640, int(live_settings.get('motion_frame_width', _state._MOTION_FRAME_W))))
     _frame_h = max(30, min(480, int(live_settings.get('motion_frame_height', _state._MOTION_FRAME_H))))
-    if _frame_w != _state._MOTION_FRAME_W or _frame_h != _state._MOTION_FRAME_H:
-        with _state._frame_motion_lock:
-            _state._MOTION_FRAME_W = _frame_w
-            _state._MOTION_FRAME_H = _frame_h
-            # Both engines' models are sized to the old thumbnail; drop them so
-            # they rebuild at the new size on the next frame. (MOG2 also rebuilds
-            # via its parameter signature, but clearing here reclaims the memory
-            # immediately instead of on the next per-camera frame.)
-            _state._frame_motion_prev.clear()
-            _state._frame_motion_mog2.clear()
-            _state._frame_motion_mog2_meta.clear()
+    # Keep the motion thumbnail geometry local to this camera.  The previous
+    # implementation wrote these values into app.state globals and cleared every
+    # camera's models, so cameras with different Day/Night profiles continuously
+    # invalidated one another.  detect_frame_motion passes the size into the
+    # per-camera model signature and the zone scorer derives geometry from the
+    # returned mask shape.
     _cam_motion_nest = settings.get('motion') if isinstance(settings.get('motion'), dict) else {}
     # Flat per-camera key wins (including the present-but-None case, which
     # falls through to the legacy nested ``settings['motion']`` dict exactly
@@ -768,7 +763,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if periodic_scan_interval > 0 and now - _state._periodic_scan_last_ts.get(camera_id, 0) >= periodic_scan_interval:
         force_scan = True
         _state._periodic_scan_last_ts[camera_id] = now
-    frame_has_motion, frame_motion_confidence, diff_mask, raw_motion_fraction = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha, algorithm=_algorithm, denoise=_denoise, shadow_suppression=_shadow_suppression)
+    frame_has_motion, frame_motion_confidence, diff_mask, raw_motion_fraction = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha, algorithm=_algorithm, denoise=_denoise, shadow_suppression=_shadow_suppression, frame_size=(_frame_w, _frame_h))
     # Keep a diagnostic signal separate from the alert-gated confidence. The
     # latter is intentionally zero below the motion gate; the former lets the
     # live bar show real sub-gate pixel changes without making them alertable.
@@ -936,30 +931,35 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # place -- it never adds or drops detections -- so it cannot change what any
     # downstream gate counts.
     detections = update_object_tracks(camera_id, detections)
-    # Tier-1 behavioural intelligence: directional line-crossing (tripwire).
-    # Runs on the freshly-tracked, pre-filter detections (each carries its
-    # prev/current centre) so a subject crossing the line is caught regardless
-    # of the object/motion rules. Fully isolated and best-effort -- a bug in
-    # behavioural code must never break the detection loop.
-    try:
-        emit_tripwire_crossings(camera_id, settings, detections)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning('Tripwire crossing check failed on %s: %s', camera_id, exc)
-    # Tier-2 behavioural intelligence: statistical loitering / long-dwell. Runs
-    # on the same freshly-tracked detections (each carries its track id + box),
-    # learns each zone's normal dwell, and flags an unusually long visit. Also
-    # fully isolated and best-effort.
-    try:
-        emit_loiter_anomalies(camera_id, settings, detections)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning('Loiter check failed on %s: %s', camera_id, exc)
-    # Tier-2 behavioural intelligence: unusual time-of-day. Same freshly-tracked
-    # detections; learns each zone's normal active hours and flags activity in a
-    # normally-quiet hour. Also fully isolated and best-effort.
-    try:
-        emit_time_of_day_anomalies(camera_id, settings, detections)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning('Time-of-day check failed on %s: %s', camera_id, exc)
+    # Behavioural engines consume tracked geometry, so pause them while the
+    # camera-motion guard is active.  Otherwise PTZ/ego-motion displacement can
+    # be interpreted as a subject crossing, dwelling, or appearing at an unusual
+    # hour.  Object inference and diagnostics remain available during suppression.
+    if not camera_motion['active']:
+        # Tier-1 behavioural intelligence: directional line-crossing (tripwire).
+        # Runs on the freshly-tracked, pre-filter detections (each carries its
+        # prev/current centre) so a subject crossing the line is caught regardless
+        # of the object/motion rules. Fully isolated and best-effort -- a bug in
+        # behavioural code must never break the detection loop.
+        try:
+            emit_tripwire_crossings(camera_id, settings, detections)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('Tripwire crossing check failed on %s: %s', camera_id, exc)
+        # Tier-2 behavioural intelligence: statistical loitering / long-dwell. Runs
+        # on the same freshly-tracked detections (each carries its track id + box),
+        # learns each zone's normal dwell, and flags an unusually long visit. Also
+        # fully isolated and best-effort.
+        try:
+            emit_loiter_anomalies(camera_id, settings, detections)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('Loiter check failed on %s: %s', camera_id, exc)
+        # Tier-2 behavioural intelligence: unusual time-of-day. Same freshly-tracked
+        # detections; learns each zone's normal active hours and flags activity in a
+        # normally-quiet hour. Also fully isolated and best-effort.
+        try:
+            emit_time_of_day_anomalies(camera_id, settings, detections)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('Time-of-day check failed on %s: %s', camera_id, exc)
     # Object settings (default mode + per-label overrides + still-alert
     # thresholds) drive both the still/moving filter and the still-dwell
     # tracker below, so resolve them once per cycle rather than reading the

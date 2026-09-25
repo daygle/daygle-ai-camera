@@ -165,6 +165,30 @@ def test_ptz_motion_detection_switch_resolves_correctly(tmp_path, monkeypatch):
     assert _resolved_allow_auto_detection(main, monkeypatch, _settings('c-auto-ptz', 'auto', ptz_enabled=True)) is True
 
 
+
+
+def test_behavioral_engines_pause_during_camera_motion(tmp_path, monkeypatch):
+    """PTZ/ego-motion must not be interpreted as subject behaviour."""
+    main = _load_app(tmp_path, monkeypatch)
+    import app.live_monitor as _lm
+
+    monkeypatch.setattr(main._state, 'detector', _still_cat_detector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    monkeypatch.setattr(_lm, 'detect_frame_motion', lambda *a, **k: (False, 0.0, None, 0.0))
+    monkeypatch.setattr(_lm, 'update_camera_motion', lambda *a, **k: {'active': True})
+    calls: list[str] = []
+    monkeypatch.setattr(_lm, 'emit_tripwire_crossings', lambda *a, **k: calls.append('tripwire'))
+    monkeypatch.setattr(_lm, 'emit_loiter_anomalies', lambda *a, **k: calls.append('loiter'))
+    monkeypatch.setattr(_lm, 'emit_time_of_day_anomalies', lambda *a, **k: calls.append('time'))
+
+    _lm.process_live_stream_alerts(
+        b'frame', {'width': 1280, 'height': 720, 'timestamp': time.time()},
+        _cat_camera_settings(), enforce_interval=False,
+    )
+
+    assert calls == []
+
+
 def test_tracking_feeds_the_motion_mode_filter(tmp_path, monkeypatch):
     """The detections handed to ``filter_detections_by_motion_mode`` must carry
     the tracker's annotation, and a paused (mask-still) but tracked-moving cat

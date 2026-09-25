@@ -73,6 +73,8 @@ resolved at call time only).
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import threading
 import time
@@ -95,8 +97,8 @@ from app.push_notifications import PushNotificationService, PushNotificationErro
 logger = logging.getLogger('daygle.ai')
 
 _MIN_RULE_CONFIDENCE_TTL = 5.0
-_min_rule_confidence_cache: tuple[float, float] | None = None
-_per_camera_min_rule_confidence_cache: dict[str, tuple[float, float]] = {}
+_min_rule_confidence_cache: tuple[float, float, str | None] | None = None
+_per_camera_min_rule_confidence_cache: dict[str, tuple[float, float, str]] = {}
 _min_rule_confidence_lock = threading.Lock()
 
 
@@ -115,12 +117,20 @@ def compute_minimum_rule_confidence(fallback: float | None = None, camera_settin
     """
     global _min_rule_confidence_cache
     camera_key = ''
+    settings_signature: str | None = None
     if camera_settings is not None:
         camera_key = str(camera_settings.get('id') or camera_settings.get('name') or '').strip()
+        # The settings object is already resolved on the hot path. Hashing its
+        # rules makes a confidence/zone edit invalidate the cache immediately,
+        # while avoiding a database read on every frame. Legacy cache entries
+        # without a signature are simply treated as misses.
+        settings_signature = hashlib.sha256(
+            json.dumps(camera_settings, sort_keys=True, default=str, separators=(',', ':')).encode('utf-8')
+        ).hexdigest()
     cached = _min_rule_confidence_cache if not camera_key else None
     if cached is not None:
-        cached_value, cached_at = cached
-        if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
+        cached_value, cached_at, cached_signature = cached
+        if (not camera_key or cached_signature == settings_signature) and time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
             return cached_value
     with _min_rule_confidence_lock:
         if camera_key:
@@ -128,8 +138,8 @@ def compute_minimum_rule_confidence(fallback: float | None = None, camera_settin
         else:
             cached = _min_rule_confidence_cache
         if cached is not None:
-            cached_value, cached_at = cached
-            if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
+            cached_value, cached_at, cached_signature = cached
+            if (not camera_key or cached_signature == settings_signature) and time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
                 return cached_value
         if fallback is None:
             # ``0`` is a legitimate persisted confidence (the ONNX slider's
@@ -144,9 +154,12 @@ def compute_minimum_rule_confidence(fallback: float | None = None, camera_settin
         min_conf: float = fallback
         cameras = [camera_settings] if camera_settings is not None else effective_cameras_config()
         for camera in cameras:
-            for zone in camera.get('detection', {}).get('zones', []):
-                for rule in zone.get('object_rules', []):
-                    if not rule.get('enabled', True):
+            detection = camera.get('detection') or {}
+            for zone in detection.get('zones') or []:
+                if not isinstance(zone, dict) or zone.get('enabled', True) is False:
+                    continue
+                for rule in zone.get('object_rules') or []:
+                    if not isinstance(rule, dict) or not rule.get('enabled', True):
                         continue
                     if str(rule.get('label') or '').strip().lower() == 'motion':
                         continue
@@ -158,9 +171,9 @@ def compute_minimum_rule_confidence(fallback: float | None = None, camera_settin
                         pass
         result = min_conf
         if camera_key:
-            _per_camera_min_rule_confidence_cache[camera_key] = (result, time.time())
+            _per_camera_min_rule_confidence_cache[camera_key] = (result, time.time(), settings_signature or '')
         else:
-            _min_rule_confidence_cache = (result, time.time())
+            _min_rule_confidence_cache = (result, time.time(), None)
         return result
 
 

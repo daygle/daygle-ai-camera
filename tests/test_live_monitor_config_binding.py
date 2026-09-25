@@ -396,9 +396,11 @@ def test_motion_frame_size_clamped_to_validated_bounds(monkeypatch):
         },
     )
     # Motion returns no activity so the flow bails right after the frame-size
-    # binding block -- we only care about the clamp side effect here.
+    # binding block -- we only care about the clamped camera-local value passed
+    # to the motion engine.
+    captured: dict = {}
     monkeypatch.setattr(live_monitor, 'detect_frame_motion',
-                        lambda cid, image, **kw: (False, 0.0, None, 0.0))
+                        lambda cid, image, **kw: (captured.update(kw), (False, 0.0, None, 0.0))[1])
     monkeypatch.setattr(live_monitor, 'zone_motion_detections',
                         lambda settings, conf, **kw: [])
     monkeypatch.setattr(live_monitor, 'update_live_detection_status',
@@ -415,5 +417,6 @@ def test_motion_frame_size_clamped_to_validated_bounds(monkeypatch):
         enforce_interval=False,
     )
 
-    assert _state._MOTION_FRAME_W == 640
-    assert _state._MOTION_FRAME_H == 480
+    assert captured['frame_size'] == (640, 480)
+    assert _state._MOTION_FRAME_W == 320
+    assert _state._MOTION_FRAME_H == 240

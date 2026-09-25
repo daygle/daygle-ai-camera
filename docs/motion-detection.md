@@ -16,9 +16,9 @@ This runs on every single frame and is deliberately cheap. It shrinks the image 
 
 **Denoise.** After the background comparison, the raw changed-pixel mask is morphologically cleaned (open then close) to erase isolated single-pixel sensor noise - a major false-positive source on IR/night cameras - and to consolidate real motion into solid blobs. This is on by default and can be disabled per install.
 
-If enough pixels have changed enough, it declares motion and passes the frame on. If nothing significant changed at the whole-frame level, YOLO is not run from this gate alone - but per-zone motion rules (Layer 3) are still scored from the diff mask first, so motion confined to a small monitored zone can fire that zone's rule without ever opening the frame-wide gate.
+If enough pixels have changed, it declares motion. A quiet whole-frame signal does **not** stop object inference by default: `always_run_object_detection` is enabled, so YOLO runs in parallel on every detection cycle. Per-zone motion rules (Layer 3) are also scored from the diff mask first, so motion confined to a small monitored zone can fire that zone's rule without opening the frame-wide gate. When operators disable `always_run_object_detection`, the motion signal becomes the CPU-saving gate for YOLO, with periodic scans as the stationary-subject escape hatch.
 
-**Why this matters:** YOLO inference is slow and CPU-intensive. Running it on every frame of a static, empty scene would waste CPU constantly. The pixel-diff gate means YOLO only runs when something is actually happening.
+**Why this matters:** motion and object detection are separate signals. Motion remains a cheap, independent alert/recording axis, while the default always-on object path protects recall for still, slow, distant, and low-contrast subjects. The legacy CPU-saving mode remains available for constrained hardware.
 
 **What it produces:** A motion confidence value between 0 and 1. Low confidence means a small amount of subtle movement. High confidence means a large portion of the frame changed significantly.
 
@@ -87,7 +87,7 @@ coverage guidance, metric definitions, and regression workflow.
 
 Out of the box, Daygle runs object detection on **every** cycle, decoupled from motion (the [Always Run Object Detection](#always-run-object-detection) default) - the configuration that gives the most reliable object recall. This is worth understanding because it shapes how the layers interact:
 
-1. **[Always Run Object Detection](#always-run-object-detection) is on by default.** YOLO runs every cycle regardless of motion, so an object is never hidden from the detector because the pixel-diff was quiet. This eliminates the "person stands still and disappears" gap, the slow/distant-subject gap, and the first-frames-after-reconnect gap. With it on, the **Periodic Scan** setting below is redundant (leave it at `0`).
+1. **[Always Run Object Detection](#always-run-object-detection) is on by default.** YOLO runs every cycle regardless of motion, so an object is never hidden from the detector because the pixel-diff was quiet. Motion-only rules remain independent. This eliminates the "person stands still and disappears" gap, the slow/distant-subject gap, and the first-frames-after-reconnect gap. With it on, the **Periodic Scan** setting below is redundant (leave it at `0`).
 2. **Use [Confirm Frames](#confirm-frames--confirm-window) = `2`** (Confirm Window `3`) when false-positive resistance is more important than minimum alert latency; the default is single-frame response.
 3. **MOG2 motion keeps running** as an independent signal for motion-only zones and "any movement" alerts - it is simply no longer *gating* the object detector.
 
@@ -339,7 +339,7 @@ per-label confidence and still avoid noise.
   to at least Confirm Frames.
 
 The gate applies to every object label uniformly, and counts only cycles that
-actually ran YOLO (a quiet frame with no motion is skipped and does not count).
+actually ran YOLO (with the default always-on mode, a quiet frame can still run YOLO; with the motion gate enabled it is skipped and does not count).
 It runs *after* zone/label filtering, so the window only tracks objects the
 camera is configured to care about. Motion rules are gated separately and are
 unaffected.

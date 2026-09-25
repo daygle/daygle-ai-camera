@@ -84,9 +84,31 @@ def test_min_rule_confidence_camera_scoped_no_rules(monkeypatch):
         _ad._per_camera_min_rule_confidence_cache.clear()
 
 
-# ---------------------------------------------------------------------------
-# Finding 2: per-label event debounce
-# ---------------------------------------------------------------------------
+def test_min_rule_confidence_cache_tracks_rule_edits_and_skips_disabled_zones(monkeypatch):
+    """A settings edit invalidates the hot-path cache immediately.
+
+    Disabled zones must not lower the detector confidence floor for a camera.
+    """
+    camera = {
+        'id': 'cam-edit',
+        'detection': {'zones': [{
+            'id': 'z', 'enabled': True,
+            'object_rules': [{'label': 'person', 'min_confidence': 0.20, 'enabled': True}],
+        }]},
+    }
+    monkeypatch.setattr(_ad, 'effective_ai_config', lambda: {'confidence': 0.45})
+    _ad._min_rule_confidence_cache = None
+    _ad._per_camera_min_rule_confidence_cache.clear()
+    try:
+        assert _ad.compute_minimum_rule_confidence(camera_settings=camera) == pytest.approx(0.20)
+        camera['detection']['zones'][0]['object_rules'][0]['min_confidence'] = 0.60
+        assert _ad.compute_minimum_rule_confidence(camera_settings=camera) == pytest.approx(0.45)
+        camera['detection']['zones'][0]['enabled'] = False
+        assert _ad.compute_minimum_rule_confidence(camera_settings=camera) == pytest.approx(0.45)
+    finally:
+        _ad._min_rule_confidence_cache = None
+        _ad._per_camera_min_rule_confidence_cache.clear()
+
 
 
 def test_live_event_fresh_labels_per_label_windows():

@@ -10,7 +10,8 @@ in-memory bookkeeping** that runs once per active camera:
   + the four tuning constants (``_MOTION_PIXEL_THRESHOLD`` /
   ``_MOTION_GATE_FRACTION`` / ``_MOTION_SCALE_FRACTION`` /
   ``_MOTION_BACKGROUND_ALPHA``) and the two frame-size constants
-  (``_MOTION_FRAME_W`` / ``_MOTION_FRAME_H``),
+  (``app.state._MOTION_FRAME_W`` / ``app.state._MOTION_FRAME_H``) as fallback-only
+  defaults; live camera cycles pass an explicit camera-local size,
 - the misc detection-label helper (``detection_label_set``).
 
 State PRIMITIVES themselves STAY on ``app.main`` (and continue to be
@@ -21,10 +22,10 @@ by :mod:`app.zone_schema` and :mod:`app.zone_detection` (both
 their function bodies). It also keeps two cross-module consumers
 working unchanged:
 
-- :mod:`app.zone_detection` reads ``main._MOTION_FRAME_W`` /
-  ``main._MOTION_FRAME_H`` for its zone-pixel-motion fraction -
-  Phase-26 keeps the constants on main.py so this code path is
-  unchanged.
+- :mod:`app.zone_detection` derives zone-pixel geometry from each returned
+  mask's shape.
+  The constants remain on ``app.state`` as legacy defaults for standalone
+  callers; live cycles carry the camera-local size into the engine.
 - ``tests/test_api.py`` reaches ``main.live_detection_history`` /
   ``main.deque`` / ``main.build_track_from_live_history`` -
   Phase-26's Pool-A rebind wires these names onto main.py so the
@@ -44,8 +45,8 @@ working unchanged:
 - ``main._frame_motion_last_frame`` - ``detect_frame_motion``
 - ``main._frame_motion_last_gray`` - ``detect_frame_motion``
 - ``main._frame_motion_error_cameras`` - ``detect_frame_motion``
-- ``main._MOTION_FRAME_W`` / ``main._MOTION_FRAME_H`` -
-  ``detect_frame_motion``
+- ``app.state._MOTION_FRAME_W`` / ``app.state._MOTION_FRAME_H`` -
+  fallback dimensions when a standalone caller does not provide ``frame_size``
 - ``main._MOTION_PIXEL_THRESHOLD`` / ``main._MOTION_GATE_FRACTION`` /
   ``main._MOTION_SCALE_FRACTION`` / ``main._MOTION_BACKGROUND_ALPHA`` -
   ``detect_frame_motion`` defaults (resolved at call time, not as
@@ -537,7 +538,20 @@ _MOG2_VAR_THRESHOLD_MIN = 4.0
 _MOG2_VAR_THRESHOLD_MAX = 255.0
 
 
-def _to_motion_thumbnail_bgr(image: Any) -> Any:
+def _resolve_motion_frame_size(frame_size: tuple[int, int] | None) -> tuple[int, int]:
+    """Resolve a caller-supplied thumbnail size without consulting shared state.
+
+    Live cameras may have different Day/Night motion profiles.  The legacy
+    ``_MOTION_FRAME_W/H`` values remain the fallback for standalone callers and
+    benchmarks, but a live cycle passes its camera-local size explicitly so
+    concurrent camera profiles cannot resize one another's models or masks.
+    """
+    if frame_size is None:
+        return (int(_state._MOTION_FRAME_W), int(_state._MOTION_FRAME_H))
+    return (max(1, int(frame_size[0])), max(1, int(frame_size[1])))
+
+
+def _to_motion_thumbnail_bgr(image: Any, frame_size: tuple[int, int] | None = None) -> Any:
     """Decode ``image`` (BGR numpy array or JPEG/PNG bytes) to a BGR thumbnail
     at the configured motion-frame size, using area interpolation so thin
     features survive the downscale. Colour is preserved (not converted to
@@ -552,11 +566,7 @@ def _to_motion_thumbnail_bgr(image: Any) -> Any:
         from PIL import Image as _Image
         pil = _Image.open(io.BytesIO(image)).convert('RGB')
         frame = cv2.cvtColor(np.array(pil, dtype=np.uint8), cv2.COLOR_RGB2BGR)
-    return cv2.resize(
-        frame,
-        (_state._MOTION_FRAME_W, _state._MOTION_FRAME_H),
-        interpolation=cv2.INTER_AREA,
-    )
+    return cv2.resize(frame, _resolve_motion_frame_size(frame_size), interpolation=cv2.INTER_AREA)
 
 
 def _denoise_mask(mask: Any) -> Any:
@@ -606,6 +616,7 @@ def _detect_frame_motion_mog2(
     background_alpha: float,
     denoise: bool,
     shadow_suppression: Any,
+    frame_size: tuple[int, int] | None = None,
 ) -> tuple[bool, float, Any, float]:
     """MOG2 (Gaussian-mixture) background-subtraction motion gate.
 
@@ -633,7 +644,8 @@ def _detect_frame_motion_mog2(
     import cv2
     import numpy as np
 
-    resized = _to_motion_thumbnail_bgr(image)
+    frame_w, frame_h = _resolve_motion_frame_size(frame_size)
+    resized = _to_motion_thumbnail_bgr(image, (frame_w, frame_h))
     # Resolve the tri-state shadow setting to a concrete on/off for this frame.
     # 'auto' rejects shadows only while the scene is bright (day); once the frame
     # darkens (night/IR) it stops, because MOG2's shadow class then swallows real
@@ -648,8 +660,8 @@ def _detect_frame_motion_mog2(
     # silently keep the stale model. Using the RESOLVED shadow bool means an
     # 'auto' day->night transition rebuilds the model with detectShadows flipped.
     signature = (
-        int(_state._MOTION_FRAME_W),
-        int(_state._MOTION_FRAME_H),
+        frame_w,
+        frame_h,
         round(var_threshold, 3),
         bool(shadow_on),
         history,
@@ -734,7 +746,7 @@ def _detect_frame_motion_mog2(
             'Motion gate %s (mog2): changed=%.4f gate=%.4f var=%.1f shadow=%s(%s) denoise=%s WxH=%dx%d',
             camera_id, changed_fraction, gate_fraction, var_threshold,
             shadow_suppression, 'on' if shadow_on else 'off', denoise,
-            _state._MOTION_FRAME_W, _state._MOTION_FRAME_H,
+            frame_w, frame_h,
         )
 
     confidence = round(min(1.0, changed_fraction / max(scale_fraction, 1e-9)), 3)
@@ -754,6 +766,7 @@ def detect_frame_motion(
     algorithm: str | None = None,
     denoise: bool | None = None,
     shadow_suppression: Any = None,
+    frame_size: tuple[int, int] | None = None,
 ) -> tuple[bool, float, Any, float]:
     """Per-camera motion gate. Returns ``(has_motion, confidence, diff_mask, raw_fraction)``.
 
@@ -764,10 +777,10 @@ def detect_frame_motion(
     pattern the diff engine uses), so callers that pass explicit kwargs -- the
     live monitor -- are unaffected.
 
-    ``diff_mask`` is a boolean ``(H×W)`` array of changed thumbnail pixels (or
-    ``None`` on the first frame / an error). Callers slice it for per-zone
-    scores. On any decode/processing error the gate fails closed -- a broken
-    frame is not evidence of motion and must not satisfy a motion rule."""
+    ``frame_size`` is camera-local when supplied by the live monitor.  Standalone
+    callers and the benchmark retain the legacy global defaults.  On any
+    decode/processing error the gate fails closed -- a broken frame is not evidence
+    of motion and must not satisfy a motion rule."""
     if pixel_threshold is None:
         pixel_threshold = _state._MOTION_PIXEL_THRESHOLD
     if gate_fraction is None:
@@ -795,6 +808,7 @@ def detect_frame_motion(
                 background_alpha=background_alpha,
                 denoise=bool(denoise),
                 shadow_suppression=shadow_suppression,
+                frame_size=frame_size,
             )
         except _EXPECTED_MOTION_ERRORS as exc:
             with _state._frame_motion_lock:
@@ -822,10 +836,11 @@ def detect_frame_motion(
         gate_fraction=gate_fraction,
         scale_fraction=scale_fraction,
         background_alpha=background_alpha,
+        frame_size=frame_size,
     )
 
 
-def _detect_frame_motion_diff(camera_id: str, image: Any, *, pixel_threshold: float | None=None, gate_fraction: float | None=None, scale_fraction: float | None=None, background_alpha: float | None=None) -> tuple[bool, float, Any, float]:
+def _detect_frame_motion_diff(camera_id: str, image: Any, *, pixel_threshold: float | None=None, gate_fraction: float | None=None, scale_fraction: float | None=None, background_alpha: float | None=None, frame_size: tuple[int, int] | None = None) -> tuple[bool, float, Any, float]:
     """Legacy single-frame adaptive-background motion gate. Returns (has_motion, confidence 0-1, diff_mask).
 
     ``image`` may be a BGR numpy array (from ``read_frame``) or JPEG bytes
@@ -873,28 +888,25 @@ def _detect_frame_motion_diff(camera_id: str, image: Any, *, pixel_threshold: fl
     try:
         import cv2
         import numpy as np
+        frame_w, frame_h = _resolve_motion_frame_size(frame_size)
         if hasattr(image, 'shape') and hasattr(image, 'dtype'):
             full_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            resized = cv2.resize(full_gray, (_state._MOTION_FRAME_W, _state._MOTION_FRAME_H), interpolation=cv2.INTER_NEAREST)
+            resized = cv2.resize(full_gray, (frame_w, frame_h), interpolation=cv2.INTER_NEAREST)
             current = resized.astype(np.float32)
         else:
             from PIL import Image as _Image
             full_image = _Image.open(io.BytesIO(image)).convert('L')
             full_gray = np.array(full_image, dtype=np.uint8)
-            resized = full_image.resize((_state._MOTION_FRAME_W, _state._MOTION_FRAME_H), _Image.NEAREST)
+            resized = full_image.resize((frame_w, frame_h), _Image.NEAREST)
             current = np.array(resized, dtype=np.float32)
         with _state._frame_motion_lock:
             background = _state._frame_motion_prev.get(camera_id)
             previous_frame = _state._frame_motion_last_frame.get(camera_id)
             previous_gray = _state._frame_motion_last_gray.get(camera_id)
-            # Reset on a first frame OR a shape mismatch. ``_MOTION_FRAME_W/H``
-            # are global and read outside this lock, so a concurrent live-settings
-            # frame-size change (which clears all backgrounds) can race with a
-            # store here and leave a background sized to the OLD dimensions. Without
-            # the shape check the subsequent ``current - background`` would raise on
-            # every frame and the ``except`` (which never resets the background)
-            # would pin the camera to fail-open motion=True forever. Treating a
-            # mismatch like a first frame self-heals it in one cycle.
+            # Reset on a first frame OR a shape mismatch.  A camera may switch
+            # between Day/Night motion profiles while another camera continues at
+            # its own size; treating the mismatch like a first frame self-heals
+            # the affected camera without touching any other camera's state.
             if (
                 background is None
                 or background.shape != current.shape
@@ -929,7 +941,7 @@ def _detect_frame_motion_diff(camera_id: str, image: Any, *, pixel_threshold: fl
                 ).astype(np.uint8)
                 fine_temporal_diff = cv2.resize(
                     full_temporal_diff,
-                    (_state._MOTION_FRAME_W, _state._MOTION_FRAME_H),
+                    (frame_w, frame_h),
                     interpolation=cv2.INTER_AREA,
                 ) > 0
             else:
@@ -975,7 +987,7 @@ def _detect_frame_motion_diff(camera_id: str, image: Any, *, pixel_threshold: fl
                 logger.debug(
                     'Motion gate %s: changed=%.4f gate=%.4f px_thresh=%d WxH=%dx%d',
                     camera_id, changed_fraction, gate_fraction, pixel_threshold,
-                    _state._MOTION_FRAME_W, _state._MOTION_FRAME_H,
+                    frame_w, frame_h,
                 )
             # Only adapt the background when no motion is detected. Freezing the
             # background during motion keeps moving subjects visible indefinitely
