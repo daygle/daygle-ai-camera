@@ -45,12 +45,19 @@ from app.recording_settings import apply_active_camera_detection_profile  # noqa
 
 
 class _FakeRequest:
-    """Minimal request stand-in: only ``state`` and ``json()`` are used."""
+    """Minimal request stand-in for the camera-settings routes.
+
+    ``state.user`` carries a real id/username because the routers write an audit
+    row on every save and ``write_audit_log`` reads both fields. ``client`` and
+    ``headers`` are present so the IP resolver takes its normal path.
+    """
 
     class _State:
-        user = {'role': 'admin'}
+        user = {'id': 1, 'username': 'admin', 'role': 'admin'}
 
     state = _State()
+    client = None
+    headers: dict = {}
 
     def __init__(self, payload: dict) -> None:
         self._payload = payload
@@ -71,6 +78,7 @@ class _FakeDB:
     def __init__(self) -> None:
         self._settings: dict = {}
         self._settings_cache_gen = 0
+        self.audit_rows: list[dict] = []
 
     def get_setting(self, key: str):
         return copy.deepcopy(self._settings.get(key))
@@ -78,6 +86,9 @@ class _FakeDB:
     def set_setting(self, key: str, value, _now=None) -> None:
         self._settings[key] = copy.deepcopy(value)
         self._settings_cache_gen += 1
+
+    def add_audit_log(self, **row) -> None:
+        self.audit_rows.append(row)
 
 
 def _zone(rule_confidence: float, *, enabled: bool = True) -> dict:
