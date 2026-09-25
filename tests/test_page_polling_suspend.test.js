@@ -22,6 +22,7 @@ import vm from 'node:vm';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const readWeb = (name) => readFileSync(path.resolve(here, '../web', name), 'utf8');
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const utilsSource = readWeb('utils.js');
 
 // ─── startPageInterval (web/utils.js) ─────────────────────────────────────
@@ -121,7 +122,7 @@ test('the dashboard suspends stats, system resources and the activity feed', () 
   assert.doesNotMatch(source, /^setInterval\(/m, 'no raw setInterval on the dashboard');
   for (const call of ['loadStats()', 'loadSystemResources()', 'loadEvents()']) {
     assert.ok(
-      new RegExp(`startPageInterval\\([\\s\\S]{0,120}?${call.replace(/[()]/g, '\\$&')}`).test(source),
+      new RegExp(`startPageInterval\\([\\s\\S]{0,120}?${escapeRegExp(call)}`).test(source),
       `${call} should run through startPageInterval`,
     );
   }
