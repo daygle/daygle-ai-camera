@@ -1102,8 +1102,10 @@ loadAuth()
     window.showToast?.(error.message, true);
   });
 
-setInterval(() => { loadStats().catch(() => {}); }, 10000);
-setInterval(() => { loadSystemResources().catch(() => {}); }, 5000);
-setInterval(() => {
+// Suspend all three sweeps while the tab is hidden and refresh them the
+// instant it is looked at again (startPageInterval, web/utils.js).
+startPageInterval(() => { loadStats().catch(() => {}); }, 10000);
+startPageInterval(() => { loadSystemResources().catch(() => {}); }, 5000);
+startPageInterval(() => {
   loadEvents().then(renderActivityFeed).catch(() => {});
 }, 30000);

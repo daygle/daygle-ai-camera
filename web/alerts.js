@@ -478,7 +478,10 @@ function renderPolicies() {
 
 window.addEventListener('daygle:auth-state-changed', refreshPolicyStatuses);
 window.daygleAuthReady?.then(refreshPolicyStatuses);
-setInterval(refreshPolicyStatuses, 30_000);
+// Policy status polling stops while the tab is hidden and refreshes once on
+// refocus, so a background Alerts tab stops re-checking every rule.
+// startPageInterval is defined in web/utils.js.
+startPageInterval(refreshPolicyStatuses, 30_000);
 
 $('cameraSelect').addEventListener('change', () => { cameraIndex = Number($('cameraSelect').value); zoneIndex = 0; renderSelectors(); renderPolicies(); });
 $('zoneSelect').addEventListener('change', () => { zoneIndex = Number($('zoneSelect').value); renderPolicies(); });

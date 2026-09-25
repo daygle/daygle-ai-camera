@@ -52,6 +52,52 @@ function requireElements(ids) {
   throw new Error('This page is missing required DOM elements; check the HTML for matching ids.');
 }
 
+// ─── Background-tab polling suspension (every polling page) ────────────────
+// A hidden tab renders nothing, yet its pollers keep working: the dashboard
+// alone fires /api/stats every 10s, /api/system-resources every 5s and the
+// activity feed every 30s, the camera list repeats health + resolution every
+// 10s, and the alert/tunnel/log pages each hold an open status connection.
+// Browsers throttle those timers but never stop them, so an NVR left open in a
+// background tab all night still hammers the backend and keeps mutating DOM
+// nobody is looking at.
+//
+// startPageInterval(fn, ms) is a drop-in replacement for setInterval(fn, ms)
+// that skips the tick while `document.hidden` and refreshes immediately when
+// the tab becomes visible again, so a page is never left showing stale numbers
+// after a long background period. This generalises the rule the Live page
+// already applied to its frame and detection-status polls (see
+// tests/test_live_hidden_tab_poll.test.js).
+//
+// Rejected promises are swallowed here exactly like the `.catch(() => {})` the
+// call sites used to add by hand; a synchronous throw still surfaces in the
+// console instead of being silently swallowed.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function startPageInterval(fn, intervalMs) {
+  if (typeof fn !== 'function' || !(intervalMs > 0)) return null;
+  _dayglePagePollers.add(fn);
+  if (!_daygleVisibilityBound) {
+    _daygleVisibilityBound = true;
+    // Bound lazily on the first poller so utils.js stays loadable in contexts
+    // without a document (the node:test sandboxes).
+    document.addEventListener('visibilitychange', _resumeDayglePagePollers);
+  }
+  return setInterval(() => _runDayglePagePoller(fn), intervalMs);
+}
+
+const _dayglePagePollers = new Set();
+let _daygleVisibilityBound = false;
+
+function _runDayglePagePoller(fn) {
+  if (document.hidden) return;
+  const result = fn();
+  if (result && typeof result.catch === 'function') result.catch(() => {});
+}
+
+function _resumeDayglePagePollers() {
+  if (document.hidden) return;
+  for (const fn of _dayglePagePollers) _runDayglePagePoller(fn);
+}
+
 // ─── Tabbed section navigation (settings + onnx pages) ─────────────────────
 // Groups a page's cards into `.settings-panel` blocks switched by a
 // `.settings-tab` bar. Implements the ARIA tabs pattern (roving tabindex +

@@ -14,6 +14,12 @@ const liveStatus = document.getElementById('liveStatus');
 const autoScrollCheck = document.getElementById('autoScrollCheck');
 
 let eventSource = null;
+// Whether the operator asked for a live tail. Kept separate from
+// `eventSource` so a background tab can drop the connection without
+// pretending live mode was switched off: the SSE is an open server-side
+// stream, so a hidden tab holding one keeps journalctl running for log
+// lines nobody is looking at.
+let liveWanted = false;
 let activeLevel = '';
 let activeSearch = '';
 let activeDateFrom = '';
@@ -193,6 +199,7 @@ function connectStream() {
     eventSource = null;
   }
   clearConnectTimeout();
+  liveWanted = true;
   liveStatus.textContent = 'Connecting…';
   setLiveActive(true);
 
@@ -234,6 +241,7 @@ function connectStream() {
     clearConnectTimeout();
     liveStatus.textContent = 'Disconnected';
     setLiveActive(false);
+    liveWanted = false;
     eventSource.close();
     eventSource = null;
   };
@@ -245,12 +253,42 @@ function disconnectStream() {
     eventSource.close();
     eventSource = null;
   }
+  liveWanted = false;
   liveStatus.textContent = 'Paused';
   setLiveActive(false);
 }
 
+// Drop the connection because the tab went to the background, not because
+// the operator paused live mode. The button keeps reading "Live" so returning
+// to the tab resumes the tail (and the log catches up via loadEntries first).
+function suspendStream() {
+  // Nothing to suspend when live mode was never on (or is already paused):
+  // leave the status line exactly as the operator left it.
+  if (!eventSource) return;
+  clearConnectTimeout();
+  eventSource.close();
+  eventSource = null;
+  liveStatus.textContent = 'Paused (tab hidden)';
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    suspendStream();
+    return;
+  }
+  if (!liveWanted || eventSource) return;
+  // Re-read the tail that was written while the tab was hidden, then reopen
+  // the stream so the view is current the instant it is looked at again.
+  loadEntries()
+    .catch((err) => {
+      if (window.daygleAuth?.redirecting) return;
+      window.showToast?.(err.message, true);
+    })
+    .finally(() => { if (liveWanted && !eventSource) connectStream(); });
+});
+
 liveBtn.addEventListener('click', () => {
-  if (eventSource) {
+  if (liveWanted) {
     disconnectStream();
   } else {
     connectStream();

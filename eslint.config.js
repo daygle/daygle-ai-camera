@@ -91,6 +91,7 @@ const WEB_SHARED_GLOBALS = {
   safeHtml: 'readonly',
   setTimeSelectValue: 'readonly',
   showToast: 'readonly',
+  startPageInterval: 'readonly',
   stillAlertBadge: 'readonly',
   timeAgo: 'readonly',
   timeSelectValue: 'readonly',
