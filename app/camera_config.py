@@ -82,7 +82,6 @@ def normalize_camera_settings(
         camera_settings['fps'] = None
     else:
         camera_settings['fps'] = int(raw_fps)
-    camera_settings['recording_stream_path'] = str(camera_settings.get('recording_stream_path') or '').strip()
     camera_settings['timezone'] = str(camera_settings.get('timezone') or 'UTC').strip() or 'UTC'
     for _location_key, _low, _high in (
         ('latitude', -90.0, 90.0),

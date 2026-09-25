@@ -251,8 +251,8 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
 
 def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None=None, index: int=1) -> dict[str, Any]:
     current = current or {}
-    updated = {key: current.get(key) for key in ('id', 'name', 'backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'recording_stream_path', 'host', 'port', 'path', 'username', 'password', 'timezone', 'latitude', 'longitude') if key in current}
-    updated.update({key: payload[key] for key in ('id', 'name', 'backend', 'device', 'flip', 'stream_url', 'recording_stream_path', 'host', 'port', 'path', 'username', 'password', 'timezone', 'latitude', 'longitude') if key in payload})
+    updated = {key: current.get(key) for key in ('id', 'name', 'backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password', 'timezone', 'latitude', 'longitude') if key in current}
+    updated.update({key: payload[key] for key in ('id', 'name', 'backend', 'device', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password', 'timezone', 'latitude', 'longitude') if key in payload})
     backend = str(updated.get('backend', 'onvif')).lower()
     if backend not in {'onvif', 'rtsp'}:
         raise HTTPException(status_code=400, detail='Camera backend must be onvif or rtsp.')
@@ -323,7 +323,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
         updated['stale_frame_grabs'] = stale_val
     if 'port' in updated or 'port' in payload:
         updated['port'] = _int_field({**current, **payload}, 'port', 554, 1, 65535)
-    for key in ('stream_url', 'recording_stream_path', 'host', 'path', 'username', 'password'):
+    for key in ('stream_url', 'host', 'path', 'username', 'password'):
         if key in updated:
             updated[key] = str(updated.get(key) or '').strip()
     if not updated.get('password') and current.get('password'):

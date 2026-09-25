@@ -6,64 +6,35 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def test_recording_stream_path_replaces_manual_rtsp_url_path():
-    from app.utils import build_recording_stream_url
+def test_stream_url_prefers_configured_url_and_injects_credentials():
+    from app.utils import build_stream_url
 
     settings = {
-        'stream_url': 'rtsp://viewer:secret@example.test:8554/sub/main?profile=1',
-        'recording_stream_path': '/main/high',
+        'stream_url': 'rtsp://example.test/main?profile=1',
+        'username': 'viewer',
+        'password': 'secret',
     }
 
-    assert build_recording_stream_url(settings) == (
-        'rtsp://viewer:secret@example.test:8554/main/high?profile=1'
-    )
+    assert build_stream_url(settings) == 'rtsp://viewer:secret@example.test/main?profile=1'
 
 
-def test_recording_stream_path_query_overrides_primary_query():
-    from app.utils import build_recording_stream_url
-
-    settings = {
-        'stream_url': 'rtsp://camera.example/sub?profile=low',
-        'recording_stream_path': '/main?profile=high',
-    }
-
-    assert build_recording_stream_url(settings) == 'rtsp://camera.example/main?profile=high'
-
-
-def test_recording_stream_path_builds_host_based_url_with_encoded_credentials():
-    from app.utils import build_recording_stream_url
+def test_stream_url_builds_host_based_url_with_encoded_credentials():
+    from app.utils import build_stream_url
 
     settings = {
         'host': 'camera.example.test',
         'port': 554,
         'username': 'user@example',
         'password': 'p@ss word',
-        'recording_stream_path': 'stream2',
     }
 
-    assert build_recording_stream_url(settings) == (
-        'rtsp://user%40example:p%40ss%20word@camera.example.test:554/stream2'
-    )
+    assert build_stream_url(settings) == 'rtsp://user%40example:p%40ss%20word@camera.example.test:554/stream1'
 
 
-def test_continuous_recording_uses_high_resolution_stream(tmp_path, monkeypatch):
-    # The application integration test for this path lives in test_api.py. Keep
-    # this focused unit test importable even on developer machines with a broken
-    # FastAPI/Pydantic installation by asserting the source-selection contract
-    # from the same pure URL helpers used by live_monitor.
-    from app.utils import build_recording_stream_url, build_stream_url
-
-    camera = {
-        'id': 'front',
-        'stream_url': 'rtsp://camera/substream',
-        'recording_stream_path': '/mainstream',
-    }
-
-    assert build_stream_url(camera) == 'rtsp://camera/substream'
-    assert build_recording_stream_url(camera) == 'rtsp://camera/mainstream'
-
-
-def test_dedicated_recording_stream_does_not_downgrade_to_detection_buffer(tmp_path, monkeypatch):
+def test_event_clip_uses_the_single_configured_stream(tmp_path, monkeypatch):
+    """One stream feeds detection ingest, event clips and live preview: the
+    prebuffer worker and the direct-capture fallback must both see exactly the
+    URL the camera is configured with."""
     from app.recordings import RecordingService
     recordings_module = importlib.import_module('app.recordings')
 
@@ -83,11 +54,9 @@ def test_dedicated_recording_stream_does_not_downgrade_to_detection_buffer(tmp_p
 
     monkeypatch.setattr(service, '_live_capture', fake_live_capture)
 
-    recording_url = 'rtsp://camera/mainstream'
-    detection_url = 'rtsp://camera/substream'
+    stream_url = 'rtsp://camera/mainstream'
     result = service.write_rtsp_clip_with_prebuffer(
-        stream_url=recording_url,
-        detection_stream_url=detection_url,
+        stream_url=stream_url,
         camera_id='front',
         file_path=tmp_path / 'recordings' / 'event.mp4',
         triggered_at=datetime.now(timezone.utc),
@@ -96,12 +65,12 @@ def test_dedicated_recording_stream_does_not_downgrade_to_detection_buffer(tmp_p
         max_duration_seconds=15,
     )
 
-    assert ensured == [detection_url]
-    assert captured['stream_url'] == recording_url
+    assert ensured == [stream_url]
+    assert captured['stream_url'] == stream_url
     assert result[1] == 1.0
 
 
-def test_continuous_chunk_command_preserves_recording_source_video(monkeypatch, tmp_path):
+def test_continuous_chunk_command_preserves_source_video(monkeypatch, tmp_path):
     recordings_module = importlib.import_module('app.recordings')
     from app.recordings import RecordingService
 

@@ -257,12 +257,11 @@ function buildEditFormHtml(camera, index) {
           '</div>' +
         '</div>' +
         '<div class="cam-edit-section">' +
-          '<h4 class="cam-edit-section-title">Streams</h4>' +
+          '<h4 class="cam-edit-section-title">Stream</h4>' +
           '<div class="form-grid">' +
-            '<label class="full-width cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '><span>Detection Stream Path</span><input name="path" placeholder="e.g. stream1" value="' + escapeHtml(camera.path || '') + '" /></label>' +
-            '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeHtml(camera.recording_stream_path || '') + '" /></label>' +
+            '<label class="full-width cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '><span>Stream Path</span><input name="path" placeholder="e.g. stream1" value="' + escapeHtml(camera.path || '') + '" /></label>' +
           '</div>' +
-          '<p class="form-help muted">Recording Stream Path is optional and points to a higher-resolution stream used for recordings. Leave empty to use the primary stream for both detection and recording.</p>' +
+          '<p class="form-help muted">This single stream is used for live view, detection, and recordings.</p>' +
         '</div>' +
         '<div class="button-row cam-test-conn-row">' +
           '<button class="btn-info cam-test-conn-btn" data-form="' + htmlAttr(formId) + '" type="button">Test Connection</button>' +
@@ -730,7 +729,6 @@ function collectFormData(form) {
     enabled: getVal('enabled') !== 'false',
     backend: backend,
     stream_url: backend === 'rtsp' ? getName('stream_url') : '',
-    recording_stream_path: getName('recording_stream_path'),
     host: backend !== 'rtsp' ? getName('host') : '',
     port: getInt('port', 554),
     path: backend !== 'rtsp' ? getName('path') : '',
@@ -1168,6 +1166,9 @@ loadCameras().catch(function(err) {
   if (window.daygleAuth?.redirecting) return;
   setMessage(err.message, true);
 });
-setInterval(updateHealthStats, 10000);
-setInterval(function() { fetchCameraResolutions().catch(function() {}); }, 10000);
+// Health + resolution polling is suspended while the tab is hidden and both
+// refresh on refocus, so a background camera list stops hammering /api/cameras
+// (startPageInterval, web/utils.js).
+startPageInterval(updateHealthStats, 10000);
+startPageInterval(function() { fetchCameraResolutions().catch(function() {}); }, 10000);
 updateHealthStats();

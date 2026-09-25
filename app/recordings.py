@@ -175,12 +175,6 @@ class RecordingService:
         # every cycle, the rolling buffer never fills, and events render with no
         # pre-roll footage.
         self._prebuffer_last_restart: dict[str, float] = {}
-        # High-res recording prebuffer: parallel video-only worker for the
-        # recording stream URL when a camera exposes dual streams. Captures
-        # full-resolution segments so event clips render at recording quality
-        # throughout (pre-roll + post), eliminating the resolution jump.
-        self._rec_prebuffer_lock = threading.Lock()
-        self._rec_prebuffer_workers: dict[str, dict[str, Any]] = {}
         self._continuous_lock = threading.Lock()
         self._continuous_workers: dict[str, dict[str, Any]] = {}
         self._missing_ffmpeg_warnings: set[str] = set()
@@ -341,10 +335,10 @@ class RecordingService:
             '128k',
             '-preset',
             'veryfast',
-            # Preserve the source frame timestamps when the high-resolution
-            # prebuffer is unavailable and we must capture directly. No scale or
-            # output-rate filter is applied, so source resolution/FPS remain the
-            # recording stream's values rather than the detection ingest rate.
+            # Preserve the source frame timestamps when the prebuffer is
+            # unavailable and we must capture directly. No scale or output-rate
+            # filter is applied, so the clip keeps the stream's own
+            # resolution/FPS.
             '-fps_mode',
             'passthrough',
             '-pix_fmt',
@@ -473,17 +467,6 @@ class RecordingService:
             self._prebuffer_workers = {}
             for worker in workers:
                 self._stop_worker(worker, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
-        # The high-res recording prebuffer shares the primary worker's
-        # lifecycle: it is spawned by ``prime_rtsp_prebuffer`` alongside it,
-        # so every bulk teardown must stop the ``<camera>-rec`` variant too.
-        # Folding it in here means the settings-swap and shutdown paths
-        # cannot forget it -- a leaked ``-rec`` ffmpeg kept capturing into
-        # the recordings volume forever after every settings save.
-        with self._rec_prebuffer_lock:
-            rec_workers = list(self._rec_prebuffer_workers.values())
-            self._rec_prebuffer_workers = {}
-            for worker in rec_workers:
-                self._stop_worker(worker, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
 
     def start_continuous_chunk_recording(
         self,
@@ -555,10 +538,6 @@ class RecordingService:
         camera_key = self._camera_key(camera_id)
         with self._prebuffer_lock:
             worker = self._prebuffer_workers.pop(camera_key, None)
-            if worker:
-                self._stop_worker(worker, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
-        with self._rec_prebuffer_lock:
-            worker = self._rec_prebuffer_workers.pop(camera_key, None)
             if worker:
                 self._stop_worker(worker, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
         with self._continuous_lock:
@@ -761,7 +740,6 @@ class RecordingService:
         stream_url: str,
         camera_id: str,
         recording_config: dict[str, Any] | None = None,
-        recording_stream_path: str = '',
     ) -> bool:
         # Bug 6 follow-up: acquire ``_state._apply_settings_lock`` so a
         # concurrent monitor poll (live_alert_monitor_loop,
@@ -786,13 +764,6 @@ class RecordingService:
                 return False
             camera_key = self._camera_key(camera_id)
             self._ensure_prebuffer_worker(camera_key, stream_url, self.prebuffer_window_seconds(config), camera_id=camera_id)
-            # Start a parallel high-res prebuffer when a dual-stream recording
-            # URL is configured. This worker captures video-only segments from
-            # the main stream so event clips render at full resolution
-            # throughout (pre-roll + post), eliminating the resolution jump
-            # at the trigger point.
-            if recording_stream_path:
-                self._ensure_rec_prebuffer_worker(camera_key, recording_stream_path, self.prebuffer_window_seconds(config), camera_id=camera_id)
             return True
 
     def write_rtsp_clip_with_prebuffer(
@@ -806,7 +777,6 @@ class RecordingService:
         post_seconds: int,
         max_duration_seconds: float,
         buffer_seconds: int | None = None,
-        detection_stream_url: str | None = None,
     ) -> tuple[float, float]:
         """Write the clip and return ``(content_start_ts, content_seconds)``:
         the wall-clock timestamp where the written media actually begins and
@@ -833,15 +803,7 @@ class RecordingService:
             buffer_seconds = self.prebuffer_window_seconds()
         buffer_seconds = max(int(buffer_seconds), pre_seconds + post_seconds + 5, pre_seconds + 10, 15)
         camera_key = self._camera_key(camera_id)
-        # Keep the shared detection/sound ingest on the primary stream. When
-        # ``stream_url`` is the optional high-resolution recording stream, it
-        # must never replace that worker or cause URL ping-pong with the live
-        # monitor. The recording stream has its own video-only prebuffer below.
-        ingest_stream_url = detection_stream_url or stream_url
-        self._ensure_prebuffer_worker(camera_key, ingest_stream_url, buffer_seconds, camera_id=camera_id)
-        has_dedicated_recording_stream = bool(
-            detection_stream_url and detection_stream_url != stream_url
-        )
+        self._ensure_prebuffer_worker(camera_key, stream_url, buffer_seconds, camera_id=camera_id)
 
         # Check for ffmpeg and pre-event segments BEFORE sleeping so that if we
         # must fall back to a live capture it starts now (at trigger time) rather
@@ -857,24 +819,11 @@ class RecordingService:
             )
             return self._live_capture(stream_url, file_path, max_duration_seconds)
 
-        # Prefer high-res recording prebuffer segments when available so
-        # the entire clip (pre-roll + post) renders at full resolution.
-        rec_segments, _ = self._collect_rec_prebuffer_segments(
+        pre_only_segments, _ = self._collect_prebuffer_segments(
             camera_key,
             triggered_at.timestamp() - pre_seconds,
             triggered_at.timestamp(),
         )
-        pre_only_segments = rec_segments
-        # If a dedicated recording stream is configured, do not silently use
-        # lower-resolution detection footage when its high-res buffer is still
-        # warming up. The direct-capture fallback below uses ``stream_url``
-        # (the recording stream), preserving the requested recording quality.
-        if not pre_only_segments and not has_dedicated_recording_stream:
-            pre_only_segments, _ = self._collect_prebuffer_segments(
-                camera_key,
-                triggered_at.timestamp() - pre_seconds,
-                triggered_at.timestamp(),
-            )
         if not pre_only_segments:
             logger.info('No prebuffer segments available for %s; falling back to direct RTSP clip capture.', camera_key)
             self._emit_diagnostic(
@@ -894,10 +843,7 @@ class RecordingService:
 
         start_ts = triggered_at.timestamp() - pre_seconds
         end_ts = end_capture_at
-        # Prefer high-res recording prebuffer segments for the full render window.
-        segments, content_start_ts = self._collect_rec_prebuffer_segments(camera_key, start_ts, end_ts)
-        if not segments and not has_dedicated_recording_stream:
-            segments, content_start_ts = self._collect_prebuffer_segments(camera_key, start_ts, end_ts)
+        segments, content_start_ts = self._collect_prebuffer_segments(camera_key, start_ts, end_ts)
         if not segments:
             logger.info('No prebuffer segments available for %s after waiting; falling back to direct RTSP clip capture.', camera_key)
             self._emit_diagnostic(
@@ -1029,8 +975,7 @@ class RecordingService:
                     'requested_seconds': round(content_seconds, 1),
                     'window_start': datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat(),
                     'window_end': datetime.fromtimestamp(end_ts, tz=timezone.utc).isoformat(),
-                    'content_start': datetime.fromtimestamp(content_start_ts, tz=timezone.utc).isoformat(),
-                    'stderr_tail': stderr_tail,
+                    'content_start': datetime.fromtimestamp(content_start_ts, tz=timezone.utc).isoformat(),                            'stderr_tail': stderr_tail,
                 },
             )
             return self._live_capture(stream_url, file_path, max_duration_seconds)
@@ -1559,164 +1504,6 @@ class RecordingService:
                         # Wake promptly if the worker is asked to stop mid-backoff.
                         stop_event.wait(backoff)
 
-    # ── High-res recording prebuffer ──────────────────────────────────
-    # When a camera exposes dual streams (sub-stream for detection,
-    # main stream for recording), a parallel prebuffer captures
-    # video-only segments from the main stream so event clips render
-    # at full resolution throughout (pre-roll + post).
-
-    def _ensure_rec_prebuffer_worker(self, camera_key: str, stream_url: str, buffer_seconds: int, camera_id: str | None = None) -> None:
-        with self._rec_prebuffer_lock:
-            existing = self._rec_prebuffer_workers.get(camera_key)
-            if existing and existing.get('stream_url') == stream_url:
-                thread = existing.get('thread')
-                if isinstance(thread, threading.Thread) and thread.is_alive():
-                    existing['buffer_seconds'] = int(buffer_seconds)
-                    return
-            if existing:
-                self._stop_worker(existing, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
-            stop_event = threading.Event()
-            worker_state = {
-                'stop_event': stop_event,
-                'stream_url': stream_url,
-                'buffer_seconds': int(buffer_seconds),
-                'camera_id': camera_id or camera_key,
-                'diagnostic_callback': self.diagnostic_callback,
-            }
-            thread = threading.Thread(
-                target=self._run_rec_prebuffer_worker,
-                args=(camera_key, stream_url, worker_state),
-                name=f'rec-prebuffer-{camera_key}',
-                daemon=True,
-            )
-            worker_state['thread'] = thread
-            self._rec_prebuffer_workers[camera_key] = worker_state
-            thread.start()
-
-    def _run_rec_prebuffer_worker(self, camera_key: str, stream_url: str, worker_state: dict[str, Any]) -> None:
-        """Video-only prebuffer worker for the high-res recording stream.
-
-        Captures rolling fragmented-MP4 segments from the recording stream
-        into a separate directory so ``write_rtsp_clip_with_prebuffer`` can
-        render event clips at full resolution without a resolution jump.
-        """
-        stop_event = worker_state.get('stop_event')
-        if not isinstance(stop_event, threading.Event):
-            stop_event = threading.Event()
-        ffmpeg = shutil.which('ffmpeg')
-        if not ffmpeg:
-            return
-        camera_dir = self.prebuffer_dir / f'{camera_key}-rec'
-        camera_dir.mkdir(parents=True, exist_ok=True)
-        output_pattern = camera_dir / 'segment-%Y%m%dT%H%M%S.mp4'
-        consecutive_failures = 0
-        stall_seconds = max(self.PREBUFFER_SEGMENT_SECONDS * 5, 20)
-        while not stop_event.is_set():
-            command = [
-                ffmpeg,
-                '-nostdin',
-                '-hide_banner',
-                '-loglevel', 'error',
-                '-rtsp_transport', 'tcp',
-                '-err_detect', 'ignore_err',
-                '-i', stream_url,
-                '-map', '0:v:0',
-                '-c:v', 'copy',
-                '-an',
-                '-f', 'segment',
-                '-segment_time', str(self.PREBUFFER_SEGMENT_SECONDS),
-                '-segment_format', 'mp4',
-                '-segment_format_options', 'movflags=+frag_keyframe+empty_moov+default_base_moof',
-                '-strftime', '1',
-                str(output_pattern),
-            ]
-            stderr_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
-            stderr_path = Path(stderr_file.name)
-            try:
-                process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr_file)
-            except OSError as exc:
-                # Same vanished-ffmpeg guard as the primary worker.
-                stderr_file.close()
-                try:
-                    stderr_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                consecutive_failures += 1
-                logger.warning(
-                    'High-res ingest for %s could not start ffmpeg (%s); retrying.',
-                    camera_key,
-                    exc,
-                )
-                stop_event.wait(self.PREBUFFER_RECONNECT_BACKOFF_BASE_SECONDS)
-                continue
-            stderr_file.close()
-            ffmpeg_started_at = time.time()
-            try:
-                last_segment_ts = time.time()
-                prune_tick = 0
-                while process.poll() is None and not stop_event.is_set():
-                    keep_seconds = int(worker_state.get('buffer_seconds') or 15)
-                    # Same 5s prune cadence as the primary worker: retention
-                    # margins make 1s precision pointless, and the stall check
-                    # below already scans this directory every second.
-                    prune_tick += 1
-                    if prune_tick % 5 == 0:
-                        self._prune_prebuffer_segments(camera_dir, keep_seconds)
-                    try:
-                        newest = max(
-                            (p.stat().st_mtime for p in camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB)),
-                            default=last_segment_ts,
-                        )
-                        if newest > last_segment_ts:
-                            last_segment_ts = newest
-                    except OSError:
-                        pass
-                    if time.time() - last_segment_ts > stall_seconds:
-                        process.kill()
-                        break
-                    time.sleep(1)
-            finally:
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                try:
-                    stderr_path.unlink(missing_ok=True)
-                except OSError:
-                    # The ffmpeg process or another worker may still hold the log
-                    # file briefly on Windows. Missing or locked logs are not
-                    # fatal; they will be re-created or cleaned up later.
-                    pass
-                keep_seconds = int(worker_state.get('buffer_seconds') or 15)
-                self._prune_prebuffer_segments(camera_dir, keep_seconds)
-            if not stop_event.is_set():
-                run_seconds = time.time() - ffmpeg_started_at
-                if run_seconds >= self.PREBUFFER_HEALTHY_RUN_SECONDS:
-                    consecutive_failures = 0
-                    stop_event.wait(1)
-                else:
-                    # Dead or flapping recording link: back off exponentially
-                    # instead of reconnecting every ~25s forever.
-                    consecutive_failures += 1
-                    backoff = min(
-                        self.PREBUFFER_RECONNECT_BACKOFF_MAX_SECONDS,
-                        self.PREBUFFER_RECONNECT_BACKOFF_BASE_SECONDS * (2 ** (consecutive_failures - 1)),
-                    )
-                    stop_event.wait(backoff)
-
-    def rec_prebuffer_segments_dir(self, camera_id: str) -> Path:
-        """Return the directory holding high-res recording prebuffer segments."""
-        return self.prebuffer_dir / f'{self._camera_key(camera_id)}-rec'
-
-    def _collect_rec_prebuffer_segments(self, camera_key: str, start_ts: float, end_ts: float) -> tuple[list[Path], float | None]:
-        """Collect high-res prebuffer segments overlapping [start_ts, end_ts]."""
-        camera_dir = self.prebuffer_dir / f'{camera_key}-rec'
-        if not camera_dir.exists():
-            return [], None
-        return self._collect_prebuffer_segments_from_dir(camera_dir, start_ts, end_ts)
-
     def _collect_prebuffer_segments_from_dir(self, camera_dir: Path, start_ts: float, end_ts: float) -> tuple[list[Path], float | None]:
         """Shared segment collector for any prebuffer directory.
 
@@ -1724,10 +1511,8 @@ class RecordingService:
         ``content_start_ts`` at the first selected segment's mtime therefore
         reported a start up to a full segment LATE (e.g. ~4s), which then
         dragged the rendered clip's ``-t`` window, the muxed audio delay and
-        the baked detection track all late together - the dual-stream
-        sound/video misalignment. Select by content overlap and report the
-        first selected segment's content START, exactly like
-        ``_collect_prebuffer_segments``.
+        the baked detection track all late together. Select by content overlap
+        and report the first selected segment's content START.
         """
         timed = self._segment_timeline(camera_dir, self.PREBUFFER_SEGMENT_GLOB, self.PREBUFFER_SEGMENT_SECONDS)
         selected = [item for item in timed if item[2] > start_ts and item[1] < end_ts]
@@ -1901,19 +1686,16 @@ class RecordingService:
         Selecting by content overlap keeps footage from before the requested
         window out of the clip, and the returned start lets the caller align
         stored timing and the detection track with what the rendered video
-        actually shows. Delegates to the shared collector so the primary and
-        high-res recording paths can never drift apart again (the mtime-anchor
-        drift that broke dual-stream A/V sync)."""
+        actually shows. Delegates to the shared collector so the mtime-anchor
+        drift fix lives in exactly one place."""
         return self._collect_prebuffer_segments_from_dir(self.prebuffer_dir / camera_key, start_ts, end_ts)
 
     def _prebuffer_segment_durations(self, camera_key: str, segments: list[Path]) -> dict[Path, float]:
-        """Return real durations for selected primary or recording segments.
+        """Return real durations for the selected prebuffer segments.
 
-        The high-resolution worker stores files under ``<camera>-rec`` while
-        the shared detection ingest stores them under ``<camera>``. Scanning
-        only the primary directory loses ``duration`` directives for recording
-        segments, which makes concat timing depend on muxer defaults and can
-        shorten or stretch high-resolution event clips.
+        Durations come from the segment timeline of whichever directory each
+        segment lives in, so concat timing stays anchored to real footage
+        instead of muxer defaults.
         """
         wanted = {segment.resolve() for segment in segments}
         directories = {
@@ -2668,47 +2450,6 @@ class RecordingService:
             return True, False
         finally:
             shutil.rmtree(staging_dir, ignore_errors=True)
-
-    @staticmethod
-    def grab_frame_from_url(stream_url: str, timeout_seconds: float = 8.0) -> bytes | None:
-        """Grab a single JPEG frame from an RTSP stream URL using ffmpeg.
-
-        Used by the Live page to show a preview of the recording stream
-        so operators can verify the high-res stream is working. Captures
-        one frame via ffmpeg and returns the JPEG bytes, or None on failure.
-        """
-        ffmpeg = shutil.which('ffmpeg')
-        if not ffmpeg:
-            return None
-        from app.config_facades import effective_live_config as _elc
-        snapshot_quality = int(_elc().get('snapshot_quality', RecordingService.SNAPSHOT_QUALITY))
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
-            tmp_path = Path(tmp.name)
-        try:
-            command = [
-                ffmpeg,
-                '-y',
-                '-rtsp_transport', 'tcp',
-                '-i', stream_url,
-                '-vframes', '1',
-                '-q:v', str(snapshot_quality),
-                '-f', 'image2',
-                str(tmp_path),
-            ]
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                check=False,
-            )
-            if result.returncode == 0 and tmp_path.exists() and tmp_path.stat().st_size > 0:
-                return tmp_path.read_bytes()
-            return None
-        except (subprocess.TimeoutExpired, OSError):
-            return None
-        finally:
-            tmp_path.unlink(missing_ok=True)
 
     @staticmethod
     def redact_stream_credentials(message: str) -> str:

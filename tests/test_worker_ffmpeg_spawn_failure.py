@@ -83,27 +83,6 @@ def test_prebuffer_worker_survives_ffmpeg_spawn_failure(tmp_path, monkeypatch):
     assert len(attempts) >= 1  # it kept retrying rather than crashing out
 
 
-def test_rec_prebuffer_worker_survives_ffmpeg_spawn_failure(tmp_path, monkeypatch):
-    service = _service(tmp_path)
-    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/nonexistent/ffmpeg')
-    monkeypatch.setattr(
-        recordings_module.subprocess,
-        'Popen',
-        _raise_spawn_error,
-    )
-    stop_event = threading.Event()
-
-    def target():
-        service._run_rec_prebuffer_worker(
-            'cam-rec-src',
-            'rtsp://example/main',
-            {'stop_event': stop_event, 'buffer_seconds': 15},
-        )
-
-    captured = _run_worker(target, stop_event)
-    assert not captured, f'rec worker thread died with: {captured!r}'
-
-
 def test_continuous_chunk_worker_survives_ffmpeg_spawn_failure(tmp_path, monkeypatch):
     service = _service(tmp_path)
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/nonexistent/ffmpeg')

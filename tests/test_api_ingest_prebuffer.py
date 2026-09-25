@@ -325,43 +325,6 @@ def test_collect_prebuffer_segments_selects_by_content_overlap(tmp_path):
     assert fallback_start is None
 
 
-def test_rec_prebuffer_segments_report_content_start_not_mtime(tmp_path):
-    """The high-res recording prebuffer collector (``<key>-rec``) must anchor
-    ``content_start_ts`` at the first selected segment's content START, exactly
-    like the primary collector - not at the segment's mtime (its content END).
-
-    Regression: ``_collect_prebuffer_segments_from_dir`` used the minimum mtime
-    as ``content_start_ts``, which is up to a full segment (~4s) late. The clip
-    render window, the muxed audio delay and the baked detection track all
-    followed that late anchor, so dual-stream recordings played with sound
-    lagging the video by roughly a segment."""
-    from app.recordings import RecordingService
-
-    service = RecordingService({
-        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
-        'recording': {'format': 'mp4'},
-    })
-    rec_dir = service.prebuffer_dir / 'camera-1-rec'
-    rec_dir.mkdir(parents=True, exist_ok=True)
-
-    now = time.time()
-    segments = []
-    for offset in range(7):  # contiguous 1s segments ending at now-6 .. now
-        end_ts = now - 6 + offset
-        segment = rec_dir / f'segment-{offset:02d}.mp4'
-        segment.write_bytes(b'ts')
-        os.utime(segment, (end_ts, end_ts))
-        segments.append(segment)
-
-    selected, content_start = service._collect_rec_prebuffer_segments('camera-1', now - 4.0, now - 1.0)
-
-    # Same content-overlap selection as the primary collector...
-    assert selected == segments[3:6]
-    # ...and the content START of the first selected segment (previous segment's
-    # end = now-4), NOT its mtime (now-3, its content END).
-    assert content_start == pytest.approx(now - 4.0, abs=0.05)
-
-
 def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, monkeypatch):
     """The rendered clip starts at the first selected segment's content start
     (keyframe-aligned, so usually before triggered_at - pre_seconds) and runs
