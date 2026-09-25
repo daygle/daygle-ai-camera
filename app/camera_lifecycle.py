@@ -24,6 +24,7 @@ from typing import Any
 import app.state as _state
 from app.ai_settings import log_detector_initialization
 from app.camera_instance import create_camera_instances
+from app.camera_policy import clear_camera_policy_cache
 from app.config_facades import effective_recording_config, effective_storage_config
 from app.detector import create_detector
 from app.diagnostics import log_camera_diagnostic
@@ -227,6 +228,11 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     # per-camera directory. Acquiring the lock here serializes BOTH paths so
     # apply-side state mutations are atomic with respect to each other.
     with _state._apply_settings_lock:
+        # Settings are normally rebuilt after a save, but callers and tests may
+        # intentionally reuse and mutate one dict. Clear identity-keyed compiled
+        # policies at the publication boundary so a same-object edit is visible
+        # on the next detection cycle.
+        clear_camera_policy_cache()
         new_instances = create_camera_instances(settings_list)
         new_ids = {str(cfg.get('id') or '') for cfg in settings_list if cfg.get('id')}
         with _state._camera_instances_lock:

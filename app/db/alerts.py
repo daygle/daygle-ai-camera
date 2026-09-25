@@ -13,7 +13,7 @@ class AlertsMixin:
     """
 
     def add_alert(self, created_at: str, rule_name: str, event_id: int, label: str, confidence: float, message: str, recording_id: int | None = None) -> None:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             db.execute(
                 """
                 INSERT INTO alert_history (created_at, rule_name, event_id, label, confidence, message, recording_id)
@@ -62,7 +62,7 @@ class AlertsMixin:
             id_val = int(raw_id)
         except ValueError:
             return 0
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             if kind == 'recording':
                 # The alerts page groups object/motion alerts by recording_id (a
                 # continuous clip can span several events), so dismissing the group
@@ -97,12 +97,12 @@ class AlertsMixin:
             return cursor.rowcount
 
     def dismiss_all_alerts(self) -> int:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute("UPDATE alert_history SET dismissed = 1 WHERE dismissed = 0")
             return cursor.rowcount
 
     def delete_all_alerts(self) -> int:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM alert_history").fetchone()["count"]
             db.execute("DELETE FROM alert_history")
             return int(count)
@@ -112,7 +112,7 @@ class AlertsMixin:
         because it's exposed via the same ``Reset operational data`` admin
         action as ``delete_all_events`` and ``delete_all_alerts``.
         """
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM detections").fetchone()["count"]
             db.execute("DELETE FROM detections")
             return int(count)

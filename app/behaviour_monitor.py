@@ -115,15 +115,6 @@ def _emit_one(camera_id: str, settings: dict[str, Any], crossing: dict[str, Any]
         'track_id': crossing.get('track_id'),
         'confidence': round(confidence, 3),
     }
-    event_id = _state.database.add_event(
-        created_at=now_iso, source='behaviour', snapshot_path=None,
-        detections=[], alert_triggered=notify_enabled, metadata=metadata,
-    )
-
-    recording_id = None
-    if normalize_bool_setting(wire.get('record_on_detect'), True):
-        recording_id = _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
-
     rule_name = f'{zone_name} · {wire_name}'
     message = f'{str(label).title()} crossed {wire_name} ({direction}) in {zone_name}'
     notify_rule = {
@@ -134,11 +125,21 @@ def _emit_one(camera_id: str, settings: dict[str, Any], crossing: dict[str, Any]
         'notify_start': str(wire.get('notify_start') or '').strip() or None,
         'notify_end': str(wire.get('notify_end') or '').strip() or None,
     }
-    if notify_enabled and _rule_notify_active_now(notify_rule):
-        _state.database.add_alert(
-            created_at=now_iso, rule_name=rule_name, event_id=event_id,
-            label=label, confidence=confidence, message=message, recording_id=recording_id,
-        )
+    alert_active = notify_enabled and _rule_notify_active_now(notify_rule)
+    alerts = [{
+        'created_at': now_iso, 'rule_name': rule_name, 'label': label,
+        'confidence': confidence, 'message': message,
+    }] if alert_active else []
+    event_id = _state.database.add_event_with_alerts(
+        created_at=now_iso, source='behaviour', snapshot_path=None,
+        detections=[], alerts=alerts, alert_triggered=notify_enabled,
+        metadata=metadata,
+    )
+
+    if normalize_bool_setting(wire.get('record_on_detect'), True):
+        _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
+
+    if alert_active:
         alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
         thread = threading.Thread(
             target=deliver_alert_notifications, args=([alert_payload], event_id, [notify_rule]),
@@ -332,15 +333,6 @@ def _emit_loiter(camera_id: str, settings: dict[str, Any], fire: dict[str, Any],
         'threshold_seconds': round(threshold, 1),
         'confidence': round(confidence, 3),
     }
-    event_id = _state.database.add_event(
-        created_at=now_iso, source='behaviour', snapshot_path=None,
-        detections=[], alert_triggered=notify_enabled, metadata=metadata,
-    )
-
-    recording_id = None
-    if normalize_bool_setting(rule.get('record_on_detect'), True):
-        recording_id = _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
-
     rule_name = f'{zone_name} · {rule_display}'
     message = f'{str(label).title()} loitering in {zone_name} ({int(round(dwell))}s)'
     notify_rule = {
@@ -351,11 +343,21 @@ def _emit_loiter(camera_id: str, settings: dict[str, Any], fire: dict[str, Any],
         'notify_start': str(rule.get('notify_start') or '').strip() or None,
         'notify_end': str(rule.get('notify_end') or '').strip() or None,
     }
-    if notify_enabled and _rule_notify_active_now(notify_rule):
-        _state.database.add_alert(
-            created_at=now_iso, rule_name=rule_name, event_id=event_id,
-            label=label, confidence=confidence, message=message, recording_id=recording_id,
-        )
+    alert_active = notify_enabled and _rule_notify_active_now(notify_rule)
+    alerts = [{
+        'created_at': now_iso, 'rule_name': rule_name, 'label': label,
+        'confidence': confidence, 'message': message,
+    }] if alert_active else []
+    event_id = _state.database.add_event_with_alerts(
+        created_at=now_iso, source='behaviour', snapshot_path=None,
+        detections=[], alerts=alerts, alert_triggered=notify_enabled,
+        metadata=metadata,
+    )
+
+    if normalize_bool_setting(rule.get('record_on_detect'), True):
+        _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
+
+    if alert_active:
         alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
         thread = threading.Thread(
             target=deliver_alert_notifications, args=([alert_payload], event_id, [notify_rule]),
@@ -540,15 +542,6 @@ def _emit_time(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], r
         'days_learned': fire.get('days'),
         'confidence': round(confidence, 3),
     }
-    event_id = _state.database.add_event(
-        created_at=now_iso, source='behaviour', snapshot_path=None,
-        detections=[], alert_triggered=notify_enabled, metadata=metadata,
-    )
-
-    recording_id = None
-    if normalize_bool_setting(rule.get('record_on_detect'), True):
-        recording_id = _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
-
     rule_name = f'{zone_name} · {rule_display}'
     message = f'{str(label).title()} in {zone_name} at an unusual time ({hour:02d}:00)'
     notify_rule = {
@@ -559,11 +552,21 @@ def _emit_time(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], r
         'notify_start': str(rule.get('notify_start') or '').strip() or None,
         'notify_end': str(rule.get('notify_end') or '').strip() or None,
     }
-    if notify_enabled and _rule_notify_active_now(notify_rule):
-        _state.database.add_alert(
-            created_at=now_iso, rule_name=rule_name, event_id=event_id,
-            label=label, confidence=confidence, message=message, recording_id=recording_id,
-        )
+    alert_active = notify_enabled and _rule_notify_active_now(notify_rule)
+    alerts = [{
+        'created_at': now_iso, 'rule_name': rule_name, 'label': label,
+        'confidence': confidence, 'message': message,
+    }] if alert_active else []
+    event_id = _state.database.add_event_with_alerts(
+        created_at=now_iso, source='behaviour', snapshot_path=None,
+        detections=[], alerts=alerts, alert_triggered=notify_enabled,
+        metadata=metadata,
+    )
+
+    if normalize_bool_setting(rule.get('record_on_detect'), True):
+        _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
+
+    if alert_active:
         alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
         thread = threading.Thread(
             target=deliver_alert_notifications, args=([alert_payload], event_id, [notify_rule]),

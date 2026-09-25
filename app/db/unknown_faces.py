@@ -54,7 +54,7 @@ class UnknownFacesMixin:
     ) -> int:
         """Insert a new unknown face capture. Returns the row id."""
         ts = created_at or utc_now()
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 """
                 INSERT INTO unknown_faces
@@ -168,7 +168,7 @@ class UnknownFacesMixin:
         """
         if person_id is None and not person_name:
             raise UnknownFaceAssignmentError('Provide person_id or name.')
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             face = db.execute(
                 "SELECT embedding, dim, model, status FROM unknown_faces WHERE id = ?",
                 (face_id,),
@@ -233,7 +233,7 @@ class UnknownFacesMixin:
     def dismiss_unknown_face(self, face_id: int) -> bool:
         """Mark an unknown face as dismissed. Returns True if a row changed."""
         ts = utc_now()
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 "UPDATE unknown_faces SET status = 'dismissed', reviewed_at = ? WHERE id = ?",
                 (ts, face_id),
@@ -242,13 +242,13 @@ class UnknownFacesMixin:
 
     def delete_unknown_face(self, face_id: int) -> bool:
         """Permanently remove a capture. Returns True if a row was deleted."""
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute("DELETE FROM unknown_faces WHERE id = ?", (face_id,))
             return cursor.rowcount > 0
 
     def purge_old_unknown_faces(self, older_than: str) -> int:
         """Remove old captures (auto-cleanup). Returns count deleted."""
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 "DELETE FROM unknown_faces WHERE created_at < ? AND status != 'pending'",
                 (older_than,),
@@ -279,7 +279,7 @@ class UnknownFacesMixin:
         """
         own = db is None
         if own:
-            with self.connect() as conn:
+            with self.write_slot(), self.connect() as conn:
                 return self.dedupe_flooded_unknown_faces(conn)
         rows = db.execute(
             """

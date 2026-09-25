@@ -22,7 +22,7 @@ class PersonsMixin:
 
     def add_person(self, name: str, *, notes: str | None = None, created_at: str | None = None) -> int:
         timestamp = created_at or utc_now()
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 "INSERT INTO persons (name, notes, created_at, updated_at) VALUES (?, ?, ?, ?)",
                 (name, notes, timestamp, timestamp),
@@ -82,13 +82,13 @@ class PersonsMixin:
         fields.append("updated_at = ?")
         params.append(updated_at or utc_now())
         params.append(person_id)
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(f"UPDATE persons SET {', '.join(fields)} WHERE id = ?", params)
             return cursor.rowcount > 0
 
     def delete_person(self, person_id: int) -> bool:
         """Delete a person and all of their enrolled face embeddings."""
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             db.execute("DELETE FROM person_faces WHERE person_id = ?", (person_id,))
             cursor = db.execute("DELETE FROM persons WHERE id = ?", (person_id,))
             return cursor.rowcount > 0
@@ -104,7 +104,7 @@ class PersonsMixin:
         thumbnail: bytes | None = None,
         created_at: str | None = None,
     ) -> int:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 """
                 INSERT INTO person_faces (person_id, embedding, dim, model, source_snapshot, thumbnail, created_at)
@@ -159,7 +159,7 @@ class PersonsMixin:
         return bytes(blob) if blob is not None else None
 
     def delete_person_face(self, face_id: int) -> bool:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute("DELETE FROM person_faces WHERE id = ?", (face_id,))
             return cursor.rowcount > 0
 
@@ -195,7 +195,7 @@ class PersonsMixin:
         events anonymised.
         """
         purged = 0
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             rows = db.execute(
                 "SELECT id, metadata FROM events "
                 "WHERE created_at < ? AND metadata LIKE '%face_identities%'",

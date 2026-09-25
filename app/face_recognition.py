@@ -346,6 +346,12 @@ class FaceEmbedder:
             # not a fault, so silence it instead of flooding the app log.
             sess_options = ort.SessionOptions()
             sess_options.log_severity_level = 3  # ORT_LOGGING_LEVEL_ERROR
+            # Face matching runs beside the object detector and is a small,
+            # short-lived CPU workload. Keep ORT from creating an unbounded
+            # pool for every embedder session; the inference semaphore above
+            # bounds concurrent calls, while these settings bound each call.
+            sess_options.intra_op_num_threads = 1
+            sess_options.inter_op_num_threads = 1
             self.session = ort.InferenceSession(
                 str(self.model_path), sess_options=sess_options, providers=providers
             )

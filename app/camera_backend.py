@@ -29,6 +29,31 @@ CAPTURE_FAILURE_LOG_INTERVAL_SECONDS = 15.0
 _avutil_libs: list[Any] = []
 _avutil_libs_searched = False
 _avutil_lock = threading.Lock()
+_opencv_threads_lock = threading.Lock()
+_opencv_threads_configured = False
+
+
+def _configure_opencv_threads() -> None:
+    """Bound OpenCV's native worker pool once per process.
+
+    Each camera capture can otherwise ask OpenCV for the host CPU count. On
+    a multi-camera NVR that multiplies decoder/resize threads and competes with
+    ONNX Runtime. One thread is sufficient for the per-camera capture path;
+    the application-level scheduler still controls camera concurrency.
+    """
+    global _opencv_threads_configured
+    if _opencv_threads_configured:
+        return
+    with _opencv_threads_lock:
+        if _opencv_threads_configured:
+            return
+        try:
+            import cv2
+
+            cv2.setNumThreads(1)
+        except (ImportError, AttributeError, RuntimeError):
+            logger.debug('OpenCV thread limit unavailable', exc_info=True)
+        _opencv_threads_configured = True
 
 
 def _configure_ffmpeg_log_level() -> None:
@@ -278,6 +303,7 @@ class OpenCvStreamCamera:
         os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|max_delay;500000|stimeout;5000000|fflags;discardcorrupt")
 
         import cv2
+        _configure_opencv_threads()
 
         if self._capture is None:
             # ``cv2.VideoCapture()`` against a dead RTSP URL blocks inside

@@ -29,7 +29,7 @@ class AuditLogMixin:
         ip_address: str | None = None,
         status: str = 'success',
     ) -> None:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             db.execute(
                 """
                 INSERT INTO audit_log (created_at, user_id, username, action, resource, resource_id, details, ip_address, status, immutable)

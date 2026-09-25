@@ -8,6 +8,12 @@ from typing import Any
 from app.detection_status import GENERIC_TRIGGER_LABELS
 from app.utils import _normalize_iso_to_utc
 
+_SQLITE_BATCH_SIZE = 400
+
+
+def _batched(values: list[int]) -> list[list[int]]:
+    return [values[index:index + _SQLITE_BATCH_SIZE] for index in range(0, len(values), _SQLITE_BATCH_SIZE)]
+
 
 class EventsMixin:
     """CRUD + query helpers for the ``events`` and ``detections`` tables.
@@ -36,7 +42,7 @@ class EventsMixin:
         # query using the same helper normalising its bound value still
         # sorts and compares correctly.
         created_at = _normalize_iso_to_utc(created_at) or created_at
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 """
                 INSERT INTO events (created_at, source, snapshot_path, alert_triggered, recording_id, metadata)
@@ -69,6 +75,41 @@ class EventsMixin:
                 )
             return event_id
 
+    def add_event_with_alerts(
+        self,
+        *,
+        created_at: str,
+        source: str,
+        snapshot_path: str | None,
+        detections: list[dict[str, Any]],
+        alerts: list[dict[str, Any]],
+        alert_triggered: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> int:
+        """Atomically persist an event, its detections, and alert history."""
+        created_at = _normalize_iso_to_utc(created_at) or created_at
+        with self.write_slot(), self.connect() as db:
+            cursor = db.execute(
+                """INSERT INTO events (created_at, source, snapshot_path, alert_triggered, metadata)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (created_at, source, snapshot_path, int(alert_triggered), json.dumps(metadata or {})),
+            )
+            event_id = int(cursor.lastrowid)
+            for detection in detections:
+                box = detection.get('box', {})
+                db.execute(
+                    """INSERT INTO detections (event_id, label, confidence, x, y, width, height, zone_name, still_alert, still_alert_minutes)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (event_id, detection['label'], float(detection['confidence']), float(box.get('x', 0)), float(box.get('y', 0)), float(box.get('width', 0)), float(box.get('height', 0)), detection.get('zone_name') or None, int(bool(detection.get('still_alert'))), detection.get('still_alert_minutes') or None),
+                )
+            for alert in alerts:
+                db.execute(
+                    """INSERT INTO alert_history (created_at, rule_name, event_id, label, confidence, message)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (_normalize_iso_to_utc(str(alert.get('created_at') or created_at)) or created_at, str(alert['rule_name']), event_id, str(alert['label']), float(alert['confidence']), str(alert['message'])),
+                )
+            return event_id
+
     def set_event_recording(self, event_id: int, recording_id: int | None) -> bool:
         """Stamp an event with the recording (clip) it belongs to.
 
@@ -76,11 +117,13 @@ class EventsMixin:
         event first (with the snapshot) and then, once the clip is resolved by
         ``attach_event_recording``, links it back here. Idempotent.
         """
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 "UPDATE events SET recording_id = ? WHERE id = ?",
                 (int(recording_id) if recording_id is not None else None, int(event_id)),
             )
+            if recording_id is not None:
+                db.execute("UPDATE alert_history SET recording_id = ? WHERE event_id = ?", (int(recording_id), int(event_id)))
             return cursor.rowcount > 0
 
     def backfill_event_recording_links(self, db: sqlite3.Connection | None = None) -> int:
@@ -97,7 +140,7 @@ class EventsMixin:
         """
         own = db is None
         if own:
-            with self.connect() as conn:
+            with self.write_slot(), self.connect() as conn:
                 return self.backfill_event_recording_links(conn)
         # 1) The recording's declared "primary" event.
         db.execute(
@@ -192,16 +235,14 @@ class EventsMixin:
         without this a deleted event orphans its detections and leaves its
         alert_history rows -- which still surface in ``/api/alerts``. Call inside
         the same transaction, BEFORE deleting the ``events`` rows."""
-        if not event_ids:
-            return
-        placeholders = ','.join('?' * len(event_ids))
-        params = [int(eid) for eid in event_ids]
-        db.execute(f"DELETE FROM detections WHERE event_id IN ({placeholders})", params)
-        db.execute(f"DELETE FROM alert_history WHERE event_id IN ({placeholders})", params)
-        db.execute(f"UPDATE recordings SET event_id = NULL WHERE event_id IN ({placeholders})", params)
+        for batch in _batched([int(event_id) for event_id in event_ids]):
+            placeholders = ','.join('?' * len(batch))
+            db.execute(f"DELETE FROM detections WHERE event_id IN ({placeholders})", batch)
+            db.execute(f"DELETE FROM alert_history WHERE event_id IN ({placeholders})", batch)
+            db.execute(f"UPDATE recordings SET event_id = NULL WHERE event_id IN ({placeholders})", batch)
 
     def delete_event(self, event_id: int) -> dict[str, Any] | None:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             row = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
             if row is None:
                 return None
@@ -212,7 +253,7 @@ class EventsMixin:
             return event
 
     def delete_all_events(self) -> int:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
             # Mirror the declared CASCADE / SET NULL (foreign_keys is off): every
             # detection and alert_history row references an event, so clear them,
@@ -346,7 +387,7 @@ class EventsMixin:
         endpoint returns 404 - distinct from ``delete_event`` which removes
         the whole event.
         """
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 "UPDATE events SET snapshot_path = NULL, thumbnail_path = NULL WHERE id = ?",
                 (int(event_id),),
@@ -357,38 +398,38 @@ class EventsMixin:
         """Delete supplied events when no surviving recording still backs them."""
         if not event_ids:
             return []
-        placeholders = ','.join('?' * len(event_ids))
-        with self.connect() as db:
-            rows = db.execute(
-                f"""
-                SELECT e.*
-                FROM events e
-                WHERE e.id IN ({placeholders})
-                  AND NOT EXISTS (
-                      SELECT 1 FROM recordings r
-                      WHERE r.id = e.recording_id OR r.event_id = e.id
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM alert_history ah
-                      JOIN recordings r ON r.id = ah.recording_id
-                      WHERE ah.event_id = e.id
-                  )
-                ORDER BY e.created_at ASC, e.id ASC
-                """,
-                [int(event_id) for event_id in event_ids],
-            ).fetchall()
-            if not rows:
-                return []
-            events = []
-            for row in rows:
-                event = dict(row)
-                event['metadata'] = json.loads(event.get('metadata') or '{}')
-                events.append(event)
+        with self.write_slot(), self.connect() as db:
+            events: list[dict[str, Any]] = []
+            for candidate_ids in _batched([int(event_id) for event_id in event_ids]):
+                placeholders = ','.join('?' * len(candidate_ids))
+                rows = db.execute(
+                    f"""
+                    SELECT e.*
+                    FROM events e
+                    WHERE e.id IN ({placeholders})
+                      AND NOT EXISTS (
+                          SELECT 1 FROM recordings r
+                          WHERE r.id = e.recording_id OR r.event_id = e.id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM alert_history ah
+                          JOIN recordings r ON r.id = ah.recording_id
+                          WHERE ah.event_id = e.id
+                      )
+                    ORDER BY e.created_at ASC, e.id ASC
+                    """,
+                    candidate_ids,
+                ).fetchall()
+                for row in rows:
+                    event = dict(row)
+                    event['metadata'] = json.loads(event.get('metadata') or '{}')
+                    events.append(event)
             purged_ids = [int(event['id']) for event in events]
-            purge_placeholders = ','.join('?' * len(purged_ids))
             self._purge_event_children(db, purged_ids)
-            db.execute(f"DELETE FROM events WHERE id IN ({purge_placeholders})", purged_ids)
+            for batch in _batched(purged_ids):
+                placeholders = ','.join('?' * len(batch))
+                db.execute(f"DELETE FROM events WHERE id IN ({placeholders})", batch)
             return events
 
     def purge_expired_events_without_recordings(self, older_than: str) -> list[dict[str, Any]]:
@@ -398,7 +439,7 @@ class EventsMixin:
         corresponding recording rows have already been removed by retention.
         """
         older_than = _normalize_iso_to_utc(older_than) or older_than
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             rows = [dict(row) for row in db.execute(
                 """
                 SELECT e.*
@@ -426,9 +467,10 @@ class EventsMixin:
                 event['metadata'] = json.loads(event.get('metadata') or '{}')
                 events.append(event)
             event_ids = [int(event['id']) for event in events]
-            placeholders = ','.join('?' * len(event_ids))
             self._purge_event_children(db, event_ids)
-            db.execute(f"DELETE FROM events WHERE id IN ({placeholders})", event_ids)
+            for batch in _batched(event_ids):
+                placeholders = ','.join('?' * len(batch))
+                db.execute(f"DELETE FROM events WHERE id IN ({placeholders})", batch)
             return events
 
     def get_event(self, event_id: int) -> dict[str, Any] | None:
@@ -531,12 +573,12 @@ class EventsMixin:
             }
 
     def dismiss_event(self, event_id: int) -> bool:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute("UPDATE events SET dismissed = 1 WHERE id = ?", (event_id,))
             return cursor.rowcount > 0
 
     def dismiss_all_events(self) -> int:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute("UPDATE events SET dismissed = 1 WHERE dismissed = 0")
             return cursor.rowcount
 

@@ -43,6 +43,7 @@ from fastapi import HTTPException
 import app.state as _state
 from app.camera_config import normalize_camera_id, normalize_camera_settings
 from app.settings import DEFAULT_CONFIG
+from app.runtime_config import cached_snapshot
 
 
 def _database_setting(key: str) -> Any:
@@ -154,6 +155,10 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
 
 
 def effective_ai_config() -> dict[str, Any]:
+    return cached_snapshot(_state.database, 'ai', lambda: _build_effective_ai_config())
+
+
+def _build_effective_ai_config() -> dict[str, Any]:
     settings = copy.deepcopy(_state.config.get('ai', {}))
     override = _database_setting('ai')
     if isinstance(override, dict):
@@ -162,9 +167,11 @@ def effective_ai_config() -> dict[str, Any]:
 
 
 def effective_face_recognition_config() -> dict[str, Any]:
-    """Face-recognition settings: defaults -> YAML ``face_recognition`` -> DB override."""
-    from app.face_recognition_settings import DEFAULT_FACE_RECOGNITION_CONFIG
+    return cached_snapshot(_state.database, 'face_recognition', lambda: _build_effective_face_recognition_config())
 
+
+def _build_effective_face_recognition_config() -> dict[str, Any]:
+    from app.face_recognition_settings import DEFAULT_FACE_RECOGNITION_CONFIG
     settings = copy.deepcopy(DEFAULT_FACE_RECOGNITION_CONFIG)
     config_block = _state.config.get('face_recognition', {})
     if isinstance(config_block, dict):
@@ -176,6 +183,10 @@ def effective_face_recognition_config() -> dict[str, Any]:
 
 
 def effective_recording_config() -> dict[str, Any]:
+    return cached_snapshot(_state.database, 'recording', lambda: _build_effective_recording_config())
+
+
+def _build_effective_recording_config() -> dict[str, Any]:
     settings = copy.deepcopy(DEFAULT_RECORDING_CONFIG)
     config_recording = _state.config.get('recording', {})
     if isinstance(config_recording, dict):
@@ -187,6 +198,10 @@ def effective_recording_config() -> dict[str, Any]:
 
 
 def effective_live_config() -> dict[str, Any]:
+    return cached_snapshot(_state.database, 'live', lambda: _build_effective_live_config())
+
+
+def _build_effective_live_config() -> dict[str, Any]:
     settings = copy.deepcopy(DEFAULT_LIVE_CONFIG)
     config_live = _state.config.get('live', {})
     if isinstance(config_live, dict):
@@ -194,9 +209,6 @@ def effective_live_config() -> dict[str, Any]:
     override = _database_setting('live')
     if isinstance(override, dict):
         settings.update(override)
-    # Keep the value returned to the settings page canonical. This preserves
-    # the tri-state 'auto' choice and migrates older boolean rows without
-    # allowing a malformed config value to appear as a blank/select fallback.
     settings['motion_shadow_suppression'] = _normalize_shadow_suppression(
         settings.get('motion_shadow_suppression')
     )
@@ -204,7 +216,10 @@ def effective_live_config() -> dict[str, Any]:
 
 
 def effective_system_config() -> dict[str, Any]:
-    """GPU-health + host-level system settings (defaults -> YAML -> DB)."""
+    return cached_snapshot(_state.database, 'system', lambda: _build_effective_system_config())
+
+
+def _build_effective_system_config() -> dict[str, Any]:
     settings = copy.deepcopy(DEFAULT_SYSTEM_CONFIG)
     config_system = _state.config.get('system', {})
     if isinstance(config_system, dict):
@@ -216,6 +231,10 @@ def effective_system_config() -> dict[str, Any]:
 
 
 def effective_storage_config() -> dict[str, Any]:
+    return cached_snapshot(_state.database, 'storage', lambda: _build_effective_storage_config())
+
+
+def _build_effective_storage_config() -> dict[str, Any]:
     settings = copy.deepcopy(DEFAULT_STORAGE_CONFIG)
     config_storage = _state.config.get('storage', {})
     if isinstance(config_storage, dict):
@@ -224,21 +243,19 @@ def effective_storage_config() -> dict[str, Any]:
     if isinstance(override, dict):
         database_path = settings.get('database')
         settings.update(override)
-        # The on-disk DB path is set at startup and must NOT be
-        # hot-reloadable; preserve it from the source dict even if the
-        # override attempted to set a different value.
         settings['database'] = database_path
     return settings
 
 
 def effective_auth_config() -> dict[str, Any]:
+    return cached_snapshot(_state.database, 'auth', lambda: _build_effective_auth_config())
+
+
+def _build_effective_auth_config() -> dict[str, Any]:
     settings = copy.deepcopy(DEFAULT_AUTH_CONFIG)
     config_auth = _state.config.get('auth', {})
     if isinstance(config_auth, dict):
         settings.update(config_auth)
-    # ``auth_config`` is kept as a startup snapshot for compatibility with
-    # callers that inspect it directly; include it here as a final startup
-    # layer in case a test or embedding host populates it independently.
     if isinstance(_state.auth_config, dict):
         settings.update(_state.auth_config)
     override = _database_setting('auth')
@@ -248,6 +265,10 @@ def effective_auth_config() -> dict[str, Any]:
 
 
 def effective_email_alert_settings() -> dict[str, Any]:
+    return cached_snapshot(_state.database, 'alert_email', lambda: _build_effective_email_alert_settings())
+
+
+def _build_effective_email_alert_settings() -> dict[str, Any]:
     settings = copy.deepcopy(DEFAULT_EMAIL_ALERT_SETTINGS)
     config_alerts = _state.config.get('alerts', {})
     if isinstance(config_alerts, dict) and isinstance(config_alerts.get('email'), dict):
@@ -259,6 +280,10 @@ def effective_email_alert_settings() -> dict[str, Any]:
 
 
 def effective_push_notification_settings() -> dict[str, Any]:
+    return cached_snapshot(_state.database, 'alert_push', lambda: _build_effective_push_notification_settings())
+
+
+def _build_effective_push_notification_settings() -> dict[str, Any]:
     settings = copy.deepcopy(DEFAULT_PUSH_NOTIFICATION_SETTINGS)
     config_alerts = _state.config.get('alerts', {})
     if isinstance(config_alerts, dict) and isinstance(config_alerts.get('push_notification'), dict):
@@ -270,12 +295,13 @@ def effective_push_notification_settings() -> dict[str, Any]:
 
 
 def effective_cameras_config() -> list[dict[str, Any]]:
+    return cached_snapshot(_state.database, 'cameras', lambda: _build_effective_cameras_config())
+
+
+def _build_effective_cameras_config() -> list[dict[str, Any]]:
     override = _database_setting('cameras')
     if isinstance(override, list) and override:
-        return [
-            normalize_camera_settings(camera_settings, index)
-            for index, camera_settings in enumerate(override, start=1)
-        ]
+        return [normalize_camera_settings(camera_settings, index) for index, camera_settings in enumerate(override, start=1)]
     return []
 
 

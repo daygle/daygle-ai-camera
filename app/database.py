@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 from app.db.alerts import AlertsMixin
 from app.db.audit import AuditLogMixin
@@ -13,6 +15,8 @@ from app.db.persons import PersonsMixin
 from app.db.recordings import RecordingsMixin
 from app.db.settings_repo import SettingsRepoMixin
 from app.db.unknown_faces import UnknownFacesMixin
+
+logger = logging.getLogger('daygle.ai')
 
 
 # How long a connection waits for a contended write lock before giving up with
@@ -72,7 +76,23 @@ class EventDatabase(
     def __init__(self, database_path: str) -> None:
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self.__dict__.setdefault('_settings_cache_gen', 0)
+        # SQLite serialises writers, but an unbounded number of camera threads
+        # can still queue on that lock. Keep a small admission gate so bursts
+        # apply backpressure before they create an unbounded wait population.
+        self._write_slots = threading.BoundedSemaphore(4)
+        self._maintenance_stop = threading.Event()
+        self._maintenance_thread: threading.Thread | None = None
         self.init()
+
+    @contextmanager
+    def write_slot(self) -> Iterator[None]:
+        """Bound concurrent repository write transactions."""
+        self._write_slots.acquire()
+        try:
+            yield
+        finally:
+            self._write_slots.release()
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -96,6 +116,42 @@ class EventDatabase(
             raise
         finally:
             connection.close()
+
+    def maintain(self) -> None:
+        """Run bounded SQLite maintenance without blocking normal readers."""
+        with self.connect() as db:
+            db.execute('PRAGMA wal_checkpoint(PASSIVE);')
+            db.execute('PRAGMA optimize;')
+
+    def start_maintenance(self, interval_seconds: float = 900.0, callback: Callable[[], None] | None = None) -> None:
+        """Start the low-frequency WAL/query-plan maintenance loop."""
+        if self._maintenance_thread and self._maintenance_thread.is_alive():
+            return
+        interval = max(60.0, float(interval_seconds))
+        self._maintenance_stop.clear()
+
+        def _run() -> None:
+            while not self._maintenance_stop.wait(interval):
+                try:
+                    self.maintain()
+                    if callback is not None:
+                        callback()
+                except Exception:
+                    # Maintenance is best effort and must never take down the
+                    # capture service; the next tick retries from a clean state.
+                    logger.warning('Periodic database maintenance failed', exc_info=True)
+
+        self._maintenance_thread = threading.Thread(
+            target=_run, name='sqlite-maintenance', daemon=True,
+        )
+        self._maintenance_thread.start()
+
+    def stop_maintenance(self) -> None:
+        self._maintenance_stop.set()
+        thread = self._maintenance_thread
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+        self._maintenance_thread = None
 
     def init(self) -> None:
         """Create / migrate the schema for every domain table.
@@ -219,9 +275,14 @@ class EventDatabase(
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
+                CREATE INDEX IF NOT EXISTS idx_events_dismissed_created ON events(dismissed, created_at DESC, id DESC);
                 CREATE INDEX IF NOT EXISTS idx_events_recording ON events(recording_id);
                 CREATE INDEX IF NOT EXISTS idx_detections_label ON detections(label);
                 CREATE INDEX IF NOT EXISTS idx_detections_event ON detections(event_id);
+                CREATE INDEX IF NOT EXISTS idx_detections_event_label ON detections(event_id, label);
+                CREATE INDEX IF NOT EXISTS idx_alert_history_event_id ON alert_history(event_id, id);
+                CREATE INDEX IF NOT EXISTS idx_alert_history_recording ON alert_history(recording_id);
+                CREATE INDEX IF NOT EXISTS idx_alert_history_dismissed_created ON alert_history(dismissed, created_at DESC, id DESC);
 
                 CREATE TABLE IF NOT EXISTS recordings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -243,6 +304,7 @@ class EventDatabase(
 
                 CREATE INDEX IF NOT EXISTS idx_recordings_event ON recordings(event_id);
                 CREATE INDEX IF NOT EXISTS idx_recordings_started_at ON recordings(started_at);
+                CREATE INDEX IF NOT EXISTS idx_recordings_camera_started ON recordings(camera_id, started_at DESC, id DESC);
                 CREATE INDEX IF NOT EXISTS idx_recordings_source ON recordings(source);
 
                 CREATE TABLE IF NOT EXISTS recording_labels (
@@ -256,6 +318,7 @@ class EventDatabase(
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_recording_labels_label ON recording_labels(label);
+                CREATE INDEX IF NOT EXISTS idx_recording_labels_label_recording ON recording_labels(label, recording_id);
                 CREATE INDEX IF NOT EXISTS idx_recording_labels_recording ON recording_labels(recording_id);
 
                 CREATE TABLE IF NOT EXISTS app_settings (
@@ -358,6 +421,7 @@ class EventDatabase(
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_unknown_faces_status ON unknown_faces(status);
+                CREATE INDEX IF NOT EXISTS idx_unknown_faces_status_created ON unknown_faces(status, created_at);
                 CREATE INDEX IF NOT EXISTS idx_unknown_faces_camera ON unknown_faces(camera_id);
                 CREATE INDEX IF NOT EXISTS idx_unknown_faces_created ON unknown_faces(created_at);
                 """
@@ -409,7 +473,6 @@ class EventDatabase(
             # pre-link schema. Runs after the orphan cleanup above so it only
             # links live rows. Resolved through MRO (EventsMixin).
             self.backfill_event_recording_links(db)
-
             # ── Immutable audit log triggers ────────────────────────────────
             # These SQLite triggers are the last line of defense for the
             # append-only audit log. They must be created AFTER the tables
@@ -423,3 +486,12 @@ class EventDatabase(
             # expungement) if ever needed. Without this carve-out, the only way
             # to ever delete a row would be to drop the trigger first.
             db.executescript('\n'.join(AUDIT_LOG_IMMUTABLE_TRIGGERS.values()))
+
+        # Run checkpoint/optimize on a fresh autocommit connection. Doing this
+        # inside the schema/backfill transaction can make a passive checkpoint
+        # observe the connection's own active write and return BUSY.
+        self.maintain()
+        # ``init()`` is also the post-restore migration entry point. Bump the
+        # generation so merged config facades cannot retain snapshots built
+        # from the database that was just replaced.
+        self.invalidate_setting_cache()

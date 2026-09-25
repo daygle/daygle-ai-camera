@@ -1349,7 +1349,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     else:
         image_bytes = image
     snapshot_path = _state.storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
-    event_id = _state.database.add_event(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, detections=recording_detections, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream', **face_identity_metadata(recording_detections)})
+    _rule_by_name = {str(r.get('name') or ''): r for r in zone_rules or []}
+    alert_rows = []
+    for alert in triggered:
+        rule = _rule_by_name.get(str(alert.get('rule_name') or ''), {})
+        if rule and not rule.get('enabled', True):
+            continue
+        alert_rows.append({'created_at': datetime.now(timezone.utc).isoformat(), 'rule_name': alert['rule_name'], 'label': alert['label'], 'confidence': alert['confidence'], 'message': alert['message']})
+    event_id = _state.database.add_event_with_alerts(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, detections=recording_detections, alerts=alert_rows, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream', **face_identity_metadata(recording_detections)})
     recording_id = attach_event_recording(event_id, event_time, 'rtsp', recording_detections, camera_id=camera_id, recording_config=camera_recording_config)
     # Remember the event even when no recording attached: the debounce state
     # must advance for alert-only events too, otherwise the next cycle (which
@@ -1360,12 +1367,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # cooldown starts now; a different track of the same label can still fire
     # immediately (its anchor is untouched).
     _remember_track_event(camera_id, _track_ids_by_label)
-    _rule_by_name = {str(r.get('name') or ''): r for r in zone_rules or []}
-    for alert in triggered:
-        _rule = _rule_by_name.get(str(alert.get('rule_name') or ''), {})
-        if _rule and not _rule.get('enabled', True):
-            continue
-        _state.database.add_alert(created_at=datetime.now(timezone.utc).isoformat(), rule_name=alert['rule_name'], event_id=event_id, label=alert['label'], confidence=alert['confidence'], message=alert['message'], recording_id=recording_id)
+    # Alert rows were written in the same transaction as the event above. The
+    # recording link is applied afterwards because clip creation is asynchronous
+    # with respect to event persistence.
     if triggered:
         notify_thread = threading.Thread(target=_deliver_alert_notifications, args=(triggered, event_id, zone_rules), name=f'alert-notify-{event_id}', daemon=True)
         notify_thread.start()

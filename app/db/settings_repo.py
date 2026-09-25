@@ -89,7 +89,7 @@ class SettingsRepoMixin:
         # ``ORDER BY updated_at`` list page or any future age-based
         # purge lex-compare behaves correctly.
         updated_at = _normalize_iso_to_utc(updated_at) or updated_at
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             db.execute(
                 """
                 INSERT INTO app_settings (key, value, updated_at)

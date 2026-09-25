@@ -43,7 +43,7 @@ class CameraDiagnosticsMixin:
         # canonical UTC normaliser so every row stored here matches the
         # canonical form of the bound it will be lex-compared against.
         created_at = _normalize_iso_to_utc(created_at) or created_at
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             db.execute(
                 """
                 INSERT INTO camera_diagnostics (created_at, camera_id, camera_name, event_type, severity, message, details)
@@ -138,7 +138,7 @@ class CameraDiagnosticsMixin:
             return int(row['count'])
 
     def delete_all_camera_diagnostics(self) -> int:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute("DELETE FROM camera_diagnostics")
             return int(cursor.rowcount or 0)
 
@@ -152,7 +152,7 @@ class CameraDiagnosticsMixin:
         alignment as the current ``utc_now()`` policy source.
         """
         older_than_bound = _normalize_iso_to_utc(older_than) or older_than
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 "DELETE FROM camera_diagnostics WHERE created_at < ?",
                 (older_than_bound,),

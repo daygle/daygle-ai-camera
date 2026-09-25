@@ -330,6 +330,8 @@ class RecordingService:
         command = [
             ffmpeg,
             '-y',
+            '-threads', '1',
+            '-filter_threads', '1',
             # Keep glitchy-but-present video on a flaky stream rather than
             # discarding corrupt packets (which can empty the clip of video);
             # -err_detect ignore_err keeps the capture alive without dropping it.
@@ -691,6 +693,8 @@ class RecordingService:
                 ffmpeg,
                 '-nostdin',
                 '-hide_banner',
+                '-threads', '1',
+                '-filter_threads', '1',
                 '-loglevel', 'error',
                 '-rtsp_transport', 'tcp',
                 '-fflags', '+discardcorrupt',
@@ -918,6 +922,8 @@ class RecordingService:
         command = [
             ffmpeg,
             '-y',
+            '-threads', '1',
+            '-filter_threads', '1',
             # Do NOT use +discardcorrupt / -err_detect ignore_err on this concat.
             # Those are for the flaky *live* RTSP feed; on the rolling buffer's own
             # segments they treat any captured packet corruption as a reason to

@@ -9,6 +9,12 @@ from app.detection_status import GENERIC_TRIGGER_LABELS
 from app.media_utils import safe_storage_path
 from app.utils import _normalize_iso_to_utc
 
+_SQLITE_BATCH_SIZE = 400
+
+
+def _batched(values: list[int]) -> list[list[int]]:
+    return [values[index:index + _SQLITE_BATCH_SIZE] for index in range(0, len(values), _SQLITE_BATCH_SIZE)]
+
 
 class RecordingsMixin:
     """CRUD + query helpers for the ``recordings`` and ``recording_labels`` tables.
@@ -51,7 +57,7 @@ class RecordingsMixin:
         started_at = _normalize_iso_to_utc(started_at) or started_at
         ended_at = _normalize_iso_to_utc(ended_at) or ended_at
         created_at = _normalize_iso_to_utc(created_at) or created_at
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 """
                 INSERT INTO recordings (event_id, camera_id, started_at, ended_at, duration_seconds, file_path, thumbnail_path, source, trigger_type, trigger_label, created_at)
@@ -156,7 +162,7 @@ class RecordingsMixin:
         not duplicated, but their stored confidence is still raised to any higher
         value supplied here. Safe to call from extension / trigger-update paths.
         """
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             existing = {
                 str(row['label'])
                 for row in db.execute(
@@ -184,7 +190,7 @@ class RecordingsMixin:
         """
         own = db is None
         if own:
-            with self.connect() as conn:
+            with self.write_slot(), self.connect() as conn:
                 return self.backfill_recording_labels(conn)
         rows = db.execute(
             """
@@ -354,7 +360,7 @@ class RecordingsMixin:
         # in a different timezone.
         ended_at = _normalize_iso_to_utc(ended_at) or ended_at
         started_at_value = _normalize_iso_to_utc(started_at) if started_at is not None else None
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             if started_at_value is not None:
                 cursor = db.execute(
                     "UPDATE recordings SET started_at = ?, ended_at = ?, duration_seconds = ? WHERE id = ?",
@@ -368,7 +374,7 @@ class RecordingsMixin:
             return cursor.rowcount > 0
 
     def update_recording_trigger(self, recording_id: int, *, trigger_type: str, trigger_label: str | None) -> bool:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 "UPDATE recordings SET trigger_type = ?, trigger_label = ? WHERE id = ?",
                 (str(trigger_type or 'motion'), str(trigger_label).strip().lower() if trigger_label else None, recording_id),
@@ -384,17 +390,15 @@ class RecordingsMixin:
         connection, so without this the labels would orphan and alert rows would
         keep a dangling recording_id. Call inside the same transaction, BEFORE
         deleting the ``recordings`` rows themselves."""
-        if not recording_ids:
-            return
-        placeholders = ','.join('?' * len(recording_ids))
-        params = [int(rid) for rid in recording_ids]
-        db.execute(f"DELETE FROM recording_labels WHERE recording_id IN ({placeholders})", params)
-        db.execute(f"UPDATE alert_history SET recording_id = NULL WHERE recording_id IN ({placeholders})", params)
-        db.execute(f"UPDATE events SET recording_id = NULL WHERE recording_id IN ({placeholders})", params)
+        for batch in _batched([int(recording_id) for recording_id in recording_ids]):
+            placeholders = ','.join('?' * len(batch))
+            db.execute(f"DELETE FROM recording_labels WHERE recording_id IN ({placeholders})", batch)
+            db.execute(f"UPDATE alert_history SET recording_id = NULL WHERE recording_id IN ({placeholders})", batch)
+            db.execute(f"UPDATE events SET recording_id = NULL WHERE recording_id IN ({placeholders})", batch)
 
     def cleanup_incomplete_recordings(self) -> list[dict[str, Any]]:
         """Delete recordings whose files were never written (e.g. service restarted mid-capture)."""
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             rows = db.execute("SELECT * FROM recordings").fetchall()
             incomplete = []
             for row in rows:
@@ -408,11 +412,13 @@ class RecordingsMixin:
             if incomplete:
                 ids = [int(r["id"]) for r in incomplete]
                 self._purge_recording_children(db, ids)
-                db.execute(f"DELETE FROM recordings WHERE id IN ({','.join('?' * len(ids))})", ids)
+                for batch in _batched(ids):
+                    placeholders = ','.join('?' * len(batch))
+                    db.execute(f"DELETE FROM recordings WHERE id IN ({placeholders})", batch)
             return incomplete
 
     def delete_all_recordings(self) -> list[dict[str, Any]]:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             rows = db.execute("SELECT * FROM recordings").fetchall()
             # Mirror the declared CASCADE / SET NULL (foreign_keys is off): clear
             # the label join table and detach any alert_history rows first.
@@ -423,7 +429,7 @@ class RecordingsMixin:
             return [dict(row) for row in rows]
 
     def delete_recording(self, recording_id: int) -> dict[str, Any] | None:
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             row = db.execute("SELECT * FROM recordings WHERE id = ?", (recording_id,)).fetchone()
             if row is None:
                 return None
@@ -450,7 +456,7 @@ class RecordingsMixin:
         bound_grace_cutoff = _normalize_iso_to_utc(
             (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         )
-        with self.connect() as db:
+        with self.write_slot(), self.connect() as db:
             # When only age-based purge is needed, filter in the database.
             # Size-based purge needs all rows to correctly identify oldest recordings.
             if bound_older_than and max_storage_bytes is None:
@@ -490,22 +496,24 @@ class RecordingsMixin:
             if not purge_ids:
                 return []
             rows = [row for row in candidates if int(row["id"]) in purge_ids]
+            ordered_purge_ids = sorted(purge_ids)
             if _linked_event_ids is not None:
-                placeholders = ','.join('?' * len(rows))
-                linked_rows = db.execute(
-                    f"""
-                    SELECT DISTINCT id FROM events
-                    WHERE recording_id IN ({placeholders})
-                       OR id IN (SELECT event_id FROM recordings WHERE id IN ({placeholders}))
-                       OR id IN (
-                           SELECT event_id FROM alert_history WHERE recording_id IN ({placeholders})
-                       )
-                    """,
-                    [rid for rid in purge_ids] * 3,
-                ).fetchall()
-                _linked_event_ids.extend(int(row['id']) for row in linked_rows)
-            self._purge_recording_children(db, [int(row["id"]) for row in rows])
-            db.executemany("DELETE FROM recordings WHERE id = ?", [(row["id"],) for row in rows])
+                for batch in _batched(ordered_purge_ids):
+                    placeholders = ','.join('?' * len(batch))
+                    linked_rows = db.execute(
+                        f"""
+                        SELECT DISTINCT id FROM events
+                        WHERE recording_id IN ({placeholders})
+                           OR id IN (SELECT event_id FROM recordings WHERE id IN ({placeholders}))
+                           OR id IN (
+                               SELECT event_id FROM alert_history WHERE recording_id IN ({placeholders})
+                           )
+                        """,
+                        batch * 3,
+                    ).fetchall()
+                    _linked_event_ids.extend(int(row['id']) for row in linked_rows)
+            self._purge_recording_children(db, ordered_purge_ids)
+            db.executemany("DELETE FROM recordings WHERE id = ?", [(recording_id,) for recording_id in ordered_purge_ids])
             return rows
 
     def _recording_row(self, row: sqlite3.Row) -> dict[str, Any]:

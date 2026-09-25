@@ -180,6 +180,7 @@ import app.state as _state
 
 logger = logging.getLogger('daygle.ai')
 from app.config_facades import get_camera_config
+from app.camera_policy import camera_policy
 
 # Tracks zones that have already logged an unexpected pixel-motion error so we
 # don't flood logs on every frame. Cleared on success to allow self-healing.
@@ -274,6 +275,20 @@ def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict
     intersection = (ix2 - ix1) * (iy2 - iy1)
     detection_area = width * height
     return intersection / detection_area if detection_area > 0 else 0.0
+
+
+def _detection_matches_compiled_zone(detection: dict[str, Any], compiled_zone: Any) -> bool:
+    """Broad-phase bounds check followed by the exact polygon/rectangle test."""
+    box = detection.get('box') or {}
+    try:
+        dx, dy = float(box.get('x') or 0), float(box.get('y') or 0)
+        dw, dh = float(box.get('width') or 0), float(box.get('height') or 0)
+        left, top, width, height = compiled_zone.bounds
+        if dx + max(0.0, dw) < left or dx > left + width or dy + max(0.0, dh) < top or dy > top + height:
+            return False
+    except (TypeError, ValueError):
+        pass
+    return detection_matches_zone(detection, compiled_zone.zone)
 
 
 def _detection_matches_zone_uncached(detection: dict[str, Any], zone: dict[str, Any], min_overlap_ratio: float) -> bool:
@@ -575,10 +590,13 @@ def filter_detections_for_camera_zones(
     zone_monitor_key: str,
     require_zones: bool = False,
 ) -> list[dict[str, Any]]:
-    detection_settings = settings.get('detection') or {}
-    raw_zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True)]
-    zones = [zone for zone in raw_zones if zone.get(zone_monitor_key, True)]
-    camera_labels = set(normalize_label_list(detection_settings.get('object_labels', [])))
+    policy = camera_policy(settings)
+    compiled_zones = tuple(
+        zone
+        for zone in (policy.object_zones if zone_monitor_key == 'monitor_objects' else policy.motion_zones)
+        if zone.zone.get(zone_monitor_key, True)
+    )
+    camera_labels = set(policy.camera_labels)
     # Track-id preservation: the live overlay renders each box's stable track
     # id beside its label so operators can verify tracker/classifier behavior
     # (and two same-label objects never look like one). Detection dicts pass
@@ -589,19 +607,15 @@ def filter_detections_for_camera_zones(
     # detection must land geometrically inside one of them -- its confidence
     # window is enforced later by the matching rule. When no zone carries a
     # face rule, faces follow the exact legacy path below.
-    face_scope_zones = (
-        [zone for zone in raw_zones if _has_enabled_face_rule(zone)]
-        if zone_monitor_key == 'monitor_objects'
-        else []
-    )
+    face_scope_zones = tuple(policy.face_zones) if zone_monitor_key == 'monitor_objects' else ()
 
     def _face_allowed(detection: dict[str, Any]) -> bool | None:
         """None = no face scoping configured (legacy path); True/False = scoped."""
         if not face_scope_zones or canonical_label(detection.get('label')) != 'face':
             return None
-        return any(detection_matches_zone(detection, zone) for zone in face_scope_zones)
+        return any(_detection_matches_compiled_zone(detection, zone) for zone in face_scope_zones)
 
-    if not zones:
+    if not compiled_zones:
         if not require_zones:
             if face_scope_zones:
                 # Every zone is face-only: the object axis has no zones, but
@@ -644,12 +658,8 @@ def filter_detections_for_camera_zones(
     # accept all" behavior of ``detection_label_allowed_for_zone``.
     need_labels = zone_monitor_key == 'monitor_objects'
     zones_with_labels = [
-        (
-            zone,
-            set(normalize_label_list(zone.get('object_labels', []))) or camera_labels,
-        )
-        if need_labels else (zone, None)
-        for zone in zones
+        (zone, frozenset(zone.object_labels) or frozenset(camera_labels)) if need_labels else (zone, None)
+        for zone in compiled_zones
     ]
     matched: list[dict[str, Any]] = []
     for detection in detections:
@@ -659,7 +669,7 @@ def filter_detections_for_camera_zones(
                 matched.append(detection)
             continue
         if any(
-            detection_matches_zone(detection, zone)
+            _detection_matches_compiled_zone(detection, zone)
             and (
                 not need_labels
                 or not labels
@@ -714,15 +724,14 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
 
 
 def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict[str, Any], action: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
-    detection_settings = settings.get('detection') or {}
     # Face-only zones (monitor_objects=False carrying a ``face`` rule) must be
     # reachable here too: face detections stamped with such a zone's id match
     # their rule through this matcher. Object detections can never carry that
     # zone's id -- they are filtered out by the monitor_objects axis upstream
     # -- so including these zones cannot make an object rule fire.
-    zones = [
-        zone for zone in detection_settings.get('zones', [])
-        if zone.get('enabled', True) and (zone.get('monitor_objects', True) or _has_enabled_face_rule(zone))
+    compiled_zones = [
+        compiled_zone for compiled_zone in camera_policy(settings).zones
+        if compiled_zone.zone.get('monitor_objects', True) or _has_enabled_face_rule(compiled_zone.zone)
     ]
     label = canonical_label(detection.get('label'))
     if not label:
@@ -731,10 +740,11 @@ def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict
     # per matched rule.
     confidence = float(detection.get('confidence') or 0)
     matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    for zone in zones:
-        if not detection_matches_zone(detection, zone):
+    for compiled_zone in compiled_zones:
+        zone = compiled_zone.zone
+        if not _detection_matches_compiled_zone(detection, compiled_zone):
             continue
-        for rule in zone.get('object_rules') or []:
+        for rule in compiled_zone.rules:
             if not rule.get('enabled', True):
                 continue
             if action == 'alert':

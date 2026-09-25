@@ -203,6 +203,19 @@ async def app_lifespan(_app: FastAPI):
         pass  # best-effort; failures are logged inside the helper
     start_live_alert_monitor()
     start_profile_monitor()
+
+    def _run_periodic_retention() -> None:
+        from app.backup import purge_camera_diagnostics_by_policy, purge_recordings_by_policy
+        try:
+            purge_recordings_by_policy()
+        except Exception:
+            _logger.warning('Periodic recording retention failed', exc_info=True)
+        try:
+            purge_camera_diagnostics_by_policy()
+        except Exception:
+            _logger.warning('Periodic camera-log retention failed', exc_info=True)
+
+    _state.database.start_maintenance(callback=_run_periodic_retention)
     apply_sound_settings()
     tunnel_manager = _state.cloudflare_tunnel_manager
     if tunnel_manager is not None and tunnel_manager.autostart:
@@ -217,6 +230,8 @@ async def app_lifespan(_app: FastAPI):
         _state.recording_service.stop_all_continuous_recordings()
         stop_live_alert_monitor()
         stop_profile_monitor()
+        if _state.database is not None:
+            _state.database.stop_maintenance()
         stop_sound_monitor()
         if _state.cloudflare_tunnel_manager is not None:
             _state.cloudflare_tunnel_manager.stop()

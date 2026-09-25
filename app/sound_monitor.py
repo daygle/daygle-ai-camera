@@ -81,10 +81,25 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
     email_recipients = normalize_email_recipients(fired_rule.get('email_recipients', []))
     push_enabled = normalize_bool_setting(fired_rule.get('push_enabled'), False)
     notify_enabled = email_enabled or push_enabled
-    event_id = _state.database.add_event(created_at=now_iso, source='sound', snapshot_path=None, detections=[], alert_triggered=notify_enabled, metadata={'source': 'sound-detection', 'sound_source': 'rtsp', 'camera_id': camera_id, 'camera_name': str((cam_settings or {}).get('name') or '').strip() or None, 'label': class_id, 'class_label': class_label, 'confidence': round(confidence, 3)})
+    message = f'{class_label} detected ({confidence:.0%} confidence)'
+    alert_active = notify_enabled and _rule_notify_active_now(fired_rule)
+    alerts = [{
+        'created_at': now_iso, 'rule_name': rule_name, 'label': class_id,
+        'confidence': confidence, 'message': message,
+    }] if alert_active else []
+    event_id = _state.database.add_event_with_alerts(
+        created_at=now_iso, source='sound', snapshot_path=None,
+        detections=[], alerts=alerts, alert_triggered=notify_enabled,
+        metadata={
+            'source': 'sound-detection', 'sound_source': 'rtsp',
+            'camera_id': camera_id,
+            'camera_name': str((cam_settings or {}).get('name') or '').strip() or None,
+            'label': class_id, 'class_label': class_label,
+            'confidence': round(confidence, 3),
+        },
+    )
     sound_detection = {'label': class_id, 'confidence': confidence, 'alert_triggered': True}
     should_record = normalize_bool_setting(fired_rule.get('record_on_detect'), True)
-    recording_ids: list[int] = []
     if should_record and cam_settings:
         stream_url = build_stream_url(cam_settings)
         if stream_url:
@@ -92,11 +107,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
             _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config)
             rid = attach_event_recording(event_id, now_iso, 'rtsp', [sound_detection], camera_id=camera_id, recording_config=cam_rec_config)
             if rid is not None:
-                recording_ids.append(rid)
                 logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, camera_id)
-    message = f'{class_label} detected ({confidence:.0%} confidence)'
-    if notify_enabled and _rule_notify_active_now(fired_rule):
-        _state.database.add_alert(created_at=now_iso, rule_name=rule_name, event_id=event_id, label=class_id, confidence=confidence, message=message, recording_id=recording_ids[0] if recording_ids else None)
     alert_payload = {'rule_name': rule_name, 'label': class_id, 'confidence': confidence, 'message': message}
     notify_rule = {'name': rule_name, 'email_enabled': email_enabled, 'push_enabled': push_enabled, 'email_recipients': email_recipients, 'notify_start': str(fired_rule.get('notify_start') or '').strip() or None, 'notify_end': str(fired_rule.get('notify_end') or '').strip() or None}
     if notify_enabled:
