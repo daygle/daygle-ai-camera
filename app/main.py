@@ -30,7 +30,13 @@ from app.config_facades import effective_auth_config, effective_ai_config, effec
 from app.diagnostics import log_camera_diagnostic
 from app.live_monitor import start_live_alert_monitor, stop_live_alert_monitor
 from app.profile_automation import start_profile_monitor, stop_profile_monitor
+from app.postprocess_pool import shutdown_pools
 from app.sound_monitor import apply_sound_settings, stop_sound_monitor
+
+# How long shutdown waits for in-flight post-process jobs (Item 12) before
+# giving up on the threads. Bounded so a wedged ffmpeg render cannot hold the
+# service restart open indefinitely.
+POSTPROCESS_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
 _logger = logging.getLogger('daygle.ai')
 
@@ -228,6 +234,11 @@ async def app_lifespan(_app: FastAPI):
     finally:
         _state.recording_service.stop_prebuffer_workers()
         _state.recording_service.stop_all_continuous_recordings()
+        # Stop the bounded post-process pools (Item 12) after the recording
+        # workers they render clips for, and before the monitors that submit
+        # work to them. Queued jobs are abandoned rather than drained: on a
+        # restart nobody reads a clip that finishes after the process exits.
+        shutdown_pools(timeout=POSTPROCESS_SHUTDOWN_TIMEOUT_SECONDS)
         stop_live_alert_monitor()
         stop_profile_monitor()
         if _state.database is not None:

@@ -110,12 +110,22 @@ def _maybe_enrich_person(
         if track_id in enriched:
             return
         enriched.add(track_id)
-    # Offload to background thread to avoid blocking the hot path.
-    threading.Thread(
-        target=_store_enriched_embedding,
-        args=(person_id, camera_id, track_id, detection, crop_bgr, service),
-        daemon=True,
-    ).start()
+    # Offload to the bounded post-process pool to avoid blocking the hot path
+    # (Item 12). This used to be a thread per enriched track; each job re-embeds
+    # a face crop, so a busy scene with many new tracks could spawn an unbounded
+    # number of them, all competing for the same cores as detection. block=False
+    # because this runs on the detection path and must never park: an
+    # enrichment that cannot be queued is simply not written, and the next
+    # cycle re-offers the same track.
+    from app.postprocess_pool import PRIORITY_BACKGROUND, enrichment_pool
+
+    enrichment_pool().submit(
+        _store_enriched_embedding,
+        person_id, camera_id, track_id, detection, crop_bgr, service,
+        priority=PRIORITY_BACKGROUND,
+        label=f'enriched-embedding-{camera_id}',
+        block=False,
+    )
 
 
 def _store_enriched_embedding(
@@ -225,11 +235,18 @@ def _maybe_capture_unknown(
     # Embed + thumbnail off the hot path (already computed by recognize, but
     # the embedding isn't stored by the matcher). We re-embed here only once
     # per track since the first unknown appearance is the only capture.
-    threading.Thread(
-        target=_store_unknown_face,
-        args=(camera_id, track_id, detection, crop_bgr, service),
-        daemon=True,
-    ).start()
+    # Bounded, non-blocking submission for the same reason as the enrichment
+    # path above (Item 12); a dropped capture costs one review candidate, and
+    # the per-track guard means it is re-offered on the next sighting.
+    from app.postprocess_pool import PRIORITY_BACKGROUND, enrichment_pool
+
+    enrichment_pool().submit(
+        _store_unknown_face,
+        camera_id, track_id, detection, crop_bgr, service,
+        priority=PRIORITY_BACKGROUND,
+        label=f'unknown-face-{camera_id}',
+        block=False,
+    )
 
 
 def _store_unknown_face(

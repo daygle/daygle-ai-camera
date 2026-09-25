@@ -105,7 +105,6 @@ import os
 
 import json
 import logging
-import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -122,6 +121,14 @@ from app.detection_status import (
 from app.media_utils import probe_video_duration, safe_storage_path
 
 logger = logging.getLogger('daygle.ai')
+
+# How long a detection thread may park waiting for room in the post-process
+# pool (Item 12). Short by design: this is called from the detection path, so
+# a long wait would show up as a missed detection. Bounded rather than
+# unlimited so a saturated recorder degrades by dropping the clip - after the
+# event, its detections and its alert history are already committed - instead
+# of stalling detection.
+CLIP_SUBMIT_TIMEOUT_SECONDS = 2.0
 
 
 def extend_active_rtsp_recording(
@@ -741,4 +748,31 @@ def start_rtsp_recording_capture(
                     captured_end_ts = captured_end_ts_holder.get('ts')
                     if captured_end_ts is not None:
                         _state.last_rtsp_capture_end[camera_id] = captured_end_ts
-    threading.Thread(target=capture, name=f'rtsp-recording-{event_id}', daemon=True).start()
+    # Bounded pool rather than a thread per event (Item 12). This capture runs
+    # ffmpeg - clip render, audio mux, sidecar and thumbnail writes - and a
+    # thread-per-event design had no ceiling: a burst of overlapping events
+    # started one render each, all competing for the same cores and disk the
+    # detection and continuous-recording workers were already using. The pool
+    # applies a fixed concurrency limit, absorbs the burst in a bounded
+    # backlog, and gives clips their own queue so identity work can never
+    # delay a clip the user is waiting on.
+    #
+    # Bounded submit with a short timeout: the caller is the detection thread,
+    # so it must not park for long. A clip that cannot be queued within the
+    # timeout is dropped here rather than growing the backlog without limit -
+    # the event, its detections and its alert history are already committed by
+    # this point, so dropping costs the footage, not the alert.
+    from app.postprocess_pool import PRIORITY_CLIP, clip_pool
+
+    if not clip_pool().submit(
+        capture,
+        priority=PRIORITY_CLIP,
+        label=f'rtsp-recording-{event_id}',
+        block=True,
+        timeout=CLIP_SUBMIT_TIMEOUT_SECONDS,
+    ):
+        logger.warning(
+            'Event clip render for %s was not queued (post-process backlog full); '
+            'the alert is recorded but this event has no clip.',
+            event_id,
+        )
