@@ -109,6 +109,65 @@ def ais():
 # ---------------------------------------------------------------------------
 
 
+def test_ai_status_cache_is_reused_and_returns_defensive_copies(monkeypatch, ais):
+    _module, _state, capture = _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(backend='onnx', available=True),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+    settings = {'backend': 'onnx', 'model_path': 'models/yolov8n.onnx'}
+
+    first = ais.ai_status_payload(settings)
+    first['mode'] = 'mutated by caller'
+    second = ais.ai_status_payload(settings)
+
+    assert second['mode'] == 'ONNX ACTIVE'
+    assert capture['detector_loaded_for_calls'] == [settings]
+    assert capture['onnx_runtime_installed_calls'] == 1
+    assert capture['model_exists_calls'] == [settings]
+    assert capture['active_ai_config_source_calls'] == 1
+
+
+def test_ai_status_cache_skips_effective_config_lookup_on_hot_path(monkeypatch, ais):
+    module, _state, _capture = _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(backend='onnx', available=True),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+    calls = {'count': 0}
+    def effective_config():
+        calls['count'] += 1
+        return {'backend': 'onnx', 'model_path': 'models/yolov8n.onnx'}
+    monkeypatch.setattr(module, 'effective_ai_config', effective_config)
+
+    assert module.ai_status_payload()['mode'] == 'ONNX ACTIVE'
+    assert module.ai_status_payload()['mode'] == 'ONNX ACTIVE'
+    assert calls['count'] == 1
+
+
+def test_ai_status_cache_invalidation_rebuilds_changed_runtime(monkeypatch, ais):
+    module, _state, _capture = _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(backend='onnx', available=True),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+    loaded = {'value': True}
+    monkeypatch.setattr(module, 'detector_loaded_for', lambda _settings: loaded['value'])
+    settings = {'backend': 'onnx', 'model_path': 'models/yolov8n.onnx'}
+
+    assert ais.ai_status_payload(settings)['detector_loaded'] is True
+    loaded['value'] = False
+    assert ais.ai_status_payload(settings)['detector_loaded'] is True
+    module.invalidate_ai_status_cache()
+    assert ais.ai_status_payload(settings)['detector_loaded'] is False
+
+
 class _DetectorStub:
     """Captures attribute lookups: ``backend``, ``available``,
     ``unavailable_reason`` -- the three attrs ``ai_status_payload``

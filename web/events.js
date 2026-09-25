@@ -270,12 +270,12 @@ function renderList() {
 
 async function loadEvents() {
   if (els.eventFeed) els.eventFeed.innerHTML = '<p class="muted">Loading events…</p>';
-  const params = new URLSearchParams({ limit: '500' });
+  const params = new URLSearchParams();
   const since = getSinceParam();
   if (since) params.set('since', since);
   try {
-    const data = await api(`/api/events?${params.toString()}`);
-    allEvents = Array.isArray(data) ? data : [];
+    const query = params.toString();
+    allEvents = await fetchAllCursorPages(`/api/events${query ? `?${query}` : ''}`, 500);
   } catch (_err) {
     allEvents = [];
     if (els.eventFeed) els.eventFeed.innerHTML = '<p class="muted empty-state">Could not load events.</p>';

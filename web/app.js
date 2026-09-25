@@ -551,7 +551,7 @@ async function loadEvents() {
   try {
     const since = getSinceParam();
     const url = since ? `/api/events?with_recording=true&since=${since}` : '/api/events?with_recording=true';
-events = await api(url);
+    events = await fetchAllCursorPages(url, 500);
     updateMotionStats();
   } catch (error) {
     if (window.daygleAuth?.redirecting) return;

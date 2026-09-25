@@ -46,8 +46,9 @@ def test_list_snapshots_returns_only_framed_events(tmp_path, monkeypatch):
             created_at=now, source='sound', snapshot_path=None, detections=[],
         )
 
-        status, _headers, snapshots = admin.request('/api/snapshots')
+        status, _headers, snapshots_page = admin.request('/api/snapshots')
         assert status == 200
+        snapshots = snapshots_page['items']
         assert [snapshot['id'] for snapshot in snapshots] == [framed_id]
         snapshot = snapshots[0]
         assert snapshot['has_snapshot'] is True
@@ -88,8 +89,9 @@ def test_list_snapshots_since_filter(tmp_path, monkeypatch):
             detections=[],
         )
 
-        status, _headers, all_snapshots = admin.request('/api/snapshots')
+        status, _headers, all_snapshots_page = admin.request('/api/snapshots')
         assert status == 200
+        all_snapshots = all_snapshots_page['items']
         assert {snapshot['id'] for snapshot in all_snapshots} == {old, recent}
 
         # Local-day-start Z-suffix bound (what the frontend sends) must land
@@ -98,7 +100,7 @@ def test_list_snapshots_since_filter(tmp_path, monkeypatch):
             '/api/snapshots?since=2026-06-05T00:00:00.000Z'
         )
         assert status == 200
-        assert [snapshot['id'] for snapshot in filtered] == [recent]
+        assert [snapshot['id'] for snapshot in filtered['items']] == [recent]
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -162,7 +164,7 @@ def test_delete_snapshot_removes_image_keeps_event(tmp_path, monkeypatch):
         # The event no longer shows up in the library.
         status, _headers, snapshots = admin.request('/api/snapshots')
         assert status == 200
-        assert snapshots == []
+        assert snapshots['items'] == []
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -285,12 +287,12 @@ def test_list_snapshots_applies_recording_scoping(tmp_path, monkeypatch):
         _login(viewer_client, viewer['username'], 'Viewer123!')
         status, _headers, viewer_snapshots = viewer_client.request('/api/snapshots')
         assert status == 200
-        assert viewer_snapshots == [], 'viewer must not see a snapshot owned by another user'
+        assert viewer_snapshots['items'] == [], 'viewer must not see a snapshot owned by another user'
 
         # Admins still see it.
         status, _headers, admin_snapshots = admin.request('/api/snapshots')
         assert status == 200
-        assert [snapshot['id'] for snapshot in admin_snapshots] == [event_id]
+        assert [snapshot['id'] for snapshot in admin_snapshots['items']] == [event_id]
     finally:
         server.should_exit = True
         thread.join(timeout=5)

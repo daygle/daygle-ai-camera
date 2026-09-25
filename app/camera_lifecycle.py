@@ -338,7 +338,9 @@ def _rebuild_face_detector(ai_settings: dict[str, Any]) -> None:
     freed before a new one is allocated. Failures are non-fatal: the face pass
     simply stays unavailable and the reason is surfaced via status.
     """
+    from app.ai_settings import invalidate_ai_status_cache
     from app.detector import create_face_detector
+    invalidate_ai_status_cache()
     previous = _state.face_detector
     old_session = getattr(previous, 'session', None) if previous is not None else None
     if old_session is not None:
@@ -364,6 +366,8 @@ def _rebuild_face_detector(ai_settings: dict[str, Any]) -> None:
 
 def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     import app.alert_dispatch as _alert_dispatch
+    from app.ai_settings import invalidate_ai_status_cache
+    invalidate_ai_status_cache()
     _alert_dispatch._min_rule_confidence_cache = None
     # Bug 8 audit fix: alias the OLD reference BEFORE publishing the
     # sentinel so concurrent pollers -- ``live_alert_monitor_loop``'s

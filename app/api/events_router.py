@@ -11,6 +11,7 @@ from app.deps import get_database
 from app.request_helpers import write_audit_log
 from app.media_utils import safe_storage_path
 from app.live_snapshot import filter_object_priority_detections, render_live_snapshot_jpeg_overlay
+from app.pagination import decode_cursor, encode_cursor
 
 router = APIRouter()
 
@@ -46,18 +47,36 @@ def _scope_event_recordings(event: dict, user: dict) -> dict | None:
 def events(
     request: Request,
     label: str | None = None,
-    limit: int = Query(10000, ge=1, le=10000),
+    limit: int = Query(100, ge=1, le=500),
+    cursor: str | None = Query(None),
     alerted_only: bool = False,
     with_recording: bool = False,
     since: str | None = Query(None),
     db=Depends(get_database),
 ):
     user = require_user(request)
-    # ``limit`` arrives pre-clamped to 10000 by FastAPI (``le=10000``), so both
-    # roles fetch at most what was requested -- no fetch-more-then-slice waste.
-    events = db.search_events(label=label, limit=limit, alerted_only=alerted_only, with_recording=with_recording, since=since)
-    scoped = [_scope_event_recordings(event, user) for event in events]
-    return [event for event in scoped if event is not None]
+    try:
+        decoded = decode_cursor(cursor, 'events', 'newest') if cursor else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    owner_user_id = None if str(user.get('role') or '').lower() == 'admin' else int(user['id'])
+    event_list, next_cursor = db.search_events_page(
+        label=label,
+        limit=limit,
+        alerted_only=alerted_only,
+        with_recording=with_recording,
+        since=since,
+        cursor=decoded,
+        owner_user_id=owner_user_id,
+    )
+    scoped = [_scope_event_recordings(event, user) for event in event_list]
+    return {
+        'items': [event for event in scoped if event is not None],
+        'next_cursor': (
+            encode_cursor('events', 'newest', next_cursor[0], next_cursor[1])
+            if next_cursor else None
+        ),
+    }
 
 
 @router.get('/api/events/{event_id}')

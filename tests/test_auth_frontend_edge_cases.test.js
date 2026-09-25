@@ -397,6 +397,28 @@ describe('Logout with null CSRF token', () => {
 });
 
 
+describe('cursor pagination helper', () => {
+  test('follows every opaque cursor and preserves existing query parameters', async () => {
+    const { sandbox } = createSandbox();
+    const calls = [];
+    sandbox.api = async (url) => {
+      calls.push(url);
+      if (calls.length === 1) return { items: [{ id: 3 }], next_cursor: 'opaque+/=' };
+      return { items: [{ id: 2 }], next_cursor: null };
+    };
+
+    const items = await vm.runInContext(
+      "fetchAllCursorPages('/api/events?with_recording=true', 2)",
+      sandbox,
+    );
+
+    assert.deepEqual(Array.from(items, (item) => item.id), [3, 2]);
+    assert.equal(calls.length, 2);
+    assert.match(calls[0], /with_recording=true&limit=2$/);
+    assert.match(calls[1], /cursor=opaque%2B%2F%3D/);
+  });
+});
+
 describe('setApiAuth dispatches auth-state-changed event', () => {
   test('setApiAuth fires daygle:auth-state-changed CustomEvent', () => {
     const { sandbox } = createSandbox();

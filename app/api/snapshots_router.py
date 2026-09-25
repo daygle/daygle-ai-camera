@@ -24,6 +24,7 @@ from app.deps import get_database
 # home; if it ever moves, update this import in lockstep.
 from app.api.events_router import _scope_event_recordings
 from app.media_utils import safe_storage_path
+from app.pagination import decode_cursor, encode_cursor
 from app.request_helpers import write_audit_log
 
 router = APIRouter()
@@ -32,22 +33,32 @@ router = APIRouter()
 @router.get('/api/snapshots')
 def snapshots(
     request: Request,
-    limit: int = Query(10000, ge=1, le=10000),
+    limit: int = Query(100, ge=1, le=500),
+    cursor: str | None = Query(None),
     since: str | None = Query(None),
     db=Depends(get_database),
 ):
-    """List every event that saved a frame, newest first.
-
-    Mirrors /api/events: viewers are limited to 10000 rows and every event
-    passes through the same recording-scope filter (an event whose linked
-    recording is outside the viewer's scope is hidden entirely).
-    """
+    """List a newest-first cursor page of events that saved a frame."""
     user = require_user(request)
-    # ``limit`` arrives pre-clamped to 10000 by FastAPI (``le=10000``), so both
-    # roles fetch at most what was requested -- no fetch-more-then-slice waste.
-    snapshot_list = db.list_snapshots(limit=limit, since=since)
+    try:
+        decoded = decode_cursor(cursor, 'snapshots', 'newest') if cursor else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    owner_user_id = None if str(user.get('role') or '').lower() == 'admin' else int(user['id'])
+    snapshot_list, next_cursor = db.list_snapshots_page(
+        limit=limit,
+        since=since,
+        cursor=decoded,
+        owner_user_id=owner_user_id,
+    )
     scoped = [_scope_event_recordings(event, user) for event in snapshot_list]
-    return [event for event in scoped if event is not None]
+    return {
+        'items': [event for event in scoped if event is not None],
+        'next_cursor': (
+            encode_cursor('snapshots', 'newest', next_cursor[0], next_cursor[1])
+            if next_cursor else None
+        ),
+    }
 
 
 @router.delete('/api/snapshots/{event_id}')

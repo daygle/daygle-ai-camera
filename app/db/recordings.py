@@ -245,72 +245,100 @@ class RecordingsMixin:
         sort: str = 'newest',
         source_type: str | None = None,
     ) -> list[dict[str, Any]]:
-        # Normalise filter bounds through the same canonical UTC +00:00
-        # form rows are stored in. The recordings page constructs these
-        # from ``Date.toISOString()`` on the browser side, which yields
-        # ``YYYY-MM-DDTHH:MM:SS.sssZ`` (Z suffix); our storage uses
-        # ``YYYY-MM-DDTHH:MM:SS+00:00`` (Python ``.isoformat`` against a
-        # UTC datetime). Lexically ``+`` (0x2B) sorts BEFORE ``Z`` (0x5A)
-        # and ``.`` (0x2E) sorts AFTER ``+`` so a Z-form filter at the
-        # exact boundary would otherwise exclude or include rows that
-        # represent the same wall-clock instant on the wrong side. The
-        # normaliser is idempotent on already-canonical inputs.
+        """Return one recording page using the historical list-only contract."""
+        items, _next = self.list_recordings_page(
+            label=label,
+            labels=labels,
+            camera_id=camera_id,
+            limit=limit,
+            alerted_only=alerted_only,
+            started_after=started_after,
+            started_before=started_before,
+            sort=sort,
+            source_type=source_type,
+        )
+        return items
+
+    def list_recordings_page(
+        self,
+        label: str | None = None,
+        labels: list[str] | None = None,
+        camera_id: str | None = None,
+        limit: int = 50,
+        alerted_only: bool = False,
+        started_after: str | None = None,
+        started_before: str | None = None,
+        sort: str = 'newest',
+        source_type: str | None = None,
+        *,
+        cursor: tuple[str, int] | None = None,
+        owner_user_id: int | None = None,
+    ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
+        """Return ``(recordings, next_raw_cursor)`` with stable keyset ordering."""
         started_after = _normalize_iso_to_utc(started_after) if started_after else None
         started_before = _normalize_iso_to_utc(started_before) if started_before else None
+        page_size = max(1, int(limit))
+        sort_normalized = (sort or 'newest').strip().lower()
+        if sort_normalized not in {'newest', 'oldest'}:
+            sort_normalized = 'newest'
+        descending = sort_normalized == 'newest'
+        order_by = (
+            'r.started_at DESC, r.id DESC' if descending
+            else 'r.started_at ASC, r.id ASC'
+        )
         with self.connect() as db:
             conditions: list[str] = []
             params: list[Any] = []
-
-            # Normalize: accept either a single label string or a list of labels.
-            resolved_labels: list[str] = []
-            if label:
-                resolved_labels = [str(label).strip().lower()]
-            elif labels:
-                resolved_labels = [str(l).strip().lower() for l in labels if str(l).strip()]
-
+            resolved_labels = [str(label).strip().lower()] if label else [
+                str(item).strip().lower() for item in (labels or []) if str(item).strip()
+            ]
+            join = ''
             if resolved_labels:
-                # Join against recording_labels (the authoritative "labels that
-                # appeared in this recording" table) rather than detections, so
-                # labels added by extension / trigger updates still match.
+                join = 'LEFT JOIN recording_labels rl ON rl.recording_id = r.id'
                 placeholders = ','.join('?' * len(resolved_labels))
-                conditions.append(f"rl.label IN ({placeholders})")
+                conditions.append(f'rl.label IN ({placeholders})')
                 params.extend(resolved_labels)
             if camera_id:
-                conditions.append("r.camera_id = ?")
+                conditions.append('r.camera_id = ?')
                 params.append(camera_id)
+            if owner_user_id is not None:
+                conditions.append('(r.owner_user_id IS NULL OR r.owner_user_id = ?)')
+                params.append(int(owner_user_id))
             if alerted_only:
                 conditions.append(
-                    "EXISTS (SELECT 1 FROM alert_history ah WHERE ah.recording_id = r.id OR (r.event_id IS NOT NULL AND ah.event_id = r.event_id))"
+                    'EXISTS (SELECT 1 FROM alert_history ah WHERE ah.recording_id = r.id '
+                    'OR (r.event_id IS NOT NULL AND ah.event_id = r.event_id))'
                 )
             if started_after:
-                conditions.append("r.started_at >= ?")
+                conditions.append('r.started_at >= ?')
                 params.append(started_after)
             if started_before:
-                conditions.append("r.started_at <= ?")
+                conditions.append('r.started_at <= ?')
                 params.append(started_before)
             if source_type == 'sound':
                 conditions.append("EXISTS (SELECT 1 FROM events e WHERE e.id = r.event_id AND e.source = 'sound')")
             elif source_type == 'object':
                 conditions.append("(r.event_id IS NULL OR NOT EXISTS (SELECT 1 FROM events e WHERE e.id = r.event_id AND e.source = 'sound'))")
+            if cursor is not None:
+                comparison = '<' if descending else '>'
+                conditions.append(f'(r.started_at, r.id) {comparison} (?, ?)')
+                params.extend((cursor[0], int(cursor[1])))
 
-            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-
-            # Sort must be a fixed allowlist - never inject user input into the
-            # ORDER BY clause. Whitelisting the column and direction keeps the
-            # query safe while still letting callers pick newest/oldest.
-            sort_normalized = (sort or 'newest').strip().lower()
-            if sort_normalized not in {'newest', 'oldest'}:
-                sort_normalized = 'newest'
-            order_by = 'r.started_at DESC' if sort_normalized == 'newest' else 'r.started_at ASC'
-
-            if resolved_labels:
-                sql = f"SELECT DISTINCT r.* FROM recordings r LEFT JOIN recording_labels rl ON rl.recording_id = r.id {where} ORDER BY {order_by}, r.id DESC LIMIT ?"
-            else:
-                sql = f"SELECT r.* FROM recordings r {where} ORDER BY {order_by}, r.id DESC LIMIT ?"
-
-            params.append(limit)
-            rows = db.execute(sql, params).fetchall()
-            return self._assemble_recordings(db, rows)
+            distinct = 'DISTINCT ' if resolved_labels else ''
+            rows = db.execute(
+                f'''SELECT {distinct}r.* FROM recordings r {join}
+                    {'WHERE ' + ' AND '.join(conditions) if conditions else ''}
+                    ORDER BY {order_by} LIMIT ?''',
+                [*params, page_size + 1],
+            ).fetchall()
+            has_more = len(rows) > page_size
+            visible_rows = rows[:page_size]
+            next_cursor = (
+                (str(visible_rows[-1]['started_at']), int(visible_rows[-1]['id']))
+                if has_more and visible_rows
+                else None
+            )
+            return self._assemble_recordings(db, visible_rows), next_cursor
 
     def list_recordings_for_camera_day(self, camera_id: str, day_start: str, day_end: str) -> list[dict[str, Any]]:
         # Normalise the day bounds to canonical UTC +00:00 form so SQLite's

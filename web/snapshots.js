@@ -455,8 +455,7 @@ function populateFaceOptions() {
 async function loadSnapshots() {
   if (els.gallery) els.gallery.innerHTML = '<p class="muted">Loading snapshots…</p>';
   try {
-    const data = await api('/api/snapshots?limit=500');
-    allSnapshots = Array.isArray(data) ? data : [];
+    allSnapshots = await fetchAllCursorPages('/api/snapshots', 500);
   } catch (_err) {
     allSnapshots = [];
     if (els.gallery) els.gallery.innerHTML = '<p class="muted empty-state">Could not load snapshots.</p>';

@@ -1042,10 +1042,10 @@ async function loadRecordings(filters = {}) {
     const draftParams = new URLSearchParams(params);
     draftParams.delete('label');
     const draftQuery = draftParams.toString();
-    const all = await api(`/api/recordings${draftQuery ? `?${draftQuery}` : ''}`);
+    const all = await fetchAllCursorPages(`/api/recordings${draftQuery ? `?${draftQuery}` : ''}`);
     recordings = all.filter((rec) => isMotionOnlyRecording(rec));
   } else {
-    recordings = await api(`/api/recordings${queryString ? `?${queryString}` : ''}`);
+    recordings = await fetchAllCursorPages(`/api/recordings${queryString ? `?${queryString}` : ''}`);
   }
   // Face identity is filtered on the client: it lives in the linked event
   // metadata (recording.event / recording.events) that /api/recordings already
@@ -1198,7 +1198,7 @@ async function populateLabelFilterOptionsFromApi() {
   if (!els.labelFilter) return;
   try {
     // Load all recordings without any filter to populate the full label list
-    const allRecordings = await api('/api/recordings?limit=500');
+    const allRecordings = await fetchAllCursorPages('/api/recordings');
     populateLabelFilterOptions(allRecordings);
     populateFaceFilterOptions(allRecordings);
   } catch (_error) {

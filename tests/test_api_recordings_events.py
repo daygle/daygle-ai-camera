@@ -7,6 +7,168 @@ tests/support.py.
 from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
 
 
+def test_event_and_recording_cursor_pages_use_stable_tie_breaking(tmp_path):
+    from app.database import EventDatabase
+
+    database = EventDatabase(str(tmp_path / 'cursor.sqlite3'))
+    event_ids = []
+    recording_ids = []
+    for index in range(5):
+        event_id = database.add_event(
+            created_at='2026-06-06T00:00:00+00:00',
+            source='camera',
+            snapshot_path=f'snapshot-{index}.jpg',
+            detections=[{
+                'label': 'person', 'confidence': 0.9,
+                'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1},
+            }],
+        )
+        recording_id = database.add_recording(
+            event_id=event_id,
+            camera_id='front',
+            started_at='2026-06-06T00:00:00+00:00',
+            ended_at='2026-06-06T00:00:05+00:00',
+            duration_seconds=5,
+            file_path=str(tmp_path / f'{index}.mp4'),
+            thumbnail_path=None,
+            source='camera',
+            created_at='2026-06-06T00:00:00+00:00',
+            trigger_type='object',
+            trigger_label='person',
+        )
+        event_ids.append(event_id)
+        recording_ids.append(recording_id)
+
+    first_events, cursor = database.search_events_page(limit=2)
+    second_events, cursor = database.search_events_page(limit=2, cursor=cursor)
+    last_events, cursor = database.search_events_page(limit=2, cursor=cursor)
+    assert [event['id'] for event in [*first_events, *second_events, *last_events]] == list(reversed(event_ids))
+    assert cursor is None
+
+    newest, cursor = database.list_recordings_page(limit=2)
+    next_newest, cursor = database.list_recordings_page(limit=2, cursor=cursor)
+    last_newest, cursor = database.list_recordings_page(limit=2, cursor=cursor)
+    assert [recording['id'] for recording in [*newest, *next_newest, *last_newest]] == list(reversed(recording_ids))
+    assert cursor is None
+
+    oldest, cursor = database.list_recordings_page(limit=2, sort='oldest')
+    next_oldest, cursor = database.list_recordings_page(limit=2, sort='oldest', cursor=cursor)
+    assert [recording['id'] for recording in [*oldest, *next_oldest]] == recording_ids[:4]
+    assert cursor is not None
+
+    snapshot_pages = []
+    cursor = None
+    while True:
+        page, cursor = database.list_snapshots_page(limit=2, cursor=cursor)
+        snapshot_pages.append(page)
+        if cursor is None:
+            break
+    assert [event['id'] for page in snapshot_pages for event in page] == list(reversed(event_ids))
+
+    with database.connect() as db:
+        db.execute('UPDATE recordings SET owner_user_id = 999')
+    assert database.search_events_page(limit=2, owner_user_id=123)[0] == []
+    assert database.list_snapshots_page(limit=2, owner_user_id=123)[0] == []
+    assert database.list_recordings_page(limit=2, owner_user_id=123)[0] == []
+
+
+def test_event_list_hydration_batches_related_rows(tmp_path):
+    from app.database import EventDatabase
+
+    database = EventDatabase(str(tmp_path / 'batch.sqlite3'))
+    for index in range(8):
+        event_id = database.add_event(
+            created_at=f'2026-06-06T00:00:{index:02d}+00:00',
+            source='camera',
+            snapshot_path=f'snapshot-{index}.jpg',
+            detections=[{
+                'label': 'person', 'confidence': 0.9,
+                'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1},
+            }],
+        )
+        database.add_recording(
+            event_id=event_id,
+            camera_id='front',
+            started_at=f'2026-06-06T00:00:{index:02d}+00:00',
+            ended_at=f'2026-06-06T00:00:{index:02d}+05:00',
+            duration_seconds=5,
+            file_path=str(tmp_path / f'{index}.mp4'),
+            thumbnail_path=None,
+            source='camera',
+            created_at='2026-06-06T00:00:00+00:00',
+            trigger_type='object',
+            trigger_label='person',
+        )
+
+    statements = []
+    original_connect = database.connect
+
+    @contextlib.contextmanager
+    def traced_connect():
+        with original_connect() as connection:
+            connection.set_trace_callback(statements.append)
+            yield connection
+
+    database.connect = traced_connect
+    events, cursor = database.search_events_page(limit=8)
+    assert cursor is None
+    assert len(events) == 8
+    assert all(event['detections'] and event['recordings'] for event in events)
+    selects = [statement for statement in statements if statement.lstrip().upper().startswith('SELECT')]
+    assert len(selects) <= 10, selects
+    assert not any('FROM detections WHERE event_id = ?' in statement for statement in selects)
+    assert any('FROM detections WHERE event_id IN' in statement for statement in selects)
+
+
+def test_cursor_list_api_contract_and_validation(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        _login(admin)
+        for index in range(3):
+            event_id = main.database.add_event(
+                created_at=f'2026-06-06T00:00:0{index}+00:00',
+                source='motion',
+                snapshot_path=f'snapshot-{index}.jpg',
+                detections=[],
+            )
+            main.database.add_recording(
+                event_id=event_id,
+                camera_id='front',
+                started_at=f'2026-06-06T00:00:0{index}+00:00',
+                ended_at=f'2026-06-06T00:00:0{index}+05:00',
+                duration_seconds=5,
+                file_path=str(tmp_path / f'{index}.mp4'),
+                thumbnail_path=None,
+                source='camera',
+                created_at='2026-06-06T00:00:00+00:00',
+                trigger_type='motion',
+                trigger_label='motion',
+            )
+
+        for resource in ('events', 'recordings', 'snapshots'):
+            status, _headers, page = admin.request(f'/api/{resource}?limit=1')
+            assert status == 200
+            assert set(page) == {'items', 'next_cursor'}
+            assert len(page['items']) == 1
+            assert page['next_cursor']
+            query = urlencode({'limit': 1, 'cursor': page['next_cursor']})
+            status, _headers, second = admin.request(f'/api/{resource}?{query}')
+            assert status == 200
+            assert second['items'][0]['id'] != page['items'][0]['id']
+
+        status, _headers, error = admin.request('/api/events?cursor=not-a-cursor')
+        assert status == 400
+        assert error['detail'] == 'Invalid cursor'
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_alerted_only_event_and_recording_queries(tmp_path):
     from app.database import EventDatabase
 
@@ -246,23 +408,24 @@ def test_recording_labels_api_filter_matches_any_recorded_label(tmp_path, monkey
         # The recording was tagged 'cat' as the trigger, but the join table
         # also contains 'person'. The /api/recordings?label= filter must
         # surface the recording when filtering by EITHER label.
-        status, _, all_recordings = admin.request('/api/recordings')
+        status, _, all_recordings_page = admin.request('/api/recordings')
         assert status == 200
+        all_recordings = all_recordings_page['items']
         assert len(all_recordings) == 1
         assert all_recordings[0]['trigger_label'] == 'cat'
         assert sorted(all_recordings[0]['labels']) == ['cat', 'person']
 
-        status, _, cat_filter = admin.request('/api/recordings?label=cat')
+        status, _, cat_filter_page = admin.request('/api/recordings?label=cat')
         assert status == 200
-        assert [r['id'] for r in cat_filter] == [recording_id]
+        assert [r['id'] for r in cat_filter_page['items']] == [recording_id]
 
-        status, _, person_filter = admin.request('/api/recordings?label=person')
+        status, _, person_filter_page = admin.request('/api/recordings?label=person')
         assert status == 200
-        assert [r['id'] for r in person_filter] == [recording_id]
+        assert [r['id'] for r in person_filter_page['items']] == [recording_id]
 
-        status, _, dog_filter = admin.request('/api/recordings?label=dog')
+        status, _, dog_filter_page = admin.request('/api/recordings?label=dog')
         assert status == 200
-        assert dog_filter == []
+        assert dog_filter_page['items'] == []
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -292,6 +455,7 @@ def test_event_snapshot_endpoint_serves_annotated_image(tmp_path, monkeypatch):
 
         status, _, events = admin.request('/api/events')
         assert status == 200
+        events = events['items']
         listed = next(event for event in events if event['id'] == event_id)
         assert listed['has_snapshot'] is True
 
@@ -305,7 +469,7 @@ def test_event_snapshot_endpoint_serves_annotated_image(tmp_path, monkeypatch):
             created_at=event_time, source='sound', snapshot_path=None, detections=[],
         )
         status, _, events2 = admin.request('/api/events')
-        sound_event = next(event for event in events2 if event['id'] == sound_id)
+        sound_event = next(event for event in events2['items'] if event['id'] == sound_id)
         assert sound_event['has_snapshot'] is False
         status, _, _ = admin.request(f'/api/events/{sound_id}/snapshot')
         assert status == 404
@@ -397,8 +561,9 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         recording_id = _re.attach_event_recording(event_id, event_time, 'upload', detections)
         assert recording_id is not None
 
-        status, _headers, recordings = admin.request('/api/recordings')
+        status, _headers, recordings_page = admin.request('/api/recordings')
         assert status == 200
+        recordings = recordings_page['items']
         assert recordings[0]['id'] == recording_id
         assert recordings[0]['event_id'] == event_id
         assert recordings[0]['detections']
@@ -409,9 +574,9 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         assert media_path.exists() or metadata_path.exists()
 
         label = recordings[0]['detections'][0]['label']
-        status, _headers, filtered = admin.request(f'/api/recordings?label={label}')
+        status, _headers, filtered_page = admin.request(f'/api/recordings?label={label}')
         assert status == 200
-        assert any(recording['id'] == recording_id for recording in filtered)
+        assert any(recording['id'] == recording_id for recording in filtered_page['items'])
 
         status, _headers, detail = admin.request(f"/api/recordings/{recording_id}")
         assert status == 200
@@ -788,7 +953,7 @@ def test_delete_event_endpoint(tmp_path, monkeypatch):
             assert deleted.get("ok") is True
             status, _headers, events = client.request("/api/events")
             assert status == 200
-            assert all(e["id"] != event_id for e in events)
+            assert all(e["id"] != event_id for e in events['items'])
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -840,6 +1005,7 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
         # Verify recording list endpoint
         status, _, recordings = admin.request('/api/recordings')
         assert status == 200
+        recordings = recordings['items']
         assert len(recordings) >= 1
         recording = next(r for r in recordings if r['id'] == recording_id)
 
@@ -867,12 +1033,12 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
         for label in ('cat', 'dog', 'person'):
             status, _, filtered = admin.request(f'/api/recordings?label={label}')
             assert status == 200
-            assert any(r['id'] == recording_id for r in filtered), f'Recording should match label={label}'
+            assert any(r['id'] == recording_id for r in filtered['items']), f'Recording should match label={label}'
 
         # Verify filtering by non-existent label returns empty
         status, _, unknown_filter = admin.request('/api/recordings?label=elephant')
         assert status == 200
-        assert not any(r['id'] == recording_id for r in unknown_filter)
+        assert not any(r['id'] == recording_id for r in unknown_filter['items'])
 
         # Verify timeline endpoint returns correct color_key
         target_day = event_time[:10]

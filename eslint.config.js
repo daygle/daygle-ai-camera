@@ -60,6 +60,7 @@ const WEB_SHARED_GLOBALS = {
   escapeHtml: 'readonly',
   eventFaceIdentities: 'readonly',
   faceIdentityPills: 'readonly',
+  fetchAllCursorPages: 'readonly',
   formatDate: 'readonly',
   formatDateTime: 'readonly',
   formatLogTime: 'readonly',

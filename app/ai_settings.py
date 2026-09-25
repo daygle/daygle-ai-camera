@@ -64,8 +64,10 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
 from __future__ import annotations
 
-import logging
+import copy
 import importlib.util
+import json
+import logging
 import threading
 from pathlib import Path
 from typing import Any
@@ -75,6 +77,7 @@ from fastapi import HTTPException
 import app.state as _state
 from app.config_facades import effective_ai_config
 from app.detector import load_labels
+from app.runtime_config import settings_generation
 from app.settings import config_file_path
 
 # Each entry describes one downloadable model. Required keys: ``pt`` (source
@@ -347,10 +350,93 @@ def log_detector_initialization(context: str = 'startup') -> None:
     )
 
 
+_AI_STATUS_CACHE_VERSION = 0
+_AI_STATUS_CACHE_LOCK = threading.RLock()
+_AI_STATUS_CACHE: tuple[Any, dict[str, Any]] | None = None
+
+
+def invalidate_ai_status_cache() -> None:
+    """Invalidate cached runtime status after a model or detector lifecycle change."""
+    global _AI_STATUS_CACHE, _AI_STATUS_CACHE_VERSION
+    with _AI_STATUS_CACHE_LOCK:
+        _AI_STATUS_CACHE_VERSION += 1
+        _AI_STATUS_CACHE = None
+
+
+def _detector_runtime_signature(detector: Any) -> tuple[Any, ...]:
+    providers = getattr(detector, 'active_providers', None)
+    return (
+        id(detector),
+        getattr(detector, 'backend', 'unknown'),
+        bool(getattr(detector, 'available', False)),
+        getattr(detector, 'unavailable_reason', None),
+        getattr(detector, 'active_precision', None),
+        tuple(providers) if providers else None,
+        getattr(detector, 'input_width', None),
+        getattr(detector, 'input_height', None),
+    )
+
+
+def _model_file_signature(settings: dict[str, Any]) -> tuple[Any, ...]:
+    paths = [settings.get('model_path'), settings.get('face_model_path')]
+    result: list[tuple[Any, ...]] = []
+    for raw in paths:
+        if not raw:
+            result.append(())
+            continue
+        path = Path(str(raw))
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        try:
+            stat = path.stat()
+            result.append((str(path), True, stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            result.append((str(path), False, None, None))
+    return tuple(result)
+
+
 def ai_status_payload(
     ai_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    settings = ai_settings or effective_ai_config()
+    """Return a versioned, defensive copy of the cached AI runtime status.
+
+    Implicit calls use the settings generation as their source-settings key, so a
+    hot-path hit does not even rebuild the effective settings dictionary. Explicit
+    settings additionally use a value fingerprint and model-file metadata. Helper,
+    catalog, and primary/face detector identities make monkeypatched/embedded test
+    doubles and runtime hot swaps visible without relying on TTL expiry.
+    """
+    global _AI_STATUS_CACHE
+    database = getattr(_state, 'database', None)
+    explicit_settings = ai_settings is not None
+    key = (
+        _AI_STATUS_CACHE_VERSION,
+        id(database),
+        settings_generation(database),
+        explicit_settings,
+        json.dumps(ai_settings, sort_keys=True, separators=(',', ':'), default=str) if explicit_settings else None,
+        id(detector_loaded_for),
+        id(onnx_runtime_installed),
+        id(model_exists),
+        id(active_ai_config_source),
+        id(YOLO_MODELS),
+        _detector_runtime_signature(getattr(_state, 'detector', None)),
+        _detector_runtime_signature(getattr(_state, 'face_detector', None)),
+        getattr(_state, 'last_detector_error', None),
+        getattr(_state, 'last_face_detector_error', None),
+        _model_file_signature(ai_settings) if explicit_settings and ai_settings else None,
+    )
+    with _AI_STATUS_CACHE_LOCK:
+        if _AI_STATUS_CACHE is not None and _AI_STATUS_CACHE[0] == key:
+            return copy.deepcopy(_AI_STATUS_CACHE[1])
+        settings = ai_settings if explicit_settings else effective_ai_config()
+        payload = _build_ai_status_payload(settings)
+        _AI_STATUS_CACHE = (key, copy.deepcopy(payload))
+        return payload
+
+
+def _build_ai_status_payload(settings: dict[str, Any]) -> dict[str, Any]:
+    settings = settings or effective_ai_config()
     active_backend = getattr(_state.detector, 'backend', 'unknown')
     configured_backend = str(settings.get('backend', 'onnx')).lower()
     # ``enabled`` is the master toggle for object detection. Coerce legacy

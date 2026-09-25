@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from app.ai_settings import YOLO_MODELS, detector_status, validate_ai_settings
+from app.ai_settings import YOLO_MODELS, detector_status, invalidate_ai_status_cache, validate_ai_settings
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.config_facades import effective_ai_config
@@ -343,6 +343,7 @@ def delete_ai_model(model_id: str, request: Request, db=Depends(get_database), i
     model_name = model_id.strip().lower()
     ai_settings = effective_ai_config()
     result = delete_model(model_name, imgsz=imgsz)
+    invalidate_ai_status_cache()
     is_face_model = str(YOLO_MODELS[model_name].get('labels') or '').endswith('face.names')
     if (
         is_face_model

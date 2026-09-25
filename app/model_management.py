@@ -102,7 +102,7 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
 from fastapi import HTTPException
 
 import app.state as _state
-from app.ai_settings import YOLO_MODELS, detector_status, validate_ai_settings
+from app.ai_settings import YOLO_MODELS, detector_status, invalidate_ai_status_cache, validate_ai_settings
 from app.auth import utc_now
 from app.config_facades import effective_ai_config
 
@@ -739,6 +739,7 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
             'variants': variants,
         }
         _write_installed_models(installed_meta)
+    invalidate_ai_status_cache()
     ai_settings = effective_ai_config()
     rel_path = _relative_model_path(destination)
     # Face-family downloads never take over the PRIMARY object-detector slot:

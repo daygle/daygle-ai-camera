@@ -292,6 +292,29 @@ async function api(path, options = {}) {
 }
 window.api = api;
 
+// Follow an API list's opaque cursor until the complete result set is loaded.
+// Callers still perform their existing client-side filtering (motion/face),
+// but no longer trade correctness for a fixed 500/10,000-row ceiling.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+async function fetchAllCursorPages(path, pageSize = 500) {
+  const separator = path.includes('?') ? '&' : '?';
+  const size = Math.max(1, Number(pageSize) || 500);
+  const items = [];
+  const seenCursors = new Set();
+  let cursor = '';
+  do {
+    const query = `${path}${separator}limit=${encodeURIComponent(size)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const page = await api(query);
+    // Accept the historical array shape during rolling upgrades.
+    if (Array.isArray(page)) return [...items, ...page];
+    items.push(...(Array.isArray(page?.items) ? page.items : []));
+    cursor = String(page?.next_cursor || '');
+    if (cursor && seenCursors.has(cursor)) throw new Error('API returned a repeated pagination cursor.');
+    if (cursor) seenCursors.add(cursor);
+  } while (cursor);
+  return items;
+}
+
 // ─── CSRF self-heal ──────────────────────────────────────────────────────
 // A CSRF-mismatch 403 on a mutating request usually means this tab's cached
 // X-CSRF-Token went stale (another tab or an overlapping refresh rotated the

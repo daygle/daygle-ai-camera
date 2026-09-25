@@ -264,118 +264,156 @@ class EventsMixin:
             db.execute("DELETE FROM events")
             return int(count)
 
-    def search_events(self, label: str | None = None, limit: int = 50, alerted_only: bool = False, with_recording: bool = False, since: str | None = None) -> list[dict[str, Any]]:
-        # Normalise the since bound to canonical UTC ``+00:00`` form (events are
-        # stored canonical after ``add_event``; the frontend sends local-day-start
-        # bounds built with ``Date.toISOString()`` which carry a ``Z`` suffix).
-        # Without this, the lexical ``e.created_at >= ?`` compare mis-sorts at
-        # the exact boundary -- ``Z`` (0x5A) sorts AFTER ``+`` (0x2B) -- so an
-        # event at local midnight would be dropped for timezones ahead of UTC.
-        since = _normalize_iso_to_utc(since) if since else None
-        with self.connect() as db:
-            alert_filter = """
-                AND EXISTS (
-                    SELECT 1
-                    FROM alert_history ah
-                    WHERE ah.event_id = e.id
-                )
-            """
-            recording_condition = """
-                (
-                    EXISTS (SELECT 1 FROM recordings WHERE recordings.id = e.recording_id)
-                    OR EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)
-                    OR EXISTS (
-                        SELECT 1
-                        FROM alert_history ah
-                        JOIN recordings r ON r.id = ah.recording_id
-                        WHERE ah.event_id = e.id
-                    )
-                )
-            """
-            recording_filter = f"AND {recording_condition}"
-            since_clause = "AND e.created_at >= ?" if since else ""
-            if label:
-                params: tuple[Any, ...] = (label,) + ((since,) if since else ()) + (limit,)
-                rows = db.execute(
-                    f"""
-                    SELECT DISTINCT e.* FROM events e
-                    JOIN detections d ON d.event_id = e.id
-                    WHERE d.label = ?
-                    AND e.dismissed = 0
-                    {since_clause}
-                    {alert_filter if alerted_only else ''}
-                    {recording_filter if with_recording else ''}
-                    ORDER BY e.created_at DESC
-                    LIMIT ?
-                    """,
-                    params,
-                ).fetchall()
-            elif alerted_only:
-                params = ((since,) if since else ()) + (limit,)
-                rows = db.execute(
-                    f"""
-                    SELECT e.* FROM events e
-                    WHERE e.dismissed = 0
-                    {since_clause}
-                    AND EXISTS (
-                        SELECT 1
-                        FROM alert_history ah
-                        WHERE ah.event_id = e.id
-                    )
-                    {recording_filter if with_recording else ''}
-                    ORDER BY e.created_at DESC
-                    LIMIT ?
-                    """,
-                    params,
-                ).fetchall()
-            elif with_recording:
-                params = ((since,) if since else ()) + (limit,)
-                rows = db.execute(
-                    f"""
-                    SELECT e.* FROM events e
-                    WHERE e.dismissed = 0
-                    {since_clause}
-                    AND {recording_condition}
-                    ORDER BY e.created_at DESC
-                    LIMIT ?
-                    """,
-                    params,
-                ).fetchall()
-            else:
-                params = ((since,) if since else ()) + (limit,)
-                rows = db.execute(
-                    f"SELECT * FROM events e WHERE e.dismissed = 0 {since_clause} ORDER BY e.created_at DESC LIMIT ?",
-                    params,
-                ).fetchall()
+    def search_events(
+        self,
+        label: str | None = None,
+        limit: int = 50,
+        alerted_only: bool = False,
+        with_recording: bool = False,
+        since: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return one event page using the historical list-only contract."""
+        items, _next = self.search_events_page(
+            label=label,
+            limit=limit,
+            alerted_only=alerted_only,
+            with_recording=with_recording,
+            since=since,
+        )
+        return items
 
-            return [self._event_with_detections(db, row) for row in rows]
+    def search_events_page(
+        self,
+        label: str | None = None,
+        limit: int = 50,
+        alerted_only: bool = False,
+        with_recording: bool = False,
+        since: str | None = None,
+        *,
+        cursor: tuple[str, int] | None = None,
+        owner_user_id: int | None = None,
+    ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
+        """Return ``(events, next_raw_cursor)`` ordered by ``(created_at, id)``.
 
-    def list_snapshots(self, limit: int = 10000, since: str | None = None) -> list[dict[str, Any]]:
-        """Events that captured a frame - the Snapshots library.
-
-        Sound events and frameless triggers store ``snapshot_path`` as NULL,
-        so the filter is simply "a non-empty snapshot_path on a non-dismissed
-        event". The ``since`` bound is normalised to canonical UTC ``+00:00``
-        exactly like ``search_events`` so the lexical ``created_at`` compare
-        lands on the right side of the boundary for timezones ahead of UTC.
+        Fetching one extra row keeps cursor generation independent of whether the
+        requested page happens to end exactly at a filter boundary. ``owner_user_id``
+        applies the viewer's recording scope in SQL so a full page is never shortened
+        after privacy filtering (which would look like the end of the list).
         """
         since = _normalize_iso_to_utc(since) if since else None
+        page_size = max(1, int(limit))
         with self.connect() as db:
-            since_clause = "AND e.created_at >= ?" if since else ""
-            params: tuple[Any, ...] = ((since,) if since else ()) + (limit,)
+            conditions = ['e.dismissed = 0']
+            params: list[Any] = []
+            if label:
+                conditions.append('EXISTS (SELECT 1 FROM detections d WHERE d.event_id = e.id AND d.label = ?)')
+                params.append(label)
+            if since:
+                conditions.append('e.created_at >= ?')
+                params.append(since)
+            if alerted_only:
+                conditions.append('EXISTS (SELECT 1 FROM alert_history ah WHERE ah.event_id = e.id)')
+            recording_links = """
+                r.id = e.recording_id
+                OR r.event_id = e.id
+                OR EXISTS (
+                    SELECT 1 FROM alert_history ah
+                    WHERE ah.event_id = e.id AND ah.recording_id = r.id
+                )
+            """
+            if with_recording:
+                conditions.append(f'EXISTS (SELECT 1 FROM recordings r WHERE {recording_links})')
+            if owner_user_id is not None:
+                conditions.append(
+                    'NOT EXISTS (SELECT 1 FROM recordings r '
+                    f'WHERE ({recording_links}) AND r.owner_user_id IS NOT NULL '
+                    'AND r.owner_user_id != ?)'
+                )
+                params.append(int(owner_user_id))
+            if cursor is not None:
+                conditions.append('(e.created_at, e.id) < (?, ?)')
+                params.extend((cursor[0], int(cursor[1])))
+
             rows = db.execute(
                 f"""
-                SELECT * FROM events e
-                WHERE e.dismissed = 0
-                  AND e.snapshot_path IS NOT NULL
-                  AND e.snapshot_path != ''
-                  {since_clause}
+                SELECT e.* FROM events e
+                WHERE {' AND '.join(conditions)}
                 ORDER BY e.created_at DESC, e.id DESC
                 LIMIT ?
                 """,
-                params,
+                [*params, page_size + 1],
             ).fetchall()
-            return [self._event_with_detections(db, row) for row in rows]
+            has_more = len(rows) > page_size
+            visible_rows = rows[:page_size]
+            next_cursor = (
+                (str(visible_rows[-1]['created_at']), int(visible_rows[-1]['id']))
+                if has_more and visible_rows
+                else None
+            )
+            return self._events_with_detections(db, visible_rows), next_cursor
+
+    def list_snapshots(self, limit: int = 10000, since: str | None = None) -> list[dict[str, Any]]:
+        """Return one snapshot page using the historical list-only contract."""
+        items, _next = self.list_snapshots_page(limit=limit, since=since)
+        return items
+
+    def list_snapshots_page(
+        self,
+        limit: int = 10000,
+        since: str | None = None,
+        *,
+        cursor: tuple[str, int] | None = None,
+        owner_user_id: int | None = None,
+    ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
+        """Return a stable newest-first snapshot page and its next raw cursor."""
+        since = _normalize_iso_to_utc(since) if since else None
+        page_size = max(1, int(limit))
+        with self.connect() as db:
+            conditions = [
+                'e.dismissed = 0',
+                'e.snapshot_path IS NOT NULL',
+                "e.snapshot_path != ''",
+            ]
+            params: list[Any] = []
+            if since:
+                conditions.append('e.created_at >= ?')
+                params.append(since)
+            recording_links = """
+                r.id = e.recording_id
+                OR r.event_id = e.id
+                OR EXISTS (
+                    SELECT 1 FROM alert_history ah
+                    WHERE ah.event_id = e.id AND ah.recording_id = r.id
+                )
+            """
+            if owner_user_id is not None:
+                conditions.append(
+                    'NOT EXISTS (SELECT 1 FROM recordings r '
+                    f'WHERE ({recording_links}) AND r.owner_user_id IS NOT NULL '
+                    'AND r.owner_user_id != ?)'
+                )
+                params.append(int(owner_user_id))
+            if cursor is not None:
+                conditions.append('(e.created_at, e.id) < (?, ?)')
+                params.extend((cursor[0], int(cursor[1])))
+
+            rows = db.execute(
+                f"""
+                SELECT e.* FROM events e
+                WHERE {' AND '.join(conditions)}
+                ORDER BY e.created_at DESC, e.id DESC
+                LIMIT ?
+                """,
+                [*params, page_size + 1],
+            ).fetchall()
+            has_more = len(rows) > page_size
+            visible_rows = rows[:page_size]
+            next_cursor = (
+                (str(visible_rows[-1]['created_at']), int(visible_rows[-1]['id']))
+                if has_more and visible_rows
+                else None
+            )
+            return self._events_with_detections(db, visible_rows), next_cursor
 
     def clear_event_snapshot(self, event_id: int) -> bool:
         """Detach a stored snapshot from its event (Snapshots-library delete).
@@ -583,47 +621,98 @@ class EventsMixin:
             return cursor.rowcount
 
     def _event_with_detections(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
-        # Cross-mixin helpers from RecordingsMixin: reached via MRO since
-        # EventDatabase inherits both EventsMixin and RecordingsMixin.
-        detections = db.execute("SELECT * FROM detections WHERE event_id = ? ORDER BY confidence DESC", (row["id"],)).fetchall()
-        recordings = db.execute(
-            """
-            SELECT DISTINCT r.*
-            FROM recordings r
-            WHERE r.event_id = ?
-               OR r.id = ?
-               OR r.id IN (
-                    SELECT ah.recording_id
-                    FROM alert_history ah
-                    WHERE ah.event_id = ?
-                      AND ah.recording_id IS NOT NULL
-               )
-            ORDER BY r.started_at DESC
-            """,
-            (row["id"], row["recording_id"], row["id"]),
-        ).fetchall()
-        # The 1:1 alert for this event (if a rule fired). ``alert_history`` can
-        # hold more than one row when several rules match the same event; expose
-        # the strongest as the event's alert to match the "alert : event = 1:1"
-        # model the UI presents.
-        alert_row = db.execute(
-            "SELECT * FROM alert_history WHERE event_id = ? ORDER BY confidence DESC, id ASC LIMIT 1",
-            (row["id"],),
-        ).fetchone()
-        event = dict(row)
-        event["metadata"] = json.loads(event.get("metadata") or "{}")
-        event["detections"] = [dict(detection) for detection in detections]
-        # Whether an annotated snapshot can be served for this event
-        # (GET /api/events/{id}/snapshot). Sound / frameless events have none.
-        event["has_snapshot"] = bool(event.get("snapshot_path"))
-        event["alert"] = dict(alert_row) if alert_row else None
-        event["recordings"] = [self._recording_row(recording) for recording in recordings]
-        if event["recordings"]:
-            label_map, confidence_map = self._fetch_labels_for_recordings(db, [int(rec["id"]) for rec in event["recordings"]])
-            for recording in event["recordings"]:
-                recording["labels"] = label_map.get(int(recording["id"]), [])
-                recording["label_confidences"] = confidence_map.get(int(recording["id"]), {})
-        else:
-            event["recordings"] = []
-        event["recording_status"] = "linked" if recordings else "none"
-        return event
+        """Hydrate one event through the shared batched list hydrator."""
+        return self._events_with_detections(db, [row])[0]
+
+    def _events_with_detections(
+        self,
+        db: sqlite3.Connection,
+        rows: list[sqlite3.Row],
+    ) -> list[dict[str, Any]]:
+        """Hydrate event lists with a fixed number of batched queries.
+
+        The previous per-row implementation issued several queries for every
+        event. These IN-clause batches keep list cost constant as pages grow and
+        preserve the existing payload shape, including strongest alert and all
+        directly/alert-linked recordings.
+        """
+        if not rows:
+            return []
+        events = {int(row['id']): dict(row) for row in rows}
+        for event in events.values():
+            event['metadata'] = json.loads(event.get('metadata') or '{}')
+            event['detections'] = []
+            event['has_snapshot'] = bool(event.get('snapshot_path'))
+            event['alert'] = None
+            event['recordings'] = []
+            event['recording_status'] = 'none'
+
+        event_ids = list(events)
+        recording_ids_by_event: dict[int, set[int]] = defaultdict(set)
+        for row in rows:
+            if row['recording_id'] is not None:
+                recording_ids_by_event[int(row['id'])].add(int(row['recording_id']))
+
+        for event_ids_batch in _batched(event_ids):
+            placeholders = ','.join('?' * len(event_ids_batch))
+            for detection in db.execute(
+                f'SELECT * FROM detections WHERE event_id IN ({placeholders}) ORDER BY confidence DESC',
+                event_ids_batch,
+            ).fetchall():
+                events[int(detection['event_id'])]['detections'].append(dict(detection))
+
+            strongest_alerts: dict[int, sqlite3.Row] = {}
+            for alert in db.execute(
+                f'SELECT * FROM alert_history WHERE event_id IN ({placeholders}) ORDER BY confidence DESC, id ASC',
+                event_ids_batch,
+            ).fetchall():
+                strongest_alerts.setdefault(int(alert['event_id']), alert)
+            for event_id, alert in strongest_alerts.items():
+                events[event_id]['alert'] = dict(alert)
+
+            for linked in db.execute(
+                f'SELECT id AS recording_id, event_id FROM recordings WHERE event_id IN ({placeholders})',
+                event_ids_batch,
+            ).fetchall():
+                if linked['recording_id'] is not None:
+                    recording_ids_by_event[int(linked['event_id'])].add(int(linked['recording_id']))
+            for linked in db.execute(
+                f'''SELECT DISTINCT event_id, recording_id FROM alert_history
+                    WHERE event_id IN ({placeholders}) AND recording_id IS NOT NULL''',
+                event_ids_batch,
+            ).fetchall():
+                recording_ids_by_event[int(linked['event_id'])].add(int(linked['recording_id']))
+
+        all_recording_ids = sorted({
+            recording_id
+            for linked_ids in recording_ids_by_event.values()
+            for recording_id in linked_ids
+        })
+        recordings_by_id: dict[int, dict[str, Any]] = {}
+        for recording_ids in _batched(all_recording_ids):
+            placeholders = ','.join('?' * len(recording_ids))
+            label_map, confidence_map = self._fetch_labels_for_recordings(db, recording_ids)
+            for recording in db.execute(
+                f'SELECT * FROM recordings WHERE id IN ({placeholders}) ORDER BY started_at DESC, id DESC',
+                recording_ids,
+            ).fetchall():
+                recording_id = int(recording['id'])
+                item = self._recording_row(recording)
+                item['labels'] = label_map.get(recording_id, [])
+                item['label_confidences'] = confidence_map.get(recording_id, {})
+                recordings_by_id[recording_id] = item
+
+        for event_id in event_ids:
+            linked = recordings_by_id
+            event = events[event_id]
+            event['recordings'] = [
+                linked[recording_id]
+                for recording_id in sorted(
+                    recording_ids_by_event.get(event_id, set()),
+                    key=lambda rid: (str(linked[rid].get('started_at') or ''), rid),
+                    reverse=True,
+                )
+                if recording_id in linked
+            ]
+            event['recording_status'] = 'linked' if event['recordings'] else 'none'
+        return [events[event_id] for event_id in event_ids]

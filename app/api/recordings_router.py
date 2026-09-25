@@ -13,6 +13,7 @@ from app.auth_gates import require_admin, require_user
 from app.camera_config import normalize_camera_id
 from app.config_facades import effective_cameras_config, effective_recording_config
 from app.deps import get_database
+from app.pagination import decode_cursor, encode_cursor
 from app.media_utils import (
     _recording_timeline_segment,
     mp4_has_video_stream,
@@ -38,7 +39,8 @@ def recordings(
     request: Request,
     label: str | None = None,
     camera_id: str | None = None,
-    limit: int = Query(10000, ge=1, le=10000),
+    limit: int = Query(100, ge=1, le=500),
+    cursor: str | None = Query(None),
     alerted_only: bool = False,
     started_after: str | None = Query(None, description='ISO timestamp; include recordings started at or after this time.'),
     started_before: str | None = Query(None, description='ISO timestamp; include recordings started at or before this time.'),
@@ -57,7 +59,12 @@ def recordings(
     labels: list[str] | None = None
     if label:
         labels = [l.strip().lower() for l in str(label).split(',') if l.strip()]
-    results = db.list_recordings(
+    try:
+        decoded = decode_cursor(cursor, 'recordings', sort) if cursor else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    owner_user_id = None if session_role == 'admin' else session_user_id
+    results, next_cursor = db.list_recordings_page(
         labels=labels,
         camera_id=camera_id,
         limit=limit,
@@ -66,19 +73,16 @@ def recordings(
         started_before=started_before,
         sort=sort,
         source_type=source_type,
+        cursor=decoded,
+        owner_user_id=owner_user_id,
     )
-    # round-5 finish / M2: viewer sees only system captures (NULL owner)
-    # and any of their own captures; admins see everything. Done as a
-    # post-fetch filter so the SQL stays untouched in this round -- the
-    # ``add_recording`` signature could be widened in a follow-up so
-    # callers can stamp owner_user_id at INSERT time.
-    if session_role != 'admin':
-        results = [
-            r for r in results
-            if r.get('owner_user_id') is None
-            or int(r.get('owner_user_id') or 0) == session_user_id
-        ]
-    return results
+    return {
+        'items': results,
+        'next_cursor': (
+            encode_cursor('recordings', sort, next_cursor[0], next_cursor[1])
+            if next_cursor else None
+        ),
+    }
 
 
 @router.get('/api/recordings/timeline')
