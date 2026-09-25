@@ -87,15 +87,145 @@ function startPageInterval(fn, intervalMs) {
 const _dayglePagePollers = new Set();
 let _daygleVisibilityBound = false;
 
+// Tracks pollers whose current tick has not settled yet. A poll that takes
+// longer than its own period used to stack: every interval fired a new
+// request while the previous one was still awaiting, so a slow /api/stats
+// built an unbounded pile of concurrent requests that all raced to write the
+// same DOM node, and the last to arrive - not the newest - won. A tick is
+// now skipped while its predecessor is in flight, which bounds concurrency
+// to one per poller and guarantees the write that lands is the newest one.
+const _dayglePollerBusy = new Set();
+
 function _runDayglePagePoller(fn) {
   if (document.hidden) return;
+  if (_dayglePollerBusy.has(fn)) return;
   const result = fn();
-  if (result && typeof result.catch === 'function') result.catch(() => {});
+  if (!result || typeof result.then !== 'function') return;
+  _dayglePollerBusy.add(fn);
+  // Swallow the rejection (matching the pre-existing `.catch(() => {})` the
+  // call sites used to add by hand) but ALWAYS clear the busy flag in a
+  // finally, so one failed poll cannot wedge a poller forever. A synchronous
+  // throw still surfaces in the console instead of being silently swallowed.
+  Promise.resolve(result)
+    .catch(() => {})
+    .finally(() => _dayglePollerBusy.delete(fn));
 }
 
 function _resumeDayglePagePollers() {
   if (document.hidden) return;
   for (const fn of _dayglePagePollers) _runDayglePagePoller(fn);
+}
+
+// ─── Request cancellation, coalescing and backoff ─────────────────────────
+// Item 14 of the performance roadmap. Three problems, one root cause: the
+// dashboard re-requests the same resources on a timer and has no way to tell
+// the browser to stop work it no longer needs.
+//
+//   1. Superseded responses. A poll that is replaced before it returns can
+//      still land afterwards and overwrite fresher DOM with staler data. The
+//      abort signal makes the browser discard it; the sequence guard makes the
+//      discard correct even when a caller ignores the signal.
+//   2. Duplicate concurrent GETs. Several components independently ask for the
+//      same endpoint; the in-flight registry lets them share one response
+//      instead of one response per component.
+//   3. Overlapping intervals. Handled above in `_runDayglePagePoller`.
+//
+// Cancellations are reported as the REQUEST_SUPERSEDED sentinel rather than a
+// rejection: superseding a request is the normal, expected outcome of the
+// "latest wins" pattern, not an error, and throwing it would force every
+// caller into a `.catch` that hides genuine failures. A real error still
+// rejects.
+
+// Resolves with REQUEST_SUPERSEDED when a newer call for the same coalescer
+// started before this one finished. Symbol-keyed so it can never collide with
+// a legitimate API payload.
+const REQUEST_SUPERSEDED = Symbol('daygle.requestSuperseded');
+
+// True for the DOMException a real fetch() raises on abort, across the
+// browser (`name`) and Node (`code` 20 / 'ABORT_ERR') spellings. Guards against
+// a caller that swallows its own AbortController signal and throws something
+// else: the sequence check in createRequestCoalescer still catches that case,
+// but recognising the error keeps the two mechanisms consistent.
+//
+// No eslint-disable marker here (unlike its siblings): isAbortError is called
+// by createRequestCoalescer below, so it is genuinely used in this file and a
+// no-unused-vars suppression would itself be flagged as an unused directive.
+// It is still exported for later scripts via WEB_SHARED_GLOBALS.
+function isAbortError(error) {
+  if (!error || typeof error !== 'object') return false;
+  if (error.name === 'AbortError') return true;
+  const code = error.code ?? error.errno;
+  return code === 20 || code === 'ABORT_ERR';
+}
+
+// Returns a runner that enforces "latest frame wins" for one logical resource.
+//
+//   const run = createRequestCoalescer();
+//   async function refresh() {
+//     const data = await run((signal) => api('/api/stats', { signal }));
+//     if (data === REQUEST_SUPERSEDED) return;   // a newer refresh took over
+//     render(data);
+//   }
+//
+// Each call aborts the previous one and takes a new sequence ticket. Two
+// independent guards, because either alone has a hole:
+//   * the abort stops the wasted network work, but a caller that ignores
+//     `signal` (or a response already in the browser's cache) can still
+//     resolve normally - the ticket check catches that;
+//   * the ticket stops a stale DOM write, but does not free the connection.
+//
+// When AbortController is unavailable the abort is skipped and the ticket
+// guard alone still provides the correctness half of the guarantee.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function createRequestCoalescer() {
+  let controller = null;
+  let sequence = 0;
+  return function runLatest(task) {
+    if (controller && typeof AbortController === 'function') {
+      try { controller.abort(); } catch (_err) { /* an already-aborted signal is fine */ }
+    }
+    const own = typeof AbortController === 'function' ? new AbortController() : null;
+    controller = own;
+    const ticket = (sequence += 1);
+    let pending;
+    try {
+      pending = Promise.resolve(task(own ? own.signal : undefined));
+    } catch (err) {
+      // A synchronous throw from the task must not leave the coalescer wedged
+      // with a controller that will never settle.
+      pending = Promise.reject(err);
+    }
+    return pending
+      .then(
+        (value) => (ticket === sequence ? value : REQUEST_SUPERSEDED),
+        (err) => {
+          if (ticket !== sequence || isAbortError(err)) return REQUEST_SUPERSEDED;
+          throw err;
+        },
+      )
+      .finally(() => {
+        if (controller === own) controller = null;
+      });
+  };
+}
+
+// Exponential backoff for a repeating poller, with full jitter around the
+// nominal delay. Jitter matters because every open dashboard tab that loses
+// the network at the same moment would otherwise retry in lockstep forever and
+// keep the backend pinned. `attempt` is 0-based; the result is clamped to
+// maxMs so a long outage cannot schedule a retry hours out. Pass jitter: 0
+// for a deterministic delay (tests).
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function backoffDelayMs(attempt, options = {}) {
+  const baseMs = Number.isFinite(options.baseMs) ? options.baseMs : 1000;
+  const factor = Number.isFinite(options.factor) ? options.factor : 2;
+  const maxMs = Number.isFinite(options.maxMs) ? options.maxMs : 30000;
+  const jitter = Number.isFinite(options.jitter) ? options.jitter : 0.2;
+  const step = Math.max(0, Math.floor(Number(attempt) || 0));
+  const capped = Math.min(maxMs, baseMs * factor ** step);
+  if (!(jitter > 0)) return Math.round(capped);
+  const spread = capped * jitter;
+  return Math.round(Math.max(0, capped - spread + Math.random() * spread * 2));
 }
 
 // ─── Tabbed section navigation (settings + onnx pages) ─────────────────────
@@ -233,7 +363,9 @@ function handleSessionLoss(reason, returnTo) {
   }, 250);
 }
 
-async function api(path, options = {}) {
+// The single uncached request path. Split out from api() so the in-flight
+// registry below can wrap it without duplicating the auth/CSRF/retry logic.
+async function apiOnce(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   // Attach the CSRF token only for state-changing verbs; GETs don't need it.
   const method = (options.method || 'GET').toUpperCase();
@@ -289,6 +421,37 @@ async function api(path, options = {}) {
     throw new Error((payload && payload.detail) || `Request failed: ${response.status}`);
   }
   return payload || {};
+}
+
+// In-flight GETs, keyed by request path. Two components asking for the same
+// endpoint at the same time share one response: on the dashboard that is the
+// normal case, not an edge case, because each page polls several resources
+// that several widgets render.
+//
+// NOTE the aliasing this implies: every sharer receives the SAME parsed
+// object, so a caller that mutates a response in place would be visible to the
+// other sharers. Dashboard code treats API payloads as read-only, and cloning
+// each response per sharer would reintroduce the parse cost this avoids. A
+// caller that needs to mutate should copy first.
+const _daygleInFlightGets = new Map();
+
+async function api(path, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  // Only bare GETs are shareable. A caller-supplied signal means the caller
+  // owns this request's lifetime (it may be aborted individually), and
+  // mutating verbs are never idempotent to share.
+  if (method !== 'GET' || options.signal) return apiOnce(path, options);
+  const inFlight = _daygleInFlightGets.get(path);
+  if (inFlight) return inFlight;
+  const pending = apiOnce(path, options);
+  _daygleInFlightGets.set(path, pending);
+  try {
+    return await pending;
+  } finally {
+    // Idempotent: the first settle removes the entry and later settles (from
+    // other sharers running this same finally) find nothing to remove.
+    if (_daygleInFlightGets.get(path) === pending) _daygleInFlightGets.delete(path);
+  }
 }
 window.api = api;
 

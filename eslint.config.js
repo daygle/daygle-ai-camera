@@ -49,6 +49,14 @@ const WEB_SHARED_GLOBALS = {
   // formatters, detection-pill/summary builders, auth/CSRF plumbing, DOM
   // utilities).
   api: 'readonly',
+  // web/utils.js - request cancellation/coalescing/backoff helpers (Item 14).
+  // Polling pages use createRequestCoalescer to enforce "latest wins" and
+  // backoffDelayMs to back off after a network error; REQUEST_SUPERSEDED is the
+  // sentinel a superseded call resolves with.
+  REQUEST_SUPERSEDED: 'readonly',
+  backoffDelayMs: 'readonly',
+  createRequestCoalescer: 'readonly',
+  isAbortError: 'readonly',
   cameraLabel: 'readonly',
   collectRecordingFaceIdentities: 'readonly',
   continuousPill: 'readonly',
