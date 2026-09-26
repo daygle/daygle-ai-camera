@@ -52,6 +52,16 @@ test('dynamic values are escaped before HTML interpolation', () => {
     `unescaped interpolations: ${interpolations.filter((expr) => !allowed.includes(expr)).join(' | ')}`);
 });
 
+test('the actions cell does not reuse the page-level button-row bar', () => {
+  // .button-row inside .page-stack draws a border-top rule (plus padding, a
+  // right-aligned layout and a 130px min button width), which rendered a stray
+  // divider above every Assign button in the table.
+  assert.match(source, /<td class="camera-model-actions">/);
+  assert.doesNotMatch(source, /<td class="button-row"/);
+  assert.match(html, /\.camera-model-actions \{ display: flex;/);
+  assert.match(html, /\.camera-model-actions button \{ min-width: 0; \}/);
+});
+
 test('nav links the Camera Models page under Intelligence', () => {
   assert.match(nav, /\{ href: '\/camera-models', match: '\/camera-models', label: 'Camera Models' \}/);
   assert.ok(nav.indexOf('/camera-models') > nav.indexOf('/onnx'));

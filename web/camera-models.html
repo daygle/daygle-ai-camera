@@ -12,6 +12,11 @@
        full-width inside its cell so long model labels stay readable. */
     .camera-model-select { width: 100%; max-width: 320px; }
     .camera-model-source { display: inline-flex; align-items: center; gap: 6px; }
+    /* Actions cell. Deliberately NOT .button-row: that class is the page-level
+       action bar, and inside .page-stack it draws a border-top rule plus extra
+       padding, which put a stray divider above the button in every table row. */
+    .camera-model-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .camera-model-actions button { min-width: 0; }
   </style>
 </head>
 <body>

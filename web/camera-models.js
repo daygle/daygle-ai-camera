@@ -60,7 +60,7 @@ function renderCameras() {
       <td><strong>${escapeHtml(camera.name || camera.id)}</strong><br /><span class="muted">${escapeHtml(camera.id)}</span></td>
       <td><span class="camera-model-source">${currentBadge}${missingNote}</span></td>
       <td><select class="camera-model-select" aria-label="Model for ${escapeHtml(camera.name || camera.id)}">${selectOptions(assignmentPayload.models || [], assigned ? camera.model_path : '')}</select></td>
-      <td class="button-row">${actions}</td>
+      <td class="camera-model-actions">${actions}</td>
     </tr>`;
   }).join('');
 }
