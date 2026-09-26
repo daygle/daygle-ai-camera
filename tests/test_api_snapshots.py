@@ -365,3 +365,56 @@ def test_snapshots_page_serves_for_authenticated_user(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_snapshot_image_thumb_variant_downscales(tmp_path, monkeypatch):
+    """``GET /api/events/{id}/snapshot?thumb=1`` serves a downscaled frame.
+
+    The Snapshots gallery renders 208px-wide thumbnails but used to fetch -
+    and annotate - the full-resolution frame for every row, which is what made
+    the page slow to fill. The thumb variant downscales before drawing (one
+    decode/encode, a fraction of the bytes); the plain URL keeps serving the
+    full-size frame for the row's "Open" action.
+    """
+    import pytest
+    cv2 = pytest.importorskip('cv2')
+    np = pytest.importorskip('numpy')
+
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        _login(admin)
+        # Noise, not a flat frame: a solid image compresses so well that the
+        # size comparison below would pass for the wrong reason.
+        frame = np.random.default_rng(0).integers(0, 255, size=(720, 1280, 3), dtype=np.uint8)
+        ok, encoded = cv2.imencode('.jpg', frame)
+        assert ok
+        snapshot_path = main.storage.save_image_snapshot(encoded.tobytes(), 'wide.jpg')
+        event_id = main.database.add_event(
+            created_at=datetime.now(timezone.utc).isoformat(),
+            source='motion',
+            snapshot_path=snapshot_path,
+            detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.5, 'height': 0.5}}],
+            metadata={'camera_id': 'front'},
+        )
+
+        status, _headers, full_bytes = admin.request(f'/api/events/{event_id}/snapshot')
+        assert status == 200
+        status, _headers, thumb_bytes = admin.request(f'/api/events/{event_id}/snapshot?thumb=1')
+        assert status == 200
+
+        def width_of(jpeg_bytes):
+            image = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+            assert image is not None, 'the endpoint must return a decodable JPEG'
+            return image.shape[1]
+
+        assert width_of(full_bytes) == 1280, 'the plain URL keeps serving full resolution'
+        assert width_of(thumb_bytes) == 416, 'the thumb variant is downscaled to the gallery width'
+        assert len(thumb_bytes) < len(full_bytes), 'the thumb must be cheaper to ship than the full frame'
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

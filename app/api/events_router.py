@@ -15,6 +15,11 @@ from app.pagination import decode_cursor, encode_cursor
 
 router = APIRouter()
 
+# Gallery rows render the frame at 208 CSS px (2x for a retina display), so a
+# ``?thumb=1`` request downscales to this width instead of pushing a
+# full-resolution frame through the annotate/encode path for every row.
+SNAPSHOT_THUMB_MAX_WIDTH = 416
+
 
 def _scope_event_recordings(event: dict, user: dict) -> dict | None:
     """Hide recordings owned by another user from event payloads.
@@ -96,6 +101,7 @@ def event_snapshot(
     event_id: int,
     request: Request,
     boxes: bool = Query(True, description='Draw green detection boxes on the snapshot (as in alert emails).'),
+    thumb: bool = Query(False, description='Downscale to a gallery thumbnail (416px wide) instead of full resolution.'),
     db=Depends(get_database),
 ):
     """Serve the event's saved snapshot, annotated with the same green
@@ -117,24 +123,25 @@ def event_snapshot(
     if snapshot_path is None or not snapshot_path.exists() or not snapshot_path.is_file():
         raise HTTPException(status_code=404, detail='Event snapshot not found')
     raw_bytes = snapshot_path.read_bytes()
-    if boxes:
-        overlay_detections = filter_object_priority_detections([
-            {
-                'label': detection.get('label'),
-                'confidence': detection.get('confidence'),
-                'box': {
-                    'x': detection.get('x'),
-                    'y': detection.get('y'),
-                    'width': detection.get('width'),
-                    'height': detection.get('height'),
-                },
-                'motion_event': detection.get('motion_event', False),
-            }
-            for detection in (event.get('detections') or [])
-        ])
-        image_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
-    else:
-        image_bytes = raw_bytes
+    overlay_detections = filter_object_priority_detections([
+        {
+            'label': detection.get('label'),
+            'confidence': detection.get('confidence'),
+            'box': {
+                'x': detection.get('x'),
+                'y': detection.get('y'),
+                'width': detection.get('width'),
+                'height': detection.get('height'),
+            },
+            'motion_event': detection.get('motion_event', False),
+        }
+        for detection in (event.get('detections') or [])
+    ]) if boxes else []
+    image_bytes = render_live_snapshot_jpeg_overlay(
+        raw_bytes,
+        overlay_detections,
+        max_width=SNAPSHOT_THUMB_MAX_WIDTH if thumb else None,
+    )
     return Response(
         content=image_bytes,
         media_type='image/jpeg',

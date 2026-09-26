@@ -141,9 +141,25 @@ def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, A
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">\n  <defs>\n    <linearGradient id="camera-bg" x1="0" x2="1" y1="0" y2="1">\n      <stop offset="0" stop-color="#101827" />\n      <stop offset="0.52" stop-color="#0b1220" />\n      <stop offset="1" stop-color="#17223a" />\n    </linearGradient>\n    <radialGradient id="lens" cx="50%" cy="45%" r="68%">\n      <stop offset="0" stop-color="#47d6ff" stop-opacity="0.22" />\n      <stop offset="0.5" stop-color="#8b5cf6" stop-opacity="0.1" />\n      <stop offset="1" stop-color="#070b13" stop-opacity="0" />\n    </radialGradient>\n    <style>\n      .grid line {{ stroke: rgba(255,255,255,.08); stroke-width: 1; }}\n      .hud {{ fill: #edf3ff; font: 700 26px Inter, Arial, sans-serif; letter-spacing: .04em; }}\n      .muted {{ fill: #91a1ba; font: 700 20px Inter, Arial, sans-serif; }}\n      .monitor-zone polygon {{ fill: rgba(71,214,255,.08); stroke: #47d6ff; stroke-width: 3; stroke-dasharray: 12 10; }}\n      .monitor-zone text {{ fill: #47d6ff; font: 800 20px Inter, Arial, sans-serif; paint-order: stroke; stroke: rgba(7,11,19,.86); stroke-width: 4; stroke-linejoin: round; }}\n      .detection-box rect {{ fill: rgba(73,230,163,.08); stroke: #49e6a3; stroke-width: 4; rx: 18; }}\n      .detection-box text {{ fill: #49e6a3; font: 800 24px Inter, Arial, sans-serif; paint-order: stroke; stroke: rgba(7,11,19,.86); stroke-width: 5; stroke-linejoin: round; }}\n    </style>\n  </defs>\n  <rect width="100%" height="100%" fill="url(#camera-bg)" />\n  <rect width="100%" height="100%" fill="url(#lens)" />\n  <g class="grid">{''.join(grid_lines)}</g>\n  <circle cx="{width * 0.74:.1f}" cy="{height * 0.34:.1f}" r="{min(width, height) * 0.16:.1f}" fill="none" stroke="rgba(71,214,255,.16)" stroke-width="3" />\n  <circle cx="{width * 0.28:.1f}" cy="{height * 0.62:.1f}" r="{min(width, height) * 0.12:.1f}" fill="none" stroke="rgba(139,92,246,.16)" stroke-width="3" />\n  {''.join(zone_markup)}\n  {''.join(detection_markup)}\n  <rect x="24" y="24" width="520" height="116" rx="20" fill="rgba(7,11,19,.58)" stroke="rgba(255,255,255,.12)" />\n  <text x="48" y="70" class="hud">{escape(camera_name).upper()}</text>\n  <text x="48" y="112" class="muted">Frame #{frame_number} · {timestamp} · Overlay {overlay_state}</text>\n</svg>'''
 
 
-def render_live_snapshot_jpeg_overlay(image_bytes: bytes, detections: list[dict[str, Any]]) -> bytes:
+def render_live_snapshot_jpeg_overlay(
+    image_bytes: bytes,
+    detections: list[dict[str, Any]],
+    *,
+    max_width: int | None = None,
+) -> bytes:
+    """Return the frame with detection boxes drawn on it.
+
+    ``max_width`` downscales the frame before the boxes are drawn, so a
+    thumbnail request decodes and encodes exactly once and ships a fraction of
+    the bytes (the Snapshots gallery renders 208px-wide thumbs from
+    full-resolution frames). Box coordinates are normalized, so the overlay
+    lands correctly at any size. Callers that want the original frame pass
+    nothing.
+    """
     detections = filter_object_priority_detections(detections)
-    if not detections:
+    # Nothing to draw AND nothing to resize: hand the original bytes back so
+    # the common case never pays for a decode/encode round trip.
+    if not detections and not max_width:
         return image_bytes
     try:
         import cv2
@@ -155,6 +171,14 @@ def render_live_snapshot_jpeg_overlay(image_bytes: bytes, detections: list[dict[
     if image is None:
         return image_bytes
     height, width = image.shape[:2]
+    if max_width and width > max_width:
+        scale = max_width / width
+        image = cv2.resize(
+            image,
+            (int(max_width), max(1, int(round(height * scale)))),
+            interpolation=cv2.INTER_AREA,
+        )
+        height, width = image.shape[:2]
     for detection in detections:
         if detection.get('alert_matched') is False and detection.get('alert_triggered') is False:
             continue

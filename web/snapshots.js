@@ -288,6 +288,10 @@ function snapshotRow(event) {
     ? '<span class="detection detection-alert" title="An alert notification was fired for this event">🔔 Alert</span>'
     : '';
   const snapshotUrl = `/api/events/${encodeURIComponent(event.id)}/snapshot`;
+  // The gallery renders a 208px-wide thumb, so ask for the downscaled variant:
+  // annotating and shipping a full-resolution frame per row is what made this
+  // page slow to fill. The Open action still links the full-size image.
+  const snapshotThumbUrl = `${snapshotUrl}?thumb=1`;
   const actions = [];
   // Deleting a snapshot is an admin action (the backend requires admin).
   if (window.daygleAuth?.user?.role === 'admin') {
@@ -297,7 +301,7 @@ function snapshotRow(event) {
   return `
     <article class="snapshot-row ${typeClass}" data-snapshot-row="${escapeHtml(String(event.id))}">
       <a class="snapshot-row-thumb" href="${snapshotUrl}" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(event.id))}">
-        <img src="${snapshotUrl}" alt="Snapshot for event ${escapeHtml(String(event.id))} on ${escapeHtml(camera)}" loading="lazy" onerror="this.remove()" />
+        <img class="lazy-media" src="${snapshotThumbUrl}" alt="Snapshot for event ${escapeHtml(String(event.id))} on ${escapeHtml(camera)}" loading="lazy" onerror="this.remove()" />
       </a>
       <div class="snapshot-row-body">
         <div class="snapshot-row-head">
@@ -357,8 +361,6 @@ function renderGallery(snapshots) {
   // offscreen thumbnails release their decoded bitmaps (the lazy-media class
   // lets the observer drop src without a refetch on return).
   renderIncrementally(els.gallery, snapshots, snapshotRow, {
-    wrapperTag: 'div',
-    wrapperClass: 'daygle-render-batch',
     onComplete: () => {
       bindDeleteButtons();
       observeMediaLifecycle(els.gallery);
