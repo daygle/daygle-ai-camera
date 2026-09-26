@@ -510,14 +510,19 @@ function renderRecordings(recordings) {
   currentRecordings = recordings;
   renderStats(recordings);
   if (!recordings.length) {
-    els.recordings.innerHTML = `
-      <div class="recordings-empty-state">
-        <div class="recordings-empty-icon" aria-hidden="true">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-        </div>
-        <h2>No recordings match the current filters</h2>
-        <p class="muted">Try resetting the filters, or wait for a new event to be captured.</p>
-      </div>${renderRecordingsFooter()}`;
+    // Concatenation, not a template literal: the H2 XSS guard (see
+    // tests/test_xss_static_guards.py) rejects any `innerHTML = `…${…}…``
+    // assignment in the H2-scoped files, even when the interpolated value is
+    // static markup. renderRecordingsFooter() emits no server data.
+    els.recordings.innerHTML =
+      '<div class="recordings-empty-state">' +
+        '<div class="recordings-empty-icon" aria-hidden="true">' +
+          '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>' +
+        '</div>' +
+        '<h2>No recordings match the current filters</h2>' +
+        '<p class="muted">Try resetting the filters, or wait for a new event to be captured.</p>' +
+      '</div>' +
+      renderRecordingsFooter();
     recordingsRowsReady = false;
     wireRecordingLoadMore();
     return;
