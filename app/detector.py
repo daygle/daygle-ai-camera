@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +112,13 @@ class OnnxYoloDetector:
     """
 
     backend = "onnx"
+
+    # Per-call preprocess / session / postprocess milliseconds, refreshed by
+    # every ``_run_inference``. Declared at class level so the attribute exists
+    # before the first inference and so duck-typed detectors elsewhere can be
+    # sampled with a plain ``getattr(detector, 'last_timing', None)`` without a
+    # hasattr dance at every call site.
+    last_timing: dict[str, float] = {}
 
     def __init__(
         self,
@@ -603,6 +611,17 @@ class OnnxYoloDetector:
         return self._run_inference(self._decode_image(image_bytes), confidence)
 
     def _run_inference(self, image: Any, confidence: float | None) -> list[dict[str, Any]]:
+        """Preprocess, run the session, postprocess -- timing each step.
+
+        ``last_timing`` is refreshed on every call with the millisecond cost of
+        each of the three steps. It is deliberately a plain attribute written
+        with a single rebind rather than three in-place mutations, so a reader
+        that samples it concurrently always sees a self-consistent snapshot of
+        one inference rather than a torn mix of two. Callers that do not care
+        (the whole of ``app/detector.py`` itself, the benchmark script) pay one
+        dict construction and three ``perf_counter`` reads per cycle.
+        """
+        started = time.perf_counter()
         effective_confidence = confidence if confidence is not None else self.confidence
         # Never run inference below the noise floor: a near-zero threshold
         # (a rule or the global AI confidence set at ~0) would otherwise let
@@ -612,6 +631,7 @@ class OnnxYoloDetector:
         if effective_confidence < _MIN_DETECTION_CONFIDENCE:
             effective_confidence = _MIN_DETECTION_CONFIDENCE
         input_tensor, scale, pad_x, pad_y, original_width, original_height = self._preprocess(image)
+        preprocess_seconds = time.perf_counter() - started
         # Cap concurrent inferences so parallel callers (per-camera background
         # detection + live overlay) don't oversubscribe the CPU and slow each other.
         with self._inference_semaphore:
@@ -623,7 +643,20 @@ class OnnxYoloDetector:
                 outputs = self._run_inference_io_bound(input_tensor)
             else:
                 outputs = self.session.run(self.output_names, {self.input_name: input_tensor})  # type: ignore[union-attr,index]
-        return self._postprocess(outputs[0], scale, pad_x, pad_y, original_width, original_height, effective_confidence)
+        # The session call above also waited on the inference semaphore, so this
+        # number includes the wait a contended camera actually experienced --
+        # which is the cost a cycle budget should be charged for.
+        inference_seconds = time.perf_counter() - started - preprocess_seconds
+        detections = self._postprocess(
+            outputs[0], scale, pad_x, pad_y, original_width, original_height,
+            effective_confidence,
+        )
+        self.last_timing = {
+            'preprocess_ms': round(preprocess_seconds * 1000.0, 3),
+            'inference_ms': round(inference_seconds * 1000.0, 3),
+            'postprocess_ms': round((time.perf_counter() - started - preprocess_seconds - inference_seconds) * 1000.0, 3),
+        }
+        return detections
 
     def _run_inference_io_bound(self, input_tensor: np.ndarray) -> list[np.ndarray]:
         """Run inference via ORT's ``io_binding`` API (CUDA-only path).

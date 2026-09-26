@@ -12,6 +12,8 @@ from app.config_facades import get_camera_config
 from app.deps import get_recording_service
 from app.detection_status import live_detection_status_payload
 from app.detection_telemetry import detection_telemetry_payload
+from app.pipeline_timing import pipeline_timing_payload
+from app.postprocess_pool import pool_stats as postprocess_pool_stats
 from app.utils import build_stream_url
 from app.zone_detection import get_camera_instance
 
@@ -73,6 +75,40 @@ def live_detection_telemetry_api(request: Request, camera_id: str | None = None)
     """
     require_user(request)
     return detection_telemetry_payload(camera_id)
+
+
+@router.get('/api/live/pipeline-timing')
+def live_pipeline_timing_api(request: Request, camera_id: str | None = None):
+    """Per-stage latency breakdown for the live detection cycle.
+
+    Reports p50/p95/max/mean milliseconds for every pipeline stage (motion
+    scoring, preprocess, ONNX inference, NMS, tracking, filtering,
+    confirmation, face identity, zone matching, alerts, event persistence),
+    plus the frame-read time sampled before the cycle begins.
+
+    ``unaccounted`` is the gap between the measured cycle and the sum of its
+    stages. It is the roadmap's "p95 cycle overhead < 10 ms" acceptance target
+    and doubles as a completeness alarm for this instrumentation: a persistent
+    gap means a stage is still unmeasured, so the breakdown is not yet safe to
+    act on.
+
+    The postprocess worker pools and the inference scheduler ride along in
+    ``pools`` / ``scheduler`` because the three answer one question -- "is the
+    live pipeline slow, and if so is it the model, the queue, or the work behind
+    it?" -- and an operator should not have to correlate three endpoints to see
+    it. Without ``camera_id`` the stage percentiles pool every camera's samples
+    and ``by_camera`` keeps the per-camera view.
+    """
+    require_user(request)
+    payload = pipeline_timing_payload(camera_id)
+    payload['pools'] = postprocess_pool_stats()
+    try:
+        from app.live_monitor import get_live_inference_scheduler
+
+        payload['scheduler'] = get_live_inference_scheduler().stats()
+    except Exception:  # noqa: BLE001 - diagnostics must never break the page
+        payload['scheduler'] = None
+    return payload
 
 
 @router.get('/api/live/snapshot')

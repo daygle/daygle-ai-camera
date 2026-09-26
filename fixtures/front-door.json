@@ -1,0 +1,501 @@
+{
+  "version": 1,
+  "name": "front-door",
+  "synthetic": true,
+  "description": "A porch camera at 0.5 s cadence. Frames 0-11 are an empty, established scene so the background model has something to learn; frames 12-41 walk a subject left across the doorway at constant speed (about 0.0128 of the frame width per frame); frames 42-47 are empty again. The lead-in and follow-through are the point: a gate tuned only on positives hides the false-positive behaviour that the empty frames are there to measure.",
+  "frame_count": 48,
+  "frames": [
+    {
+      "index": 0,
+      "objects": []
+    },
+    {
+      "index": 1,
+      "objects": []
+    },
+    {
+      "index": 2,
+      "objects": []
+    },
+    {
+      "index": 3,
+      "objects": []
+    },
+    {
+      "index": 4,
+      "objects": []
+    },
+    {
+      "index": 5,
+      "objects": []
+    },
+    {
+      "index": 6,
+      "objects": []
+    },
+    {
+      "index": 7,
+      "objects": []
+    },
+    {
+      "index": 8,
+      "objects": []
+    },
+    {
+      "index": 9,
+      "objects": []
+    },
+    {
+      "index": 10,
+      "objects": []
+    },
+    {
+      "index": 11,
+      "objects": []
+    },
+    {
+      "index": 12,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.55,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 13,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.537,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 14,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.524,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 15,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.512,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 16,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.499,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 17,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.486,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 18,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.473,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 19,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.461,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 20,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.448,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 21,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.435,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 22,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.422,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 23,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.41,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 24,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.397,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 25,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.384,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 26,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.371,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 27,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.359,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 28,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.346,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 29,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.333,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 30,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.32,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 31,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.308,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 32,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.295,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 33,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.282,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 34,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.269,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 35,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.257,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 36,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.244,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 37,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.231,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 38,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.218,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 39,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.206,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 40,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.193,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 41,
+      "objects": [
+        {
+          "label": "person",
+          "box": [
+            0.18,
+            0.12,
+            0.16,
+            0.66
+          ]
+        }
+      ]
+    },
+    {
+      "index": 42,
+      "objects": []
+    },
+    {
+      "index": 43,
+      "objects": []
+    },
+    {
+      "index": 44,
+      "objects": []
+    },
+    {
+      "index": 45,
+      "objects": []
+    },
+    {
+      "index": 46,
+      "objects": []
+    },
+    {
+      "index": 47,
+      "objects": []
+    }
+  ]
+}

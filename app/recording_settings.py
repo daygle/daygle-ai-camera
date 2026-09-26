@@ -71,6 +71,7 @@ CAMERA_MOTION_PROFILE_FIELDS = (
     'detection_confirm_window',
     'detection_confirm_iou',
     'always_run_object_detection',
+    'adaptive_detection_enabled',
     'object_detection_region_boost',
     'object_detection_tiling',
     'periodic_scan_interval_seconds',
@@ -124,7 +125,8 @@ def _normalize_profile_value(key: str, value: Any) -> int | float | str | bool |
         return None
     if key in {
         'background_detection_enabled', 'always_run_object_detection',
-        'object_detection_region_boost', 'motion_denoise',
+        'adaptive_detection_enabled', 'object_detection_region_boost',
+        'motion_denoise',
     }:
         return normalize_bool_setting(value, True)
     if key == 'object_detection_tiling':

@@ -31,6 +31,25 @@ from app.detection_state import (
     record_live_detection_history,
 )
 from app.detection_status import _camera_has_live_alert_stream, update_live_detection_status
+from app.pipeline_timing import (
+    STAGE_ALERTS,
+    STAGE_BEHAVIOUR,
+    STAGE_CONFIRMATION,
+    STAGE_EVENT,
+    STAGE_FACE_IDENTITY,
+    STAGE_FACE_PASS,
+    STAGE_FILTERING,
+    STAGE_INFERENCE,
+    STAGE_MOTION,
+    STAGE_REGION_BOOST,
+    STAGE_TILING,
+    STAGE_TRACKING,
+    STAGE_ZONE_RULES,
+    StageTimer,
+    prune_pipeline_timing,
+    record_frame_read,
+    record_pipeline_cycle,
+)
 from app.detection_telemetry import (
     MODE_ALWAYS_ON,
     MODE_ERROR,
@@ -317,6 +336,18 @@ def read_live_detection_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | No
     a job that waited behind a backlog still processes the newest frame
     available rather than the one that existed when it was submitted.
     """
+    read_started = time.perf_counter()
+    try:
+        return _read_live_detection_frame(camera_id)
+    finally:
+        # Sampled here, outside the per-cycle timer, because this runs BEFORE
+        # the cycle begins. A slow read is an ingest/RTSP problem, not a stage
+        # of the detection pipeline, and conflating the two would make a starved
+        # camera look like a slow one.
+        record_frame_read(camera_id, (time.perf_counter() - read_started) * 1000.0)
+
+
+def _read_live_detection_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:
     sample = read_ingest_frame(camera_id)
     if sample is not None:
         return sample
@@ -458,6 +489,7 @@ def _prune_frame_motion_state() -> None:
         # A removed camera must not leave a permanent telemetry entry (or stale
         # behavioural presence) behind in the same pruning pass.
         prune_detection_telemetry(active_ids)
+        prune_pipeline_timing(active_ids)
         for cid in stale:
             clear_behavioural_state(cid)
         logger.debug('Pruned stale motion state for cameras: %s', stale)
@@ -755,6 +787,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             camera_id,
             inference_mode=MODE_SKIPPED_NO_DETECTOR,
         )
+        # A cycle that never reached the pipeline still happened: it is the
+        # frame the operator waited for, and a camera whose cycles are all
+        # 0ms is information (the AI gate is off), not a gap in the record.
+        # Total is 0 rather than the cost of the gate itself, because the gate
+        # runs ABOVE the pipeline and must not be charged to it.
+        record_pipeline_cycle(camera_id, {'stages': {}, 'total_ms': 0.0})
         return None
     if enforce_interval:
         now = time.time()
@@ -827,7 +865,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if periodic_scan_interval > 0 and now - _state._periodic_scan_last_ts.get(camera_id, 0) >= periodic_scan_interval:
         force_scan = True
         _state._periodic_scan_last_ts[camera_id] = now
+    _cycle_timer = StageTimer()
+    _motion_started = time.perf_counter()
     frame_has_motion, frame_motion_confidence, diff_mask, raw_motion_fraction = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha, algorithm=_algorithm, denoise=_denoise, shadow_suppression=_shadow_suppression, frame_size=(_frame_w, _frame_h))
+    _cycle_timer.add(STAGE_MOTION, (time.perf_counter() - _motion_started) * 1000.0)
     # Feed the adaptive-cadence tracker (Item 16). This is the only place that
     # knows whether the scene is still, so it is the only place that can keep
     # the per-camera quiet streak honest. Recorded on EVERY cycle, not just
@@ -868,6 +909,19 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _telemetry_candidates: dict[str, int] = {}
     _telemetry_rejected: dict[str, int] = {}
 
+    def _finish_pipeline_cycle(timer: StageTimer) -> dict[str, Any]:
+        """Seal a cycle: stamp the total, then store the stage breakdown.
+
+        The total is stamped LAST and from the live clock, so it covers every
+        stage plus the Python between them. That residue -- ``unaccounted_ms``
+        -- is reported alongside the breakdown, and its p95 is the roadmap's
+        "cycle overhead < 10 ms" acceptance target. A number that stays large
+        means a stage is still unmeasured, so the breakdown is not yet complete
+        enough to act on.
+        """
+        timer.mark_total(timer.elapsed_ms())
+        return record_pipeline_cycle(camera_id, timer)
+
     def _telemetry_finish(
         inference_mode: str,
         *,
@@ -887,6 +941,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             )
         except Exception as exc:  # noqa: BLE001 - telemetry must never break a cycle
             logger.debug('Detection telemetry failed for %s: %s', camera_id, exc)
+        _finish_pipeline_cycle(_cycle_timer)
     # A motion-gate error is not evidence of motion, but it must not suppress
     # the independent object-detection path: some callers provide detector-
     # compatible input that the optional motion decoder cannot parse. Keep the
@@ -976,18 +1031,30 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # so the motion event/recording path still runs. When ONNX is ready, this
     # branch is identical to the existing object-detection path.
     min_conf = compute_minimum_rule_confidence(camera_settings=settings)
+    _inference_started = time.perf_counter()
+    # Captured straight after the BASE detector call, not after the opt-in
+    # region-boost / tiling re-runs below: every extra pass overwrites
+    # ``detector.last_timing``, so reading it after them would report the cost
+    # of the last sub-inference as if it were the whole cycle's model time --
+    # and ``account_for`` replaces (not adds) the inference stage, so the
+    # base cost would silently vanish from the breakdown.
+    _base_inference_timing: Any = None
     try:
         if detector_ready and frame_is_numpy and hasattr(_state.detector, 'detect_frame'):
             detections = _state.detector.detect_frame(image, confidence=min_conf)
+            _base_inference_timing = getattr(_state.detector, 'last_timing', None)
+            _cycle_timer.add(STAGE_INFERENCE, (time.perf_counter() - _inference_started) * 1000.0)
             # Motion-region high-res boost (opt-in): re-run the detector zoomed
             # into the moving regions so small/distant subjects that vanish in
             # the full-frame downscale are recovered, then merge + de-dup. Safe
             # to call unconditionally -- it returns the base list when disabled,
             # when there is no diff mask, or when no region qualifies.
             if diff_mask is not None and region_boost_enabled(live_settings):
+                _boost_started = time.perf_counter()
                 detections = detect_with_region_boost(
                     _state.detector, image, diff_mask, detections, confidence=min_conf,
                 )
+                _cycle_timer.add(STAGE_REGION_BOOST, (time.perf_counter() - _boost_started) * 1000.0)
             # Tiled / sliced inference (opt-in): re-run the detector on a grid of
             # overlapping tiles covering the WHOLE frame every cycle, recovering
             # small subjects anywhere -- including stationary ones the
@@ -995,12 +1062,16 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             # shared IoU de-dup collapses any overlap.
             _tile_grid = tiling_grid(live_settings)
             if _tile_grid is not None:
+                _tiling_started = time.perf_counter()
                 detections = detect_with_tiling(
                     _state.detector, image, detections,
                     cols=_tile_grid[0], rows=_tile_grid[1], confidence=min_conf,
                 )
+                _cycle_timer.add(STAGE_TILING, (time.perf_counter() - _tiling_started) * 1000.0)
         elif detector_ready:
             detections = _state.detector.detect_image(image, confidence=min_conf)
+            _base_inference_timing = getattr(_state.detector, 'last_timing', None)
+            _cycle_timer.add(STAGE_INFERENCE, (time.perf_counter() - _inference_started) * 1000.0)
         else:
             detections = []
     except Exception as exc:
@@ -1021,10 +1092,17 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # The pass runs on its own clock (face_detection_interval_seconds) and not
     # at all when nothing on this camera consumes a face detection, so object
     # detection keeps its full cadence and its sub-second alert latency.
+    # The detector's own preprocess / ONNX session / NMS split refines the single
+    # ``STAGE_INFERENCE`` bracket above. It is read with getattr because the
+    # detector is duck-typed: a stub, an alternative provider, or a build
+    # without the breakdown simply contributes no extra stages.
+    _cycle_timer.account_for(_base_inference_timing)
+    _face_started = time.perf_counter()
     detections = merge_secondary_face_detections(
         image, detections,
         camera_id=camera_id, settings=settings, live_settings=live_settings,
     )
+    _cycle_timer.add(STAGE_FACE_PASS, (time.perf_counter() - _face_started) * 1000.0)
     detections = normalize_detection_boxes_for_frame(detections, frame)
     _telemetry_candidates['detected'] = len(detections)
     # Stamp stable track ids on EVERY detection BEFORE the moving/still filter so
@@ -1041,7 +1119,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # confirmation, recording, dwell, and face amortisation. It annotates in
     # place -- it never adds or drops detections -- so it cannot change what any
     # downstream gate counts.
+    _tracking_started = time.perf_counter()
     detections = update_object_tracks(camera_id, detections)
+    _cycle_timer.add(STAGE_TRACKING, (time.perf_counter() - _tracking_started) * 1000.0)
+    _behaviour_started = time.perf_counter()
     # Behavioural engines consume tracked geometry, so pause them while the
     # camera-motion guard is active.  Otherwise PTZ/ego-motion displacement can
     # be interpreted as a subject crossing, dwelling, or appearing at an unusual
@@ -1075,6 +1156,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # thresholds) drive both the still/moving filter and the still-dwell
     # tracker below, so resolve them once per cycle rather than reading the
     # ``objects`` DB setting twice on this ~4 Hz hot path.
+    _cycle_timer.add(STAGE_BEHAVIOUR, (time.perf_counter() - _behaviour_started) * 1000.0)
     object_settings = effective_object_settings()
     # Classify moving/still ONCE for this cycle and stamp it on each detection.
     # Both ``still_dwell_candidates`` and ``filter_detections_by_motion_mode``
@@ -1100,6 +1182,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # is moving, otherwise still (no mask -> still). Motion-zone rules (Layer
     # 3) are a separate pixel-diff axis and are unaffected. Surviving
     # detections carry a ``motion_state`` annotation for overlays/status.
+    _filtering_started = time.perf_counter()
     _detected_count = len(detections)
     detections = filter_detections_by_motion_mode(
         detections, diff_mask, object_settings,
@@ -1109,6 +1192,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _telemetry_rejected[REJECT_MOTION_MODE] = max(
         0, _detected_count - len(detections),
     )
+    _cycle_timer.add(STAGE_FILTERING, (time.perf_counter() - _filtering_started) * 1000.0)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     _camera_scope_input = len(detections)
     object_detections = filter_detections_for_camera(detections, settings)
@@ -1137,11 +1221,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # around the frame each cycle (rain/snow streaks, IR sensor noise, foliage).
     _confirm_iou = live_settings.get('detection_confirm_iou', 0.0)
     _confirm_input = len(object_detections)
+    _confirm_started = time.perf_counter()
     object_detections = confirm_object_detections(
         camera_id, object_detections,
         required_frames=_confirm_frames, window_frames=_confirm_window,
         location_iou=_confirm_iou,
     )
+    _cycle_timer.add(STAGE_CONFIRMATION, (time.perf_counter() - _confirm_started) * 1000.0)
     _telemetry_candidates['after_confirmation'] = len(object_detections)
     _telemetry_rejected[REJECT_CONFIRMATION] = max(
         0, _confirm_input - len(object_detections),
@@ -1175,7 +1261,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             recognition_frame = None
     else:
         recognition_frame = None
+    _identity_started = time.perf_counter()
     object_detections = annotate_face_identities(camera_id, object_detections, recognition_frame)
+    _cycle_timer.add(STAGE_FACE_IDENTITY, (time.perf_counter() - _identity_started) * 1000.0)
     # Zone-stamp faces so People rules can be scoped: a face inside an enabled
     # zone carries that zone's id, and scoped rules (_unknown:<zone>, per-person
     # rules with camera_id/zone_id) fire only for faces stamped accordingly.
@@ -1289,7 +1377,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         _telemetry_rejected[REJECT_CAMERA_MOTION] = max(
             0, len(object_detections) - len(alertable_object_detections),
         )
+    _zone_started = time.perf_counter()
     object_alert_detections = zone_alert_detections(settings, alertable_object_detections) if _zone_match_needed else list(alertable_object_detections)
+    _cycle_timer.add(STAGE_ZONE_RULES, (time.perf_counter() - _zone_started) * 1000.0)
     if _zone_match_needed:
         _telemetry_rejected[REJECT_ZONE] = max(
             0, len(alertable_object_detections) - len(object_alert_detections),
@@ -1326,7 +1416,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         _telemetry_finish(_telemetry_mode)
         return None
+    _alerts_started = time.perf_counter()
     triggered = _state.alerts.process(alert_detections, rules=zone_rules)
+    _cycle_timer.add(STAGE_ALERTS, (time.perf_counter() - _alerts_started) * 1000.0)
     # Dwell alerts are first-class in-app alerts added directly to ``triggered``
     # (they fire once per still streak by construction, so a zone-style rule
     # with cooldowns would either flood alerts or risk being skipped). The
@@ -1487,6 +1579,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         _telemetry_finish(_telemetry_mode)
         return None
     event_time = frame_capture_time
+    _event_started = time.perf_counter()
     if frame_is_numpy:
         image_bytes = _encode_frame_jpeg(image)
     else:
@@ -1501,6 +1594,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         alert_rows.append({'created_at': datetime.now(timezone.utc).isoformat(), 'rule_name': alert['rule_name'], 'label': alert['label'], 'confidence': alert['confidence'], 'message': alert['message']})
     event_id = _state.database.add_event_with_alerts(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, detections=recording_detections, alerts=alert_rows, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream', **face_identity_metadata(recording_detections)})
     recording_id = attach_event_recording(event_id, event_time, 'rtsp', recording_detections, camera_id=camera_id, recording_config=camera_recording_config)
+    _cycle_timer.add(STAGE_EVENT, (time.perf_counter() - _event_started) * 1000.0)
     # Remember the event even when no recording attached: the debounce state
     # must advance for alert-only events too, otherwise the next cycle (which
     # sees the same labels) is not suppressed and the timeline floods with

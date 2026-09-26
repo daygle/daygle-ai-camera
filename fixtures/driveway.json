@@ -1,0 +1,793 @@
+{
+  "version": 1,
+  "name": "driveway",
+  "synthetic": true,
+  "description": "A wide driveway camera at 0.5 s cadence, deliberately built around the cases that separate a good setting from a bad one. Frames 0-9 are empty. A car drives in over frames 10-25 and then STOPS for the rest of the clip, so the default Moving Only filter sees the same object flip from moving to still, a still-for-N (dwell) alert has something to accrue on, and a \"car moving only\" zone rule correctly stops firing after frame 25. Frames 28-45 add a dog crossing in front of the parked car, which is the occlusion case. Frames 18-22 carry a difficult, partially visible cat at the left edge that is excluded from the recall denominator.",
+  "frame_count": 48,
+  "frames": [
+    {
+      "index": 0,
+      "objects": []
+    },
+    {
+      "index": 1,
+      "objects": []
+    },
+    {
+      "index": 2,
+      "objects": []
+    },
+    {
+      "index": 3,
+      "objects": []
+    },
+    {
+      "index": 4,
+      "objects": []
+    },
+    {
+      "index": 5,
+      "objects": []
+    },
+    {
+      "index": 6,
+      "objects": []
+    },
+    {
+      "index": 7,
+      "objects": []
+    },
+    {
+      "index": 8,
+      "objects": []
+    },
+    {
+      "index": 9,
+      "objects": []
+    },
+    {
+      "index": 10,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.56,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 11,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.549,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 12,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.539,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 13,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.528,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 14,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.517,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 15,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.507,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 16,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.496,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 17,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.485,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 18,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.475,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "cat",
+          "box": [
+            0.0,
+            0.2,
+            0.06,
+            0.18
+          ],
+          "difficult": true
+        }
+      ]
+    },
+    {
+      "index": 19,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.464,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "cat",
+          "box": [
+            0.0,
+            0.2,
+            0.06,
+            0.18
+          ],
+          "difficult": true
+        }
+      ]
+    },
+    {
+      "index": 20,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.453,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "cat",
+          "box": [
+            0.0,
+            0.2,
+            0.06,
+            0.18
+          ],
+          "difficult": true
+        }
+      ]
+    },
+    {
+      "index": 21,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.443,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "cat",
+          "box": [
+            0.0,
+            0.2,
+            0.06,
+            0.18
+          ],
+          "difficult": true
+        }
+      ]
+    },
+    {
+      "index": 22,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.432,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "cat",
+          "box": [
+            0.0,
+            0.2,
+            0.06,
+            0.18
+          ],
+          "difficult": true
+        }
+      ]
+    },
+    {
+      "index": 23,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.421,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 24,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.411,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 25,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 26,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 27,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 28,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.2,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 29,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.231,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 30,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.261,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 31,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.292,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 32,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.322,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 33,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.353,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 34,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.384,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 35,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.414,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 36,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.445,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 37,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.475,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 38,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.506,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 39,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.536,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 40,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.567,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 41,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.598,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 42,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.628,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 43,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.659,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 44,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.689,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 45,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        },
+        {
+          "label": "dog",
+          "box": [
+            0.72,
+            0.6,
+            0.14,
+            0.24
+          ]
+        }
+      ]
+    },
+    {
+      "index": 46,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    },
+    {
+      "index": 47,
+      "objects": [
+        {
+          "label": "car",
+          "box": [
+            0.4,
+            0.45,
+            0.42,
+            0.3
+          ]
+        }
+      ]
+    }
+  ]
+}

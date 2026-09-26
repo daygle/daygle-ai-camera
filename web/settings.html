@@ -77,6 +77,12 @@
               <option value="false">Disabled</option>
             </select></label>
           <label>
+            <span>Adaptive Detection Cadence <span class="info-tip" data-tip="Stretch the detection interval on a quiet scene and when the inference queue is backed up, so a busy camera is not starved by an idle one. A scene that has been still for a while is sampled progressively less often (up to 4x the configured interval) and recovers to the full rate the moment motion returns. The stretch is also capped so a frame is never more than 10s stale, and a camera can be pinned back to its exact interval. Disable to run every cycle at exactly the Detection Interval below. Default: Enabled" title="Stretch the detection interval on quiet scenes and under inference load. Recovers to the full rate on motion. Default: Enabled" tabindex="0" aria-label="Help: Stretch the detection interval on quiet scenes and under inference load. Recovers to the full rate on motion. Default: Enabled"></span></span>
+            <select name="adaptive_detection_enabled">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select></label>
+          <label>
             <span>Motion-Region Boost <span class="info-tip" data-tip="After the full-frame scan, re-run object detection zoomed into the moving regions so small or distant subjects (a person far from the camera) are detected at higher resolution. Higher CPU/GPU (extra inference per motion region). Best enabled after validating on your footage. Default: Disabled" title="Re-run object detection zoomed into moving regions to catch small/distant subjects. Higher CPU. Default: Disabled" tabindex="0" aria-label="Help: Re-run detection zoomed into moving regions for small/distant subjects. Higher CPU. Default: Disabled"></span></span>
             <select name="object_detection_region_boost">
               <option value="false">Disabled</option>

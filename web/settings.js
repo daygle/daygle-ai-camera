@@ -209,6 +209,7 @@ const FORM_DEFAULTS = {
     detection_confirm_iou: 0,
     background_detection_enabled: 'true',
     always_run_object_detection: 'true',
+    adaptive_detection_enabled: 'true',
     object_detection_region_boost: 'false',
     object_detection_tiling: 'off',
     detection_history_minutes: 10,
@@ -298,6 +299,7 @@ const FIELD_TYPES = {
   boolean: new Set([
     'enabled', 'continuous', 'auto_purge_enabled', 'background_detection_enabled',
     'always_run_object_detection', 'object_detection_region_boost', 'motion_denoise',
+    'adaptive_detection_enabled',
     'use_tls', 'use_ssl', 'autostart', 'tunnel_loopback_only',
   ]),
   integer: new Set([

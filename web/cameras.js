@@ -36,6 +36,7 @@ const PROFILE_PERFORMANCE_FIELDS = [
   'face_detection_interval_seconds',
   'ingest_frame_fps', 'detection_confirm_frames', 'detection_confirm_window',
   'detection_confirm_iou', 'always_run_object_detection',
+  'adaptive_detection_enabled',
   'object_detection_region_boost', 'object_detection_tiling',
   'periodic_scan_interval_seconds', 'motion_frame_width', 'motion_frame_height',
 ];
@@ -91,6 +92,7 @@ function parseProfileFieldValue(key, raw) {
     }
     case 'background_detection_enabled':
     case 'always_run_object_detection':
+    case 'adaptive_detection_enabled':
     case 'object_detection_region_boost':
     case 'motion_denoise':
       return raw === 'true';
@@ -150,6 +152,11 @@ function profileSectionHtml(camera, mode) {
     numberField('detection_confirm_window', { label: 'Confirm Window', min: '1', max: '30', step: '1', placeholder: 'Global Default (1)' }) +
     numberField('detection_confirm_iou', { label: 'Confirm Location (IoU)', min: '0', max: '0.9', step: '0.05', placeholder: 'Global Default (0)' }) +
     selectField('always_run_object_detection', { label: 'Always Run Object Detection', options: boolOptions }) +
+    selectField('adaptive_detection_enabled', {
+      label: 'Adaptive Cadence',
+      tip: 'Stretch the detection interval on a quiet scene and when the inference queue is backed up, recovering to the full rate on motion. Disable to run every cycle at the exact interval above.',
+      options: boolOptions,
+    }) +
     selectField('object_detection_region_boost', { label: 'Region Boost', options: boolOptions }) +
     selectField('object_detection_tiling', { label: 'Object Detection Tiling', options: [
       { value: 'off', attr: 'off', label: 'Off' },

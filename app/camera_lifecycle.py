@@ -219,6 +219,14 @@ def _cleanup_camera_runtime_state(removed_ids: set[str]) -> None:
         except Exception:  # pragma: no cover - defensive; cache cleanup must not block the apply
             logger.debug('Behavioural state cleanup failed for removed camera %s', cam_id, exc_info=True)
         try:
+            # Per-stage timings. Held next to the telemetry they complete: a
+            # re-added camera would otherwise report a p95 assembled from the
+            # previous instance's hardware, which is worse than no number.
+            from app.pipeline_timing import clear_pipeline_timing
+            clear_pipeline_timing(cam_id)
+        except Exception:  # pragma: no cover - defensive; cache cleanup must not block the apply
+            logger.debug('Pipeline timing cleanup failed for removed camera %s', cam_id, exc_info=True)
+        try:
             # Adaptive cadence (Item 16): a removed-and-re-added camera must not
             # inherit a "still for 10 minutes" streak and resume sampling on
             # the slow cadence.

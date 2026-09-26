@@ -30,7 +30,8 @@ non-sensitive fixture.
 
 Annotations are JSON. Frame indexes are **zero-based decoded-frame indexes** in
 the same order as the evaluator reads the video or image directory. Boxes are
-normalized `[x, y, width, height]` values from `0` to `1`.
+normalized `[x, y, width, height]` values from `0` to `1`. Two annotated scenes
+are checked in as worked examples under [`fixtures/`](../fixtures/README.md).
 
 ```json
 {
@@ -280,9 +281,17 @@ Two caveats worth knowing before you trust a number:
 ## 7. Make it a regression check
 
 Keep a small, deterministic, non-sensitive fixture in the repository and a
-larger private dataset for local benchmarking. In CI, validate the annotation
-format and run metric tests. A full camera benchmark should run on demand and
-publish its JSON report as an artifact. The evaluator can enforce minimum quality while still writing the report. When
+larger private dataset for local benchmarking. Two such scenes are checked in
+under [`fixtures/`](../fixtures/README.md) — `front-door` (one subject crossing,
+with empty lead-in and follow-through) and `driveway` (a subject that arrives
+and stops, plus an occlusion and a difficult/partial object). Both are
+**synthetic** and drawn from their own annotation file by
+`fixtures/render_fixture.py`, so they measure the motion gate and the metric
+math; label your own footage for per-class accuracy and the input-size
+recommendation. In CI, validate the annotation format and run metric tests
+(`tests/test_detection_fixture.py`). A full camera benchmark should run on
+demand and publish its JSON report as an artifact. The evaluator can enforce
+minimum quality while still writing the report. When
 `--post-pipeline` is used, quality gates apply to the post-pipeline benchmark,
 not the raw detector view:
 
@@ -297,7 +306,6 @@ python scripts/evaluate_detection.py \
   --fail-below-map-50 0.85 \
   --output reports/ci-quality.json
 ```
-
 A failed floor exits with status `1`. Pin thresholds against the model, labels,
 and fixture version so a model upgrade is an explicit decision rather than an
 accidental regression. When running a confidence sweep, every selected confidence floor must pass the configured gates — and with `--scenarios`, **every scenario** must pass, so a camera that silently loses recall under the motion gate cannot go green on its always-on number alone. Store the input

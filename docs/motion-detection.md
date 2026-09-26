@@ -113,6 +113,50 @@ When a camera did not alert on something you saw, the question is usually
 }
 ```
 
+If the camera is alerting correctly but *late*, the question is *which stage ate
+the frame budget* — a different question with a different endpoint.
+`GET /api/live/pipeline-timing` (same `?camera_id=` option) answers it:
+
+```json
+{
+  "cycle":      {"p50": 71.4, "p95": 96.2, "max": 121.0, "count": 50},
+  "unaccounted": {"p95": 3.1, "count": 50},
+  "over_budget": false,
+  "stages": {
+    "motion_detection": {"p50": 4.1, "p95": 6.0, "max": 9.8},
+    "preprocess":       {"p50": 1.8, "p95": 2.4, "max": 3.1},
+    "inference":        {"p50": 41.0, "p95": 55.9, "max": 74.2},
+    "postprocess":      {"p50": 2.2, "p95": 3.6, "max": 5.0},
+    "tracking":         {"p50": 0.3, "p95": 0.5, "max": 0.9},
+    "zone_rules":       {"p50": 1.1, "p95": 2.0, "max": 4.4},
+    "event_persist":    {"p50": 9.0, "p95": 18.0, "max": 41.0}
+  },
+  "frame_read": {"p50": 2.2, "p95": 3.0, "max": 4.1},
+  "pools":     {"clip_pool": {"pending": 0, "dropped": 0}, "enrichment_pool": {"pending": 0, "dropped": 0}},
+  "scheduler": {"pending": 0, "running": 1, "max_workers": 2}
+}
+```
+
+Read it like this:
+
+- `p50` is the typical cycle; `p95`/`max` are what a person notices. A stage
+  whose p50 is fine and whose p95 is not is the one causing intermittent lag.
+- `preprocess`, `inference` and `postprocess` are the detector's own internal
+  split. They have opposite fixes — inference scales with input size and
+  precision, preprocessing is resize + letterbox overhead, postprocess is NMS —
+  so never read them as one "inference" number.
+- `unaccounted` is the gap between the measured cycle and the sum of its stages.
+  It is the roadmap's **p95 cycle overhead < 10 ms** acceptance target, and it
+  doubles as a completeness alarm: while `over_budget` is true, some stage is
+  still unmeasured and the breakdown is not yet safe to act on.
+- `frame_read` is sampled *before* the cycle begins, so a slow number there is an
+  ingest/RTSP problem, not a detection problem.
+- `pools` and `scheduler` are the backpressure view: a growing `pending` with a
+  healthy `inference` p50 means work is queued behind the model, not inside it.
+
+Without `camera_id` the stage percentiles pool every camera's samples and
+`by_camera` keeps the per-camera view for attribution.
+
 Read it as a funnel: `after_motion_mode` far below `detected` means the
 still/moving filter is eating your subject (check the label's detection mode);
 `after_confirmation` at zero with detections present means the N-of-M window is
