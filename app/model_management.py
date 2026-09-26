@@ -104,7 +104,6 @@ from fastapi import HTTPException
 import app.state as _state
 from app.ai_settings import (
     YOLO_MODELS,
-    _DEFAULT_MODEL,
     detector_status,
     invalidate_ai_status_cache,
     validate_ai_settings,
@@ -631,55 +630,15 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
     }
 
 
-def auto_download_default_model() -> None:
-    """Download the default YOLO model on first startup if no model exists.
-
-    Set ``DAYGLE_DISABLE_AUTO_MODEL_DOWNLOAD=1`` for environments such as CI
-    that must not perform network/model-export work during application startup.
-    Operators can still download a model explicitly from the Models page.
-
-    On a clean install the ``models/`` directory has no ONNX file, so the
-    detector reports ``MODEL MISSING`` and object detection is completely
-    inert until the operator manually navigates to the Models tab and
-    clicks Download.  This helper checks whether *any* model variant is
-    already present; if none are, it exports the default
-    (``app.ai_settings._DEFAULT_MODEL``) in a background thread so the server
-    can finish starting while the ~10 MB export + Ultralytics weight download
-    happens.
-
-    Failures are logged at WARNING level and intentionally swallowed -
-    a clean-install host that lacks network or is missing export
-    dependencies still starts normally, just without detection.
-    """
-    if os.environ.get('DAYGLE_DISABLE_AUTO_MODEL_DOWNLOAD', '').strip().lower() in {'1', 'true', 'yes', 'on'}:
-        logger.info('Skipping default model auto-download because it is disabled.')
-        return
-
-    # If any ONNX file already exists in the models directory, the operator
-    # has already set up detection (or a prior startup downloaded it).
-    try:
-        MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        if any(MODELS_DIR.glob('*.onnx')):
-            return
-    except Exception:
-        return
-    info = YOLO_MODELS.get(_DEFAULT_MODEL)
-    if info is None:
-        return
-    def _background_download() -> None:
-        try:
-            logger.info(
-                'No ONNX model found - auto-downloading %s (first install).',
-                info['label'],
-            )
-            _do_download_model(_DEFAULT_MODEL, switch_active=True, imgsz=info.get('input_size', 640))
-            logger.info('Auto-download of %s completed successfully.', info['label'])
-        except Exception as exc:
-            logger.warning(
-                'Auto-download of %s failed: %s. You can download the model manually from the Models tab.',
-                info['label'], exc,
-            )
-    threading.Thread(target=_background_download, name='model-auto-download', daemon=True).start()
+# No model is fetched at first start, by design. A clean install starts with
+# an empty ``models/`` directory and object detection OFF until an admin
+# installs a model from the Object Models tab; the Status tab says so and
+# links straight there. The alternative - silently exporting a default on
+# startup - made three invisible choices at once (which model, a network
+# fetch on hosts that may be air-gapped, and a ~10 MB export competing with
+# the ffmpeg workers for CPU) and could not tell the operator it had
+# happened. ``_DEFAULT_MODEL`` survives as the model the UI recommends and
+# as the fallback path the legacy-face repair below installs.
 
 
 def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int = 640, configure_face: bool = False) -> dict[str, Any]:
@@ -825,8 +784,8 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
         error = None
     # Say plainly which of the three things happened, so the operator is never
     # left guessing whether the running detector changed:
-    #   * switch_active -> installed AND made the default (first-install
-    #     auto-download, legacy-face repair),
+    #   * switch_active -> installed AND made the default (legacy-face
+    #     repair, and any future internal caller that asks for it),
     #   * is_active     -> re-exported the model already running as default,
     #   * neither       -> installed only; the default model is untouched.
     if switch_active and not is_active:

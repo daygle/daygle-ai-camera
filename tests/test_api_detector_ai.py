@@ -7,6 +7,51 @@ tests/support.py.
 from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
 
 
+def test_clean_install_does_not_download_a_model(tmp_path, monkeypatch):
+    """First start must NOT install a detection model behind the operator's back.
+
+    The app used to export a default model in a background thread on a clean
+    install, which silently chose a model, needed the network, and burned CPU
+    competing with the capture workers. Detection now starts OFF and the ONNX
+    page tells the operator to pick a model, so nothing may download on
+    startup. This pins that contract at the level that matters: whatever the
+    models directory contains, booting the app never calls the download flow.
+    """
+    # ``_load_app`` re-imports the whole app package, so the module patch has
+    # to land AFTER it or it would be thrown away with the old module objects.
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.model_management as mm
+
+    calls = []
+
+    def _record(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("startup must not download or export a model")
+
+    monkeypatch.setattr(mm, '_do_download_model', _record)
+    # The removed helper must not reappear under its old name either.
+    assert not hasattr(mm, 'auto_download_default_model')
+
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        # Give the lifespan's startup work time to run; a pre-download would
+        # fire immediately on the first poll, not after a long delay.
+        time.sleep(0.5)
+        assert calls == [], 'a clean install triggered a model download on startup'
+        # And the operator is told detection is off rather than left guessing:
+        # the Status tab reads this to show the first-run call to action.
+        status, _headers, settings = client.request("/api/settings/ai")
+        assert status == 200
+        assert settings['model_exists'] is False
+        assert str(settings['mode']).lower() == 'model missing'
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_detector_backend_selection(tmp_path):
     from app.detector import OnnxYoloDetector, create_detector
 
@@ -614,6 +659,12 @@ def test_ai_models_endpoint(tmp_path, monkeypatch):
         object_ids = {m["id"] for m in models if m["family"] == "object"}
         assert "yolo11n" in object_ids
         assert "yolov8n" in object_ids
+        # Exactly one object model carries the "Recommended" badge. Nothing is
+        # installed for the operator on a clean install any more, so this flag
+        # is what points them at a starting model.
+        recommended = [m for m in models if m.get("recommended")]
+        assert {m["id"] for m in recommended} == {"yolo26n"}
+        assert all(m["family"] == "object" for m in recommended)
         # Undownloaded face entries must be flagged as face-family so they
         # render under "Face Detection Models", not the object grid.
         undownloaded_face = next(
@@ -923,10 +974,6 @@ def test_download_model_installs_without_switching_the_default(tmp_path, monkeyp
         monkeypatch.setattr(module, 'MODELS_DIR', models_dir, raising=False)
     monkeypatch.setattr(mm, '_installed_package_version', lambda _package: 'test-version')
     monkeypatch.setattr(mm, 'detector_status', lambda settings: dict(settings))
-    # The first-install auto-download (which DOES activate, by design) fires
-    # from the app lifespan and would race this test's assertion about which
-    # write moved the default model.
-    monkeypatch.setattr(mm, 'auto_download_default_model', lambda: None)
 
     def fake_export(model_name, destination, imgsz, **_kwargs):
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1010,8 +1057,8 @@ def test_download_message_reports_which_slot_changed(tmp_path, monkeypatch):
     assert 'not the default model' in installed['message']
     assert installed['reload_succeeded'] is False
 
-    # Internal callers (first-install auto-download, legacy-face repair) still
-    # activate, and the message says the model became the default.
+    # Internal callers (the legacy-face repair) still activate, and the
+    # message says the model became the default.
     activated = mm._do_download_model('yolo11s', True, 640)
     assert 'set it as the default model' in activated['message']
     assert activated['reload_succeeded'] is True

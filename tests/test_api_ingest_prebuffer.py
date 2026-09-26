@@ -619,7 +619,7 @@ def test_prebuffer_worker_backs_off_and_throttles_on_dead_link(tmp_path, monkeyp
     # to the prebuffer worker's OWN warnings: the monkeypatch above replaces
     # ``warning`` on the shared ``daygle.ai`` logger, so any warning emitted on
     # that logger by a still-running background thread from another test (e.g. a
-    # model auto-download) would otherwise leak into this capture and flake the
+    # detector reload) would otherwise leak into this capture and flake the
     # count. Every prebuffer message begins "Prebuffer ingest for ...".
     prebuffer_warnings = [w for w in warnings if w.startswith('Prebuffer ingest for')]
     assert len(prebuffer_warnings) == 1, f'expected a single throttled WARNING, got {prebuffer_warnings}'

@@ -92,21 +92,22 @@ from app.settings import config_file_path
 #   ``keypoint_count`` - pose/keypoint head width (e.g. ``5`` for a YOLO-face
 #                        landmark head) so the detector reads class scores from
 #                        the right columns instead of the landmark columns.
-# Default object model for a clean install, and the single place it is
-# declared: ``model_management`` imports this name, the first-install
-# auto-download exports it and makes it the active detector, and the settings
-# fallback in ``app.settings`` mirrors ``default_model_path()`` below (a test
-# pins the two together).
+# The object model this app RECOMMENDS, and the single place it is declared.
+# Nothing is downloaded at first start: this name drives the "Recommended"
+# badge in the model library, the fallback path used before anything is
+# configured (see ``default_model_path()``), and the model the legacy-face
+# repair installs. The settings fallback in ``app.settings`` mirrors
+# ``default_model_path()`` (a test pins the two together).
 #
-# YOLO26n is the current pick: its end-to-end NMS-free head is the fastest on
-# CPU. Two consequences are deliberate, not oversights:
+# YOLO26n is the current recommendation: its end-to-end NMS-free head is the
+# fastest on CPU. Two consequences are deliberate, not oversights:
 #   * the catalog input size is 768, so per-frame cost is higher than the
 #     640 of a YOLO11 export (fewer detections per second, better small/distant
 #     recall);
 #   * NMS-free heads are excluded from runtime INT8 quantization (see
 #     ``app.detector._int8_precision_supported_for_detector``), so INT8 is not
-#     available on the default model - operators who need it can switch to a
-#     YOLO11 export from the ONNX page.
+#     available on it - operators who need it can install a YOLO11 export from
+#     the ONNX page instead.
 _DEFAULT_MODEL = 'yolo26n'
 #   ``weights_url``    - explicit https source for weights Ultralytics can't
 #                        resolve by name (third-party face models). The
@@ -153,12 +154,12 @@ MODELS_DIR = BASE_DIR / 'models'
 
 
 def default_model_path() -> str:
-    """Project-relative path of the default model's flat export name.
+    """Project-relative path of the recommended model's flat export name.
 
     The download flow writes a resolution-suffixed file
     (``models/<stem>-<imgsz>.onnx``); this is the stable fallback used when
-    nothing is configured yet, so the "MODEL MISSING" status before the
-    first-install download finishes names the model that is actually coming.
+    nothing is configured yet, so the "MODEL MISSING" status on a fresh
+    install names the model the library recommends.
     """
     info = YOLO_MODELS.get(_DEFAULT_MODEL) or {}
     return f'models/{info.get("onnx") or "yolo11n.onnx"}'

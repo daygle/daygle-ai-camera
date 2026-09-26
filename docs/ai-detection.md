@@ -48,7 +48,8 @@ models are more accurate but use more CPU/GPU per frame.
 | **YOLO26** (n/s/m/l/x) | End-to-end **NMS-free** detection. Up to ~43% faster CPU inference; the model head dedupes its own boxes. |
 
 Each card shows the approximate download size, install state (Available,
-Installed, or Active), the exported resolution, and the installed version.
+Installed, or Active), the exported resolution, and the installed version. The
+server's recommended model also carries a **Recommended** badge.
 
 Actions per model:
 
@@ -64,14 +65,22 @@ Actions per model:
 - **Check for Updates** - query the upstream source and flag installed models
   that have a newer release.
 
-The default model is `yolo26n`. On first start, if no model is installed, the
-app auto-downloads and exports the default at its catalog resolution (768) so
-detection works out of the box. Two traits come with that default: the
-end-to-end NMS-free head is the fastest on CPU, but it exports at 768 rather
-than 640 (more compute per frame, better small-object recall) and is excluded
-from runtime INT8 quantization, so INT8 is only available after switching to a
-YOLO11/YOLOv8 export with **Use**. The default is declared once, in
-`app.ai_settings._DEFAULT_MODEL`.
+Nothing is downloaded on a clean install. A fresh install starts with an empty
+`models/` directory and object detection OFF, and the Status tab says so with a
+link straight to the Object Models tab. This is deliberate: silently exporting
+a model at first start would pick a model, require network access, and burn CPU
+competing with the capture workers - all without telling anyone. Install a model
+(**Download**), then activate it (**Use**); until then only motion rules run.
+
+The recommended starting point is `yolo26n`, badged **Recommended** in the
+library, because its end-to-end NMS-free head is the fastest on CPU. Two traits
+come with it: the catalog input size is 768, so per-frame cost is higher than
+the 640 of a YOLO11 export (fewer detections per second, better small/distant
+recall), and NMS-free heads are excluded from runtime INT8 quantization, so a
+CPU-only host that needs INT8 should install a YOLO11 or YOLOv8 export instead.
+The recommendation is declared once, in `app.ai_settings._DEFAULT_MODEL`, and is
+also the model the legacy-face repair falls back to.
+
 Models are stored under `models/` alongside the label file `models/coco.names`
 (the 80 standard COCO classes).
 

@@ -28,8 +28,9 @@ services:
       - "8080:8080"
     volumes:
       - daygle-data:/data
-      # Persist the auto-downloaded ONNX model across container replacement.
-      # Without this the model re-downloads on every new container.
+      # Persist the ONNX models you install across container replacement.
+      # Nothing is downloaded for you, so without this volume every model
+      # would have to be re-downloaded and re-exported on a new container.
       - daygle-models:/app/models
     # Cameras frequently live on the LAN; host networking is an alternative
     # if your cameras cannot be reached from the Docker bridge subnet:

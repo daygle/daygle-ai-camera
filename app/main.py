@@ -199,14 +199,9 @@ async def app_lifespan(_app: FastAPI):
     if removed:
         _logger.info(f'Cleaned up {len(removed)} incomplete recording(s) from previous session')
     log_detector_initialization()
-    # Auto-download the default ONNX model on a clean install so the
-    # operator doesn't have to navigate to the Models tab manually.
-    # Runs in a background thread so startup is not blocked.
-    try:
-        from app.model_management import auto_download_default_model
-        auto_download_default_model()
-    except Exception:
-        pass  # best-effort; failures are logged inside the helper
+    # No model download here on purpose: a clean install stays without one
+    # until an admin installs one from the Object Models tab, and the ONNX
+    # page's Status tab reports detection as off with a link to do it.
     start_live_alert_monitor()
     start_profile_monitor()
 

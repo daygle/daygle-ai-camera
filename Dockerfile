@@ -89,8 +89,8 @@ COPY scripts/docker-entrypoint.sh /app/scripts/docker-entrypoint.sh
 # container replacement; the bootstrap config is seeded into the volume so
 # persisted dashboard settings and this file stay together.
 ENV DAYGLE_CONFIG=/data/config.yaml
-# /app/models is writable by the runtime user so the first-start model
-# download lands there; mount a named volume at /app/models to persist it
+# /app/models is writable by the runtime user so models installed from the
+# ONNX page land there; mount a named volume at /app/models to persist them
 # across container replacement (see docker-compose.yml). /app/data exists
 # writable because app/main.py creates its rotating file log under
 # <app>/data/logs at startup; container-layer file logs are best-effort and
@@ -99,8 +99,8 @@ RUN mkdir -p /data /app/data \
     && useradd --system --home /data --shell /usr/sbin/nologin daygle \
     && chown -R daygle:daygle /data /app/data /app/models \
     && chmod 0755 /app/scripts/docker-entrypoint.sh
-# /app/models is writable by the runtime user so the first-start model
-# download lands there; mount a named volume at /app/models to persist it
+# /app/models is writable by the runtime user so models installed from the
+# ONNX page land there; mount a named volume at /app/models to persist them
 # across container replacement (see docker-compose.yml).
 VOLUME ["/data"]
 USER daygle

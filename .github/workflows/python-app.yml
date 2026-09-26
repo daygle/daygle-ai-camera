@@ -18,11 +18,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Tests start the app repeatedly over HTTP. Avoid triggering the
-    # production first-run YOLO download/export in every test process; model
-    # downloads remain covered by the explicit endpoint tests.
-    env:
-      DAYGLE_DISABLE_AUTO_MODEL_DOWNLOAD: "1"
+    # No env block needed: the app no longer downloads a model at startup, so
+    # tests never trigger a YOLO download/export. Model downloads stay
+    # covered by the explicit endpoint tests.
 
     strategy:
       matrix:

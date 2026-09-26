@@ -325,11 +325,11 @@ Email and push notifications use the same alert title/body format. Configure del
 ### ONNX detection
 
 - Open `/onnx` as an admin. The page is split into **Status**, **Models**, and **Settings** tabs.
-- On **Models**, pick a YOLO model (YOLOv8, YOLO11, or YOLO26) and a download resolution, then download and install it. Use **Use** to activate an installed model and **Check for Updates** to re-export newer weights.
+- On **Models**, pick a YOLO model (YOLOv8, YOLO11, or YOLO26) and a download resolution, then download and install it. Use **Use** to activate an installed model and **Check for Updates** to re-export newer weights. A new install has no model at all: download one and press **Use** to turn detection on.
 - On **Settings**, choose the inference device (Auto, CUDA, or CPU), precision (FP32, FP16, or INT8), and any advanced tuning such as concurrency, inference threads, GPU memory limit, execution mode, NMS dedupe, and CUDA IO Binding.
 - On **Status**, use **Check Model**, **Reload Detector**, and **Test Detector** to confirm the detector is healthy.
 
-Models are stored under `models/`. The default model is `yolo26n`, downloaded automatically on first start when no model is present. See `docs/ai-detection.md` for the full settings reference and `docs/detection-benchmarking.md` for labeled precision/recall/mAP evaluation and confidence sweeps.
+Models are stored under `models/`. Nothing is downloaded for you: a new install starts with object detection off, and `/onnx` tells you to install a model and press **Use**. `yolo26n` is badged **Recommended** as a starting point; pick a YOLO11 or YOLOv8 export if you need INT8 precision on a CPU-only host. See `docs/ai-detection.md` for the full settings reference and `docs/detection-benchmarking.md` for labeled precision/recall/mAP evaluation and confidence sweeps.
 
 ### Per-camera model assignment
 
@@ -434,7 +434,7 @@ gates with zero warnings and no `--max-warnings` pin.
 
 - Cannot log in after first start: open `/setup` and create the initial admin user.
 - Setup redirects to login: a user already exists.
-- `MODEL MISSING`: open `/onnx`, download/select a model, and reload the detector.
+- `MODEL MISSING`: no detection model is installed. Open `/onnx`, press **Download** on a model, then **Use** to activate it. This is the normal state on a fresh install - nothing is downloaded automatically.
 - ONNX fails to load: verify model and label paths and confirm the expected ONNX Runtime wheel is installed. For GPU, check that `CUDAExecutionProvider` appears in `ort.get_available_providers()` and that the NVIDIA driver/CUDA/cuDNN versions match the ONNX Runtime release.
 - Email alerts fail: verify SMTP settings under `/settings`, and confirm email notifications are enabled for the rule.
 - Push notifications fail: verify ntfy settings and use the test notification action.

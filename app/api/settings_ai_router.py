@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from app.ai_settings import YOLO_MODELS, detector_status, invalidate_ai_status_cache, validate_ai_settings
+from app.ai_settings import _DEFAULT_MODEL, YOLO_MODELS, detector_status, invalidate_ai_status_cache, validate_ai_settings
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.config_facades import effective_ai_config
@@ -104,6 +104,10 @@ def list_ai_models():
     result = []
     for model_id, info in YOLO_MODELS.items():
         family = _model_family(info)
+        # The recommended pick carries a badge in the library. Nothing is
+        # installed at first start, so this is how the operator is told where to
+        # start instead of a silent default download choosing for them.
+        recommended = model_id == _DEFAULT_MODEL and family == 'object'
         variants = _model_variants(model_id, installed_meta)
         if not variants:
             # ``family`` must be present on EVERY row -- including the
@@ -119,6 +123,7 @@ def list_ai_models():
                 'input_size': info.get('input_size'),
                 'nms_free': info.get('nms_free', False),
                 'family': family,
+                'recommended': recommended,
                 'path': (models_dir / info['onnx']).relative_to(BASE_DIR).as_posix(),
                 'installed': False,
                 'active': False,
@@ -141,6 +146,7 @@ def list_ai_models():
             'installed': False,
             'active': False,
             'family': family,
+            'recommended': recommended,
             'size_bytes': None,
             'installed_version': None,
             'exported_imgsz': None,
@@ -168,6 +174,7 @@ def list_ai_models():
                     else not _same_model_path(active_path, path)
                 ),
                 'family': family,
+                'recommended': recommended,
                 'size_bytes': absolute.stat().st_size if absolute.is_file() else None,
                 'installed_version': variant.get('version'),
                 'exported_imgsz': int(variant['imgsz']),

@@ -10,6 +10,12 @@ const objectModelsCard = document.getElementById('objectModelsCard');
 const faceModelsCard = document.getElementById('faceModelsCard');
 const objectModelsEmpty = document.getElementById('objectModelsEmpty');
 const faceModelsEmpty = document.getElementById('faceModelsEmpty');
+// First-run state: no model installed, so object detection is off. Nothing is
+// downloaded on first start any more, so this notice (plus the hint under the
+// catalog) is how a new install is told what to do.
+const firstRunNotice = document.getElementById('firstRunNotice');
+const firstRunChooseModelBtn = document.getElementById('firstRunChooseModelBtn');
+const recommendedModelName = document.getElementById('recommendedModelName');
 const objectModelCount = document.getElementById('objectModelCount');
 const faceModelCount = document.getElementById('faceModelCount');
 const objectModelUpdatesMessage = document.getElementById('objectModelUpdatesMessage');
@@ -182,6 +188,22 @@ function renderStatus(status) {
   if (status.primary_is_face_model) {
     objectRows.push(safeHtml`<div class="wide"><span style="color:var(--danger)">Object Detection</span><strong style="color:var(--danger)">${status.model_path || 'The active model'} is a face model running as the object detector - object detection is disabled. Restart the server to auto-migrate it to the Face Model slot, or select an object model above.</strong></div>`);
   }
+  // First-run / missing-model call to action. Shown whenever the configured
+  // object model is not on disk, which on a fresh install is the normal state:
+  // nothing is downloaded at first start, so the operator has to choose a
+  // model before anything is detected. The rows above still spell out the
+  // technical reason; this is the "here is what to do next" panel.
+  if (firstRunNotice) {
+    // Gated on the master AI toggle too: with detection deliberately off,
+    // "no model installed" is not the reason and the notice would just nag.
+    const aiEnabled = status.enabled === undefined
+      || String(status.enabled).toLowerCase() !== 'false';
+    const noModel = aiEnabled && (
+      status.model_exists === false
+      || String(status.mode || '').toLowerCase() === 'model missing'
+    );
+    firstRunNotice.hidden = !noModel;
+  }
   objectStatusPanel.innerHTML = objectRows.join('');
 
   // Face pass card: always rendered so the parallel architecture stays
@@ -261,6 +283,12 @@ function renderModelList(models) {
   const faceModels = models.filter((m) => m.family === 'face');
   objectModelCount.textContent = `${objectModels.filter((m) => m.installed).length} installed · ${objectModels.length} available`;
   faceModelCount.textContent = `${faceModels.filter((m) => m.installed).length} installed · ${faceModels.length} available`;
+  // Name the server's recommended model instead of hard-coding a model id in
+  // the markup, so changing the recommendation needs no HTML edit.
+  const recommended = objectModels.find((m) => m.recommended);
+  if (recommendedModelName && recommended) {
+    recommendedModelName.textContent = recommended.label;
+  }
 
   // Object models card (PRIMARY)
   objectModelsCard.hidden = false;
@@ -284,6 +312,12 @@ function renderCard(m) {
     const isActive = m.active;
     const canDelete = m.can_delete !== false;
     const versionLabel = m.installed_version ? `v${escapeHtml(m.installed_version)}` : '';
+    // "Recommended" rides with the server's recommended pick on every row of
+    // that model (each installed resolution), so the badge shows up whether
+    // the card is the catalog entry or an installed variant.
+    const recommendedBadge = m.recommended
+      ? '<span class="model-status model-status-recommended">Recommended</span>'
+      : '';
 
     // Determine card state class
     let cardClass = 'model-card';
@@ -357,7 +391,7 @@ function renderCard(m) {
           <div class="model-card-title">
             <h3>${escapeHtml(m.label)}</h3>
             <div class="model-card-meta">
-              ${statusHtml}${updateBadge}${resBadge}${versionLabel ? `<span class="model-version">${versionLabel}</span>` : ''}
+              ${statusHtml}${recommendedBadge}${updateBadge}${resBadge}${versionLabel ? `<span class="model-version">${versionLabel}</span>` : ''}
             </div>
           </div>
           <div class="model-card-size">
@@ -609,6 +643,14 @@ document.getElementById('reloadDetectorBtn').addEventListener('click', () => run
 document.getElementById('testDetectorBtn').addEventListener('click', () => runAction('testDetectorBtn', '/api/settings/ai/test-detector', 'Testing detector'));
 document.getElementById('checkObjectModelUpdatesBtn').addEventListener('click', () => checkForModelUpdates('object'));
 document.getElementById('checkFaceModelUpdatesBtn').addEventListener('click', () => checkForModelUpdates('face'));
+// The first-run notice's call to action: jump to the Object Models tab by
+// clicking its tab button, which reuses the shared ARIA tab wiring (and its
+// URL-hash deep link) rather than reaching into the panels directly.
+if (firstRunChooseModelBtn) {
+  firstRunChooseModelBtn.addEventListener('click', () => {
+    document.getElementById('tab-object-models')?.click();
+  });
+}
 
 // Group the ONNX cards into Status / Models / Settings tabs. Shared
 // implementation (ARIA tabs + URL-hash deep-linking) lives in utils.js.

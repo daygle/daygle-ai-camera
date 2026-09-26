@@ -16,6 +16,30 @@
       .onnx-hero-copy { flex: 0 0 auto; }
       .onnx-hero-mark { margin: 0 auto; }
     }
+    /* First-run state: nothing is installed, so object detection is off. This
+       standing call to action replaces the silent first-start model download
+       the app used to perform. Theme-safe tokens only (no color-mix). */
+    .first-run-notice {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+      margin: 0 0 16px; padding: 16px 18px;
+      background: var(--muted-bg);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--warning);
+      border-radius: 12px;
+    }
+    .first-run-notice[hidden] { display: none; }
+    .first-run-notice-copy { flex: 1 1 320px; min-width: 0; }
+    .first-run-notice-copy strong { display: block; font-size: 15px; }
+    .first-run-notice-copy p { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+    /* "Recommended" badge on the model the server suggests. Page-local: the
+       badge only ever renders on this page's model cards, and web/styles.css
+       is a shared sheet. Tones follow the shared .model-status pills. */
+    .model-status-recommended {
+      background: rgba(71,214,255,.12);
+      color: var(--accent);
+      border: 1px solid rgba(71,214,255,.32);
+    }
+    :root.light .model-status-recommended { background: rgba(2,132,199,.08); color: #026aa7; border-color: rgba(2,132,199,.28); }
   </style>
 </head>
 <body>
@@ -57,6 +81,13 @@
           <h2>Object Detection Status</h2>
           <p class="settings-section-subtitle">Detects everyday objects (person, car…) - these labels are what zones, alerts, and recordings use.</p>
         </div>
+      </div>
+      <div id="firstRunNotice" class="first-run-notice" hidden>
+        <div class="first-run-notice-copy">
+          <strong>Object detection is off - no model installed</strong>
+          <p>Nothing is downloaded automatically, so a new install starts here. Install a model to choose what your cameras detect; until then only motion rules run.</p>
+        </div>
+        <button id="firstRunChooseModelBtn" class="btn-info" type="button">Choose a model</button>
       </div>
       <div id="settingsMessage" class="muted"></div>
       <div id="objectStatusPanel" class="status-panel"></div>
@@ -106,6 +137,7 @@
         </div>
         <div id="objectModelList" class="model-card-grid"></div>
         <p id="objectModelsEmpty" class="model-library-empty" hidden>No object models available.</p>
+        <p class="model-library-empty" id="objectModelsFirstRunHint">Nothing here is installed for you: press <strong>Download</strong> to install a model, then <strong>Use</strong> to make it the one your cameras run. Recommended starting point: <strong id="recommendedModelName">&hellip;</strong>. Need INT8 precision on a CPU-only host? Pick a YOLO11 or YOLOv8 export instead.</p>
       </section>
     </div><!-- /panel-object-models -->
 

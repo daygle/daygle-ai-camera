@@ -903,7 +903,7 @@ def test_default_model_is_declared_once_and_agrees_everywhere(ais):
     info = ais.YOLO_MODELS[ais._DEFAULT_MODEL]
     assert not str(info.get('labels') or '').endswith('face.names')
     # Every consumer agrees.
-    assert mm._DEFAULT_MODEL is ais._DEFAULT_MODEL
+    assert not hasattr(mm, '_DEFAULT_MODEL'), 'model_management must not redeclare the default'
     assert ais.default_model_path() == f'models/{info["onnx"]}'
     assert DEFAULT_CONFIG['ai']['model_path'] == ais.default_model_path()
     # And the download flow exports it at the catalog resolution rather than a
