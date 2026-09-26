@@ -10,6 +10,11 @@
 //      and duplicate rows into the same container.
 //   4. Offscreen video pauses and resumes only if it was playing; offscreen
 //      images release their decoded bitmap and get it back with no refetch.
+//   5. Rows land DIRECTLY in the container - no wrapper element. The old
+//      wrapper defaulted to <tbody>, which nested a <tbody> inside the table
+//      pages' existing <tbody id="...-rows">: invalid markup the browser
+//      repairs with anonymous table boxes (deformed columns) and re-lays out
+//      on every batch (slow pages).
 //
 // Rendered against a minimal DOM stub in a vm sandbox (the same pattern as
 // tests/test_request_coalescing.test.js).
@@ -42,6 +47,9 @@ function loadUtils({ withObserver = true } = {}) {
       _innerHTML: '',
       parentNode: null,
       get firstChild() { return this.children[0] || null; },
+      // A <template>'s content is the fragment rows are parsed into; aliasing
+      // it to the element itself is enough for the drain loop's semantics.
+      get content() { return this; },
       get innerHTML() { return this._innerHTML; },
       set innerHTML(value) {
         // Assigning innerHTML replaces every child. This stub does not parse
@@ -158,10 +166,8 @@ test('the first batch is painted synchronously', () => {
 
   // No frame has run yet, but rows are already in the DOM - this is what keeps
   // a long list feeling instant.
-  const wrapper = container.children[0];
-  assert.ok(wrapper, 'a batch wrapper should exist immediately');
-  assert.equal(wrapper.children.length, 40, 'first screenful should be synchronous');
-  assert.ok(wrapper.children.length < items.length, 'the rest must be deferred');
+  assert.equal(container.children.length, 40, 'first screenful should be synchronous');
+  assert.ok(container.children.length < items.length, 'the rest must be deferred');
 });
 
 test('the container is emptied once, not per batch', () => {
@@ -187,7 +193,7 @@ test('the container is emptied once, not per batch', () => {
   flushFrames();
 
   assert.equal(innerHTMLWrites, 1, `container written ${innerHTMLWrites} times; must be once`);
-  assert.ok(container.children[0].children.length > 0, 'rows should still be present');
+  assert.ok(container.children.length > 0, 'rows should still be present');
 });
 
 test('every row is painted exactly once, in order, across frames', () => {
@@ -203,9 +209,7 @@ test('every row is painted exactly once, in order, across frames', () => {
   flushFrames();
 
   assert.deepEqual(rendered, items, 'rows must render once each, in order');
-  const wrapper = container.children[0];
-  const total = wrapper.children.length;
-  assert.ok(total > 0, 'rows should land in the wrapper');
+  assert.equal(container.children.length, items.length, 'every row lands directly in the container');
 });
 
 test('a newer render cancels its predecessor instead of interleaving', () => {
@@ -228,8 +232,7 @@ test('a newer render cancels its predecessor instead of interleaving', () => {
   assert.equal(first.length, 8, 'first render painted only its synchronous first batch');
   assert.deepEqual(second, [100, 200], 'the surviving render paints exactly its own rows');
   // The cancelled render must not have appended anything after being superseded.
-  const wrapper = container.children[0];
-  assert.equal(wrapper.children.length, 2, `wrapper has ${wrapper.children.length} rows, expected 2`);
+  assert.equal(container.children.length, 2, `container has ${container.children.length} rows, expected 2`);
 });
 
 test('an empty list clears the container and completes immediately', () => {
@@ -279,18 +282,38 @@ test('the cancel function stops further batches', () => {
   assert.equal(rendered.length, afterFirstBatch, 'cancelled render must not paint more rows');
 });
 
-test('a custom wrapper tag and class are applied', () => {
-  const { sandbox } = loadUtils();
-  const container = containerWith(sandbox);
+test('rows parse through a template host and land directly in the container', () => {
+  // Regression: two DOM mistakes made the table pages unreadable.
+  //   1. Rows were parsed through a throwaway <div>, whose innerHTML silently
+  //      DROPS <tr>/<td> (body-mode fragment parsing discards them). Every
+  //      table page therefore rendered its rows as loose text inside the
+  //      <tbody>, and the browser repaired that with thousands of anonymous
+  //      table boxes - deformed columns AND a slow, janky layout.
+  //   2. Batches were wrapped in a <tbody> by default, nesting a second
+  //      <tbody> inside the pages' existing <tbody id="...-rows">.
+  // A <template> parses the row markup into real TR/TD nodes whatever the
+  // container is; rows then go straight into the container.
+  const { sandbox, flushFrames } = loadUtils();
+  const tbody = sandbox.document.createElement('tbody');
+  // Spy AFTER building the container so the tag log only covers the render.
+  const tags = [];
+  const createElement = sandbox.document.createElement;
+  sandbox.document.createElement = (tag) => {
+    tags.push(String(tag).toUpperCase());
+    return createElement(tag);
+  };
+  const items = Array.from({ length: 250 }, (_, i) => i);
 
-  sandbox.renderIncrementally(container, [1, 2], rowHtml, {
-    wrapperTag: 'div',
-    wrapperClass: 'daygle-render-batch',
-  });
+  sandbox.renderIncrementally(tbody, items, rowHtml);
+  flushFrames();
 
-  const wrapper = container.children[0];
-  assert.equal(wrapper.tagName, 'DIV');
-  assert.equal(wrapper.className, 'daygle-render-batch');
+  assert.ok(tags.filter((tag) => tag === 'TEMPLATE').length >= items.length,
+    'each row must be parsed through a <template>, not a <div>');
+  assert.ok(!tags.includes('TBODY'), 'no wrapper tbody may be created');
+  assert.equal(tbody.children.length, items.length, 'every row is a direct child of the tbody');
+  for (const child of tbody.children) {
+    assert.ok(String(child._html || '').includes('<tr'), 'children are the rendered rows');
+  }
 });
 
 // ─── media lifecycle ──────────────────────────────────────────────────────

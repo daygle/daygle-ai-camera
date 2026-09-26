@@ -152,16 +152,18 @@ const INCREMENTAL_BATCH = 60;
  * @param {Array} items        the full list
  * @param {Function} renderItem  item -> HTML string for one row
  * @param {Object} [options]
- * @param {string} [options.wrapperTag='tbody']  tag wrapping the rows
- * @param {string} [options.wrapperClass]        class for that wrapper
  * @param {Function} [options.onComplete]        called once the last batch lands
+ *
+ * Rows are appended DIRECTLY to `container` - there is deliberately no wrapper
+ * element around them. A wrapper defaulted to `tbody` here, which put a nested
+ * `<tbody>` inside the existing `<tbody id="...-rows">` of every table page:
+ * invalid markup that the browser repairs with anonymous table boxes (columns
+ * stop lining up) and that forces a whole-table relayout on every batch append.
  * @returns {Function} a cancel function for the in-flight render
  */
 // eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
 function renderIncrementally(container, items, renderItem, options = {}) {
   const {
-    wrapperTag = 'tbody',
-    wrapperClass = '',
     onComplete = null,
   } = options;
 
@@ -195,12 +197,10 @@ function renderIncrementally(container, items, renderItem, options = {}) {
     ? requestAnimationFrame
     : (fn) => setTimeout(fn, 16);
 
-  // Build the wrapper once and append batches into it, so the container is
-  // emptied exactly once (a single reflow) rather than per batch.
+  // The container is emptied exactly once (a single reflow) and batches are
+  // appended straight into it: rows land exactly where the page put them -
+  // the existing <tbody> for the table pages, the gallery for snapshots.
   container.innerHTML = '';
-  const wrapper = document.createElement(wrapperTag);
-  if (wrapperClass) wrapper.className = wrapperClass;
-  container.appendChild(wrapper);
 
   let index = 0;
   const paint = (count) => {
@@ -209,14 +209,21 @@ function renderIncrementally(container, items, renderItem, options = {}) {
     const end = Math.min(list.length, index + count);
     for (; index < end; index += 1) {
       // Every row goes through safeHtml by contract: a row renderer returns
-      // markup that must already be escaped (the XSS guard tests enforce this),
-      // and the fragment append keeps that path identical to the old innerHTML
-      // join without re-parsing the whole list at once.
-      const host = document.createElement('div');
+      // markup that must already be escaped (the XSS guard tests enforce this).
+      //
+      // Rows are parsed through a <template>, NOT a throwaway <div>:
+      // `div.innerHTML = '<tr>...</tr>'` silently DROPS the table tags (the
+      // fragment parser runs in body mode and discards them), so every table
+      // page rendered its rows as loose text inside the <tbody> - the browser
+      // repairs that with thousands of anonymous table boxes, which is both
+      // the deformed columns and the slow, janky layout. A <template> parses
+      // the same markup into real TR/TD nodes whatever the container is, and
+      // its content is inert until the nodes are moved into the fragment.
+      const host = document.createElement('template');
       host.innerHTML = renderItem(list[index]);
-      while (host.firstChild) fragment.appendChild(host.firstChild);
+      while (host.content.firstChild) fragment.appendChild(host.content.firstChild);
     }
-    wrapper.appendChild(fragment);
+    container.appendChild(fragment);
     if (index < list.length) {
       frame = schedule(() => paint(INCREMENTAL_BATCH));
     } else {
