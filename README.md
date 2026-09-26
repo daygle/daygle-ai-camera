@@ -329,7 +329,7 @@ Email and push notifications use the same alert title/body format. Configure del
 - On **Settings**, choose the inference device (Auto, CUDA, or CPU), precision (FP32, FP16, or INT8), and any advanced tuning such as concurrency, inference threads, GPU memory limit, execution mode, NMS dedupe, and CUDA IO Binding.
 - On **Status**, use **Check Model**, **Reload Detector**, and **Test Detector** to confirm the detector is healthy.
 
-Models are stored under `models/`. The default model is `yolo11n`, downloaded automatically on first start when no model is present. See `docs/ai-detection.md` for the full settings reference and `docs/detection-benchmarking.md` for labeled precision/recall/mAP evaluation and confidence sweeps.
+Models are stored under `models/`. The default model is `yolo26n`, downloaded automatically on first start when no model is present. See `docs/ai-detection.md` for the full settings reference and `docs/detection-benchmarking.md` for labeled precision/recall/mAP evaluation and confidence sweeps.
 
 ### Per-camera model assignment
 

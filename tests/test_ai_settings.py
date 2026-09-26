@@ -878,8 +878,37 @@ def test_validate_ai_settings_picks_up_default_model_path_when_missing(monkeypat
         effective_ai_config_value={},
     )
     out = ais.validate_ai_settings({})
-    assert out['model_path'] == 'models/yolo11n.onnx'
+    # Tracks the single declared default (app.ai_settings._DEFAULT_MODEL)
+    # rather than hard-coding a model id here.
+    assert out['model_path'] == ais.default_model_path()
     assert out['labels_path'] == 'models/coco.names'
+
+
+def test_default_model_is_declared_once_and_agrees_everywhere(ais):
+    """The default object model lives in ONE place.
+
+    ``app.ai_settings._DEFAULT_MODEL`` is the declaration;
+    ``model_management`` imports that name, the settings fallback in
+    ``app.settings`` mirrors ``default_model_path()``, and the validator /
+    repair fallbacks all route through the same helper. This test is what
+    makes changing the default a one-line change instead of a scavenger hunt.
+    """
+    from app import model_management as mm
+    from app.settings import DEFAULT_CONFIG
+
+    # The declared default itself.
+    assert ais._DEFAULT_MODEL == 'yolo26n'
+    # It must be a real catalog OBJECT model (a face entry would be healed
+    # straight back out by ``heal_legacy_face_primary``).
+    info = ais.YOLO_MODELS[ais._DEFAULT_MODEL]
+    assert not str(info.get('labels') or '').endswith('face.names')
+    # Every consumer agrees.
+    assert mm._DEFAULT_MODEL is ais._DEFAULT_MODEL
+    assert ais.default_model_path() == f'models/{info["onnx"]}'
+    assert DEFAULT_CONFIG['ai']['model_path'] == ais.default_model_path()
+    # And the download flow exports it at the catalog resolution rather than a
+    # hard-coded 640, so the first-install export matches the model.
+    assert info.get('input_size') == 768
 
 
 def test_validate_ai_settings_rejects_unknown_device(monkeypatch, ais):

@@ -39,7 +39,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "confidence": 0.45,
         "iou_threshold": 0.45,
         "input_size": 640,
-        "model_path": "models/yolo11n.onnx",
+        # Mirrors app.ai_settings.default_model_path(); the two are pinned
+        # together by tests so the declared default can only change in one
+        # place (app.ai_settings._DEFAULT_MODEL).
+        "model_path": "models/yolo26n.onnx",
         "labels_path": "models/coco.names",
         "gpu_mem_limit": 0,
     },

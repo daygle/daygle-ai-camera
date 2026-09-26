@@ -64,8 +64,14 @@ Actions per model:
 - **Check for Updates** - query the upstream source and flag installed models
   that have a newer release.
 
-The default model is `yolo11n`. On first start, if no model is installed, the
-app auto-downloads and exports the default so detection works out of the box.
+The default model is `yolo26n`. On first start, if no model is installed, the
+app auto-downloads and exports the default at its catalog resolution (768) so
+detection works out of the box. Two traits come with that default: the
+end-to-end NMS-free head is the fastest on CPU, but it exports at 768 rather
+than 640 (more compute per frame, better small-object recall) and is excluded
+from runtime INT8 quantization, so INT8 is only available after switching to a
+YOLO11/YOLOv8 export with **Use**. The default is declared once, in
+`app.ai_settings._DEFAULT_MODEL`.
 Models are stored under `models/` alongside the label file `models/coco.names`
 (the 80 standard COCO classes).
 

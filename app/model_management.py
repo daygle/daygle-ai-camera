@@ -102,7 +102,13 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
 from fastapi import HTTPException
 
 import app.state as _state
-from app.ai_settings import YOLO_MODELS, detector_status, invalidate_ai_status_cache, validate_ai_settings
+from app.ai_settings import (
+    YOLO_MODELS,
+    _DEFAULT_MODEL,
+    detector_status,
+    invalidate_ai_status_cache,
+    validate_ai_settings,
+)
 from app.auth import utc_now
 from app.config_facades import effective_ai_config
 
@@ -625,9 +631,6 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
     }
 
 
-_DEFAULT_MODEL = 'yolo11n'
-
-
 def auto_download_default_model() -> None:
     """Download the default YOLO model on first startup if no model exists.
 
@@ -639,9 +642,10 @@ def auto_download_default_model() -> None:
     detector reports ``MODEL MISSING`` and object detection is completely
     inert until the operator manually navigates to the Models tab and
     clicks Download.  This helper checks whether *any* model variant is
-    already present; if none are, it exports the default (``yolo11n``)
-    in a background thread so the server can finish starting while the
-    ~5 MB export + Ultralytics weight download happens.
+    already present; if none are, it exports the default
+    (``app.ai_settings._DEFAULT_MODEL``) in a background thread so the server
+    can finish starting while the ~10 MB export + Ultralytics weight download
+    happens.
 
     Failures are logged at WARNING level and intentionally swallowed -
     a clean-install host that lacks network or is missing export
