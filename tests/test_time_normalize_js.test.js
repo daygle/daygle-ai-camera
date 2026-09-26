@@ -1,4 +1,4 @@
-// Unit tests for normalizeTime in web/utils.js — the client mirror of
+// Unit tests for normalizeTime in web/utils.js - the client mirror of
 // app/zone_schema.py::normalize_zone_time used by the Zones save path. It must
 // keep the rule's delivery settings (edited on the Alerts page) intact through
 // a Zones save and match what the backend stores.

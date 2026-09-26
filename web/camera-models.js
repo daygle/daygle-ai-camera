@@ -19,7 +19,7 @@ function modelInstalled(path) {
 function renderDefaultModel() {
   const info = assignmentPayload?.default_model || {};
   if (!info.model_path) {
-    defaultModelInfo.textContent = 'No default object model is configured yet — install one on the ONNX page.';
+    defaultModelInfo.textContent = 'No default object model is configured yet - install one on the ONNX page.';
     return;
   }
   const name = String(info.model_path).replace(/\\/g, '/').split('/').pop();
@@ -43,7 +43,7 @@ function selectOptions(models, selectedPath) {
 function renderCameras() {
   const cameras = assignmentPayload?.cameras || [];
   if (!cameras.length) {
-    tableBody.innerHTML = '<tr><td colspan="4" class="muted">No cameras configured yet — add one on the Cameras page first.</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="4" class="muted">No cameras configured yet - add one on the Cameras page first.</td></tr>';
     return;
   }
   tableBody.innerHTML = cameras.map((camera) => {

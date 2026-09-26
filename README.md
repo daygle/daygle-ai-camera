@@ -334,8 +334,8 @@ Models are stored under `models/`. The default model is `yolo11n`, downloaded au
 ### Per-camera model assignment
 
 - Open `/camera-models` to give any camera its own object-detection model. A quiet driveway can run a fast nano model while a busy yard gets a larger one, and cameras without an assignment keep following the default model from `/onnx`.
-- Use the **Assign Model** column to pick an installed model, then **Assign** / **Change** to switch, or **Unassign** to return the camera to the default. Changes apply on the camera's next detection cycle — no reload or restart needed.
-- Assignments use the same runtime tuning (device, precision, threads) as the default detector. Face models are not assignable here — they run in the separate face-detection pass configured on `/onnx`.
+- Use the **Assign Model** column to pick an installed model, then **Assign** / **Change** to switch, or **Unassign** to return the camera to the default. Changes apply on the camera's next detection cycle - no reload or restart needed.
+- Assignments use the same runtime tuning (device, precision, threads) as the default detector. Face models are not assignable here - they run in the separate face-detection pass configured on `/onnx`.
 
 ### Sound detection
 
@@ -349,32 +349,32 @@ If the TFLite runtime is missing, install `ai-edge-litert` or `tflite-runtime`.
 ### Line crossing (tripwire)
 
 - Open `/zones` and select a camera and area.
-- In the area's detection panel, turn on **Line crossing**. A yellow line appears on the footage with a dot at each end — drag the two dots to place it across the path you care about (a driveway entrance, a doorway, a gate).
+- In the area's detection panel, turn on **Line crossing**. A yellow line appears on the footage with a dot at each end - drag the two dots to place it across the path you care about (a driveway entrance, a doorway, a gate).
 - Pick the counting **Direction**: *Arrow way* (an object crossing the way the on-screen arrow points), *Against* (the opposite way), or *Both*. The arrow marks the "forward" side so you can see which way counts before saving.
 - Optionally limit **Counts** to specific object classes (e.g. only *Car* or *Person*); leave it empty to count any tracked object. Choose whether a crossing records a clip, then click **Save Zones**.
-- Configure notifications on the **Alerts** page: pick **Line crossing** as the alert type, select the camera and area, and set email/push, recipients, a cooldown, and an optional **Notify From/Until** quiet-hours window — exactly like object and sound alerts.
+- Configure notifications on the **Alerts** page: pick **Line crossing** as the alert type, select the camera and area, and set email/push, recipients, a cooldown, and an optional **Notify From/Until** quiet-hours window - exactly like object and sound alerts.
 
-Crossings raise an event (and optional recording) whenever a tracked object crosses the line in the chosen direction, and notify you when email/push are enabled. A tripwire builds on the object tracker, so it works wherever objects are detected — no extra model or GPU load.
+Crossings raise an event (and optional recording) whenever a tracked object crosses the line in the chosen direction, and notify you when email/push are enabled. A tripwire builds on the object tracker, so it works wherever objects are detected - no extra model or GPU load.
 
 ### Loitering (long dwell)
 
-Loitering *learns your site*: it measures how long objects normally dwell in an area, then alerts when one stays far longer than usual — no fixed timer to guess at.
+Loitering *learns your site*: it measures how long objects normally dwell in an area, then alerts when one stays far longer than usual - no fixed timer to guess at.
 
 - Open `/zones`, select a camera and area, and turn on **Loitering** in the detection panel.
-- Set **Min dwell** — the minimum seconds before anything can count as loitering (a hard floor). Set **Sensitivity** — how far above the area's *learned normal* dwell before it fires (× the normal spread; lower = more sensitive, `0` fires at the minimum dwell). Optionally limit **Counts** to specific object classes, choose whether it records, then **Save Zones**.
-- Configure notifications on the **Alerts** page under the **Loitering** type — email/push, recipients, a cooldown, and an optional **Notify From/Until** quiet-hours window, like the other alerts.
+- Set **Min dwell** - the minimum seconds before anything can count as loitering (a hard floor). Set **Sensitivity** - how far above the area's *learned normal* dwell before it fires (× the normal spread; lower = more sensitive, `0` fires at the minimum dwell). Optionally limit **Counts** to specific object classes, choose whether it records, then **Save Zones**.
+- Configure notifications on the **Alerts** page under the **Loitering** type - email/push, recipients, a cooldown, and an optional **Notify From/Until** quiet-hours window, like the other alerts.
 
-Each area learns from completed visits, so the effective threshold is `max(min dwell, normal + sensitivity × spread)`: a busy patio where people linger won't cry wolf, while a driveway where nobody stops fires at the floor. It works on day one from the minimum dwell and sharpens as history builds; the learned baselines persist across restarts. Also built on the object tracker — pure statistics, no extra model or GPU load.
+Each area learns from completed visits, so the effective threshold is `max(min dwell, normal + sensitivity × spread)`: a busy patio where people linger won't cry wolf, while a driveway where nobody stops fires at the floor. It works on day one from the minimum dwell and sharpens as history builds; the learned baselines persist across restarts. Also built on the object tracker - pure statistics, no extra model or GPU load.
 
 ### Unusual time-of-day
 
 Catches *"something's here when nothing should be"*: each area learns which hours it is normally active, then alerts on activity at a normally-quiet hour (e.g. a person in the driveway at 3am).
 
 - Open `/zones`, select a camera and area, and turn on **Unusual time** in the detection panel.
-- Set **Flag under (%)** — an hour counts as unusual when the area normally has activity on at most that percent of days (lower = only the rarest hours fire). Optionally limit **Counts** to specific object classes, choose whether it records, then **Save Zones**.
-- Configure notifications on the **Alerts** page under the **Unusual time** type — email/push, recipients, a cooldown, and an optional **Notify From/Until** window.
+- Set **Flag under (%)** - an hour counts as unusual when the area normally has activity on at most that percent of days (lower = only the rarest hours fire). Optionally limit **Counts** to specific object classes, choose whether it records, then **Save Zones**.
+- Configure notifications on the **Alerts** page under the **Unusual time** type - email/push, recipients, a cooldown, and an optional **Notify From/Until** window.
 
-Hours are your **local** wall-clock time. The baseline needs about a week of history before it fires, and counts the days an area was active (so vacation days don't skew it); learned baselines persist across restarts. Pure statistics on the object tracker — no extra model or GPU load.
+Hours are your **local** wall-clock time. The baseline needs about a week of history before it fires, and counts the days an area was active (so vacation days don't skew it); learned baselines persist across restarts. Pure statistics on the object tracker - no extra model or GPU load.
 
 ## Updating
 

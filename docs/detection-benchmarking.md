@@ -211,7 +211,7 @@ Always-on is the live default; motion-gated is the CPU-saving mode. Their
 recall differs **by construction**: a subject that never trips the pixel gate is
 invisible in motion-gated mode. Sizing a floor from one blended number hides
 exactly the regression that matters, so measure the mode the camera will
-actually run in — and if you intend to run both, check the gated number before
+actually run in - and if you intend to run both, check the gated number before
 choosing thresholds.
 
 For a threshold study, hold the input, annotations, model, IoU threshold, and
@@ -282,7 +282,7 @@ Two caveats worth knowing before you trust a number:
 
 Keep a small, deterministic, non-sensitive fixture in the repository and a
 larger private dataset for local benchmarking. Two such scenes are checked in
-under [`fixtures/`](../fixtures/README.md) — `front-door` (one subject crossing,
+under [`fixtures/`](../fixtures/README.md) - `front-door` (one subject crossing,
 with empty lead-in and follow-through) and `driveway` (a subject that arrives
 and stops, plus an occlusion and a difficult/partial object). Both are
 **synthetic** and drawn from their own annotation file by
@@ -308,6 +308,6 @@ python scripts/evaluate_detection.py \
 ```
 A failed floor exits with status `1`. Pin thresholds against the model, labels,
 and fixture version so a model upgrade is an explicit decision rather than an
-accidental regression. When running a confidence sweep, every selected confidence floor must pass the configured gates — and with `--scenarios`, **every scenario** must pass, so a camera that silently loses recall under the motion gate cannot go green on its always-on number alone. Store the input
+accidental regression. When running a confidence sweep, every selected confidence floor must pass the configured gates - and with `--scenarios`, **every scenario** must pass, so a camera that silently loses recall under the motion gate cannot go green on its always-on number alone. Store the input
 fixture version, model/labels version, and selected operating point with the
 report so a later threshold change is explainable.

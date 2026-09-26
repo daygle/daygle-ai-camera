@@ -1,10 +1,10 @@
-// Unit tests for normalizeLoiter in web/utils.js — the client mirror of
+// Unit tests for normalizeLoiter in web/utils.js - the client mirror of
 // app/zone_schema.py::normalize_zone_loiter used by the Zones save path. It
 // must keep the loiter rule's delivery settings (edited on the Alerts page)
 // intact through a Zones save and match what the backend stores.
 //
 // utils.js is a classic browser script that reaches for `window` at load, so we
-// load it into a vm context behind a lightweight window stub — same pattern as
+// load it into a vm context behind a lightweight window stub - same pattern as
 // test_tripwire_geometry_js.test.js.
 //
 // Run with:

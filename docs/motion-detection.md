@@ -114,7 +114,7 @@ When a camera did not alert on something you saw, the question is usually
 ```
 
 If the camera is alerting correctly but *late*, the question is *which stage ate
-the frame budget* — a different question with a different endpoint.
+the frame budget* - a different question with a different endpoint.
 `GET /api/live/pipeline-timing` (same `?camera_id=` option) answers it:
 
 ```json
@@ -142,8 +142,8 @@ Read it like this:
 - `p50` is the typical cycle; `p95`/`max` are what a person notices. A stage
   whose p50 is fine and whose p95 is not is the one causing intermittent lag.
 - `preprocess`, `inference` and `postprocess` are the detector's own internal
-  split. They have opposite fixes — inference scales with input size and
-  precision, preprocessing is resize + letterbox overhead, postprocess is NMS —
+  split. They have opposite fixes - inference scales with input size and
+  precision, preprocessing is resize + letterbox overhead, postprocess is NMS -
   so never read them as one "inference" number.
 - `unaccounted` is the gap between the measured cycle and the sum of its stages.
   It is the roadmap's **p95 cycle overhead < 10 ms** acceptance target, and it

@@ -23,9 +23,9 @@ hard line around what it does not measure.
 
 **Good for:**
 
-- the motion gate — does motion appear where the label says it should, and stay
+- the motion gate - does motion appear where the label says it should, and stay
   quiet on the empty frames;
-- the evaluator's metric math — precision/recall/F1/AP against a known-correct
+- the evaluator's metric math - precision/recall/F1/AP against a known-correct
   answer, with `difficult` objects excluded from the recall denominator;
 - the whole benchmark path end to end, on any machine, with no dataset download.
 
@@ -57,7 +57,7 @@ python fixtures/render_fixture.py --out /tmp/frames --scene driveway
 
 ## Running the evaluator
 
-Motion gate only — no model needed beyond opencv:
+Motion gate only - no model needed beyond opencv:
 
 ```bash
 python scripts/evaluate_detection.py \
@@ -91,7 +91,7 @@ python scripts/evaluate_detection.py \
    scene is built to catch.
 4. Add a test case. `tests/test_detection_fixture.py` pins that a scene has
    negatives as well as positives, that each labelled box is actually drawn,
-   and — where opencv is installed — that the motion gate is quiet on the
+   and - where opencv is installed - that the motion gate is quiet on the
    lead-in and fires on the activity.
 
 `render_fixture.py` only needs to learn a new label colour in `LABEL_COLORS`;
