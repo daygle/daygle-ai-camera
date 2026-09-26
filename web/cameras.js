@@ -6,6 +6,32 @@ const cameraFps = {};
 
 const messageEl = document.getElementById('cameraMessage');
 const gridEl = document.getElementById('cameraGrid');
+
+// On phones the camera table keeps its columns (its headers are the sort
+// controls) and scrolls sideways inside its card. Tell the operator that, but
+// only while it ACTUALLY overflows - a hint promising a scroll the layout does
+// not need is worse than none. A ResizeObserver covers the table appearing and
+// every re-render; the resize listener covers rotate / breakpoint changes.
+function updateScrollHint() {
+  var hint = document.querySelector('.cameras-scroll-hint');
+  if (!hint) return;
+  var wrap = gridEl.querySelector('.cameras-table-wrap');
+  hint.hidden = !wrap || wrap.scrollWidth <= wrap.clientWidth + 1;
+}
+if (gridEl) {
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(function() { updateScrollHint(); }).observe(gridEl);
+  }
+  var scrollHintFrame = null;
+  window.addEventListener('resize', function() {
+    if (scrollHintFrame !== null) return;
+    scrollHintFrame = requestAnimationFrame(function() {
+      scrollHintFrame = null;
+      updateScrollHint();
+    });
+  });
+  updateScrollHint();
+}
 const emptyEl = document.getElementById('cameraEmpty');
 const deleteModal = document.getElementById('deleteModal');
 

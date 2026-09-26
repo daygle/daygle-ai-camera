@@ -17,6 +17,53 @@
        padding, which put a stray divider above the button in every table row. */
     .camera-model-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .camera-model-actions button { min-width: 0; }
+    /* The card is a page-stack grid item, so a grid item's automatic minimum
+       size would let the table's min-content leak up and stretch the WHOLE
+       page sideways on a phone. Confine the overflow to the table's own box. */
+    .camera-models-card { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+    .camera-models-card .audit-table-wrap { min-width: 0; }
+    /* Phones: camera name + current model + a select + two buttons cannot fit
+       four columns, and side-scrolling a 400px table on a 360px screen is worse
+       than stacking. Each row becomes a card and the column names come from
+       ``data-label`` on the cells - the same treatment the shared sheet gives
+       ``#logTable``. */
+    @media (max-width: 700px) {
+      #cameraModelsTable { display: block; }
+      #cameraModelsTable thead { display: none; }
+      #cameraModelsTable tbody { display: grid; gap: 12px; }
+      #cameraModelsTable tbody tr {
+        display: grid;
+        gap: 0;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(255,255,255,.035);
+      }
+      #cameraModelsTable tbody td {
+        display: grid;
+        grid-template-columns: minmax(96px, 34%) minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(255,255,255,.07);
+      }
+      #cameraModelsTable tbody td:last-child { border-bottom: 0; padding-bottom: 0; }
+      #cameraModelsTable tbody td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 1.5;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+      }
+      /* Full-width cells (the empty-state row) have no label to show. */
+      #cameraModelsTable tbody td[colspan] { display: block; }
+      #cameraModelsTable .camera-model-select { max-width: none; }
+      /* Stack the actions and give them phone-sized tap targets. */
+      #cameraModelsTable .camera-model-actions { display: grid; grid-template-columns: 1fr; }
+      #cameraModelsTable .camera-model-actions button { min-height: 40px; }
+    }
   </style>
 </head>
 <body>
@@ -43,7 +90,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card camera-models-card">
       <div class="settings-section-header">
         <div class="settings-section-icon">📷</div>
         <div>

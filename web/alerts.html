@@ -7,6 +7,86 @@
   <title>Alerts - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    /* The policy table carries a 760px min-width inside a scroll box, and this
+       card is a page-stack grid item, so the automatic minimum size let that
+       min-content stretch the whole page sideways on a phone. Confine it. */
+    .alerts-editor-card { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+    #alertsList { min-width: 0; }
+    #alertsList .cameras-table-wrap,
+    #alertsList .alerts-policy-table-wrap { min-width: 0; }
+    @media (max-width: 700px) {
+      /* The four toolbar controls share one flex row on desktop; on a phone
+         each takes the full width so the selects stay tappable. */
+      .alerts-toolbar { display: grid; grid-template-columns: 1fr; gap: 12px; }
+      .alerts-toolbar label { min-width: 0; }
+      .alerts-toolbar button { width: 100%; }
+      /* Six toggle columns do not fit a phone, so each policy stacks into a
+         card with the column names coming from ``data-label`` on the cells.
+         The shared sheet's 760px rule-table scroll treatment is overridden
+         here (ID selectors win) so the rows really do stack. */
+      #alertsList .alerts-policy-table { display: block; min-width: 0; overflow-x: visible; }
+      #alertsList .alerts-policy-table thead { display: none; }
+      #alertsList .alerts-policy-table tbody { display: grid; gap: 12px; }
+      #alertsList .alerts-policy-table tbody tr:not([hidden]) {
+        display: grid;
+        table-layout: auto;
+        width: 100%;
+        min-width: 0;
+        gap: 0;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(255,255,255,.035);
+      }
+      /* An author `display` rule outranks the UA `[hidden]` rule, so the
+         collapsible settings row needs this to stay collapsed. */
+      #alertsList .alerts-policy-table tbody tr[hidden] { display: none; }
+      #alertsList .alerts-policy-table tbody tr:hover td { background: none; }
+      #alertsList .alerts-policy-table tbody td:not([colspan]) {
+        display: grid;
+        grid-template-columns: minmax(96px, 34%) minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(255,255,255,.07);
+      }
+      #alertsList .alerts-policy-table tbody td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 1.5;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+      }
+      /* The policy name heads the card; the scope line rides under it. */
+      #alertsList .alerts-policy-table tbody td.alerts-policy-name { grid-column: 1 / -1; }
+      #alertsList .alerts-policy-table tbody td.alerts-policy-name::before { display: none; }
+      /* Actions: full-width row, phone-sized tap targets, no label. */
+      #alertsList .alerts-policy-table tbody td.alerts-table-actions {
+        grid-column: 1 / -1;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        border-bottom: 0;
+        padding-bottom: 0;
+      }
+      #alertsList .alerts-policy-table tbody td.alerts-table-actions::before { display: none; }
+      #alertsList .alerts-table-actions button { width: 40px; height: 40px; }
+      /* The expanded settings row is a single full-width cell (no label). The
+         shared sheet already gives it its accent underline and panel chrome. */
+      #alertsList .alerts-policy-table tbody tr.alerts-policy-details-row:not([hidden]) {
+        display: block;
+        padding: 0;
+        border: 0;
+        background: none;
+      }
+      #alertsList .alerts-policy-table tbody td[colspan] { display: block; padding: 0; border-bottom: 0; }
+      /* Inside the expanded panel everything is one column on a phone. */
+      #alertsList .alerts-policy-grid { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
   <main class="shell page-stack alerts-shell">

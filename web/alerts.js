@@ -327,12 +327,12 @@ function renderPolicies() {
               : 'Assigned on the Zones page. Removing here unassigns this item from the area.';
     return `
     <tr class="alerts-policy-row ${status.className}" data-rule-index="${index}" title="${escapeHtml(status.title)}">
-      <td class="alerts-policy-name"><strong>${escapeHtml(ruleLabel(rule))}</strong><span>Policy ${index + 1}</span><span class="alerts-policy-state">${escapeHtml(status.label)}</span></td>
-      <td>${escapeHtml(scopeLabel())}</td>
-      <td><label class="alerts-table-toggle"><input data-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''}><span>${rule.enabled !== false ? 'On' : 'Off'}</span></label></td>
-      <td><label class="alerts-table-toggle"><input data-field="email_enabled" type="checkbox" ${emailEnabled ? 'checked' : ''}><span>${emailEnabled ? 'On' : 'Off'}</span></label></td>
-      <td><label class="alerts-table-toggle"><input data-field="push_enabled" type="checkbox" ${pushEnabled ? 'checked' : ''}><span>${pushEnabled ? 'On' : 'Off'}</span></label></td>
-      <td class="alerts-table-actions"><button class="secondary alerts-policy-expand" data-expand-policy="${index}" type="button" aria-expanded="false" aria-controls="alert-policy-settings-${index}" title="Edit alert policy" aria-label="Edit ${escapeHtml(ruleLabel(rule))}">${ICONS.edit}</button><button class="delete-btn secondary alerts-policy-remove" data-delete-rule type="button" title="Remove alert policy" aria-label="Remove ${escapeHtml(ruleLabel(rule))}">${ICONS.remove}</button></td>
+      <td class="alerts-policy-name" data-label="Policy"><strong>${escapeHtml(ruleLabel(rule))}</strong><span>Policy ${index + 1}</span><span class="alerts-policy-state">${escapeHtml(status.label)}</span></td>
+      <td data-label="Scope">${escapeHtml(scopeLabel())}</td>
+      <td data-label="Enabled"><label class="alerts-table-toggle"><input data-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''}><span>${rule.enabled !== false ? 'On' : 'Off'}</span></label></td>
+      <td data-label="Email"><label class="alerts-table-toggle"><input data-field="email_enabled" type="checkbox" ${emailEnabled ? 'checked' : ''}><span>${emailEnabled ? 'On' : 'Off'}</span></label></td>
+      <td data-label="Push"><label class="alerts-table-toggle"><input data-field="push_enabled" type="checkbox" ${pushEnabled ? 'checked' : ''}><span>${pushEnabled ? 'On' : 'Off'}</span></label></td>
+      <td class="alerts-table-actions" data-label="Actions"><button class="secondary alerts-policy-expand" data-expand-policy="${index}" type="button" aria-expanded="false" aria-controls="alert-policy-settings-${index}" title="Edit alert policy" aria-label="Edit ${escapeHtml(ruleLabel(rule))}">${ICONS.edit}</button><button class="delete-btn secondary alerts-policy-remove" data-delete-rule type="button" title="Remove alert policy" aria-label="Remove ${escapeHtml(ruleLabel(rule))}">${ICONS.remove}</button></td>
     </tr>
     <tr class="alerts-policy-details-row" id="alert-policy-settings-${index}" data-policy-details-for="${index}" hidden><td colspan="6">
     <article class="alerts-policy ${rule.enabled !== false ? 'is-enabled' : ''}" data-rule-index="${index}">

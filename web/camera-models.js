@@ -57,10 +57,10 @@ function renderCameras() {
          <button type="button" data-action="unassign" data-camera="${escapeHtml(camera.id)}">Unassign</button>`
       : `<button type="button" class="btn-info" data-action="assign" data-camera="${escapeHtml(camera.id)}">Assign</button>`;
     return `<tr data-camera-row="${escapeHtml(camera.id)}">
-      <td><strong>${escapeHtml(camera.name || camera.id)}</strong><br /><span class="muted">${escapeHtml(camera.id)}</span></td>
-      <td><span class="camera-model-source">${currentBadge}${missingNote}</span></td>
-      <td><select class="camera-model-select" aria-label="Model for ${escapeHtml(camera.name || camera.id)}">${selectOptions(assignmentPayload.models || [], assigned ? camera.model_path : '')}</select></td>
-      <td class="camera-model-actions">${actions}</td>
+      <td data-label="Camera"><strong>${escapeHtml(camera.name || camera.id)}</strong><br /><span class="muted">${escapeHtml(camera.id)}</span></td>
+      <td data-label="Current model"><span class="camera-model-source">${currentBadge}${missingNote}</span></td>
+      <td data-label="Assign model"><select class="camera-model-select" aria-label="Model for ${escapeHtml(camera.name || camera.id)}">${selectOptions(assignmentPayload.models || [], assigned ? camera.model_path : '')}</select></td>
+      <td data-label="Actions" class="camera-model-actions">${actions}</td>
     </tr>`;
   }).join('');
 }

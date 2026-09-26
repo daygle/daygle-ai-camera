@@ -56,8 +56,10 @@ test('the actions cell does not reuse the page-level button-row bar', () => {
   // .button-row inside .page-stack draws a border-top rule (plus padding, a
   // right-aligned layout and a 130px min button width), which rendered a stray
   // divider above every Assign button in the table.
-  assert.match(source, /<td class="camera-model-actions">/);
-  assert.doesNotMatch(source, /<td class="button-row"/);
+  // Attribute order is irrelevant here: the cell also carries a data-label for
+  // the phone layout, which stacks this row into a card.
+  assert.match(source, /<td[^>]*class="camera-model-actions"/);
+  assert.doesNotMatch(source, /<td[^>]*class="button-row"/);
   assert.match(html, /\.camera-model-actions \{ display: flex;/);
   assert.match(html, /\.camera-model-actions button \{ min-width: 0; \}/);
 });

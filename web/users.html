@@ -7,6 +7,70 @@
   <title>Users - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    /* The users table carries a 760px min-width inside a scroll box, and the
+       card is a page-stack grid item, so the automatic minimum size let that
+       min-content stretch the whole page sideways on a phone. Confine it. */
+    .users-list-card { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+    .users-table-wrap { min-width: 0; }
+    /* Phones: five columns (account, role, status, last login, three action
+       buttons) do not fit, so each row stacks into a card and the column
+       names come from ``data-label`` on the cells. */
+    @media (max-width: 700px) {
+      .users-table { display: block; min-width: 0; }
+      .users-table thead { display: none; }
+      .users-table tbody { display: grid; gap: 12px; }
+      .users-table tbody tr {
+        display: grid;
+        gap: 0;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(255,255,255,.035);
+      }
+      .users-table tbody tr:hover,
+      .users-table tbody tr.user-row-editing { background: rgba(71,214,255,.055); }
+      .users-table tbody td {
+        display: grid;
+        grid-template-columns: minmax(96px, 34%) minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(255,255,255,.07);
+      }
+      .users-table tbody td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 1.5;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+      }
+      /* The account cell is the row's heading, so give it the full width and
+         drop its label rather than indenting the name under a "ACCOUNT" tag. */
+      .users-table tbody td.user-account-cell { grid-column: 1 / -1; min-width: 0; padding-bottom: 10px; }
+      .users-table tbody td.user-account-cell::before { display: none; }
+      .users-table tbody td.user-last-login { min-width: 0; white-space: normal; }
+      /* Actions: full-width row with phone-sized tap targets, no label. */
+      .users-table tbody td.user-actions-cell {
+        grid-column: 1 / -1;
+        grid-template-columns: 1fr;
+        border-bottom: 0;
+        padding-bottom: 0;
+      }
+      .users-table tbody td.user-actions-cell::before { display: none; }
+      .users-table .user-actions { justify-content: stretch; gap: 8px; }
+      .users-table .user-actions button { flex: 1 1 0; min-height: 40px; min-width: 0; }
+      /* The inline edit form is a full-width cell; it has no column label and
+         keeps the accent underline the shared sheet gives it. */
+      .users-table tbody td[colspan] {
+        display: block;
+        padding: 0;
+        border-bottom: 2px solid var(--accent);
+      }
+    }
+  </style>
 </head>
 <body>
   <main class="shell page-stack">

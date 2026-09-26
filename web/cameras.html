@@ -87,6 +87,7 @@
 
       <p id="cameraMessage" class="muted cameras-list-status" aria-live="polite"></p>
 
+      <p class="cameras-scroll-hint" hidden>Scroll the table sideways to see connection, video, status and PTZ.</p>
       <div id="cameraGrid"></div>
       <div id="cameraEmpty" class="camera-empty-state" hidden>
         <div class="camera-empty-icon" aria-hidden="true">
@@ -135,6 +136,47 @@
     @media (max-width: 600px) {
       .camera-edit-panel .camera-edit-form { grid-template-columns: 1fr; }
     }
+
+    /* ── Phones ─────────────────────────────────────────────────────────────
+       The camera table keeps its columns (unlike the stacked tables on the
+       users / alerts / camera-models pages) because every column header is a
+       sort control, and a stacked layout would take sorting away on the
+       smallest screens. Instead the widest secondary column is dropped, the
+       row actions move out of the name cell's reserved right gutter so the
+       name column can shrink, and the whole thing scrolls inside the card
+       rather than stretching the page. */
+    @media (max-width: 760px) {
+      /* Profiles (day/night pills, schedule source, preset names) is the widest
+         cell and is also fully visible in the camera's own edit panel. */
+      #cameraGrid .cameras-table th:nth-child(5),
+      #cameraGrid .cameras-table td.cell-profiles { display: none; }
+      /* The actions were absolutely positioned in the name cell's 88px right
+         gutter; unstacking them under the name frees that width. */
+      #cameraGrid .cameras-table .cell-camera { min-width: 160px; padding-right: 10px; }
+      #cameraGrid .cameras-table .cell-actions {
+        position: static;
+        transform: none;
+        margin-top: 8px;
+        flex-wrap: wrap;
+      }
+      /* Phone-sized tap targets for the per-row edit / power / remove buttons. */
+      #cameraGrid .cameras-table .cell-actions button { min-width: 40px; min-height: 40px; padding: 8px; }
+      #cameraGrid .cameras-table { min-width: 520px; }
+    }
+    @media (max-width: 480px) {
+      /* The filter row is already one column; let Reset fill it. */
+      .cameras-filter-actions .button-row { width: 100%; }
+      .cameras-filter-actions .button-row button { width: 100%; justify-content: center; }
+    }
+    /* Side-scroll hint. visibility is driven by cameras.js (it only shows when
+       the table actually overflows), so it never promises a scroll that is not
+       there on a wider phone. */
+    .cameras-scroll-hint {
+      display: flex; align-items: center; gap: 8px; margin: 0 0 10px;
+      font-size: 12px; color: var(--muted);
+    }
+    .cameras-scroll-hint[hidden] { display: none; }
+    .cameras-scroll-hint::before { content: "\21C4"; font-size: 14px; }
   </style>
 
   <script src="/static/nav.js"></script>
