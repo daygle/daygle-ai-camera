@@ -39,8 +39,11 @@ Callables moved (2):
 
 - ``authentication_middleware`` -- session-cookie validation +
   admin-path gating + CSRF token check on mutating ``/api/*`` methods.
-- ``app_navigation_middleware`` -- injects ``<script src="/static/nav.js">``
-  before the closing ``</body>`` of every HTML page response.
+- ``app_navigation_middleware`` -- versions every ``/static/...`` asset URL
+  in an HTML page response (``?v=<content hash>``, so a browser or CDN that
+  ignores our ``no-cache`` header can never pair a new page script with a
+  stale shared bundle) and injects ``<script src="/static/nav.js?v=...">``
+  before the closing ``</body>`` of every authenticated HTML page.
 
 the previous ``@app.middleware('http')`` decorators lived on
 ``app/main.py`` lines 1771 + 1799; the @decorator syntax can't move
@@ -87,9 +90,12 @@ applies verbatim.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
+import re
 import urllib.parse
+from pathlib import Path
 
 from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -99,6 +105,7 @@ import app.state as _state
 from app.auth import CSRF_HEADER
 from app.auth_helpers import set_session_cookie
 from app.config_facades import effective_auth_config
+from app.deps import get_web_dir
 from app.rate_limiter import admin_limiter
 ADMIN_PATHS = _state.ADMIN_PATHS
 MUTATING_METHODS = _state.MUTATING_METHODS
@@ -333,6 +340,120 @@ async def authentication_middleware(request: Request, call_next):
     return response
 
 
+async def _buffer_body(response) -> bytes:
+    """Consume a streaming response body so it can be rewritten."""
+    body = b''
+    async for chunk in response.body_iterator:
+        body += chunk
+    return body
+
+
+# ── Static asset versioning (cache-busting) ────────────────────────────────
+# A page load fetches utils.js and events.js independently, so anything that
+# holds one of them for longer than the other (a browser `max-age`, a CDN edge
+# TTL, a deploy landing mid-load) can pair a NEW page script with an OLD shared
+# bundle. That is exactly the mixed-version failure behind
+# ``ReferenceError: renderIncrementally is not defined`` on /events: events.js
+# had been redeployed while the browser still held the previous utils.js.
+#
+# The origin already answers /static/* with ``no-cache, must-revalidate``
+# (asserted by tests/test_middleware.py), but the header is only a request to
+# revalidate -- it cannot help once a proxy in front of us has decided to
+# rewrite it (a Cloudflare Browser Cache TTL currently turns it into
+# ``max-age=1800``). Versioning the URL sidesteps every layer: the rewrite below
+# turns ``/static/utils.js`` into ``/static/utils.js?v=<content hash>`` in the
+# HTML we serve, so any change to a script changes its URL and a stale copy of
+# the old URL can never be reused for the new page. HTML itself is never cached
+# (``no-store``), so the version in it is always current.
+#
+# References that already carry a query string (recordings.html pins
+# ``?v=recordings-motion-fallback-1``) are left untouched -- the asset group
+# stops at ``?``, so the rewrite is idempotent.
+_STATIC_REF_RE = re.compile(
+    r'(?P<attr>(?:src|href)\s*=\s*)(?P<quote>["\'])/static/(?P<asset>[^"\'\s?]+)(?P=quote)'
+)
+# Any ``/static/nav.js`` script tag counts as "the nav is already included",
+# whether or not it carries a version query -- otherwise a hand-pinned URL
+# would make the injection below add nav.js twice.
+_NAV_SCRIPT_RE = re.compile(r'<script[^>]*\bsrc\s*=\s*["\']/static/nav\.js')
+# asset -> (st_mtime_ns, st_size, hash): re-stats the file, re-reads it only
+# when it actually changed, so the per-page cost is one stat per asset.
+_STATIC_VERSION_CACHE: dict[str, tuple[int, int, str]] = {}
+
+
+def _web_dir_or_none(request: Request) -> Path | None:
+    """Resolve ``web/`` once per response instead of once per asset."""
+    try:
+        return get_web_dir(request)
+    except Exception:  # pragma: no cover -- defensive: never break HTML over a version
+        return None
+
+
+def _static_asset_version(web_dir: Path | None, asset: str) -> str | None:
+    """Short content hash for ``web/<asset>``, or ``None`` if unreadable."""
+    if web_dir is None:
+        return None
+    file_path = web_dir / asset
+    try:
+        # Refuse anything that escapes web/ (assets come from our own HTML,
+        # but a rewrite must never turn into a file-read primitive).
+        file_path.resolve().relative_to(web_dir.resolve())
+        stat = file_path.stat()
+    except (OSError, ValueError):
+        return None
+    cached = _STATIC_VERSION_CACHE.get(asset)
+    if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+        return cached[2]
+    try:
+        digest = hashlib.sha1(file_path.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return None
+    _STATIC_VERSION_CACHE[asset] = (stat.st_mtime_ns, stat.st_size, digest)
+    return digest
+
+
+def _version_static_refs(web_dir: Path | None, html: str) -> str:
+    def _replace(match: re.Match) -> str:
+        asset = match.group('asset')
+        version = _static_asset_version(web_dir, asset)
+        if not version:
+            return match.group(0)
+        quote = match.group('quote')
+        return f'{match.group("attr")}{quote}/static/{asset}?v={version}{quote}'
+
+    return _STATIC_REF_RE.sub(_replace, html)
+
+
+def version_static_asset_urls(request: Request, html: str) -> str:
+    """Append ``?v=<content hash>`` to every unversioned ``/static/...`` ref."""
+    return _version_static_refs(_web_dir_or_none(request), html)
+
+
+async def _versioned_html_body(request: Request, body: bytes, *, inject_nav: bool) -> bytes:
+    """Version static refs in an HTML body and (optionally) add ``nav.js``.
+
+    Decoded as UTF-8 with a latin-1 fallback so the byte round-trip is lossless
+    for either encoding -- rewriting must never corrupt a page it did not need
+    to touch.
+    """
+    codec = 'utf-8'
+    try:
+        text = body.decode(codec)
+    except UnicodeDecodeError:
+        codec = 'latin-1'
+        text = body.decode(codec)
+    web_dir = _web_dir_or_none(request)
+    text = _version_static_refs(web_dir, text)
+    if inject_nav:
+        version = _static_asset_version(web_dir, 'nav.js')
+        nav_url = f'/static/nav.js?v={version}' if version else '/static/nav.js'
+        script = f'<script src="{nav_url}"></script>'
+        marker = '</body>'
+        if marker in text and not _NAV_SCRIPT_RE.search(text):
+            text = text.replace(marker, script + marker)
+    return text.encode(codec)
+
+
 async def app_navigation_middleware(request: Request, call_next):
     response = await call_next(request)
     content_type = response.headers.get('content-type', '')
@@ -375,17 +496,29 @@ async def app_navigation_middleware(request: Request, call_next):
         if path.startswith('/static/'):
             response.headers['Cache-Control'] = 'no-cache, must-revalidate'
         # Public HTML pages (login, setup) should also not be cached, so a
-        # stale copy isn't shown after the auth state changes.
+        # stale copy isn't shown after the auth state changes. They still get
+        # versioned asset URLs -- a stale stylesheet is only cosmetic, but the
+        # rewrite is the same code path either way. nav.js is deliberately NOT
+        # injected here: the nav sidebar has no business on the login form.
         if content_type.startswith('text/html'):
             response.headers.setdefault('Cache-Control', 'no-store, must-revalidate')
+            body = await _versioned_html_body(request, await _buffer_body(response), inject_nav=False)
+            headers = dict(response.headers)
+            headers.pop('content-length', None)
+            return Response(
+                content=body,
+                status_code=response.status_code,
+                headers=headers,
+                media_type='text/html',
+            )
         return response
-    body = b''
-    async for chunk in response.body_iterator:
-        body += chunk
-    marker = b'</body>'
-    script = b'<script src="/static/nav.js"></script>'
-    if marker in body and script not in body:
-        body = body.replace(marker, script + marker)
+    # Authenticated HTML: version every /static ref, then add the nav script if
+    # the page did not include it itself.
+    body = await _versioned_html_body(
+        request,
+        await _buffer_body(response),
+        inject_nav=True,
+    )
     headers = dict(response.headers)
     headers.pop('content-length', None)
     for key, value in security_headers.items():

@@ -32,9 +32,13 @@ What the middleware actually does:
 
 1. Path in ``PUBLIC_PATHS`` -> pass-through (skip script injection).
 2. Response content-type not ``text/html`` -> pass-through.
-3. Otherwise: lazy-iterate the response body, prepend
-   ``<script src="/static/nav.js"></script>`` immediately before the closing
-   ``</body>`` marker (idempotent -- skip if already injected).
+3. Otherwise: lazy-iterate the response body, rewrite every
+   ``src``/``href="/static/..."`` reference to carry a content-hash
+   ``?v=<12 hex>`` query (so a browser/CDN that ignores our ``no-cache``
+   header can never pair a new page script with a stale shared bundle),
+   then prepend ``<script src="/static/nav.js?v=..."></script>``
+   immediately before the closing ``</body>`` marker (idempotent -- skip
+   if any nav.js script tag is already present).
 
 These tests cover the full critical-path lifecycle end-to-end via the
 FastAPI ``app`` instance running on a uvicorn thread, just like the
@@ -43,6 +47,7 @@ existing tests in ``tests/test_api_*.py`` and ``tests/test_web_auth_router_integ
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -60,8 +65,18 @@ from tests.support import (  # noqa: E402
 )
 
 
-# The exact tag app_navigation_middleware injects before </body>.
-NAV_SCRIPT_TAG = '<script src="/static/nav.js"></script>'
+# The nav tag app_navigation_middleware injects before </body>. It carries a
+# content-hash query (``?v=<12 hex>``) so a browser that honours a CDN's
+# ``max-age`` can never reuse a cached nav.js/utils.js from before a deploy --
+# hence a regex rather than a literal tag.
+NAV_SCRIPT_TAG_RE = re.compile(r'<script src="/static/nav\.js\?v=[0-9a-f]{12}"></script>')
+# ANY /static/nav.js script tag (versioned or hand-pinned) counts as "the nav
+# is already included", so the middleware must not inject a second one.
+NAV_SCRIPT_TAG_ANY_RE = re.compile(r'<script[^>]*\bsrc\s*=\s*["\']/static/nav\.js')
+# Every static reference in a served page, split into its URL part.
+STATIC_REF_RE = re.compile(r'(?:src|href)="(/static/[^"]+)"')
+# Static refs that still lack a ``?v=`` cache-buster.
+UNVERSIONED_STATIC_REF_RE = re.compile(r'(?:src|href)="(/static/[^"?]+)"')
 # Shared regex for matching the closing </body> marker.
 _BODY_CLOSE_RE = "</body>"
 
@@ -115,7 +130,7 @@ def test_public_paths_serve_without_session_or_admin(tmp_path, monkeypatch):
         assert "image/svg+xml" in (LocalClient.header(headers, "Content-Type") or ""), (
             "/favicon.ico should be served as image/svg+xml"
         )
-        assert NAV_SCRIPT_TAG not in favicon_body, (
+        assert NAV_SCRIPT_TAG_ANY_RE.search(favicon_body) is None, (
             "favicon body must NOT have nav.js script injected "
             "(content-type guard in app_navigation_middleware)"
         )
@@ -474,15 +489,17 @@ def test_navigation_middleware_injects_script_into_html_root(tmp_path, monkeypat
         assert "text/html" in (LocalClient.header(headers, "Content-Type") or ""), (
             "GET / should serve HTML so the navigation middleware exercises its injection branch"
         )
-        assert NAV_SCRIPT_TAG in body, (
-            f"app_navigation_middleware should prepend {NAV_SCRIPT_TAG!r}; "
-            f"injected nowhere in the body"
+        nav_match = NAV_SCRIPT_TAG_RE.search(body)
+        assert nav_match is not None, (
+            "app_navigation_middleware should prepend a versioned "
+            "<script src=\"/static/nav.js?v=<hash>\"></script>; injected "
+            "nowhere in the body"
         )
         # The injection contract: tag immediately before </body>.
-        script_idx = body.index(NAV_SCRIPT_TAG)
+        script_idx = nav_match.start()
         body_idx = body.index(_BODY_CLOSE_RE)
         assert script_idx < body_idx, (
-            f"{NAV_SCRIPT_TAG!r} must precede </body> in the response body; "
+            f"the nav.js script tag must precede </body> in the response body; "
             f"got script at {script_idx}, </body> at {body_idx}"
         )
     finally:
@@ -540,9 +557,123 @@ def test_navigation_middleware_skips_public_paths(tmp_path, monkeypatch):
         assert status == 200
         assert isinstance(body, str)
         # Source contract: "request.url.path in main.PUBLIC_PATHS" -> return.
-        assert NAV_SCRIPT_TAG not in body, (
+        assert NAV_SCRIPT_TAG_ANY_RE.search(body) is None, (
             "app_navigation_middleware should NOT inject nav.js into "
             "PUBLIC_PATHS responses (/login here)"
+        )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+# ---------------------------------------------------------------------------
+# 6b. Static asset versioning (deploy-skew cache busting).
+# ---------------------------------------------------------------------------
+
+
+def _assert_all_refs_versioned(body: str, context: str) -> None:
+    """No static ref may be served without some ``?v=`` cache-buster.
+
+    The value itself is either the middleware's content hash or a pin the page
+    authored by hand (``recordings.html``), so only its presence is asserted
+    here; the hash format is pinned by the dashboard test below.
+    """
+    unversioned = UNVERSIONED_STATIC_REF_RE.findall(body)
+    assert unversioned == [], (
+        f"{context}: served HTML must not reference unversioned static assets "
+        f"(a browser/CDN can then reuse a copy from before a deploy): {unversioned}"
+    )
+    for ref in STATIC_REF_RE.findall(body):
+        assert "?v=" in ref, f"{context}: static ref {ref!r} should carry a ?v= version"
+
+
+def test_served_html_versions_static_asset_urls(tmp_path, monkeypatch):
+    """Every ``/static`` reference in a served page carries ``?v=<hash>``.
+
+    A page load fetches ``utils.js`` and ``events.js`` independently, so any
+    layer that applies its own ``max-age`` (a Cloudflare Browser Cache TTL
+    currently rewrites our ``no-cache, must-revalidate`` into
+    ``max-age=1800``) can serve a page built from today's ``events.js``
+    alongside yesterday's ``utils.js``. That is the mixed-version failure
+    behind ``ReferenceError: renderIncrementally is not defined`` on /events.
+
+    A content hash in the URL makes every deploy change the URL, so a stale
+    copy of the old URL can never be reused for the new page -- regardless of
+    what any proxy does to the cache headers.
+    """
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    try:
+        client = LocalClient(base_url)
+        _setup_admin(client)
+        _login(client)
+        status, headers, body = client.request("/")
+        assert status == 200, f"GET / (after login) expected 200, got {status}"
+        assert isinstance(body, str)
+        refs = STATIC_REF_RE.findall(body)
+        assert refs, "the dashboard shell should reference at least one /static asset"
+        _assert_all_refs_versioned(body, "GET /")
+        # The version must track the file: utils.js is hashed from its bytes,
+        # so the URL differs from the bare path a deploy would invalidate.
+        utils_ref = next((ref for ref in refs if ref.startswith('/static/utils.js')), None)
+        assert utils_ref and utils_ref != '/static/utils.js', (
+            f"GET / should version /static/utils.js, got {utils_ref!r}"
+        )
+        # The middleware's own versions are 12-hex content hashes.
+        for ref in refs:
+            assert re.search(r"/static/[^\"?]+\?v=[0-9a-f]{12}$", ref), (
+                f"GET /: static ref {ref!r} should carry ?v=<12 hex content hash>"
+            )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_hand_pinned_static_versions_are_left_alone(tmp_path, monkeypatch):
+    """``recordings.html`` pins ``?v=recordings-motion-fallback-1`` itself.
+
+    The rewrite must neither double-version that reference
+    (``...?v=...?v=...``) nor strip the pin the page author chose.
+    """
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    try:
+        client = LocalClient(base_url)
+        _setup_admin(client)
+        _login(client)
+        status, headers, body = client.request("/recordings")
+        assert status == 200, f"GET /recordings expected 200, got {status}"
+        assert isinstance(body, str)
+        assert "/static/utils.js?v=recordings-motion-fallback-1" in body, (
+            "the hand-pinned ?v= on recordings.html must survive the rewrite"
+        )
+        assert "?v=recordings-motion-fallback-1?v=" not in body, (
+            "an already-versioned ref must not be versioned a second time"
+        )
+        _assert_all_refs_versioned(body, "GET /recordings")
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_public_html_pages_are_versioned_without_nav_injection(tmp_path, monkeypatch):
+    """``/login`` (PUBLIC_PATHS) gets versioned assets but no nav.js.
+
+    The public branch returns early to keep the nav sidebar off the login
+    form, but it still has to rewrite the stylesheet URL -- otherwise the
+    public pages are the one place a stale asset can survive a deploy.
+    """
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    try:
+        _setup_admin(LocalClient(base_url))
+        anonymous = LocalClient(base_url)
+        status, headers, body = anonymous.request("/login")
+        assert status == 200
+        assert isinstance(body, str)
+        _assert_all_refs_versioned(body, "GET /login")
+        assert NAV_SCRIPT_TAG_ANY_RE.search(body) is None, (
+            "the public-path branch must still skip the nav.js injection"
         )
     finally:
         server.should_exit = True
