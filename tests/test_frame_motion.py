@@ -235,7 +235,16 @@ def test_steady_state_backoff_clear_does_not_wipe_motion_background():
 def test_recovery_backoff_clear_resets_motion_state():
     """A genuine transition out of backoff DOES reset the per-camera motion
     state (both engines) so a scene that changed during the outage reseeds
-    instead of producing a spurious first-frame motion event."""
+    instead of producing a spurious first-frame motion event.
+
+    Earlier integration tests reload the app namespace, so resolve these
+    cooperating modules together here instead of using stale module globals.
+    """
+    import importlib
+
+    ds = importlib.import_module('app.detection_state')
+    ed = importlib.import_module('app.event_debounce')
+    st = importlib.import_module('app.state')
     cam = "motion-backoff-recovery"
     base = np.full((120, 160, 3), 100, dtype=np.uint8)
     ds.detect_frame_motion(cam, base, algorithm="diff")  # seed a background

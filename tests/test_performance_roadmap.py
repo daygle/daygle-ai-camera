@@ -215,9 +215,14 @@ def test_automatic_recording_retention_is_coalesced_off_calling_thread(monkeypat
 
 
 def test_size_retention_streams_compact_rows_and_skips_age_expired_file_stats(tmp_path, monkeypatch) -> None:
-    import app.db.recordings as recordings_repo
+    import importlib
 
-    database = EventDatabase(str(tmp_path / 'retention.sqlite3'))
+    # Other API tests reload app.* modules during collection/execution. Resolve
+    # the DB facade and repository helper from the same current app namespace so
+    # the monkeypatch intercepts the implementation this EventDatabase uses.
+    recordings_repo = importlib.import_module('app.db.recordings')
+    current_database = importlib.import_module('app.database').EventDatabase
+    database = current_database(str(tmp_path / 'retention.sqlite3'))
     recordings = [
         ('2020-01-01T00:00:00+00:00', 'expired.mp4', 100),
         ('2026-01-01T00:00:00+00:00', 'first.mp4', 8),
