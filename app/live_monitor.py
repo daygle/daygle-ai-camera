@@ -64,6 +64,7 @@ from app.behaviour_monitor import (
 )
 from app.recording_settings import effective_camera_live_settings
 from app.inference_scheduler import LiveInferenceScheduler
+from app.adaptive_cadence import get_adaptive_cadence
 from app.face_identity import annotate_face_identities, face_identity_metadata, unknown_face_alerts
 from app.face_detection_rules import effective_face_detection_rules, known_face_rules_for_camera
 from app.region_detection import (
@@ -389,7 +390,10 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             retry_after = _state.live_detection_retry_after.get(camera_id, 0)
         if retry_after and now < retry_after:
             continue
-        detection_interval_seconds = float(camera_live_settings.get('detection_interval_seconds', 0.5))
+        detection_interval_seconds = _adaptive_detection_interval(
+            camera_id,
+            camera_live_settings,
+        )
         with _state.live_detection_worker_lock:
             if camera_id in _state.active_live_detection_cameras:
                 continue
@@ -569,6 +573,37 @@ def queue_live_stream_alerts(
     if not submitted:
         with _state.live_detection_worker_lock:
             _state.active_live_detection_cameras.discard(camera_id)
+
+
+def _adaptive_detection_interval(
+    camera_id: str,
+    camera_live_settings: dict[str, Any],
+) -> float:
+    """The detection interval this camera should be sampled at (Item 16).
+
+    Starts from the operator's configured ``detection_interval_seconds`` and
+    lets the adaptive tracker stretch it when the camera's scene has been
+    still for a while. Two things keep this honest rather than merely cheap:
+    the tracker enforces a hard staleness floor, so a stationary subject is
+    still sampled within ``max_stale_seconds``; and the existing
+    ``periodic_scan_interval_seconds`` scan keeps overriding the motion gate,
+    so the two features compose instead of fighting.
+
+    Adaptive cadence is opt-out per camera via ``adaptive_detection_enabled``:
+    an operator who wants a fixed interval for a camera can pin it, and a
+    dropped frame on that camera is their call, not ours.
+    """
+    configured = float(camera_live_settings.get('detection_interval_seconds', 0.5))
+    if not normalize_bool_setting(camera_live_settings.get('adaptive_detection_enabled'), True):
+        return configured
+    scheduler = get_live_inference_scheduler()
+    stats = scheduler.stats() if scheduler is not None else {}
+    return get_adaptive_cadence().effective_interval(
+        camera_id,
+        configured,
+        pending=int(stats.get('pending', 0) or 0),
+        max_workers=int(stats.get('max_workers', 1) or 1),
+    )
 
 
 def _camera_has_face_zone_rules(settings: dict[str, Any]) -> bool:
@@ -793,6 +828,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         force_scan = True
         _state._periodic_scan_last_ts[camera_id] = now
     frame_has_motion, frame_motion_confidence, diff_mask, raw_motion_fraction = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha, algorithm=_algorithm, denoise=_denoise, shadow_suppression=_shadow_suppression, frame_size=(_frame_w, _frame_h))
+    # Feed the adaptive-cadence tracker (Item 16). This is the only place that
+    # knows whether the scene is still, so it is the only place that can keep
+    # the per-camera quiet streak honest. Recorded on EVERY cycle, not just
+    # the motion ones - the absence of motion is the signal.
+    get_adaptive_cadence().note_cycle(camera_id, had_motion=bool(frame_has_motion))
     # Keep a diagnostic signal separate from the alert-gated confidence. The
     # latter is intentionally zero below the motion gate; the former lets the
     # live bar show real sub-gate pixel changes without making them alertable.

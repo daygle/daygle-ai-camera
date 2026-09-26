@@ -1167,6 +1167,29 @@ def test_validate_auth_settings_rejects_invalid_trusted_proxy(monkeypatch, pv):
 # ---------------------------------------------------------------------------
 
 
+def test_adaptive_detection_enabled_survives_a_save(monkeypatch, pv):
+    """Item 16: the per-camera opt-out must round-trip.
+
+    ``validate_live_settings`` returns an ALLOWLIST, so a key that the live
+    monitor reads but that is not listed in the return value is silently
+    stripped on every save. That would leave the documented "turn adaptive
+    cadence off for this camera" escape hatch doing nothing at all - a safety
+    valve that looks real and is not.
+    """
+    _install_validator_dependencies(monkeypatch)
+    assert pv.validate_live_settings({})['adaptive_detection_enabled'] is True
+    assert pv.validate_live_settings({'adaptive_detection_enabled': False})[
+        'adaptive_detection_enabled'
+    ] is False
+    # Coerced from the usual truthy/falsy spellings rather than stored raw.
+    assert pv.validate_live_settings({'adaptive_detection_enabled': 'yes'})[
+        'adaptive_detection_enabled'
+    ] is True
+    assert pv.validate_live_settings({'adaptive_detection_enabled': 'no'})[
+        'adaptive_detection_enabled'
+    ] is False
+
+
 def test_validate_live_settings_rejects_snapshot_refresh_out_of_range(monkeypatch, pv):
     from fastapi import HTTPException
     _install_validator_dependencies(monkeypatch)

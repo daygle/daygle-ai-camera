@@ -151,6 +151,9 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'ingest_frame_fps': 4,
     'snapshot_quality': 2,
     'periodic_scan_interval_seconds': 0,
+    # Adaptive detection cadence (Item 16): a still camera samples itself less
+    # often, bounded by a hard staleness floor. Defaults on.
+    'adaptive_detection_enabled': True,
 }
 
 

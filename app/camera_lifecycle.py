@@ -219,6 +219,14 @@ def _cleanup_camera_runtime_state(removed_ids: set[str]) -> None:
         except Exception:  # pragma: no cover - defensive; cache cleanup must not block the apply
             logger.debug('Behavioural state cleanup failed for removed camera %s', cam_id, exc_info=True)
         try:
+            # Adaptive cadence (Item 16): a removed-and-re-added camera must not
+            # inherit a "still for 10 minutes" streak and resume sampling on
+            # the slow cadence.
+            from app.adaptive_cadence import get_adaptive_cadence
+            get_adaptive_cadence().clear_camera(cam_id)
+        except Exception:  # pragma: no cover - defensive; cache cleanup must not block the apply
+            logger.debug('Adaptive cadence cleanup failed for removed camera %s', cam_id, exc_info=True)
+        try:
             from app.face_identity import reset_camera_identities
             reset_camera_identities(cam_id)
         except Exception:  # pragma: no cover - defensive; cache cleanup must not block the apply
