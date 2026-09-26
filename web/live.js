@@ -1012,12 +1012,16 @@ document.addEventListener('visibilitychange', () => {
 });
 
 if (liveEls.liveAiTrackToggle) {
-  const savedTrack = localStorage.getItem(LIVE_AI_TRACK_KEY);
+  // Storage access can throw (privacy modes, sandboxed frames); fall back to
+  // the default instead of aborting the rest of the page wiring (the codebase
+  // convention: every localStorage access is guarded).
+  let savedTrack = null;
+  try { savedTrack = localStorage.getItem(LIVE_AI_TRACK_KEY); } catch (_err) { /* storage disabled - keep default */ }
   liveAiTrackEnabled = savedTrack !== '0';
   liveEls.liveAiTrackToggle.checked = liveAiTrackEnabled;
   liveEls.liveAiTrackToggle.addEventListener('change', () => {
     liveAiTrackEnabled = Boolean(liveEls.liveAiTrackToggle.checked);
-    localStorage.setItem(LIVE_AI_TRACK_KEY, liveAiTrackEnabled ? '1' : '0');
+    try { localStorage.setItem(LIVE_AI_TRACK_KEY, liveAiTrackEnabled ? '1' : '0'); } catch (_err) { /* storage disabled / quota - silently no-op */ }
     liveAiTrackDetections = null;
     liveAiTrackPrevDetections = null;
     liveAiTrackCaptureMs = 0;
