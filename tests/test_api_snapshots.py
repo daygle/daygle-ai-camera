@@ -418,3 +418,60 @@ def test_snapshot_image_thumb_variant_downscales(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_snapshot_thumb_serves_the_capture_time_thumbnail_when_stored(tmp_path, monkeypatch):
+    """``?thumb=1`` hands back the capture-time thumbnail untouched.
+
+    The gallery loads one image per row, so decoding/annotating/re-encoding the
+    full frame per request is what made the page slow. When the capture path
+    stored a thumbnail, the endpoint must serve that file byte-for-byte - and
+    only for the annotated variant, since the boxes are baked into it.
+    """
+    import pytest
+    cv2 = pytest.importorskip('cv2')
+    np = pytest.importorskip('numpy')
+
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        _login(admin)
+        frame = np.random.default_rng(1).integers(0, 255, size=(720, 1280, 3), dtype=np.uint8)
+        ok, encoded = cv2.imencode('.jpg', frame)
+        assert ok
+        snapshot_path = main.storage.save_image_snapshot(encoded.tobytes(), 'wide.jpg')
+        # Not a renderable frame (and not UTF-8, so the test client hands the
+        # bytes back untouched): any re-render would come back different, so
+        # byte equality proves the stored file was served as-is.
+        thumb_bytes = b'\xff\xd8\xff\xe0capture-time-thumbnail\xff\xd9'
+        thumbnail_path = main.storage.save_image_snapshot(thumb_bytes, 'wide.thumb.jpg')
+        event_id = main.database.add_event(
+            created_at=datetime.now(timezone.utc).isoformat(),
+            source='motion',
+            snapshot_path=snapshot_path,
+            detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.5, 'height': 0.5}}],
+            metadata={'camera_id': 'front'},
+            thumbnail_path=thumbnail_path,
+        )
+
+        status, _headers, served = admin.request(f'/api/events/{event_id}/snapshot?thumb=1')
+        assert status == 200
+        assert served == thumb_bytes, 'the stored capture-time thumbnail must be served verbatim'
+
+        # The row's Open action still renders the full-size annotated frame.
+        status, _headers, full = admin.request(f'/api/events/{event_id}/snapshot')
+        assert status == 200
+        assert full != thumb_bytes
+
+        # boxes=false wants an unannotated image, which the baked-in file is
+        # not - that combination keeps rendering on the fly.
+        status, _headers, raw = admin.request(f'/api/events/{event_id}/snapshot?thumb=1&boxes=false')
+        assert status == 200
+        assert raw != thumb_bytes
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

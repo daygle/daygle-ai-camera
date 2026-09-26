@@ -10,15 +10,15 @@ from app.auth_gates import require_admin, require_user
 from app.deps import get_database
 from app.request_helpers import write_audit_log
 from app.media_utils import safe_storage_path
-from app.live_snapshot import filter_object_priority_detections, render_live_snapshot_jpeg_overlay
+from app.live_snapshot import (
+    SNAPSHOT_THUMB_MAX_WIDTH,
+    filter_object_priority_detections,
+    overlay_detection_rows,
+    render_live_snapshot_jpeg_overlay,
+)
 from app.pagination import decode_cursor, encode_cursor
 
 router = APIRouter()
-
-# Gallery rows render the frame at 208 CSS px (2x for a retina display), so a
-# ``?thumb=1`` request downscales to this width instead of pushing a
-# full-resolution frame through the annotate/encode path for every row.
-SNAPSHOT_THUMB_MAX_WIDTH = 416
 
 
 def _scope_event_recordings(event: dict, user: dict) -> dict | None:
@@ -101,7 +101,7 @@ def event_snapshot(
     event_id: int,
     request: Request,
     boxes: bool = Query(True, description='Draw green detection boxes on the snapshot (as in alert emails).'),
-    thumb: bool = Query(False, description='Downscale to a gallery thumbnail (416px wide) instead of full resolution.'),
+    thumb: bool = Query(False, description='Serve the capture-time gallery thumbnail (416px wide) when one was stored; otherwise downscale on the fly.'),
     db=Depends(get_database),
 ):
     """Serve the event's saved snapshot, annotated with the same green
@@ -122,21 +122,25 @@ def event_snapshot(
     snapshot_path = safe_storage_path(event.get('snapshot_path'), roots=('snapshots_dir',))
     if snapshot_path is None or not snapshot_path.exists() or not snapshot_path.is_file():
         raise HTTPException(status_code=404, detail='Event snapshot not found')
+    if thumb and boxes:
+        # Capture-time thumbnail: serve the stored file verbatim instead of
+        # decoding, annotating and re-encoding the full-resolution frame for
+        # every gallery row. Only for the annotated variant - the stored file
+        # has the boxes baked in, so ``boxes=false`` keeps rendering on the fly.
+        thumbnail_path = safe_storage_path(event.get('thumbnail_path'), roots=('snapshots_dir',))
+        if thumbnail_path is not None and thumbnail_path.exists() and thumbnail_path.is_file():
+            return Response(
+                content=thumbnail_path.read_bytes(),
+                media_type='image/jpeg',
+                headers={'Cache-Control': 'private, max-age=300'},
+            )
     raw_bytes = snapshot_path.read_bytes()
-    overlay_detections = filter_object_priority_detections([
-        {
-            'label': detection.get('label'),
-            'confidence': detection.get('confidence'),
-            'box': {
-                'x': detection.get('x'),
-                'y': detection.get('y'),
-                'width': detection.get('width'),
-                'height': detection.get('height'),
-            },
-            'motion_event': detection.get('motion_event', False),
-        }
-        for detection in (event.get('detections') or [])
-    ]) if boxes else []
+    # Events created before thumbnails were captured have no stored file and
+    # still render here - same pipeline as build_event_thumbnail ran at capture
+    # time, so both paths draw identical boxes.
+    overlay_detections = filter_object_priority_detections(
+        overlay_detection_rows(event.get('detections') or [])
+    ) if boxes else []
     image_bytes = render_live_snapshot_jpeg_overlay(
         raw_bytes,
         overlay_detections,

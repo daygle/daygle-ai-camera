@@ -141,6 +141,66 @@ def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, A
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">\n  <defs>\n    <linearGradient id="camera-bg" x1="0" x2="1" y1="0" y2="1">\n      <stop offset="0" stop-color="#101827" />\n      <stop offset="0.52" stop-color="#0b1220" />\n      <stop offset="1" stop-color="#17223a" />\n    </linearGradient>\n    <radialGradient id="lens" cx="50%" cy="45%" r="68%">\n      <stop offset="0" stop-color="#47d6ff" stop-opacity="0.22" />\n      <stop offset="0.5" stop-color="#8b5cf6" stop-opacity="0.1" />\n      <stop offset="1" stop-color="#070b13" stop-opacity="0" />\n    </radialGradient>\n    <style>\n      .grid line {{ stroke: rgba(255,255,255,.08); stroke-width: 1; }}\n      .hud {{ fill: #edf3ff; font: 700 26px Inter, Arial, sans-serif; letter-spacing: .04em; }}\n      .muted {{ fill: #91a1ba; font: 700 20px Inter, Arial, sans-serif; }}\n      .monitor-zone polygon {{ fill: rgba(71,214,255,.08); stroke: #47d6ff; stroke-width: 3; stroke-dasharray: 12 10; }}\n      .monitor-zone text {{ fill: #47d6ff; font: 800 20px Inter, Arial, sans-serif; paint-order: stroke; stroke: rgba(7,11,19,.86); stroke-width: 4; stroke-linejoin: round; }}\n      .detection-box rect {{ fill: rgba(73,230,163,.08); stroke: #49e6a3; stroke-width: 4; rx: 18; }}\n      .detection-box text {{ fill: #49e6a3; font: 800 24px Inter, Arial, sans-serif; paint-order: stroke; stroke: rgba(7,11,19,.86); stroke-width: 5; stroke-linejoin: round; }}\n    </style>\n  </defs>\n  <rect width="100%" height="100%" fill="url(#camera-bg)" />\n  <rect width="100%" height="100%" fill="url(#lens)" />\n  <g class="grid">{''.join(grid_lines)}</g>\n  <circle cx="{width * 0.74:.1f}" cy="{height * 0.34:.1f}" r="{min(width, height) * 0.16:.1f}" fill="none" stroke="rgba(71,214,255,.16)" stroke-width="3" />\n  <circle cx="{width * 0.28:.1f}" cy="{height * 0.62:.1f}" r="{min(width, height) * 0.12:.1f}" fill="none" stroke="rgba(139,92,246,.16)" stroke-width="3" />\n  {''.join(zone_markup)}\n  {''.join(detection_markup)}\n  <rect x="24" y="24" width="520" height="116" rx="20" fill="rgba(7,11,19,.58)" stroke="rgba(255,255,255,.12)" />\n  <text x="48" y="70" class="hud">{escape(camera_name).upper()}</text>\n  <text x="48" y="112" class="muted">Frame #{frame_number} · {timestamp} · Overlay {overlay_state}</text>\n</svg>'''
 
 
+# Gallery rows render the frame at 208 CSS px (2x for a retina display), so a
+# captured thumbnail is downscaled to this width.
+SNAPSHOT_THUMB_MAX_WIDTH = 416
+
+
+def overlay_detection_rows(detections: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Normalize detections into the shape the JPEG overlay draws.
+
+    Accepts both payload shapes: capture-time detections (coordinates nested
+    under ``box``) and the flat ``x``/``y``/``width``/``height`` columns the
+    event API returns. Only label/confidence/box/motion_event survive, which is
+    what makes a capture-time thumbnail and an on-the-fly render of the same
+    event draw the exact same boxes - the alert_matched/alert_triggered flags
+    carried by capture-time rows would otherwise make the two paths disagree.
+    """
+    rows: list[dict[str, Any]] = []
+    for detection in detections or []:
+        box = detection.get('box') or {}
+
+        def coord(name: str) -> Any:
+            value = box.get(name)
+            return detection.get(name) if value is None else value
+
+        rows.append({
+            'label': detection.get('label'),
+            'confidence': detection.get('confidence'),
+            'box': {
+                'x': coord('x'),
+                'y': coord('y'),
+                'width': coord('width'),
+                'height': coord('height'),
+            },
+            'motion_event': detection.get('motion_event', False),
+        })
+    return rows
+
+
+def build_event_thumbnail(image_bytes: bytes, detections: list[dict[str, Any]] | None) -> bytes | None:
+    """Render the gallery thumbnail for a captured frame, or ``None``.
+
+    Called ONCE at capture time so ``GET /api/events/{id}/snapshot?thumb=1``
+    can serve a stored file instead of decoding, annotating and re-encoding the
+    full-resolution frame per gallery row. The pipeline is deliberately the
+    same one the endpoint runs (same overlay rows, same box priority filter,
+    same downscale), so a stored thumbnail is visually identical to what an
+    on-the-fly render would have produced.
+
+    Returns ``None`` when the frame cannot be rendered (no ``cv2``, undecodable
+    bytes) so callers skip the file entirely - storing the untouched
+    full-resolution frame as a "thumbnail" would only double the disk cost, and
+    the endpoint still falls back to rendering on the fly.
+    """
+    thumb = render_live_snapshot_jpeg_overlay(
+        image_bytes,
+        filter_object_priority_detections(overlay_detection_rows(detections)),
+        max_width=SNAPSHOT_THUMB_MAX_WIDTH,
+    )
+    return None if thumb is image_bytes else thumb
+
+
 def render_live_snapshot_jpeg_overlay(
     image_bytes: bytes,
     detections: list[dict[str, Any]],
@@ -167,7 +227,12 @@ def render_live_snapshot_jpeg_overlay(
     except ImportError:
         return image_bytes
     data = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    try:
+        image = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    except cv2.error:
+        # cv2 RAISES on an empty buffer and returns None on a malformed one;
+        # either way there is no frame to draw on or shrink.
+        return image_bytes
     if image is None:
         return image_bytes
     height, width = image.shape[:2]

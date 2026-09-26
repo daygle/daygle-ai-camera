@@ -22,6 +22,7 @@ from app.alert_dispatch import (
 from app.camera_health import _check_cameras_health
 from app.camera_instance import read_ingest_frame
 from app.config_facades import effective_ai_config, effective_email_alert_settings, effective_face_recognition_config, effective_live_config
+from app.live_snapshot import build_event_thumbnail
 from app.detection_state import (
     confirm_motion_detections,
     confirm_object_detections,
@@ -1585,6 +1586,16 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     else:
         image_bytes = image
     snapshot_path = _state.storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
+    # Bake the gallery thumbnail once at capture time (annotated + downscaled),
+    # so the Snapshots gallery serves a stored file instead of decoding,
+    # annotating and re-encoding the full frame for every row. ``None`` when it
+    # cannot be rendered here (e.g. no cv2) - the snapshot endpoint then falls
+    # back to rendering on the fly.
+    thumbnail_bytes = build_event_thumbnail(image_bytes, recording_detections)
+    thumbnail_path = (
+        _state.storage.save_image_snapshot(thumbnail_bytes, f'{camera_id}.thumb.jpg')
+        if thumbnail_bytes else None
+    )
     _rule_by_name = {str(r.get('name') or ''): r for r in zone_rules or []}
     alert_rows = []
     for alert in triggered:
@@ -1592,7 +1603,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         if rule and not rule.get('enabled', True):
             continue
         alert_rows.append({'created_at': datetime.now(timezone.utc).isoformat(), 'rule_name': alert['rule_name'], 'label': alert['label'], 'confidence': alert['confidence'], 'message': alert['message']})
-    event_id = _state.database.add_event_with_alerts(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, detections=recording_detections, alerts=alert_rows, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream', **face_identity_metadata(recording_detections)})
+    event_id = _state.database.add_event_with_alerts(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, thumbnail_path=thumbnail_path, detections=recording_detections, alerts=alert_rows, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream', **face_identity_metadata(recording_detections)})
     recording_id = attach_event_recording(event_id, event_time, 'rtsp', recording_detections, camera_id=camera_id, recording_config=camera_recording_config)
     _cycle_timer.add(STAGE_EVENT, (time.perf_counter() - _event_started) * 1000.0)
     # Remember the event even when no recording attached: the debounce state

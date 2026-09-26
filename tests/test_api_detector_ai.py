@@ -189,6 +189,66 @@ def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path
     assert int(decoded.sum()) > 0
 
 
+def test_build_event_thumbnail_matches_the_on_the_fly_render_at_thumb_size(tmp_path, monkeypatch):
+    """Capture-time thumbnails must equal what the snapshot endpoint would
+    render on the fly, just at thumbnail size - the gallery serves the stored
+    file, so any difference would make capture-time and legacy rows look
+    unlike each other.
+    """
+    _load_app(tmp_path, monkeypatch)
+    mods = _m()
+
+    cv2 = pytest.importorskip('cv2')
+    np = pytest.importorskip('numpy')
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    ok, encoded = cv2.imencode('.jpg', frame)
+    assert ok
+    image_bytes = encoded.tobytes()
+    detections = [
+        {
+            'label': 'person',
+            'confidence': 0.92,
+            'box': {'x': 0.1, 'y': 0.2, 'width': 0.3, 'height': 0.4},
+            # Capture-time rows carry alert flags; they must not change which
+            # boxes get drawn relative to the endpoint's flat DB rows.
+            'alert_triggered': False,
+            'alert_matched': False,
+        }
+    ]
+
+    thumb = mods.live_snapshot.build_event_thumbnail(image_bytes, detections)
+    assert thumb is not None
+    assert len(thumb) < len(image_bytes), 'the thumbnail must be smaller than the full frame'
+
+    def decode(jpeg_bytes):
+        return cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+
+    decoded = decode(thumb)
+    assert decoded is not None
+    assert decoded.shape[1] == mods.live_snapshot.SNAPSHOT_THUMB_MAX_WIDTH
+
+    on_the_fly = mods.live_snapshot.render_live_snapshot_jpeg_overlay(
+        image_bytes,
+        mods.live_snapshot.filter_object_priority_detections(
+            mods.live_snapshot.overlay_detection_rows(detections)
+        ),
+        max_width=mods.live_snapshot.SNAPSHOT_THUMB_MAX_WIDTH,
+    )
+    assert np.array_equal(decoded, decode(on_the_fly)), (
+        'the capture-time thumbnail must be pixel-identical to the on-the-fly render'
+    )
+
+
+def test_build_event_thumbnail_returns_none_when_the_frame_cannot_be_rendered(tmp_path, monkeypatch):
+    """An undecodable frame yields no thumbnail rather than a full-size copy:
+    the endpoint keeps rendering those on the fly."""
+    _load_app(tmp_path, monkeypatch)
+    mods = _m()
+
+    assert mods.live_snapshot.build_event_thumbnail(b'not-a-jpeg', []) is None
+    assert mods.live_snapshot.build_event_thumbnail(b'', [{'label': 'person', 'confidence': 0.5}]) is None
+
+
 def test_object_priority_hides_overlapping_motion_but_keeps_unrelated_motion(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     from app.live_snapshot import filter_object_priority_detections

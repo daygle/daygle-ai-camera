@@ -32,6 +32,7 @@ class EventsMixin:
         alert_triggered: bool = False,
         metadata: dict[str, Any] | None = None,
         recording_id: int | None = None,
+        thumbnail_path: str | None = None,
     ) -> int:
         # Coerce ``created_at`` to canonical UTC ``+00:00`` before binding
         # so the storage form is consistent across every event row. There is
@@ -45,10 +46,10 @@ class EventsMixin:
         with self.write_slot(), self.connect() as db:
             cursor = db.execute(
                 """
-                INSERT INTO events (created_at, source, snapshot_path, alert_triggered, recording_id, metadata)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO events (created_at, source, snapshot_path, thumbnail_path, alert_triggered, recording_id, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (created_at, source, snapshot_path, int(alert_triggered), recording_id, json.dumps(metadata or {})),
+                (created_at, source, snapshot_path, thumbnail_path, int(alert_triggered), recording_id, json.dumps(metadata or {})),
             )
             if cursor.lastrowid is None:
                 raise RuntimeError("Failed to create event row")
@@ -85,14 +86,15 @@ class EventsMixin:
         alerts: list[dict[str, Any]],
         alert_triggered: bool = False,
         metadata: dict[str, Any] | None = None,
+        thumbnail_path: str | None = None,
     ) -> int:
         """Atomically persist an event, its detections, and alert history."""
         created_at = _normalize_iso_to_utc(created_at) or created_at
         with self.write_slot(), self.connect() as db:
             cursor = db.execute(
-                """INSERT INTO events (created_at, source, snapshot_path, alert_triggered, metadata)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (created_at, source, snapshot_path, int(alert_triggered), json.dumps(metadata or {})),
+                """INSERT INTO events (created_at, source, snapshot_path, thumbnail_path, alert_triggered, metadata)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (created_at, source, snapshot_path, thumbnail_path, int(alert_triggered), json.dumps(metadata or {})),
             )
             event_id = int(cursor.lastrowid)
             for detection in detections:
