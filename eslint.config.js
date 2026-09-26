@@ -49,6 +49,12 @@ const WEB_SHARED_GLOBALS = {
   // formatters, detection-pill/summary builders, auth/CSRF plumbing, DOM
   // utilities).
   api: 'readonly',
+  // web/utils.js - incremental list rendering and media lifecycle (Item 15).
+  // Long lists (activity feed, events, snapshots, recordings) paint their first
+  // screen synchronously and append the rest across frames; offscreen <video>
+  // and lazy images are released and restored by a shared observer.
+  observeMediaLifecycle: 'readonly',
+  renderIncrementally: 'readonly',
   // web/utils.js - request cancellation/coalescing/backoff helpers (Item 14).
   // Polling pages use createRequestCoalescer to enforce "latest wins" and
   // backoffDelayMs to back off after a network error; REQUEST_SUPERSEDED is the

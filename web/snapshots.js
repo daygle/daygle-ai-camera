@@ -314,8 +314,18 @@ function renderGallery(snapshots) {
       </div>`;
     return;
   }
-  els.gallery.innerHTML = snapshots.map(snapshotRow).join('');
-  bindDeleteButtons();
+  // Item 15: paint the gallery progressively rather than in one innerHTML
+  // assignment, and hand the finished grid to the media observer so
+  // offscreen thumbnails release their decoded bitmaps (the lazy-media class
+  // lets the observer drop src without a refetch on return).
+  renderIncrementally(els.gallery, snapshots, snapshotRow, {
+    wrapperTag: 'div',
+    wrapperClass: 'daygle-render-batch',
+    onComplete: () => {
+      bindDeleteButtons();
+      observeMediaLifecycle(els.gallery);
+    },
+  });
 }
 
 function bindDeleteButtons() {

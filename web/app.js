@@ -345,6 +345,11 @@ function renderActivityFeed() {
     return;
   }
   const ordered = activitySortState ? items.slice().sort(compareActivityItems) : items;
+  // Item 15: the table chrome is cheap and must exist immediately (it carries
+  // the sortable headers), but the rows are painted incrementally so a mature
+  // install with thousands of events does not block the main thread building
+  // one giant innerHTML string. The first screenful is still synchronous, so
+  // the feed looks instant.
   els.activityFeed.innerHTML =
     '<div class="cameras-table-wrap"><table class="rule-table activity-table">' +
       '<thead><tr>' +
@@ -355,12 +360,21 @@ function renderActivityFeed() {
         renderActivitySortHeader('When', 'when') +
         '<th class="cell-center" scope="col">Actions</th>' +
       '</tr></thead>' +
-      '<tbody>' + ordered.map(renderActivityItem).join('') + '</tbody>' +
+      '<tbody id="activity-feed-rows"></tbody>' +
     '</table></div>';
+  const rows = document.getElementById('activity-feed-rows');
+  renderIncrementally(rows, ordered, renderActivityItem, {
+    onComplete: () => {
+      // Delegated handlers and the dismiss-button state both walk the live
+      // rows, so they have to run once the last batch is in the DOM.
+      bindActivityActions();
+      updateDismissButtons();
+    },
+  });
   updateListStatus(items.length);
-  bindActivityActions();
+  // Headers are outside the incremental region, so their binding is immediate.
   bindActivitySortHeaders();
-  updateDismissButtons();
+  observeMediaLifecycle(els.activityFeed);
 }
 
 function updateListStatus(count) {

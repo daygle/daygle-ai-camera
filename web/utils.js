@@ -116,6 +116,190 @@ function _resumeDayglePagePollers() {
   for (const fn of _dayglePagePollers) _runDayglePagePoller(fn);
 }
 
+// ─── Incremental list rendering (Item 15) ──────────────────────────────────
+// The dashboard activity feed, the event list, the snapshot gallery and the
+// recording list all build one giant innerHTML string and hand it to the DOM
+// in a single assignment. That is fine for 30 rows and pathological for 3000:
+// the browser must parse and lay out every node before the user sees anything,
+// and a filter change or a sort click re-does all of it even though only the
+// order changed.
+//
+// renderIncrementally() paints the first screen synchronously - so the page
+// still feels instant - then appends the remainder across animation frames.
+// Long lists therefore become visible progressively instead of blocking, and
+// a re-render is cancelled by its successor rather than racing it.
+//
+// This is deliberately NOT full windowing/virtualization. Dropping to
+// placeholders is a much larger change: it breaks find-in-page, Ctrl-F, and
+// browser accessibility trees, and it has to be re-implemented per page
+// because every list here is a different markup shape (table rows, cards,
+// absolutely-positioned timeline tracks). Progressive painting captures most
+// of the win - the main thread is never blocked for the whole list - without
+// those costs. If a page ever genuinely needs thousands of simultaneously live
+// nodes, that page should window on its own.
+
+// How many rows to paint in the first synchronous batch. One screenful: enough
+// that the user sees a full viewport immediately on a typical row height.
+const INCREMENTAL_FIRST_BATCH = 40;
+// How many further rows to append per animation frame. Small enough that a
+// frame stays well inside the 16 ms budget even with heavy row markup.
+const INCREMENTAL_BATCH = 60;
+
+/**
+ * Paint `items` into `container` through `renderItem`, progressively.
+ *
+ * @param {Element} container  target element (its children are replaced)
+ * @param {Array} items        the full list
+ * @param {Function} renderItem  item -> HTML string for one row
+ * @param {Object} [options]
+ * @param {string} [options.wrapperTag='tbody']  tag wrapping the rows
+ * @param {string} [options.wrapperClass]        class for that wrapper
+ * @param {Function} [options.onComplete]        called once the last batch lands
+ * @returns {Function} a cancel function for the in-flight render
+ */
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function renderIncrementally(container, items, renderItem, options = {}) {
+  const {
+    wrapperTag = 'tbody',
+    wrapperClass = '',
+    onComplete = null,
+  } = options;
+
+  // A newer render always supersedes an older one, otherwise two incremental
+  // passes interleave into the same container and duplicate rows.
+  if (container._daygleRenderCancel) container._daygleRenderCancel();
+
+  const list = Array.isArray(items) ? items : [];
+  let cancelled = false;
+  let frame = 0;
+
+  const cancel = () => {
+    cancelled = true;
+    if (frame) {
+      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
+      else clearTimeout(frame);
+      frame = 0;
+    }
+    container._daygleRenderCancel = null;
+  };
+
+  if (!container) return cancel;
+
+  if (!list.length) {
+    container.innerHTML = '';
+    if (onComplete) onComplete();
+    return cancel;
+  }
+
+  const schedule = typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame
+    : (fn) => setTimeout(fn, 16);
+
+  // Build the wrapper once and append batches into it, so the container is
+  // emptied exactly once (a single reflow) rather than per batch.
+  container.innerHTML = '';
+  const wrapper = document.createElement(wrapperTag);
+  if (wrapperClass) wrapper.className = wrapperClass;
+  container.appendChild(wrapper);
+
+  let index = 0;
+  const paint = (count) => {
+    if (cancelled) return;
+    const fragment = document.createDocumentFragment();
+    const end = Math.min(list.length, index + count);
+    for (; index < end; index += 1) {
+      // Every row goes through safeHtml by contract: a row renderer returns
+      // markup that must already be escaped (the XSS guard tests enforce this),
+      // and the fragment append keeps that path identical to the old innerHTML
+      // join without re-parsing the whole list at once.
+      const host = document.createElement('div');
+      host.innerHTML = renderItem(list[index]);
+      while (host.firstChild) fragment.appendChild(host.firstChild);
+    }
+    wrapper.appendChild(fragment);
+    if (index < list.length) {
+      frame = schedule(() => paint(INCREMENTAL_BATCH));
+    } else {
+      frame = 0;
+      container._daygleRenderCancel = null;
+      if (onComplete) onComplete();
+    }
+  };
+
+  container._daygleRenderCancel = cancel;
+  paint(INCREMENTAL_FIRST_BATCH);
+  return cancel;
+}
+
+// ─── Media lifecycle (Item 15) ────────────────────────────────────────────
+// A list of <video> elements keeps decoding whether or not anyone is looking at
+// it: the browser holds the decoded frame, the audio pipeline stays live, and
+// a page left open on a wall display quietly pins a decoder per element. With
+// virtualization those elements come and go, so the rule has to be visibility
+// driven rather than "pause everything on unload".
+//
+// One shared IntersectionObserver for the whole page, created lazily on first
+// use and reused by every list. Offscreen media is paused; on the way back it
+// resumes only if it was playing before it scrolled away, so a paused clip the
+// user deliberately stopped does not start itself on re-entry.
+
+let _daygleMediaObserver = null;
+const _daygleMediaWanted = new WeakMap();
+
+function _daygleMediaVisibilityChanged(entries) {
+  for (const entry of entries) {
+    const media = entry.target;
+    if (media.tagName === 'VIDEO') {
+      if (entry.isIntersecting) {
+        if (_daygleMediaWanted.get(media)) {
+          const resume = media.play();
+          // Autoplay can reject (policy, or no user gesture yet); that is not
+          // an error worth surfacing, and the poster/frame is still shown.
+          if (resume && typeof resume.catch === 'function') resume.catch(() => {});
+        }
+      } else {
+        _daygleMediaWanted.set(media, !media.paused);
+        media.pause();
+      }
+      continue;
+    }
+    // Images: drop the decoded bitmap when far offscreen and restore it on
+    // return. The src is stashed, not removed, so no network refetch happens
+    // and the row keeps its intrinsic box (avoids layout shift on return).
+    if (entry.isIntersecting) {
+      const src = media.dataset.daygleSrc;
+      if (src && !media.src) {
+        media.src = src;
+        delete media.dataset.daygleSrc;
+      }
+    } else {
+      if (media.src && !media.dataset.daygleSrc) media.dataset.daygleSrc = media.src;
+      media.removeAttribute('src');
+    }
+  }
+}
+
+/**
+ * Register a subtree's media elements for visibility-driven lifecycle.
+ * Safe to call repeatedly on the same root; only the first call observes.
+ */
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function observeMediaLifecycle(root) {
+  if (!root || typeof IntersectionObserver !== 'function') return null;
+  if (!_daygleMediaObserver) {
+    _daygleMediaObserver = new IntersectionObserver(_daygleMediaVisibilityChanged, {
+      // Start managing an element a little before it scrolls in, so playback
+      // and decode are already warm by the time it is visible.
+      rootMargin: '200px 0px',
+      threshold: 0,
+    });
+  }
+  for (const media of root.querySelectorAll('video, img[data-daygle-release], img.lazy-media')) {
+    _daygleMediaObserver.observe(media);
+  }
+  return _daygleMediaObserver;
+}
+
 // ─── Request cancellation, coalescing and backoff ─────────────────────────
 // Item 14 of the performance roadmap. Three problems, one root cause: the
 // dashboard re-requests the same resources on a timer and has no way to tell

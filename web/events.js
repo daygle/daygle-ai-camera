@@ -254,6 +254,10 @@ function renderList() {
   const ordered = eventsSortState
     ? events.slice().sort(compareEvents)
     : events;
+  // Item 15: rows are painted incrementally (first screenful synchronous, the
+  // rest across frames) so a wide time range with thousands of events does not
+  // block the main thread. The table chrome and its sortable headers render
+  // immediately and are bound outside the incremental region.
   els.eventFeed.innerHTML =
     '<div class="cameras-table-wrap"><table class="rule-table activity-table">' +
     '<thead><tr>' +
@@ -263,8 +267,12 @@ function renderList() {
       renderSortHeader('When', 'when') +
       '<th class="cell-center" scope="col">Actions</th>' +
     '</tr></thead>' +
-    '<tbody>' + ordered.map(renderEventRow).join('') + '</tbody>' +
+    '<tbody id="event-feed-rows"></tbody>' +
     '</table></div>';
+  const rows = document.getElementById('event-feed-rows');
+  renderIncrementally(rows, ordered, renderEventRow, {
+    onComplete: () => observeMediaLifecycle(els.eventFeed),
+  });
   bindSortHeaders();
 }
 

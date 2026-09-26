@@ -408,6 +408,9 @@ function renderRecordings(recordings) {
   const ordered = recordingsSortState
     ? recordings.slice().sort(compareRecordings)
     : recordings;
+  // Item 15: table chrome renders immediately (it carries the sortable
+  // headers), rows are painted incrementally so a mature install's recording
+  // list does not block the main thread in one innerHTML assignment.
   els.recordings.innerHTML = '<div class="cameras-table-wrap"><table class="rule-table activity-table">' +
     '<thead><tr>' +
       renderSortHeader('Type', 'type') +
@@ -418,84 +421,14 @@ function renderRecordings(recordings) {
       renderSortHeader('Duration', 'duration') +
       '<th class="cell-center" scope="col">Actions</th>' +
     '</tr></thead>' +
-    '<tbody>' + ordered.map((recording) => {
-    const mediaReady = recording.media_ready !== false;
-    const isSound = isSoundRecording(recording);
-    const isMotion = isMotionOnlyRecording(recording);
-    // Always-on capture segments carry no triggering detection, so they must
-    // not fall through to the "Object Recording" default (which reads as a
-    // broken object clip with no detections). Classify them explicitly.
-    const isContinuous = !isSound && !isMotion && isContinuousOnlyRecording(recording);
-    const typeClass = isSound ? 'activity-item-sound'
-      : isMotion ? 'activity-item-motion'
-      : isContinuous ? 'activity-item-continuous'
-      : 'activity-item-event';
-    const typeLabel = isSound ? 'Sound Recording'
-      : isMotion ? 'Motion Recording'
-      : isContinuous ? 'Continuous Recording'
-      : 'Object Recording';
-    const zones = recordingZoneNames(recording);
-    const zoneCell = zones.length ? zones.map(escapeHtml).join(', ') : '-';
-    const durationText = `${Number(recording.duration_seconds || 0).toFixed(1)}s`;
-    const durationCell = mediaReady
-      ? `<span class="recording-duration">${escapeHtml(durationText)}</span>`
-      : '<span class="muted">Preparing...</span>';
-    let badges;
-    if (isMotion) {
-      // Motion-only clips have no concrete object labels - show a single
-      // teal "Motion · NN%" pill so the row reads distinctly from object
-      // and sound recordings without falling back to "No detections".
-      badges = motionPill(motionConfidenceFor(recording));
-    } else if (isContinuous) {
-      // Always-on capture: no triggering detection. Show the neutral
-      // "Continuous" chip (plus a Motion pill if the segment happened to
-      // catch frame motion) instead of the "No detections" broken-looking
-      // fallback.
-      const motionBadge = hasRecordingMotion(recording)
-        ? motionPill(motionConfidenceFor(recording))
-        : '';
-      badges = `${continuousPill()}${motionBadge}`;
-    } else {
-      const summaryBadges = recordingDetectionSummary(recording)
-        .map((d) => detectionPill(d.label, d.confidence, isSound, d.count)).join('');
-      // A clip can contain both frame motion and a recognised object. Keep it
-      // as an Object Recording, but show the motion intensity separately so
-      // the list does not lose one of the event types.
-      const motionBadge = !isSound && hasRecordingMotion(recording)
-        ? motionPill(motionConfidenceFor(recording))
-        : '';
-      badges = `${motionBadge}${summaryBadges}` || '<span class="muted">No detections</span>';
-    }
-    // recordingDetectionSummary already merges the clip's events into one pill
-    // per distinct label (with a "×N" multiplier when a label fired across
-    // several events), so we no longer append a second row of per-event pills
-    // here -- that double-render was showing every shared label twice.
-    const actions = [
-      `<button class="secondary activity-item-action activity-item-action-delete" data-delete-recording="${recording.id}" type="button" aria-label="Delete recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg><span class="activity-action-label">Delete</span></button>`,
-      mediaReady
-        ? `<button class="secondary activity-item-action activity-item-action-play" data-play-recording="${recording.id}" type="button" aria-label="Play recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Play</span></button>`
-        : '<button class="secondary activity-item-action" disabled aria-label="Preparing recording"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="activity-action-label">Preparing...</span></button>',
-    ];
-    return `
-      <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
-        <td class="activity-cell-type"><span class="activity-item-type">${typeLabel}</span><span class="activity-cell-ref">Recording #${recording.id}</span></td>
-        <td class="activity-cell-camera">${escapeHtml(recordingCameraName(recording))}</td>
-        <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}</div></td>
-        <td class="activity-cell-zone">${zoneCell}</td>
-        <td class="activity-cell-when">
-          <div class="activity-item-when">
-            <div class="activity-item-when-relative">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              <span>${escapeHtml(timeAgo(recording.started_at))}</span>
-            </div>
-            <span class="activity-item-when-absolute">${escapeHtml(formatDateTime(recording.started_at))}</span>
-          </div>
-        </td>
-        <td class="activity-cell-duration">${durationCell}</td>
-        <td class="activity-cell-actions"><div class="cell-actions">${actions.join('')}</div></td>
-      </tr>
-    `;
-  }).join('') + '</tbody></table></div>';
+    '<tbody id="recordings-list-rows"></tbody>' +
+    '</table></div>';
+  renderIncrementally(
+    document.getElementById('recordings-list-rows'),
+    ordered,
+    recordingRowHtml,
+    { onComplete: () => bindRecordingButtons() },
+  );
   if (recordings.some((recording) => recording.media_ready === false)) {
     clearTimeout(recordingRefreshTimer);
     recordingRefreshTimer = setTimeout(() => loadRecordings(), 3000);
@@ -503,8 +436,88 @@ function renderRecordings(recordings) {
     clearTimeout(recordingRefreshTimer);
     recordingRefreshTimer = null;
   }
-  bindRecordingButtons();
   bindSortHeaders();
+}
+
+// One recording table row. Extracted from renderRecordings (Item 15) so it can
+// be handed to renderIncrementally() as a row renderer.
+function recordingRowHtml(recording) {
+  const mediaReady = recording.media_ready !== false;
+  const isSound = isSoundRecording(recording);
+  const isMotion = isMotionOnlyRecording(recording);
+  // Always-on capture segments carry no triggering detection, so they must
+  // not fall through to the "Object Recording" default (which reads as a
+  // broken object clip with no detections). Classify them explicitly.
+  const isContinuous = !isSound && !isMotion && isContinuousOnlyRecording(recording);
+  const typeClass = isSound ? 'activity-item-sound'
+    : isMotion ? 'activity-item-motion'
+    : isContinuous ? 'activity-item-continuous'
+    : 'activity-item-event';
+  const typeLabel = isSound ? 'Sound Recording'
+    : isMotion ? 'Motion Recording'
+    : isContinuous ? 'Continuous Recording'
+    : 'Object Recording';
+  const zones = recordingZoneNames(recording);
+  const zoneCell = zones.length ? zones.map(escapeHtml).join(', ') : '-';
+  const durationText = `${Number(recording.duration_seconds || 0).toFixed(1)}s`;
+  const durationCell = mediaReady
+    ? `<span class="recording-duration">${escapeHtml(durationText)}</span>`
+    : '<span class="muted">Preparing...</span>';
+  let badges;
+  if (isMotion) {
+    // Motion-only clips have no concrete object labels - show a single
+    // teal "Motion · NN%" pill so the row reads distinctly from object
+    // and sound recordings without falling back to "No detections".
+    badges = motionPill(motionConfidenceFor(recording));
+  } else if (isContinuous) {
+    // Always-on capture: no triggering detection. Show the neutral
+    // "Continuous" chip (plus a Motion pill if the segment happened to
+    // catch frame motion) instead of the "No detections" broken-looking
+    // fallback.
+    const motionBadge = hasRecordingMotion(recording)
+      ? motionPill(motionConfidenceFor(recording))
+      : '';
+    badges = `${continuousPill()}${motionBadge}`;
+  } else {
+    const summaryBadges = recordingDetectionSummary(recording)
+      .map((d) => detectionPill(d.label, d.confidence, isSound, d.count)).join('');
+    // A clip can contain both frame motion and a recognised object. Keep it
+    // as an Object Recording, but show the motion intensity separately so
+    // the list does not lose one of the event types.
+    const motionBadge = !isSound && hasRecordingMotion(recording)
+      ? motionPill(motionConfidenceFor(recording))
+      : '';
+    badges = `${motionBadge}${summaryBadges}` || '<span class="muted">No detections</span>';
+  }
+  // recordingDetectionSummary already merges the clip's events into one pill
+  // per distinct label (with a "×N" multiplier when a label fired across
+  // several events), so we no longer append a second row of per-event pills
+  // here -- that double-render was showing every shared label twice.
+  const actions = [
+    `<button class="secondary activity-item-action activity-item-action-delete" data-delete-recording="${recording.id}" type="button" aria-label="Delete recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg><span class="activity-action-label">Delete</span></button>`,
+    mediaReady
+      ? `<button class="secondary activity-item-action activity-item-action-play" data-play-recording="${recording.id}" type="button" aria-label="Play recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Play</span></button>`
+      : '<button class="secondary activity-item-action" disabled aria-label="Preparing recording"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="activity-action-label">Preparing...</span></button>',
+  ];
+  return `
+    <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
+      <td class="activity-cell-type"><span class="activity-item-type">${typeLabel}</span><span class="activity-cell-ref">Recording #${recording.id}</span></td>
+      <td class="activity-cell-camera">${escapeHtml(recordingCameraName(recording))}</td>
+      <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}</div></td>
+      <td class="activity-cell-zone">${zoneCell}</td>
+      <td class="activity-cell-when">
+        <div class="activity-item-when">
+          <div class="activity-item-when-relative">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>${escapeHtml(timeAgo(recording.started_at))}</span>
+          </div>
+          <span class="activity-item-when-absolute">${escapeHtml(formatDateTime(recording.started_at))}</span>
+        </div>
+      </td>
+      <td class="activity-cell-duration">${durationCell}</td>
+      <td class="activity-cell-actions"><div class="cell-actions">${actions.join('')}</div></td>
+    </tr>
+  `;
 }
 
 function renderRecordingDetails(recording) {
