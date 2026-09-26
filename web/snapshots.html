@@ -14,7 +14,7 @@
       <div>
         <p class="eyebrow">Captured Frames</p>
         <h1>Snapshots</h1>
-        <p class="muted">Every saved detection frame across all cameras. Snapshots sit alongside recordings and are flagged when they fired an alert.</p>
+        <p class="muted">Saved detection frames across all cameras, starting with today by default so the library opens fast - widen the From Date to reach further back. Snapshots sit alongside recordings and are flagged when they fired an alert.</p>
       </div>
     </header>
 
@@ -56,8 +56,8 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
           </span>
         </div>
-        <strong id="statFilterStatus" class="stat-card-value">All</strong>
-        <small class="muted stat-card-sub" id="statFilterHint">Showing every snapshot</small>
+        <strong id="statFilterStatus" class="stat-card-value">Today</strong>
+        <small class="muted stat-card-sub" id="statFilterHint">Showing snapshots captured today</small>
       </article>
     </section>
 
@@ -66,7 +66,7 @@
         <div class="settings-section-icon">📸</div>
         <div>
           <h2>Snapshot Library</h2>
-          <p class="settings-section-subtitle">Browse saved detection frames and narrow them by camera, label, date, or time. Each row opens the annotated image; admins can delete a stored snapshot without touching the event or its recording.</p>
+          <p class="settings-section-subtitle">Browse saved detection frames and narrow them by camera, label, date, or time. Today's frames load first; applying an earlier From Date loads older ones. Each row opens the annotated image; admins can delete a stored snapshot without touching the event or its recording.</p>
         </div>
       </div>
 
@@ -79,17 +79,17 @@
             <option value="">All Cameras</option>
           </select></label>
         <label>
-          <span>Label <span class="info-tip" data-tip="Limit to a specific detected object or sound. Default: all snapshots" title="Limit to a specific detected object or sound. Default: all snapshots" tabindex="0" aria-label="Help: Limit to a specific detected object or sound. Default: all snapshots"></span></span>
+          <span>Label <span class="info-tip" data-tip="Limit to a specific detected object or sound. Default: every snapshot in the current date range" title="Limit to a specific detected object or sound. Default: every snapshot in the current date range" tabindex="0" aria-label="Help: Limit to a specific detected object or sound. Default: every snapshot in the current date range"></span></span>
           <select id="snapshotLabelFilter" aria-label="Filter by label">
             <option value="">All Labels</option>
           </select></label>
         <label id="snapshotFaceField" hidden>
-          <span>Face <span class="info-tip" data-tip="Limit to snapshots where a specific enrolled person or an unrecognised (Unknown) face was seen. Default: all snapshots" title="Limit to snapshots where a specific enrolled person or an unrecognised (Unknown) face was seen. Default: all snapshots" tabindex="0" aria-label="Help: Limit to snapshots where a specific enrolled person or an unrecognised (Unknown) face was seen. Default: all snapshots"></span></span>
+          <span>Face <span class="info-tip" data-tip="Limit to snapshots where a specific enrolled person or an unrecognised (Unknown) face was seen. Default: every snapshot in the current date range" title="Limit to snapshots where a specific enrolled person or an unrecognised (Unknown) face was seen. Default: every snapshot in the current date range" tabindex="0" aria-label="Help: Limit to snapshots where a specific enrolled person or an unrecognised (Unknown) face was seen. Default: every snapshot in the current date range"></span></span>
           <select id="snapshotFaceFilter" aria-label="Filter by recognised face">
             <option value="">All Faces</option>
           </select></label>
         <label>
-          <span>From Date <span class="info-tip" data-tip="Earliest capture date (inclusive). Default: any date" title="Earliest capture date (inclusive). Default: any date" tabindex="0" aria-label="Help: Earliest capture date (inclusive). Default: any date"></span></span>
+          <span>From Date <span class="info-tip" data-tip="Earliest capture date (inclusive). Default: today's snapshots only - pick an earlier date and apply to load more" title="Earliest capture date (inclusive). Default: today's snapshots only - pick an earlier date and apply to load more" tabindex="0" aria-label="Help: Earliest capture date (inclusive). Default: today's snapshots only - pick an earlier date and apply to load more"></span></span>
           <input id="snapshotDateFrom" type="date" aria-label="Filter by start date" /></label>
         <label>
           <span>From Time <span class="info-tip" data-tip="Earliest time on the from date (5-minute steps). Default: 00:00" title="Earliest time on the from date (5-minute steps). Default: 00:00" tabindex="0" aria-label="Help: Earliest time on the from date (5-minute steps). Default: 00:00"></span></span>

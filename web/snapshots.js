@@ -6,10 +6,16 @@
 // event or its recording.
 //
 // Unlike /api/recordings, /api/snapshots has no server-side filter params
-// (only limit + since), so the recordings-style filter card (camera, label,
+// beyond limit + `since`, so the recordings-style filter card (camera, label,
 // from/to date+time, sort) filters the already-fetched snapshot list
 // client-side. The endpoint returns full event objects - detections,
 // metadata and created_at are all present - so every filter below is exact.
+//
+// Paging the whole table before first paint is what made this page crawl, so
+// the list now asks for TODAY's snapshots by default via the `since` bound
+// (see snapshotsRequestSinceMs below). The From/To date card can still reach
+// further back: widening it re-requests with the wider bound, while camera,
+// label, face and sort keep filtering what is already in memory.
 //
 // escapeHtml, api, showToast, timeAgo, formatDate, cameraLabel, detectionPill,
 // motionPill, isSoundLabel, GENERIC_TRIGGER_LABELS, titleCase,
@@ -179,11 +185,43 @@ function localBoundary(dateString, timeString, endOfDay) {
   return new Date(year, month - 1, day, parts.hour, parts.minute, endOfDay ? 59 : 0, endOfDay ? 999 : 0);
 }
 
+// ── Lower bound: today by default ────────────────────────────────────────
+// /api/snapshots walks a cursor over every snapshot it is allowed to return,
+// so an unbounded first load paged through the entire table. Both bounds
+// below are derived from the same filter state so the request (`since=`) and
+// the client-side range test can never disagree:
+//   * no date filters -> local midnight today,
+//   * From Date set    -> that instant (honouring From Time),
+//   * only To Date set -> the start of that day, so a To Date in the past
+//                         still loads the day the operator asked for.
+let loadedSinceMs = null; // widest `since` already fetched; null = nothing yet
+
+// Lower bound of what the list should display for the given filters.
+function snapshotsFloorMs(filters) {
+  if (filters.dateFrom) {
+    const from = localBoundary(filters.dateFrom, filters.timeFrom, false);
+    if (from) return from.getTime();
+  } else if (filters.dateTo) {
+    const toDayStart = localBoundary(filters.dateTo, '', false);
+    if (toDayStart) return toDayStart.getTime();
+  }
+  const todayStart = Date.parse(daygleSinceParamForRange('today'));
+  return Number.isFinite(todayStart) ? todayStart : 0;
+}
+
+// `since` bound for the request: never later than the display floor, so the
+// fetched set is always a superset of what the client renders (a future From
+// Date, for example, still loads today and lets the floor hide it).
+function snapshotsRequestSinceMs(filters) {
+  const floor = snapshotsFloorMs(filters);
+  const todayStart = Date.parse(daygleSinceParamForRange('today'));
+  return Number.isFinite(todayStart) && todayStart < floor ? todayStart : floor;
+}
+
 function snapshotInRange(event, filters) {
   const created = Date.parse(event.created_at || '');
   if (!Number.isFinite(created)) return true;
-  const fromBoundary = localBoundary(filters.dateFrom, filters.timeFrom, false);
-  if (fromBoundary && created < fromBoundary.getTime()) return false;
+  if (created < snapshotsFloorMs(filters)) return false;
   const toBoundary = localBoundary(filters.dateTo, filters.timeTo, true);
   if (toBoundary && created > toBoundary.getTime()) return false;
   return true;
@@ -230,8 +268,8 @@ function updateFilterStat(filters) {
     els.statFilterStatus.textContent = 'Filtered';
     els.statFilterHint.textContent = `Showing snapshots matching ${active.join(' and ')}.`;
   } else {
-    els.statFilterStatus.textContent = 'All';
-    els.statFilterHint.textContent = 'Showing every snapshot';
+    els.statFilterStatus.textContent = 'Today';
+    els.statFilterHint.textContent = 'Showing snapshots captured today';
   }
 }
 
@@ -364,6 +402,18 @@ function applyFilters() {
   renderGallery(filtered);
 }
 
+// Re-request only when the date card reaches further back than the widest
+// bound already loaded. Narrowing (or resetting back to the default) reuses
+// the in-memory list because the fetched set always covers today.
+async function applyFiltersOrReload() {
+  const since = snapshotsRequestSinceMs(currentFilterValues());
+  if (loadedSinceMs === null || since < loadedSinceMs) {
+    await loadSnapshots(since);
+    return;
+  }
+  applyFilters();
+}
+
 // ── Camera + label filter options ────────────────────────────────────────
 async function loadCameras() {
   try {
@@ -383,6 +433,9 @@ async function loadCameras() {
 
 function populateLabelOptions() {
   if (!els.labelFilter) return;
+  // Refetches (a widened date range) rebuild this list - keep the operator's
+  // pick unless it vanished from the new set, like populateFaceOptions does.
+  const previous = els.labelFilter.value || '';
   const counts = {};
   allSnapshots.forEach((event) => {
     const labels = new Set();
@@ -419,6 +472,8 @@ function populateLabelOptions() {
   els.labelFilter.innerHTML = ordered.map((option) => (
     `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
   )).join('');
+  const values = new Set(ordered.map((option) => option.value));
+  els.labelFilter.value = values.has(previous) ? previous : '';
 }
 
 // Build the Face filter from the identities actually present in the loaded
@@ -462,12 +517,21 @@ function populateFaceOptions() {
   els.faceFilter.value = values.has(previous) ? previous : '';
 }
 
-async function loadSnapshots() {
+// `sinceMs` is the lower bound to request (null = derive it from the current
+// filter state, i.e. today by default). Only ever called with a bound that is
+// wider than what is already loaded, so `loadedSinceMs` keeps tracking the
+// widest window fetched so far.
+async function loadSnapshots(sinceMs = null) {
+  const since = sinceMs ?? snapshotsRequestSinceMs(currentFilterValues());
   if (els.gallery) els.gallery.innerHTML = '<p class="muted">Loading snapshots…</p>';
   try {
-    allSnapshots = await fetchAllCursorPages('/api/snapshots', 500);
+    const params = new URLSearchParams({ since: new Date(since).toISOString() });
+    allSnapshots = await fetchAllCursorPages(`/api/snapshots?${params}`, 500);
+    loadedSinceMs = since;
   } catch (_err) {
     allSnapshots = [];
+    // Drop the bound so the next attempt re-requests instead of trusting it.
+    loadedSinceMs = null;
     if (els.gallery) els.gallery.innerHTML = '<p class="muted empty-state">Could not load snapshots.</p>';
     if (typeof showToast === 'function') showToast('Failed to load snapshots.', true);
     return;
@@ -480,7 +544,8 @@ async function loadSnapshots() {
 function wireControls() {
   els.filterForm?.addEventListener('submit', (event) => {
     event.preventDefault();
-    applyFilters();
+    // Apply Filters can widen the date range, which needs a fresh request.
+    applyFiltersOrReload();
   });
   // Camera and label are instant-pick filters (like /recordings); the date
   // range and sort apply on the Apply Filters button.
@@ -498,7 +563,7 @@ function wireControls() {
     // renderFilterTimeSelects (rather than poking child selects directly) means
     // Reset Filters also handles the 12h vs 24h AM/PM swap correctly.
     renderFilterTimeSelects();
-    applyFilters();
+    applyFiltersOrReload();
   });
 }
 
