@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 import app.state as _state
 from app.camera_id import camera_storage_key
+from app.detection_status import json_safe_detections
 
 
 logger = logging.getLogger('daygle.ai')
@@ -300,7 +301,10 @@ class RecordingService:
         filename = f"event_{event_id}_{created.strftime('%Y%m%d_%H%M%S_%f')}.{extension}"
         file_path = self.recordings_dir / filename
         if write_clip:
-            self.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
+            # Strip internal ``_``-prefixed memo caches (see
+            # detection_status.json_safe_detections): the metadata-fallback path
+            # JSON-serialises these rows and a tuple-keyed memo crashed it.
+            self.write_event_clip(file_path, event_id, json_safe_detections(detections), duration_seconds, trigger_type, trigger_label)
 
         mapped_source = 'upload' if source == 'upload' else 'rtsp' if source == 'rtsp' else 'camera'
         return {

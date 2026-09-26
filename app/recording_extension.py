@@ -117,6 +117,7 @@ from app.detection_status import (
     GENERIC_TRIGGER_LABELS,
     detection_label_confidences,
     detection_label_strings,
+    json_safe_detections,
 )
 from app.media_utils import probe_video_duration, safe_storage_path
 
@@ -650,8 +651,11 @@ def start_rtsp_recording_capture(
             }
 
     def write_generated_fallback() -> None:
+        # Strip internal ``_``-prefixed memo caches (see
+        # detection_status.json_safe_detections): the metadata-fallback path
+        # JSON-serialises these rows and a tuple-keyed memo crashed it.
         _state.recording_service.write_event_clip(
-            file_path, event_id, detections, duration_seconds,
+            file_path, event_id, json_safe_detections(detections), duration_seconds,
             trigger_type, str(trigger_label) if trigger_label else None,
         )
 

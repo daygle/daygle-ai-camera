@@ -115,6 +115,28 @@ GENERIC_TRIGGER_LABELS: frozenset[str] = frozenset({
 })
 
 
+def json_safe_detections(detections: Any) -> list[Any]:
+    """Return shallow copies of detection rows with internal fields stripped.
+
+    The live pipeline stamps internal, tuple-keyed memo caches
+    (``_zone_match_memo`` / ``_rule_match_memo``) onto the very detection dicts
+    that flow to status payloads, JSON sidecars, and HTTP serialisers.
+    ``json.dumps`` rejects a tuple dict-key outright, and FastAPI's
+    ``jsonable_encoder`` encodes one to a list then uses it as a key --
+    ``TypeError: unhashable type: 'list'``. Dropping every ``_``-prefixed key
+    (the codebase's internal-field convention; no consumer reads any of them)
+    keeps a row JSON-safe without depending on any single memo name, and the
+    shallow copy avoids mutating the live dict mid-cycle.
+    """
+    sanitized: list[Any] = []
+    for detection in detections or []:
+        if isinstance(detection, dict):
+            sanitized.append({k: v for k, v in detection.items() if not k.startswith('_')})
+        else:
+            sanitized.append(detection)
+    return sanitized
+
+
 def update_live_detection_status(camera_id: str, **updates: Any) -> None:
     # Keep a best-confidence map alongside the raw detections. The live page
     # normally receives confidence through ``detections``, but some status
@@ -123,23 +145,9 @@ def update_live_detection_status(camera_id: str, **updates: Any) -> None:
     # Hearing lane instead of silently dropping the score.
     if 'detections' in updates:
         best_confidences: dict[str, float] = {}
-        # Store sanitised copies: the live pipeline stamps internal, tuple-keyed
-        # memo dicts (``_zone_match_memo`` / ``_rule_match_memo``) onto the very
-        # detection dicts handed here by reference. This status dict is served
-        # verbatim by ``/api/live/detection-status``, and FastAPI's
-        # ``jsonable_encoder`` encodes a tuple dict-key to a list, then uses it
-        # as a key -- ``TypeError: unhashable type: 'list'`` -- crashing the
-        # endpoint. History/event serialisation whitelists fields and so is
-        # immune; this hot path was the gap. Dropping every ``_``-prefixed key
-        # (the codebase's internal-field convention; the UI reads none of them)
-        # keeps the stored copy JSON-safe without depending on any single memo
-        # name, and the shallow copy avoids mutating the live dict mid-cycle.
-        sanitized: list[Any] = []
         for detection in updates.get('detections') or []:
             if not isinstance(detection, dict):
-                sanitized.append(detection)
                 continue
-            sanitized.append({k: v for k, v in detection.items() if not k.startswith('_')})
             label = str(detection.get('label') or '').strip().lower()
             if not label:
                 continue
@@ -149,7 +157,11 @@ def update_live_detection_status(camera_id: str, **updates: Any) -> None:
                 continue
             if label not in best_confidences or confidence > best_confidences[label]:
                 best_confidences[label] = confidence
-        updates['detections'] = sanitized
+        # Store sanitised copies: this status dict is served verbatim by
+        # ``/api/live/detection-status`` and must stay JSON-safe even though the
+        # caller's dicts carry tuple-keyed memo caches (see json_safe_detections).
+        # History/event serialisation whitelists fields and so is immune.
+        updates['detections'] = json_safe_detections(updates.get('detections'))
         updates['detection_confidences'] = best_confidences
     with _state.live_detection_status_lock:
         _state.live_detection_status[camera_id] = {

@@ -159,20 +159,17 @@ def overlay_detection_rows(detections: list[dict[str, Any]] | None) -> list[dict
     rows: list[dict[str, Any]] = []
     for detection in detections or []:
         box = detection.get('box') or {}
-
-        def coord(name: str) -> Any:
+        # ``box`` coordinates win; fall back to the flat columns. Inlined (no
+        # per-detection closure) so this stays cheap on the per-frame path and
+        # cannot late-bind the loop variables.
+        coords = {}
+        for name in ('x', 'y', 'width', 'height'):
             value = box.get(name)
-            return detection.get(name) if value is None else value
-
+            coords[name] = detection.get(name) if value is None else value
         rows.append({
             'label': detection.get('label'),
             'confidence': detection.get('confidence'),
-            'box': {
-                'x': coord('x'),
-                'y': coord('y'),
-                'width': coord('width'),
-                'height': coord('height'),
-            },
+            'box': coords,
             'motion_event': detection.get('motion_event', False),
         })
     return rows
