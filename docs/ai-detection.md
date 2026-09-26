@@ -159,6 +159,44 @@ touch these. Change one at a time so you can attribute any per-frame impact.
 
 ---
 
+## Per-camera model assignment
+
+By default every camera runs the one primary object model configured on the
+Models tab. `/camera-models` lets a camera run its own model instead - for
+example a fast `yolo11n` on a quiet view and a larger `yolo11m` on the view
+that matters. Cameras without an assignment keep following the global model.
+
+An assignment is stored in the camera's `detection` block as `model_path`
+(plus an optional `labels_path`, default `models/coco.names`) and is picked up
+by the live pipeline on the camera's next detection cycle - no detector reload
+or restart is needed. Assign, switch, and unassign from `/camera-models`, or
+through the API:
+
+```http
+PUT    /api/camera-models/{camera_id}   {"model_path": "models/yolo11s.onnx"}
+DELETE /api/camera-models/{camera_id}
+GET    /api/camera-models
+```
+
+Rules and behaviour:
+
+- The assigned model must be an installed ONNX file inside `models/`. Face
+  models are rejected: they run in the separate face-detection pass
+  (`face_model_path`), never as a camera's object detector.
+- Per-camera detectors share the global runtime tuning (device, precision,
+  threads, NMS settings); model-specific knobs such as the NMS-free head and
+  input size are re-derived from the assigned model itself.
+- Cameras that share one model share one ONNX session; each additional
+  assigned model costs its own session, so watch memory when assigning many
+  different models.
+- A missing or broken assigned model fails only that camera's object detection
+  (the live status shows why) - other cameras are unaffected. Deleting a model
+  that is still assigned to a camera is refused; unassign it first.
+- **Reload Detector** rebuilds the per-camera sessions too, so a device or
+  precision change applies to assigned models as well.
+
+---
+
 ## Detection scheduling
 
 Every camera detection cycle - background monitor and Live-page alike - is

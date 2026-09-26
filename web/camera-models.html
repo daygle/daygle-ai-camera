@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<script>(function(){var t=localStorage.getItem("daygle.theme");if(t!=="dark")document.documentElement.classList.add("light");})()</script>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Camera Models - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    /* The assignment select shares the row with the action buttons; keep it
+       full-width inside its cell so long model labels stay readable. */
+    .camera-model-select { width: 100%; max-width: 320px; }
+    .camera-model-source { display: inline-flex; align-items: center; gap: 6px; }
+  </style>
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Intelligence</p>
+        <h1>Camera Models</h1>
+        <p class="muted">Run a dedicated YOLO model on any camera. A quiet driveway can use a fast nano model while a busy yard gets a larger one — cameras without a dedicated model keep following the default.</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">🌐</div>
+        <div>
+          <h2>Default Model</h2>
+          <p class="settings-section-subtitle">Cameras without a dedicated assignment run this object-detection model.</p>
+        </div>
+      </div>
+      <div id="defaultModelInfo" class="muted" aria-live="polite"></div>
+      <div class="button-row">
+        <a class="button-link" href="/onnx">Manage Models on ONNX</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">📷</div>
+        <div>
+          <h2>Camera Assignments</h2>
+          <p class="settings-section-subtitle">Assign, switch, or unassign the object-detection model each camera runs. Changes apply on the camera's next detection cycle — no restart needed.</p>
+        </div>
+      </div>
+      <div id="cameraModelsMessage" class="muted" aria-live="polite"></div>
+      <div class="audit-table-wrap">
+        <table class="audit-table" id="cameraModelsTable">
+          <thead>
+            <tr>
+              <th scope="col">Camera</th>
+              <th scope="col">Current Model</th>
+              <th scope="col">Assign Model</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="cameraModelsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/camera-models.js"></script>
+</body>
+</html>

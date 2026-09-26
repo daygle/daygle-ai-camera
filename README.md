@@ -301,6 +301,7 @@ If cloudflared cannot start or later exits, Daygle logs a clear warning and cont
 - `/objects` - per-object detection behavior (Moving Only / Still Only / both) and still-alert thresholds with a global default; recording is set per area on `/zones`
 - `/sounds` - camera audio detection: enable it per camera and choose which sound classes the camera listens for, their confidence, and whether each records; notification delivery is configured on `/alerts`
 - `/onnx` - AI model library and detector settings
+- `/camera-models` - per-camera YOLO model assignment (assign, switch, or unassign a dedicated object-detection model per camera)
 - `/settings` - detection, recording, notifications, retention, backup, Cloudflare Tunnel, and updates
 - `/users` - user management (admin)
 - `/profile` - change your own password
@@ -329,6 +330,12 @@ Email and push notifications use the same alert title/body format. Configure del
 - On **Status**, use **Check Model**, **Reload Detector**, and **Test Detector** to confirm the detector is healthy.
 
 Models are stored under `models/`. The default model is `yolo11n`, downloaded automatically on first start when no model is present. See `docs/ai-detection.md` for the full settings reference and `docs/detection-benchmarking.md` for labeled precision/recall/mAP evaluation and confidence sweeps.
+
+### Per-camera model assignment
+
+- Open `/camera-models` to give any camera its own object-detection model. A quiet driveway can run a fast nano model while a busy yard gets a larger one, and cameras without an assignment keep following the default model from `/onnx`.
+- Use the **Assign Model** column to pick an installed model, then **Assign** / **Change** to switch, or **Unassign** to return the camera to the default. Changes apply on the camera's next detection cycle — no reload or restart needed.
+- Assignments use the same runtime tuning (device, precision, threads) as the default detector. Face models are not assignable here — they run in the separate face-detection pass configured on `/onnx`.
 
 ### Sound detection
 

@@ -535,6 +535,25 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
             detail=f"Cannot delete '{model_name}' because it is the active face detection model. Disable face detection or choose another face model first."
         )
 
+    # Also protect models assigned to a camera as its per-camera detector
+    # (app/camera_models.py): deleting the file would silently break that
+    # camera's object detection on the next cycle.
+    from app.camera_models import camera_model_assignment
+    from app.config_facades import effective_cameras_config
+    assigned_cameras = []
+    for _camera in effective_cameras_config():
+        _assignment = camera_model_assignment(_camera)
+        if _assignment and _same_model_path(_assignment[0], rel_path):
+            assigned_cameras.append(str(_camera.get('id') or ''))
+    if assigned_cameras:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot delete '{model_name}' because it is assigned to camera(s): "
+                f"{', '.join(assigned_cameras)}. Unassign the model on /camera-models first."
+            ),
+        )
+
     # Delete the source together with its INT8 cache under the same advisory
     # lock used by quantization. This prevents a concurrent worker from
     # publishing a cache for a model that is being deleted.
@@ -591,6 +610,12 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
         elif model_name in installed_meta:
             installed_meta.pop(model_name, None)
         _write_installed_models(installed_meta)
+
+    # Any cached per-camera detector running this file must go with it
+    # (app/camera_models.py), or a later assignment would reuse a session
+    # whose backing file no longer exists.
+    from app.camera_models import evict_camera_model_cache
+    evict_camera_model_cache(rel_path)
 
     return {
         'ok': True,

@@ -402,6 +402,11 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     from app.ai_settings import invalidate_ai_status_cache
     invalidate_ai_status_cache()
     _alert_dispatch.invalidate_min_rule_confidence_cache()
+    # Per-camera detector cache (app/camera_models.py): a reload changes the
+    # runtime tuning (device / precision / threads) every detector is built
+    # from, so the cached per-camera sessions must be rebuilt on next use.
+    from app.camera_models import clear_camera_model_cache
+    clear_camera_model_cache()
     # Bug 8 audit fix: alias the OLD reference BEFORE publishing the
     # sentinel so concurrent pollers -- ``live_alert_monitor_loop``'s
     # per-poll ``detect_frame`` / ``ai_status_payload``,

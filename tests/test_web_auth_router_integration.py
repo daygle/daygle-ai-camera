@@ -140,7 +140,8 @@ def test_web_router_registers_expected_page_paths(app_modules):
     ``/live``, ``/zones``, ``/alerts``, ``/sounds``, ``/objects``, ``/cameras``,
     ``/events``, ``/search``, ``/recordings``, ``/snapshots``,
     ``/recordings/timeline``,
-    ``/onnx``, ``/ai``, ``/arcface``, ``/yamnet-tflite``, ``/yamnet``, ``/profile``,
+    ``/onnx``, ``/camera-models``, ``/ai``, ``/arcface``, ``/yamnet-tflite``,
+    ``/yamnet``, ``/profile``,
     ``/settings``, ``/users``, ``/audit``, ``/camera-log``,
     ``/application-log``.
     """
@@ -162,6 +163,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
         "/recordings/timeline",
         "/recordings/{recording_id}",
         "/onnx",
+        "/camera-models",
         "/ai",
         "/arcface",
         "/face-recognition",

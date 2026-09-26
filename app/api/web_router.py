@@ -20,6 +20,7 @@ Routes:
 - GET  /snapshots     -- snapshots_page
 - GET  /recordings/timeline -- recordings_timeline_page
 - GET  /onnx          -- onnx_page
+- GET  /camera-models  -- camera_models_page
 - GET  /ai            -- ai_settings_page (308 redirect)
 - GET  /yamnet-tflite -- yamnet_tflite_page
 - GET  /yamnet        -- yamnet_page (308 redirect)
@@ -322,6 +323,15 @@ def onnx_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     ai_path = web_dir / 'onnx.html'
     if ai_path.exists():
         return FileResponse(ai_path)
+    return root(web_dir=web_dir)
+
+
+@router.get('/camera-models')
+def camera_models_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
+    page_path = web_dir / 'camera-models.html'
+    if page_path.exists():
+        return FileResponse(page_path)
     return root(web_dir=web_dir)
 
 

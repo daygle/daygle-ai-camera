@@ -273,6 +273,8 @@ from app.api.recordings_router import router as recordings_router
 app.include_router(recordings_router)
 from app.api.cameras_router import router as cameras_router
 app.include_router(cameras_router)
+from app.api.camera_models_router import router as camera_models_router
+app.include_router(camera_models_router)
 from app.api.events_router import router as events_router
 app.include_router(events_router)
 from app.api.snapshots_router import router as snapshots_router

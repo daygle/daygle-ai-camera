@@ -119,6 +119,22 @@ def normalize_camera_settings(
     detection['sound'] = _normalize_camera_sound_settings(
         detection.get('sound'),
     )
+    # Per-camera YOLO model assignment (app/camera_models.py). Tolerant on
+    # read: an invalid stored override is dropped (self-heals to the global
+    # default detector) rather than breaking every effective_cameras_config
+    # read. Valid overrides are re-canonicalised to the project-relative form.
+    from app.camera_models import normalize_camera_labels_path, normalize_camera_model_path
+    _model_path = normalize_camera_model_path(detection.get('model_path'))
+    if _model_path is None:
+        detection.pop('model_path', None)
+        detection.pop('labels_path', None)
+    else:
+        detection['model_path'] = _model_path
+        _labels_path = normalize_camera_labels_path(detection.get('labels_path'))
+        if _labels_path is None:
+            detection.pop('labels_path', None)
+        else:
+            detection['labels_path'] = _labels_path
     _migrate_legacy_camera_motion(detection)
     camera_settings['detection'] = detection
     camera_settings['recording'] = normalize_camera_recording_settings(

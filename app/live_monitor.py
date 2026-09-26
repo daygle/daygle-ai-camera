@@ -95,6 +95,7 @@ from app.region_detection import (
     region_boost_enabled,
     tiling_grid,
 )
+from app.camera_models import camera_detector
 from app.detector import DetectorUnavailableError
 from app.event_debounce import (
     _remember_track_event,
@@ -1009,11 +1010,32 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         _telemetry_finish(MODE_SKIPPED_NO_MOTION)
         return None
+    # Per-camera YOLO model assignment (app/camera_models.py): a camera with a
+    # model override runs its own cached detector; every other camera shares
+    # the global primary detector exactly as before. Readiness is measured on
+    # the DETECTOR THIS CYCLE USES -- an assigned model that failed to load
+    # must not inherit the global detector's healthy status (and vice versa).
+    detector = camera_detector(settings, ai_config)
     detector_method_available = hasattr(
-        _state.detector,
+        detector,
         'detect_frame' if frame_is_numpy else 'detect_image',
     )
-    detector_ready = bool(ai_state['detector_loaded'] and detector_method_available)
+    if detector is _state.detector:
+        detector_loaded = bool(ai_state['detector_loaded'])
+    else:
+        detector_loaded = bool(getattr(detector, 'available', False))
+        _assigned_model = str(getattr(detector, 'model_path', '') or '').replace('\\', '/')
+        _assigned_error = getattr(detector, 'unavailable_reason', None)
+        ai_state = {
+            **ai_state,
+            'model_path': _assigned_model,
+            'model_name': _assigned_model.rsplit('/', 1)[-1] or None,
+            'detector_loaded': detector_loaded,
+            'model_loaded': detector_loaded,
+            'error': _assigned_error or '',
+            'last_detector_error': _assigned_error or '',
+        }
+    detector_ready = bool(detector_loaded and detector_method_available)
     if not detector_ready and not motion_detections:
         detector_reason = (
             ai_state['last_detector_error']
@@ -1050,9 +1072,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # base cost would silently vanish from the breakdown.
     _base_inference_timing: Any = None
     try:
-        if detector_ready and frame_is_numpy and hasattr(_state.detector, 'detect_frame'):
-            detections = _state.detector.detect_frame(image, confidence=min_conf)
-            _base_inference_timing = getattr(_state.detector, 'last_timing', None)
+        if detector_ready and frame_is_numpy and hasattr(detector, 'detect_frame'):
+            detections = detector.detect_frame(image, confidence=min_conf)
+            _base_inference_timing = getattr(detector, 'last_timing', None)
             _cycle_timer.add(STAGE_INFERENCE, (time.perf_counter() - _inference_started) * 1000.0)
             # Motion-region high-res boost (opt-in): re-run the detector zoomed
             # into the moving regions so small/distant subjects that vanish in
@@ -1062,7 +1084,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             if diff_mask is not None and region_boost_enabled(live_settings):
                 _boost_started = time.perf_counter()
                 detections = detect_with_region_boost(
-                    _state.detector, image, diff_mask, detections, confidence=min_conf,
+                    detector, image, diff_mask, detections, confidence=min_conf,
                 )
                 _cycle_timer.add(STAGE_REGION_BOOST, (time.perf_counter() - _boost_started) * 1000.0)
             # Tiled / sliced inference (opt-in): re-run the detector on a grid of
@@ -1074,13 +1096,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             if _tile_grid is not None:
                 _tiling_started = time.perf_counter()
                 detections = detect_with_tiling(
-                    _state.detector, image, detections,
+                    detector, image, detections,
                     cols=_tile_grid[0], rows=_tile_grid[1], confidence=min_conf,
                 )
                 _cycle_timer.add(STAGE_TILING, (time.perf_counter() - _tiling_started) * 1000.0)
         elif detector_ready:
-            detections = _state.detector.detect_image(image, confidence=min_conf)
-            _base_inference_timing = getattr(_state.detector, 'last_timing', None)
+            detections = detector.detect_image(image, confidence=min_conf)
+            _base_inference_timing = getattr(detector, 'last_timing', None)
             _cycle_timer.add(STAGE_INFERENCE, (time.perf_counter() - _inference_started) * 1000.0)
         else:
             detections = []

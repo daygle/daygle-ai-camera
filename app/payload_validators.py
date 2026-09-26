@@ -343,6 +343,26 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     detection['ptz_motion_detection'] = normalize_ptz_motion_detection(detection.get('ptz_motion_detection'))
     detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
+    # Per-camera YOLO model assignment (app/camera_models.py). An explicitly
+    # sent non-empty value is validated strictly so a typo / path traversal /
+    # face model surfaces as a 400; an explicitly empty value clears the
+    # override; a value carried over from the stored config is re-canonicalised
+    # tolerantly so an old invalid entry self-heals instead of blocking every
+    # camera save. Clearing the model clears its labels with it.
+    from app.camera_models import normalize_camera_labels_path, normalize_camera_model_path
+    _strict_model = 'model_path' in payload_detection and bool(str(payload_detection.get('model_path') or '').strip())
+    _model_path = normalize_camera_model_path(detection.get('model_path'), strict=_strict_model)
+    if _model_path is None:
+        detection.pop('model_path', None)
+        detection.pop('labels_path', None)
+    else:
+        detection['model_path'] = _model_path
+        _strict_labels = 'labels_path' in payload_detection and bool(str(payload_detection.get('labels_path') or '').strip())
+        _labels_path = normalize_camera_labels_path(detection.get('labels_path'), strict=_strict_labels)
+        if _labels_path is None:
+            detection.pop('labels_path', None)
+        else:
+            detection['labels_path'] = _labels_path
     _migrate_legacy_camera_motion(detection)
     updated['detection'] = detection
     existing_recording = current.get('recording') if isinstance(current.get('recording'), dict) else {}
