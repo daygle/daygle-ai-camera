@@ -215,7 +215,6 @@ def test_clip_jobs_jump_ahead_of_background_jobs() -> None:
     pool.start()
     try:
         order: list[str] = []
-        lock = threading.Lock()
         release = threading.Event()
         blocker = lambda: release.wait(2.0)  # noqa: E731
 
