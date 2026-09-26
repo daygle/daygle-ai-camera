@@ -56,6 +56,24 @@ class _CapturingScheduler:
             image, frame = sample
             runner(image, frame, settings)
 
+    def stats(self):
+        """Mirror ``LiveInferenceScheduler.stats`` for the adaptive cadence.
+
+        Item 16's ``_adaptive_detection_interval`` consults ``pending`` and
+        ``max_workers`` to decide how far to stretch a still camera's sampling
+        under load, so a stand-in scheduler that omits ``stats()`` is no longer
+        a faithful double -- it makes the dispatch path raise. An idle queue
+        (nothing submitted yet, one worker) is the honest report here: the
+        cadence must not stretch while the dispatcher is handing work over.
+        """
+        return {
+            'pending': len(self.jobs),
+            'running': 0,
+            'max_workers': 1,
+            'completed': 0,
+            'failed': 0,
+        }
+
 
 def _install_capturing_scheduler(monkeypatch) -> _CapturingScheduler:
     scheduler = _CapturingScheduler()

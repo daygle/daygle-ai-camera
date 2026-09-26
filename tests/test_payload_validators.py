@@ -1176,7 +1176,13 @@ def test_adaptive_detection_enabled_survives_a_save(monkeypatch, pv):
     cadence off for this camera" escape hatch doing nothing at all - a safety
     valve that looks real and is not.
     """
-    _install_validator_dependencies(monkeypatch)
+    # The default stub is a naive ``bool(raw)``, which cannot model a falsy
+    # STRING -- and string coercion is half of what this test is about, since
+    # the Settings form posts 'true'/'false'. Use the real coercion, the same
+    # way test_validate_live_settings_normalises_motion_engine does; against the
+    # stub, ``'no'`` would coerce to True and the assertion would be vacuous.
+    from app.utils import normalize_bool_setting as real_bool
+    _install_validator_dependencies(monkeypatch, normalize_bool_setting=real_bool)
     assert pv.validate_live_settings({})['adaptive_detection_enabled'] is True
     assert pv.validate_live_settings({'adaptive_detection_enabled': False})[
         'adaptive_detection_enabled'
@@ -1250,6 +1256,7 @@ def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
         'detection_interval_seconds', 'face_detection_interval_seconds',
         'event_debounce_seconds',
         'background_detection_enabled', 'always_run_object_detection',
+        'adaptive_detection_enabled',
         'object_detection_region_boost', 'object_detection_tiling',
         'detection_history_minutes',
         'motion_algorithm', 'motion_denoise', 'motion_shadow_suppression',
