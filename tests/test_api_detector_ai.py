@@ -900,3 +900,124 @@ def test_download_weights_enforces_size_cap(tmp_path, monkeypatch):
     # Failed download leaves no cached weight and no temp file behind.
     assert not dest.exists()
     assert not any(p.name.startswith('weights.pt.download') for p in tmp_path.iterdir())
+
+
+def test_download_model_installs_without_switching_the_default(tmp_path, monkeypatch):
+    """Downloading installs a model but must NOT promote it to the default.
+
+    Picking the model every camera runs is an explicit operator action ("Use"
+    here, or a per-camera assignment on /camera-models), so a download can
+    never silently repoint the running detector. Mirrors ``update_ai_model``,
+    which already passes ``switch_active=False``.
+    """
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.model_management as mm
+    import app.api.settings_ai_router as ai_router
+
+    models_dir = tmp_path / 'models'
+    models_dir.mkdir(parents=True, exist_ok=True)
+    # ``settings_ai_router`` imported BASE_DIR/MODELS_DIR by value, so both
+    # modules have to be pointed at the tmp models dir for the listing test.
+    for module in (mm, ai_router):
+        monkeypatch.setattr(module, 'BASE_DIR', tmp_path)
+        monkeypatch.setattr(module, 'MODELS_DIR', models_dir, raising=False)
+    monkeypatch.setattr(mm, '_installed_package_version', lambda _package: 'test-version')
+    monkeypatch.setattr(mm, 'detector_status', lambda settings: dict(settings))
+    # The first-install auto-download (which DOES activate, by design) fires
+    # from the app lifespan and would race this test's assertion about which
+    # write moved the default model.
+    monkeypatch.setattr(mm, 'auto_download_default_model', lambda: None)
+
+    def fake_export(model_name, destination, imgsz, **_kwargs):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b'fake onnx')
+        return len(b'fake onnx')
+
+    monkeypatch.setattr(mm, 'export_yolo_onnx', fake_export)
+
+    # Seed a default model that is NOT the one downloaded below.
+    mm._state.database.set_setting('ai', {
+        'model_path': 'models/yolov8n-640.onnx',
+        'labels_path': 'models/coco.names',
+        'input_size': 640,
+    }, '2026-01-01T00:00:00Z')
+    persisted = []
+    monkeypatch.setattr(
+        mm._state.database,
+        'set_setting',
+        lambda key, value, _timestamp: persisted.append((key, value)),
+    )
+
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, body = client.request(
+            '/api/settings/ai/download-model',
+            method='POST',
+            json_body={'model': 'yolo11n', 'imgsz': 640},
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200, body
+        assert body['ok'] is True
+        assert 'not the default model' in body['message']
+        # The AI settings were never rewritten, so nothing could have moved the
+        # default (or triggered a detector reload).
+        assert [entry for entry in persisted if entry[0] == 'ai'] == []
+        status, _headers, settings = client.request('/api/settings/ai')
+        assert status == 200
+        assert settings['model_path'] == 'models/yolov8n-640.onnx'
+        # ...while the downloaded model is installed and offered for assignment.
+        status, _headers, models = client.request('/api/settings/ai/models')
+        assert status == 200
+        rows = [row for row in models if row['id'] == 'yolo11n' and row['installed']]
+        assert rows, 'the downloaded model should be listed as installed'
+        assert all(row['active'] is False for row in rows)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_download_message_reports_which_slot_changed(tmp_path, monkeypatch):
+    """The response message must state plainly whether the default model was
+    touched, so the operator is never left guessing."""
+    _load_app(tmp_path, monkeypatch)
+    import app.model_management as mm
+
+    models_dir = tmp_path / 'models'
+    models_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(mm, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(mm, 'MODELS_DIR', models_dir)
+    monkeypatch.setattr(mm, '_installed_package_version', lambda _package: 'test-version')
+    monkeypatch.setattr(mm, 'detector_status', lambda settings: dict(settings))
+
+    def fake_export(model_name, destination, imgsz, **_kwargs):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b'fake onnx')
+        return destination.stat().st_size
+
+    monkeypatch.setattr(mm, 'export_yolo_onnx', fake_export)
+    monkeypatch.setattr(mm, 'validate_ai_settings', lambda payload: dict(payload))
+    monkeypatch.setattr(mm._state.database, 'set_setting', lambda *_args: None)
+    monkeypatch.setattr(mm._state, 'reload_detector', lambda _settings: (True, None))
+
+    current = {'model_path': 'models/yolov8n-640.onnx', 'labels_path': 'models/coco.names'}
+    monkeypatch.setattr(mm, 'effective_ai_config', lambda: dict(current))
+
+    # Install-only: the default is untouched and the message says so.
+    installed = mm._do_download_model('yolo11n', False, 640)
+    assert 'not the default model' in installed['message']
+    assert installed['reload_succeeded'] is False
+
+    # Internal callers (first-install auto-download, legacy-face repair) still
+    # activate, and the message says the model became the default.
+    activated = mm._do_download_model('yolo11s', True, 640)
+    assert 'set it as the default model' in activated['message']
+    assert activated['reload_succeeded'] is True
+
+    # Re-exporting the model already running as default keeps it default.
+    current['model_path'] = activated['model_path']
+    refreshed = mm._do_download_model('yolo11s', False, 640)
+    assert 'stays the default model' in refreshed['message']
+    assert refreshed['reload_succeeded'] is True

@@ -332,7 +332,7 @@ function renderCard(m) {
             <option value="1024">1024 (Accurate)</option>
             <option value="1280">1280 (Max)</option>
           </select>
-          <button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-family="${escapeHtml(m.family || 'object')}">\u2B07 Download</button>
+          <button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-family="${escapeHtml(m.family || 'object')}" title="Install this model. It will not change the default model - press Use afterwards to switch to it, or assign it to a camera on Camera Models.">\u2B07 Download</button>
         </div>`;
     } else if (isActive && !canDelete && hasUpdate) {
       // Active model with update: allow re-export in place
@@ -439,7 +439,7 @@ function bindModelCardActions() {
         }
         // Show success inside the model card (no toast  -  feedback is local)
         const successMessages = {
-          download: `${modelId} installed successfully.`,
+          download: `${modelId} installed. It is not the default model - press Use to switch to it.`,
           use: isFace ? `${modelId} set as the Face Detection model.` : `Switched to ${modelId}.`,
           update: `${modelId} updated successfully.`,
           delete: `${modelId} deleted.`,

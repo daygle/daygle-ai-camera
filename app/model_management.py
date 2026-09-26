@@ -819,4 +819,19 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
         updated = ai_settings
         reloaded = False
         error = None
-    return {'ok': True, 'message': f"Exported {info['label']} ONNX to {_relative_model_path(destination)}.", 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': detector_status(updated)}
+    # Say plainly which of the three things happened, so the operator is never
+    # left guessing whether the running detector changed:
+    #   * switch_active -> installed AND made the default (first-install
+    #     auto-download, legacy-face repair),
+    #   * is_active     -> re-exported the model already running as default,
+    #   * neither       -> installed only; the default model is untouched.
+    if switch_active and not is_active:
+        message = f"Exported {info['label']} ONNX to {rel_path} and set it as the default model."
+    elif is_active:
+        message = f"Re-exported {info['label']} ONNX to {rel_path}; it stays the default model."
+    else:
+        message = (
+            f"Installed {info['label']} ONNX to {rel_path}. It is not the default model - "
+            "use Use to switch to it, or assign it to a camera on Camera Models."
+        )
+    return {'ok': True, 'message': message, 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': detector_status(updated)}

@@ -200,7 +200,7 @@ async def download_ai_model(request: Request, db=Depends(get_database)):
     # ``_do_download_model``) instead of replacing the active object model.
     is_face_model = str(info.get('labels') or '').endswith('face.names')
     write_audit_log(request, db, 'download', 'settings.ai.model',
-                    details={'model_id': model_name, 'switch_active': not is_face_model, 'configure_face': is_face_model, 'imgsz': imgsz})
+                    details={'model_id': model_name, 'switch_active': False, 'configure_face': is_face_model, 'imgsz': imgsz})
     # Round-6 / N2 removal (drop N2 entirely (B3)): the previous SHA-256
     # pin-on-upstream gate has been removed because ``_do_download_model``
     # produces a locally-exported ONNX binary via the Ultralytics SDK
@@ -213,7 +213,16 @@ async def download_ai_model(request: Request, db=Depends(get_database)):
     # ``_do_download_model`` continues to capture byte-fingerprints for
     # local auditing. The whitelist above (``YOLO_MODELS`` membership
     # check) remains the active gate against off-list blob fetches.
-    return await run_in_threadpool(_do_download_model, model_name, not is_face_model, imgsz, is_face_model)
+    #
+    # ``switch_active=False``: downloading INSTALLS a model, it does not
+    # make it the default. Picking which model runs is a separate, explicit
+    # operator action (the "Use" button here, or a per-camera assignment on
+    # /camera-models), so a download can no longer silently repoint the
+    # running detector and change every camera's behaviour. This mirrors
+    # ``update_ai_model``. Re-downloading the model that is ALREADY active
+    # still refreshes it in place (``_do_download_model`` keeps that branch
+    # on ``is_active``), so "Update" on the in-use card behaves as before.
+    return await run_in_threadpool(_do_download_model, model_name, False, imgsz, is_face_model)
 
 
 @router.get('/api/settings/ai/check-model-updates')

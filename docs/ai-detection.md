@@ -55,7 +55,8 @@ Actions per model:
 - **Download** - export and install the model. Pick a resolution first (320
   "Fast" through 1280 "Max"; 640 is the default). Higher resolutions are more
   accurate on small/distant objects but slower per frame. YOLO26 models default
-  to a 768 input size.
+  to a 768 input size. Downloading never changes the default model: the
+  operator picks what runs with **Use**, or per camera on `/camera-models`.
 - **Use** - make an installed model the active detector.
 - **Update** - re-export a model when newer weights are available. On the active
   model this re-exports in place.
