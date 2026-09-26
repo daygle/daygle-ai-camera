@@ -584,6 +584,82 @@ def evaluate_detections(
     return {"overall": overall, "per_label": per_label}
 
 
+def recommend_input_size(
+    sweep: list[dict[str, Any]],
+    *,
+    min_recall: float = 0.0,
+    min_precision: float = 0.0,
+    latency_budget_ms: float | None = None,
+) -> dict[str, Any]:
+    """Pick the smallest input size that still meets the quality floors.
+
+    The point of a guided benchmark is to stop an operator hand-tuning
+    ``--input-size`` blind, so the recommendation has to encode a defensible
+    rule rather than "highest mAP wins":
+
+    1. Discard any run that misses a required quality floor. A size that
+       cannot hold recall is not a faster option, it is a broken one.
+    2. Discard any run that blows the latency budget, if one was given.
+    3. Of what survives, take the SMALLEST input size. Detection cost scales
+       with the square of the input side, so the smallest size that still
+       meets the floors is the cheapest acceptable answer - and on a self-
+       hosted NVR that is the whole point of the exercise.
+
+    Ties at equal size are broken by mAP. Deliberately a pure function over
+    already-measured numbers, with no model or OpenCV involved, so the
+    recommendation logic is testable on its own.
+    """
+    scored: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for run in sweep:
+        size = int(run.get('input_size') or 0)
+        metrics = run.get('metrics') or {}
+        overall = metrics.get('overall') or {}
+        recall = float(overall.get('recall') or 0.0)
+        precision = float(overall.get('precision') or 0.0)
+        latency = run.get('ms_per_inference') or {}
+        p95 = float(latency.get('p95') or 0.0)
+        candidate = {
+            'input_size': size,
+            'precision': round(precision, 6),
+            'recall': round(recall, 6),
+            'f1': round(float(overall.get('f1') or 0.0), 6),
+            'map_50': round(float(overall.get('map_50') or 0.0), 6),
+            'ms_p95': round(p95, 3),
+        }
+        reasons: list[str] = []
+        if recall < min_recall:
+            reasons.append(f'recall {recall:.3f} < {min_recall:.3f}')
+        if precision < min_precision:
+            reasons.append(f'precision {precision:.3f} < {min_precision:.3f}')
+        if latency_budget_ms is not None and p95 > latency_budget_ms:
+            reasons.append(f'p95 {p95:.1f}ms > {latency_budget_ms:.1f}ms')
+        if reasons:
+            rejected.append({**candidate, 'rejected_because': reasons})
+        else:
+            scored.append(candidate)
+
+    if not scored:
+        return {
+            'recommended': None,
+            'reason': 'No input size met the required quality/latency floors.',
+            'acceptable': [],
+            'rejected': rejected,
+        }
+
+    best = min(scored, key=lambda run: (run['input_size'], -run['map_50']))
+    return {
+        'recommended': best['input_size'],
+        'reason': (
+            f"Smallest input size meeting recall>={min_recall:.2f} and "
+            f"precision>={min_precision:.2f}"
+            + (f' within {latency_budget_ms:.0f}ms p95' if latency_budget_ms is not None else '')
+        ),
+        'acceptable': sorted(scored, key=lambda run: (run['input_size'], -run['map_50'])),
+        'rejected': rejected,
+    }
+
+
 def _build_detector(args: argparse.Namespace):
     if not args.model:
         return None
@@ -914,6 +990,36 @@ def _print_human(report: dict[str, Any]) -> None:
     print()
 
 
+def _print_input_size_recommendation(recommendation: dict[str, Any]) -> None:
+    """Human-readable output for a guided input-size sweep (Item 17)."""
+    print()
+    print("Input size trade-off (lower input size = cheaper inference):")
+    header = f"  {'size':>6}  {'precision':>9}  {'recall':>7}  {'mAP@50':>7}  {'p95 ms':>7}  verdict"
+    print(header)
+    print(f"  {'-' * (len(header) - 2)}")
+    rows = list(recommendation.get('acceptable') or []) + list(recommendation.get('rejected') or [])
+    for run in sorted(rows, key=lambda item: item.get('input_size') or 0):
+        rejected = run.get('rejected_because')
+        verdict = 'meets floors' if not rejected else '; '.join(rejected)
+        print(
+            f"  {run.get('input_size', 0):>6}  {run.get('precision', 0.0):>9.3f}  "
+            f"{run.get('recall', 0.0):>7.3f}  {run.get('map_50', 0.0):>7.3f}  "
+            f"{run.get('ms_p95', 0.0):>7.1f}  {verdict}"
+        )
+    recommended = recommendation.get('recommended')
+    print()
+    if recommended:
+        print(f"  Recommended input size: {recommended}")
+        print(f"  ({recommendation.get('reason')})")
+        print("  Detection cost scales with the square of the input side, so this is the")
+        print("  cheapest size that still holds your quality floors.")
+    else:
+        print(f"  No recommendation: {recommendation.get('reason')}")
+        print("  Loosen --min-recall/--min-precision, add a larger size to the sweep,")
+        print("  or check that --ground-truth covers the subjects you care about.")
+    print()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input", required=True, help="Video file OR a directory of frame images.")
@@ -976,6 +1082,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--confidence-sweep",
         help="Comma-separated confidence floors to benchmark, e.g. 0.25,0.35,0.45.",
+    )
+    parser.add_argument(
+        "--sweep-input-sizes",
+        help="Comma-separated model input sizes to benchmark, e.g. 320,416,512,640. "
+             "Needs --ground-truth to be able to recommend one.",
+    )
+    parser.add_argument(
+        "--min-recall", type=float, default=0.0,
+        help="Recall floor for the --sweep-input-sizes recommendation (default: 0.0, i.e. none).",
+    )
+    parser.add_argument(
+        "--min-precision", type=float, default=0.0,
+        help="Precision floor for the --sweep-input-sizes recommendation (default: 0.0, i.e. none).",
+    )
+    parser.add_argument(
+        "--latency-budget-ms", type=float,
+        help="Optional p95 inference budget (ms) for the --sweep-input-sizes recommendation.",
     )
     parser.add_argument("--output", help="Write the generated JSON report to this path.")
     parser.add_argument("--fail-below-precision", type=float,
@@ -1055,17 +1178,31 @@ def main(argv: list[str] | None = None) -> int:
 
     reports = []
     scenario_reports: dict[str, Any] = {}
+    size_reports: list[dict[str, Any]] = []
+    input_sizes = [
+        int(value) for value in str(getattr(args, 'sweep_input_sizes', '') or '').split(',') if value.strip()
+    ]
     for confidence in confidences:
-        for scenario_name, gated in scenarios:
-            run_args = argparse.Namespace(**vars(args))
-            run_args.confidence = confidence
-            run_args.gated = gated
-            label_floor = min(run_args.label_thresholds.values()) if run_args.label_thresholds else confidence
-            run_args.detector_confidence = min(confidence, label_floor)
-            run_report = evaluate(run_args)
-            reports.append(run_report)
-            if args.scenarios:
-                scenario_reports.setdefault(scenario_name, []).append(run_report)
+        for input_size in (input_sizes or [None]):
+            for scenario_name, gated in scenarios:
+                run_args = argparse.Namespace(**vars(args))
+                run_args.confidence = confidence
+                run_args.gated = gated
+                if input_size is not None:
+                    run_args.input_size = input_size
+                label_floor = min(run_args.label_thresholds.values()) if run_args.label_thresholds else confidence
+                run_args.detector_confidence = min(confidence, label_floor)
+                run_report = evaluate(run_args)
+                reports.append(run_report)
+                if input_sizes:
+                    size_reports.append({
+                        'input_size': run_args.input_size,
+                        'metrics': (run_report.get('benchmark') or {}).get('overall')
+                        or (run_report.get('benchmark') or {}),
+                        'ms_per_inference': (run_report.get('objects') or {}).get('ms_per_inference'),
+                    })
+                if args.scenarios:
+                    scenario_reports.setdefault(scenario_name, []).append(run_report)
     report: dict[str, Any] = (
         reports[0]
         if len(reports) == 1
@@ -1079,6 +1216,20 @@ def main(argv: list[str] | None = None) -> int:
                 for name, runs in scenario_reports.items()
             },
         }
+    if size_reports:
+        recommendation = recommend_input_size(
+            size_reports,
+            min_recall=float(getattr(args, 'min_recall', 0.0) or 0.0),
+            min_precision=float(getattr(args, 'min_precision', 0.0) or 0.0),
+            latency_budget_ms=getattr(args, 'latency_budget_ms', None),
+        )
+        report = {
+            "input": str(args.input),
+            "input_size_sweep": size_reports,
+            "recommendation": recommendation,
+        }
+        if not args.json:
+            _print_input_size_recommendation(recommendation)
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)

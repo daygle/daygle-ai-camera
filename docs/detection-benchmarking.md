@@ -228,7 +228,56 @@ higher floor or stronger confirmation is not automatically better if it
 removes valid small or low-light subjects. Keep negative scenes in the dataset;
 they are what make false-positive reductions visible.
 
-## 6. Make it a regression check
+## 6. Choose an input size (Item 17)
+
+A smaller YOLO input size is the single biggest lever on inference cost, and
+also the biggest lever on accuracy - so picking one by hand on an arbitrary
+clip is how people end up either wasting CPU or missing small subjects.
+`--sweep-input-sizes` runs the same labeled clip at several sizes and
+recommends one, given floors you state:
+
+```bash
+python scripts/evaluate_detection.py \
+  --input fixtures/front-door-frames \
+  --ground-truth fixtures/front-door.json \
+  --model models/yolo11n.onnx \
+  --sweep-input-sizes 320,416,512,640 \
+  --min-recall 0.85 \
+  --min-precision 0.75 \
+  --latency-budget-ms 50 \
+  --output reports/input-size.json
+```
+
+It prints the trade-off before it prints the answer:
+
+```
+Input size trade-off (lower input size = cheaper inference):
+    size  precision   recall   mAP@50   p95 ms  verdict
+  -----------------------------------------------------
+     320      0.620    0.550    0.500     12.0  recall 0.550 < 0.800; precision 0.620 < 0.750
+     416      0.840    0.860    0.700     21.0  meets floors
+     640      0.930    0.950    0.800     58.0  p95 58.0ms > 50.0ms
+
+  Recommended input size: 416
+```
+
+The rule is deliberately **not** "highest mAP wins". Detection cost scales
+with the square of the input side, so the recommendation is the *smallest*
+size that still clears your quality and latency floors - the cheapest
+acceptable answer rather than the best-scoring one. Sizes that miss a floor
+are listed with the reason they were rejected, so a sweep that recommends
+nothing tells you which constraint is unreachable rather than just failing.
+
+Two caveats worth knowing before you trust a number:
+
+- **Use a representative clip.** The recommendation is only as good as the
+  ground truth. A clip of empty driveway will happily recommend 320.
+- **Check the whole pipeline, not just the detector.** Add `--post-pipeline`
+  with `--camera-config` to see how the size interacts with confirmation
+  windows and zone rules; a size that scores well raw can still lose
+  detections to N-of-M confirmation.
+
+## 7. Make it a regression check
 
 Keep a small, deterministic, non-sensitive fixture in the repository and a
 larger private dataset for local benchmarking. In CI, validate the annotation
