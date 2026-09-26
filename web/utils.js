@@ -357,6 +357,40 @@ function isAbortError(error) {
   return code === 20 || code === 'ABORT_ERR';
 }
 
+// A fetch that is still in flight when the user clicks a nav link is cancelled
+// by the browser as the document unloads, and the pending promise rejects with
+// a network-level TypeError ("Failed to fetch" / "Load failed") that carries
+// neither name === 'AbortError' nor an abort code, so isAbortError alone does
+// not recognise it. Left unguarded, every in-flight poll rejected on the way
+// out and the page's catch handler raised an error toast during the very
+// navigation that was tearing the page down: a red banner flashing for a few
+// hundred milliseconds, too short to read and impossible to act on.
+//
+// Mark the document as leaving on the two events that actually precede
+// teardown, and treat any failure from that point on as expected. pagehide
+// covers the navigation itself and bfcache eviction; beforeunload covers the
+// legacy path. The flag is deliberately latching: once the page is going away
+// it never comes back, so there is nothing to reset.
+let _dayglePageLeaving = false;
+function markPageLeaving() {
+  _dayglePageLeaving = true;
+}
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('pagehide', markPageLeaving);
+  window.addEventListener('beforeunload', markPageLeaving);
+}
+
+// True when a rejection is the browser tearing the page down rather than a
+// real failure worth telling the user about. Callers guard their toasts (and
+// any error state they were about to paint) with this so navigating away from
+// a polling page stays silent.
+//
+// Exported for later scripts via WEB_SHARED_GLOBALS.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function isPageLeavingError(error) {
+  return _dayglePageLeaving || isAbortError(error);
+}
+
 // Returns a runner that enforces "latest frame wins" for one logical resource.
 //
 //   const run = createRequestCoalescer();

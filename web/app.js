@@ -54,6 +54,19 @@ let configuredLabels = null;
 let events = [];
 let activeFilter = 'all';
 
+// Activity-feed streaming state. eventsPager holds the server cursor so the
+// rest of the history streams in on demand instead of being drained up front;
+// activityLoadSession invalidates an in-flight load when the range changes so
+// a slow response for the old range cannot overwrite the new one.
+const ACTIVITY_PAGE_SIZE = 200;
+let eventsPager = null;
+let activityMoreLoading = false;
+let activityLoadSession = 0;
+// Rows the user pulled in past the first page. The 30s refresh reloads page
+// one (so new detections appear) but keeps these, and appends de-duplicated by
+// id: a fresh page one can overlap the tail when new events land at the head.
+let streamedTail = [];
+
 // api() is provided by web/utils.js (loaded before this script) - it reads
 // the CSRF token from window.daygleAuth.csrfToken and handles 401 redirects
 // so every page shares identical auth and error semantics.
@@ -136,10 +149,6 @@ function detectionBadges(detections = [], { isSound = false } = {}) {
 // isMotionOnlyEvent / isMotionOnlyEventItem live in web/utils.js (loaded
 // before this script) and are also exposed on window.daygleUi for callers
 // that prefer the explicit namespace.
-
-function updateMotionStats() {
-  if (els.motionEvents) els.motionEvents.textContent = events.filter(isMotionOnlyEvent).length;
-}
 
 function buildEventItems() {
   const eventItems = events.map((event) => {
@@ -336,12 +345,67 @@ function bindActivitySortHeaders() {
   });
 }
 
+// Load-more footer for the streamed feed. Only rendered while the pager still
+// has a cursor, so the control disappears once the history is fully loaded.
+function renderActivityFooter() {
+  if (!eventsPager || eventsPager.done) return '';
+  return `
+    <div class="list-load-more" id="activity-more">
+      <button type="button" class="secondary list-load-more-btn" id="activity-more-btn">Load more detections</button>
+      <span class="muted">Older detections load as you scroll.</span>
+    </div>`;
+}
+
+function wireActivityLoadMore() {
+  const button = document.getElementById('activity-more-btn');
+  if (button) button.addEventListener('click', () => loadMoreActivity());
+  const sentinel = document.getElementById('activity-more');
+  setLoadMoreSentinel('dashboard-activity', (eventsPager && !eventsPager.done) ? sentinel : null, loadMoreActivity);
+}
+
+// Concatenate a freshly fetched page with rows already streamed in, dropping
+// ids seen on either side. The first page and the tail can overlap when new
+// detections land at the head between two loads; without this the shared row
+// would render twice.
+function mergeEventPages(pageItems, tail) {
+  const seen = new Set();
+  const merged = [];
+  for (const event of pageItems.concat(tail)) {
+    const key = String(event?.id ?? '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(event);
+  }
+  return merged;
+}
+
+async function loadMoreActivity() {
+  if (!eventsPager || eventsPager.done || activityMoreLoading) return;
+  activityMoreLoading = true;
+  const session = activityLoadSession;
+  try {
+    const page = await eventsPager.loadPage();
+    if (session !== activityLoadSession) return;
+    streamedTail = streamedTail.concat(page.items);
+    events = mergeEventPages(events, page.items);
+    renderActivityFeed();
+  } catch (error) {
+    if (session !== activityLoadSession) return;
+    if (window.daygleAuth?.redirecting) return;
+    if (isPageLeavingError(error)) return;
+    window.showToast?.(error.message, true);
+  } finally {
+    activityMoreLoading = false;
+  }
+}
+
 function renderActivityFeed() {
   const items = applyFilter(buildEventItems());
   if (!items.length) {
-    els.activityFeed.innerHTML = renderEmptyState();
+    els.activityFeed.innerHTML = renderEmptyState() + renderActivityFooter();
     updateListStatus(0);
     updateDismissButtons();
+    wireActivityLoadMore();
     return;
   }
   const ordered = activitySortState ? items.slice().sort(compareActivityItems) : items;
@@ -361,7 +425,8 @@ function renderActivityFeed() {
         '<th class="cell-center" scope="col">Actions</th>' +
       '</tr></thead>' +
       '<tbody id="activity-feed-rows"></tbody>' +
-    '</table></div>';
+    '</table></div>' +
+    renderActivityFooter();
   const rows = document.getElementById('activity-feed-rows');
   renderIncrementally(rows, ordered, renderActivityItem, {
     onComplete: () => {
@@ -375,6 +440,7 @@ function renderActivityFeed() {
   // Headers are outside the incremental region, so their binding is immediate.
   bindActivitySortHeaders();
   observeMediaLifecycle(els.activityFeed);
+  wireActivityLoadMore();
 }
 
 function updateListStatus(count) {
@@ -383,9 +449,12 @@ function updateListStatus(count) {
   const label = labels[activeFilter] || 'items';
   if (count === 0) {
     els.listStatus.textContent = '';
-  } else {
-    els.listStatus.textContent = `${count} ${label}`;
+    return;
   }
+  // The feed streams, so the visible count is a loaded-rows count rather than
+  // a total. Say so instead of letting the badge read as a complete tally.
+  const more = eventsPager && !eventsPager.done ? ' · more available' : '';
+  els.listStatus.textContent = `${count} ${label}${more}`;
 }
 
 function bindActivityActions() {
@@ -396,10 +465,13 @@ function bindActivityActions() {
       try {
         await api(`/api/events/${id}/dismiss`, { method: 'POST' });
         events = events.filter((e) => String(e.id) !== String(id));
+        // The pager stays valid: the cursor is (created_at, id) based and the
+        // next page simply omits the row the server now marks dismissed.
         renderActivityFeed();
       } catch (error) {
         // Skip UI updates if api() triggered a 401 redirect
         if (window.daygleAuth?.redirecting) return;
+        if (isPageLeavingError(error)) return;
         window.showToast?.(error.message, true);
         btn.disabled = false;
       }
@@ -428,9 +500,13 @@ async function loadStats() {
     const stats = await api(url);
     els.totalEvents.textContent = stats.matched_object_events ?? stats.total_events ?? 0;
     if (els.soundEvents) els.soundEvents.textContent = stats.sound_detection_events ?? 0;
+    // Served by the backend so the card no longer depends on the activity feed
+    // having drained the whole event history.
+    if (els.motionEvents) els.motionEvents.textContent = stats.motion_detection_events ?? 0;
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
+    if (isPageLeavingError(error)) return;
     window.showToast?.(error.message, true);
   }
 }
@@ -561,15 +637,30 @@ async function loadSystemResources() {
   }
 }
 
-async function loadEvents() {
+async function loadEvents({ restart = false } = {}) {
+  const since = getSinceParam();
+  const url = since ? `/api/events?with_recording=true&since=${since}` : '/api/events?with_recording=true';
+  // A fresh pager per load: the previous one may still hold a cursor, and a
+  // range change has to restart from the newest page. Only the first page is
+  // fetched here - the rest streams in behind the Load more control, so the
+  // dashboard paints without waiting on the whole history.
+  eventsPager = createCursorPager(url, ACTIVITY_PAGE_SIZE);
+  activityLoadSession += 1;
+  const session = activityLoadSession;
+  if (restart) streamedTail = [];
   try {
-    const since = getSinceParam();
-    const url = since ? `/api/events?with_recording=true&since=${since}` : '/api/events?with_recording=true';
-    events = await fetchAllCursorPages(url, 500);
-    updateMotionStats();
+    const page = await eventsPager.loadPage();
+    if (session !== activityLoadSession) return;
+    // A plain refresh keeps the rows the user already streamed in; only a
+    // restart (first load, range change, dismiss-all) discards them.
+    events = streamedTail.length ? mergeEventPages(page.items, streamedTail) : page.items;
   } catch (error) {
+    if (session !== activityLoadSession) return;
     if (window.daygleAuth?.redirecting) return;
+    if (isPageLeavingError(error)) return;
     events = [];
+    // A dead pager must not leave the Load more control wired to it.
+    setLoadMoreSentinel('dashboard-activity', null, loadMoreActivity);
     window.showToast?.(error.message, true);
   }
 }
@@ -987,10 +1078,16 @@ els.dismissAllEventsBtn?.addEventListener('click', async () => {
   try {
     await api('/api/events/dismiss-all', { method: 'POST' });
     events = [];
+    // Every row is gone server-side, so the cursor has nothing left to stream;
+    // the next poll rebuilds the feed from the top.
+    eventsPager = null;
+    streamedTail = [];
+    setLoadMoreSentinel('dashboard-activity', null, loadMoreActivity);
     renderActivityFeed();
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
+    if (isPageLeavingError(error)) return;
     window.showToast?.(error.message, true);
   } finally {
     els.dismissAllEventsBtn.disabled = false;
@@ -1019,7 +1116,8 @@ els.rangeBtns.forEach((btn) => {
       other.classList.toggle('active', active);
       other.setAttribute('aria-selected', String(active));
     });
-    loadStats().then(() => loadEvents().then(renderActivityFeed)).catch(() => {});
+    // A range change invalidates everything streamed under the old bound.
+    loadStats().then(() => loadEvents({ restart: true }).then(renderActivityFeed)).catch(() => {});
   });
 });
 
@@ -1113,6 +1211,7 @@ loadAuth()
   .catch((error) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
+    if (isPageLeavingError(error)) return;
     window.showToast?.(error.message, true);
   });
 
@@ -1120,6 +1219,8 @@ loadAuth()
 // instant it is looked at again (startPageInterval, web/utils.js).
 startPageInterval(() => { loadStats().catch(() => {}); }, 10000);
 startPageInterval(() => { loadSystemResources().catch(() => {}); }, 5000);
+// The poll exists to surface new detections, not to throw away the pages the
+// user already streamed in, so a plain loadEvents() keeps the tail by default.
 startPageInterval(() => {
   loadEvents().then(renderActivityFeed).catch(() => {});
 }, 30000);

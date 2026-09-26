@@ -551,6 +551,44 @@ class EventsMixin:
                 f"SELECT COUNT(*) AS count FROM events e WHERE e.source = 'sound' AND e.dismissed = 0 {since_clause}",
                 _params(),
             ).fetchone()["count"]
+            # Motion-only events, mirroring the frontend's isMotionOnlyEvent():
+            # not a sound event, at least one detection, and EVERY detection
+            # label inside GENERIC_TRIGGER_LABELS. An event with no detections
+            # (or only blank labels) is not counted - it is an under-recorded
+            # sample, not a motion trigger. Previously the dashboard counted
+            # these client-side over the fully drained event list, which is why
+            # it had to fetch the entire history to render one stat card.
+            #
+            # The label set is built from the canonical frozenset imported at
+            # the top of this module (minus the blank entry, which the
+            # non-empty EXISTS below already excludes) so it cannot drift from
+            # the rest of the backend when a label is added or removed.
+            generic_labels = sorted(
+                label for label in GENERIC_TRIGGER_LABELS if label.strip()
+            )
+            generic_placeholders = ', '.join('?' for _ in generic_labels)
+            motion_sql = f"""
+                SELECT COUNT(*) AS count
+                FROM events e
+                WHERE e.dismissed = 0
+                  AND e.source != 'sound'
+                  AND EXISTS (
+                    SELECT 1 FROM detections d
+                    WHERE d.event_id = e.id
+                      AND TRIM(COALESCE(d.label, '')) != ''
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM detections d
+                    WHERE d.event_id = e.id
+                      AND TRIM(COALESCE(d.label, '')) != ''
+                      AND LOWER(TRIM(d.label)) NOT IN ({generic_placeholders})
+                  )
+                  {since_clause}
+            """
+            motion_detection_events = db.execute(
+                motion_sql,
+                tuple(generic_labels) + _params(),
+            ).fetchone()["count"]
             matched_object_events = db.execute(
                 f"""
                 SELECT COUNT(DISTINCT e.id) AS count
@@ -607,6 +645,7 @@ class EventsMixin:
                 "total_alerts": total_alerts,
                 "matched_object_events": matched_object_events,
                 "sound_detection_events": sound_detection_events,
+                "motion_detection_events": motion_detection_events,
                 "object_alerts": object_alerts,
                 "sound_alerts": sound_alerts,
                 "objects": [dict(row) for row in labels],

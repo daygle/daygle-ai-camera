@@ -63,6 +63,10 @@ const WEB_SHARED_GLOBALS = {
   backoffDelayMs: 'readonly',
   createRequestCoalescer: 'readonly',
   isAbortError: 'readonly',
+  // web/utils.js - isPageLeavingError reports a rejection that is just the
+  // browser cancelling in-flight fetches while the document unloads, so a
+  // polling page does not flash an unreadable error toast on the way out.
+  isPageLeavingError: 'readonly',
   cameraLabel: 'readonly',
   collectRecordingFaceIdentities: 'readonly',
   continuousPill: 'readonly',
