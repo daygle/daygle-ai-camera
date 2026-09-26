@@ -1,9 +1,12 @@
 # Ruff configuration.
 #
-# The CI lint job (.github/workflows/python-app.yml) runs `ruff check app`.
+# The CI lint job (.github/workflows/python-app.yml) runs
+# `ruff check app scripts`.
 # We select the Pyflakes ("F") rules: the highest-signal, low-false-positive
 # set - unused/undefined names, duplicate definitions, and f-string mistakes.
-# app/ is clean under these today, so the gate is meaningful without noise.
+# app/ and scripts/ are clean under these today, so the gate is meaningful
+# without noise. scripts/ (first-party tooling, notably
+# scripts/evaluate_detection.py) is gated so it cannot rot outside the check.
 #
 # tests/ are intentionally not gated yet: they use a deliberate "Pool-A"
 # preload pattern (`import app.main` for its module-rebind side effects before

@@ -1282,12 +1282,16 @@ if ('ResizeObserver' in window && els.clipPlayer) {
 }
 
 if (els.clipOverlayToggle) {
-  const savedValue = localStorage.getItem(RECORDINGS_OVERLAY_TOGGLE_KEY);
+  // Storage access can throw (privacy modes, sandboxed frames); fall back to
+  // the default instead of aborting the rest of the page wiring (the codebase
+  // convention: every localStorage access is guarded).
+  let savedValue = null;
+  try { savedValue = localStorage.getItem(RECORDINGS_OVERLAY_TOGGLE_KEY); } catch (_err) { /* storage disabled - keep default */ }
   overlayEnabled = savedValue !== '0';
   els.clipOverlayToggle.checked = overlayEnabled;
   els.clipOverlayToggle.addEventListener('change', () => {
     overlayEnabled = Boolean(els.clipOverlayToggle.checked);
-    localStorage.setItem(RECORDINGS_OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0');
+    try { localStorage.setItem(RECORDINGS_OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0'); } catch (_err) { /* storage disabled / quota - silently no-op */ }
     if (els.clipPlayer && !els.clipPlayer.paused && overlayShouldAnimate()) {
       startOverlayRaf();
     } else if (!overlayEnabled) {
