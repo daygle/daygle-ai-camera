@@ -163,6 +163,14 @@ def _update_camera_health(camera_id: str, online: bool) -> None:
 
 
 def _camera_offline_notification_eligible(camera_id: str) -> bool:
+    # Most health checks are online. Reject those without hitting the settings
+    # store; recheck under lock after the settings read for state transitions.
+    with _state._camera_health_lock:
+        state = _state._camera_health_state.get(camera_id)
+        if not state or state.get('online', True) or state.get('offline_notified'):
+            return False
+        if state.get('offline_since') is None:
+            return False
     delay_minutes = int(effective_camera_offline_alert_settings().get('offline_delay_minutes', 1))
     delay_seconds = max(0, delay_minutes * 60)
     with _state._camera_health_lock:

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+from types import SimpleNamespace
+
 from app.camera_config import normalize_camera_settings
 from app.camera_policy import camera_policy, clear_camera_policy_cache
 from app.database import EventDatabase
@@ -180,6 +183,76 @@ def test_event_alert_insert_is_atomic_and_recording_link_propagates(tmp_path) ->
             for table in ('events', 'detections', 'alert_history')
         }
     assert after_invalid == before_invalid
+
+
+def test_automatic_recording_retention_is_coalesced_off_calling_thread(monkeypatch) -> None:
+    import app.backup as backup
+
+    started = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+    calls: list[int] = []
+
+    def fake_purge() -> None:
+        calls.append(1)
+        started.set()
+        release.wait(timeout=2)
+        completed.set()
+
+    monkeypatch.setattr(backup, 'purge_recordings_by_policy', fake_purge)
+    monkeypatch.setattr(backup, '_automatic_retention_last_started', None)
+    monkeypatch.setattr(backup, '_automatic_retention_running', False)
+
+    assert backup.schedule_recordings_retention()
+    assert started.wait(timeout=1)
+    assert calls == [1]
+    assert not backup.schedule_recordings_retention()
+
+    release.set()
+    assert completed.wait(timeout=1)
+    # A completed sweep still coalesces new event/chunk triggers for its window.
+    assert not backup.schedule_recordings_retention()
+
+
+def test_size_retention_streams_compact_rows_and_skips_age_expired_file_stats(tmp_path, monkeypatch) -> None:
+    import app.db.recordings as recordings_repo
+
+    database = EventDatabase(str(tmp_path / 'retention.sqlite3'))
+    recordings = [
+        ('2020-01-01T00:00:00+00:00', 'expired.mp4', 100),
+        ('2026-01-01T00:00:00+00:00', 'first.mp4', 8),
+        ('2026-01-02T00:00:00+00:00', 'second.mp4', 8),
+    ]
+    file_sizes = {name: size for _, name, size in recordings}
+    statted: list[str] = []
+
+    class _FakePath:
+        def __init__(self, name: str):
+            self.name = name
+
+        def stat(self):
+            statted.append(self.name)
+            return SimpleNamespace(st_size=file_sizes[self.name])
+
+    monkeypatch.setattr(
+        recordings_repo,
+        'safe_storage_path',
+        lambda raw_path, **_kwargs: _FakePath(str(raw_path).rsplit('/', 1)[-1]),
+    )
+    ids = []
+    for started_at, name, _size in recordings:
+        ids.append(database.add_recording(
+            event_id=None, camera_id='front', started_at=started_at,
+            ended_at=started_at, duration_seconds=1, file_path=f'/recordings/{name}',
+            thumbnail_path=None, source='camera', created_at=started_at,
+        ))
+
+    purged = database.purge_recordings(
+        older_than='2025-01-01T00:00:00+00:00', max_storage_bytes=10,
+    )
+
+    assert {row['id'] for row in purged} == {ids[0], ids[1]}
+    assert statted == ['second.mp4', 'first.mp4']
 
 
 def test_database_maintenance_schema_has_target_indexes_and_wal(tmp_path) -> None:

@@ -75,7 +75,7 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.02,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'auto',
+            'motion_shadow_suppression': 'off',
         },
     },
     {
@@ -118,7 +118,7 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.03,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'auto',
+            'motion_shadow_suppression': 'off',
         },
     },
     {
@@ -161,7 +161,7 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.02,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'auto',
+            'motion_shadow_suppression': 'off',
         },
     },
     {
@@ -204,7 +204,7 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.03,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'auto',
+            'motion_shadow_suppression': 'off',
         },
     },
     {
@@ -247,7 +247,7 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.01,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'auto',
+            'motion_shadow_suppression': 'off',
         },
     },
     {
@@ -290,7 +290,7 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.02,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'auto',
+            'motion_shadow_suppression': 'off',
         },
     },
 )
@@ -302,7 +302,13 @@ BUILTIN_PRESETS: tuple[dict[str, Any], ...] = tuple(
         'name': f"{group['name']} ({mode.capitalize()})",
         'builtin': True,
         'mode': mode,
-        'settings': dict(group[mode]),
+        'settings': {
+            **group[mode],
+            # Adaptive cadence is enabled by default system-wide. Keep that
+            # behavior explicit when a built-in preset is applied to a
+            # Day/Night profile, while allowing a group to opt out if needed.
+            'adaptive_detection_enabled': group[mode].get('adaptive_detection_enabled', True),
+        },
     }
     for group in _BUILTIN_PRESET_GROUPS
     for mode in ('day', 'night')

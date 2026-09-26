@@ -59,6 +59,34 @@ def test_enabled_unknown_rule_returns_enabled_rule(monkeypatch):
     assert rule['id'] == '_unknown'
 
 
+def test_effective_face_rules_cache_by_generation_and_return_defensive_copies(monkeypatch):
+    class _VersionedDb(_DbStub):
+        _settings_cache_gen = 0
+
+    rules = _rules_payload(_unknown_rule(enabled=True))
+    db = _VersionedDb({'face_detection_rules': rules})
+    calls = 0
+    original_get_setting = db.get_setting
+
+    def counted_get_setting(key):
+        nonlocal calls
+        calls += 1
+        return original_get_setting(key)
+
+    db.get_setting = counted_get_setting
+    monkeypatch.setattr(fdr._state, 'database', db)
+
+    first = fdr.effective_face_detection_rules()
+    first['rules'][0]['name'] = 'mutated'
+    assert fdr.effective_face_detection_rules()['rules'][0]['name'] == 'Unknown Person'
+    assert calls == 1
+
+    db._settings['face_detection_rules'] = _rules_payload(_unknown_rule(enabled=False))
+    db._settings_cache_gen += 1
+    assert fdr.effective_face_detection_rules()['rules'][0]['enabled'] is False
+    assert calls == 2
+
+
 def test_enabled_unknown_rule_none_when_disabled(monkeypatch):
     db = _DbStub({'face_detection_rules': _rules_payload(_unknown_rule(enabled=False))})
     monkeypatch.setattr(fdr._state, 'database', db)

@@ -805,8 +805,12 @@ function renderNavAccount(user) {
       navAvatar.textContent = usernameInitial;
     }
   }
-  if (user.role !== 'admin' && nav) {
-    nav.querySelectorAll('[data-admin="true"]').forEach((el) => { el.hidden = true; });
+  if (nav) {
+    // Auth can be temporarily unknown while a backgrounded tab revalidates.
+    // Always restore admin groups when that refresh confirms an admin user.
+    nav.querySelectorAll('[data-admin="true"]').forEach((el) => {
+      el.hidden = user.role !== 'admin';
+    });
   }
   if (logoutBtn) logoutBtn.hidden = false;
   // The countdown element exists in the DOM; the ticker manages its

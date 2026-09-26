@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -30,6 +29,7 @@ import app.state as _state
 from app.alert_dispatch import (
     _rule_notify_active_now,
     deliver_sound_alert_notifications as _deliver_sound_alert_notifications,
+    submit_sound_alert_notification,
 )
 from app.sound_detector import SOUND_CLASSES, SoundDetector
 from app.utils import normalize_bool_setting, normalize_email_recipients, build_stream_url
@@ -111,11 +111,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
     alert_payload = {'rule_name': rule_name, 'label': class_id, 'confidence': confidence, 'message': message}
     notify_rule = {'name': rule_name, 'email_enabled': email_enabled, 'push_enabled': push_enabled, 'email_recipients': email_recipients, 'notify_start': str(fired_rule.get('notify_start') or '').strip() or None, 'notify_end': str(fired_rule.get('notify_end') or '').strip() or None}
     if notify_enabled:
-        notify_thread = threading.Thread(target=_deliver_sound_alert_notifications, args=([alert_payload], event_id, notify_rule), name=f'sound-alert-notify-{event_id}', daemon=True)
-        with _state._notification_threads_lock:
-            _state._notification_threads[:] = [t for t in _state._notification_threads if t.is_alive()]
-            _state._notification_threads.append(notify_thread)
-        notify_thread.start()
+        submit_sound_alert_notification(_deliver_sound_alert_notifications, [alert_payload], event_id, notify_rule)
 
 
 def _sound_rules_fingerprint(enabled_rules: list[dict[str, Any]], detection_interval_seconds: float = 0.5) -> str:

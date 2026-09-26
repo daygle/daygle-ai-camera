@@ -469,7 +469,7 @@ def _parse_chunk_start_time(file_path: Path) -> datetime | None:
 
 def _make_continuous_chunk_callback(camera_id: str) -> Any:
     def on_chunk_complete(camera_key: str, file_path: Path) -> None:
-        from app.backup import purge_recordings_by_policy
+        from app.backup import schedule_recordings_retention
         try:
             started_at_dt = _parse_chunk_start_time(file_path)
             stat = file_path.stat()
@@ -528,7 +528,7 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
                 recording_id, file_path, camera_id,
                 started_at_dt.timestamp(), ended_at_dt.timestamp(),
             )
-            purge_recordings_by_policy()
+            schedule_recordings_retention()
         except Exception as exc:
             logger.warning(
                 'Failed to register continuous chunk %s for camera %s: %s',
@@ -545,7 +545,7 @@ def attach_event_recording(
     camera_id: str | None = None,
     recording_config: dict[str, Any] | None = None,
 ) -> int | None:
-    from app.backup import purge_recordings_by_policy
+    from app.backup import schedule_recordings_retention
     from app.utils import build_stream_url
     from app.config_facades import get_camera_config
     stream_url = ''
@@ -591,7 +591,7 @@ def attach_event_recording(
                 recording_id, Path(str(metadata.get('file_path') or '')),
                 camera_id, window[0], window[1],
             )
-    purge_recordings_by_policy()
+    schedule_recordings_retention()
     return recording_id
 
 

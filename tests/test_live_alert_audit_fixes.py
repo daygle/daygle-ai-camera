@@ -111,6 +111,29 @@ def test_min_rule_confidence_cache_tracks_rule_edits_and_skips_disabled_zones(mo
 
 
 
+def test_confidence_signature_ignores_irrelevant_camera_metadata(monkeypatch):
+    camera = {
+        'id': 'signature-cam',
+        'detection': {'zones': [{
+            'id': 'driveway', 'name': 'Driveway', 'enabled': True,
+            'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.2}],
+        }]},
+        'description': 'initial',
+    }
+    monkeypatch.setattr(_ad, 'effective_ai_config', lambda: {'confidence': 0.45})
+    _ad._min_rule_confidence_cache = None
+    _ad._per_camera_min_rule_confidence_cache.clear()
+    try:
+        assert _ad.compute_minimum_rule_confidence(camera_settings=camera) == pytest.approx(0.2)
+        camera['description'] = 'changed but unrelated'
+        assert _ad.compute_minimum_rule_confidence(camera_settings=camera) == pytest.approx(0.2)
+        camera['detection']['zones'][0]['object_rules'][0]['min_confidence'] = 0.4
+        assert _ad.compute_minimum_rule_confidence(camera_settings=camera) == pytest.approx(0.4)
+    finally:
+        _ad._min_rule_confidence_cache = None
+        _ad._per_camera_min_rule_confidence_cache.clear()
+
+
 def test_live_event_fresh_labels_per_label_windows():
     """Each label's window is its own: a fast label can fire while a slower
     label on the same camera is still cooling."""

@@ -33,7 +33,7 @@ as ``main.<name>``.
 - ``main._live_backoff_lock`` - ``clear_live_camera_backoff``
 - ``main.live_detection_failure_count`` - ``clear_live_camera_backoff``
 - ``main.live_detection_retry_after`` - ``clear_live_camera_backoff``
-- ``main._frame_motion_lock`` / ``main._frame_motion_prev`` /
+- striped ``app.state._frame_motion_locks`` / ``main._frame_motion_prev`` /
   ``main._frame_motion_error_cameras`` /
   ``main._periodic_scan_last_ts`` - ``clear_live_camera_backoff`` resets
   the per-camera motion-gate state when a transition out of backoff is
@@ -222,14 +222,8 @@ def clear_live_camera_backoff(camera_id: str) -> None:
     # buffers, and the MOG2 mixture model + scene-streak). Each engine reseeds
     # from the next frame instead of diffing against a pre-outage model and
     # emitting a spurious motion event on the first recovered frame.
-    with _state._frame_motion_lock:
-        _state._frame_motion_prev.pop(camera_id, None)
-        _state._frame_motion_last_frame.pop(camera_id, None)
-        _state._frame_motion_last_gray.pop(camera_id, None)
-        _state._frame_motion_mog2.pop(camera_id, None)
-        _state._frame_motion_mog2_meta.pop(camera_id, None)
-        _state._frame_motion_scene_streak.pop(camera_id, None)
-    _state._frame_motion_error_cameras.discard(camera_id)
+    from app.detection_state import clear_frame_motion_state
+    clear_frame_motion_state(camera_id)
     _state._periodic_scan_last_ts.pop(camera_id, None)
 
 

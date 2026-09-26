@@ -18,6 +18,7 @@ from app.alert_dispatch import (
     _rule_notify_active_now,
     compute_minimum_rule_confidence,
     deliver_alert_notifications as _deliver_alert_notifications,
+    submit_alert_notification,
 )
 from app.camera_health import _check_cameras_health
 from app.camera_instance import read_ingest_frame
@@ -28,6 +29,7 @@ from app.detection_state import (
     confirm_object_detections,
     detect_frame_motion,
     detection_label_set,
+    frame_motion_lock,
     update_camera_motion,
     record_live_detection_history,
 )
@@ -460,13 +462,20 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
 
 def _prune_frame_motion_state() -> None:
     """Remove background model and scan timestamp entries for cameras no longer in the active config."""
+    from app.detection_state import frame_motion_locks
+
     active_ids = {str(cfg.get('id') or '') for cfg in _state.cameras_config if cfg.get('id')}
-    with _state._frame_motion_lock:
+    with frame_motion_locks():
         # Union of every per-camera motion model so MOG2-only or diff-only
         # cameras are both pruned (a camera lives in one engine's dict, not both).
         tracked_ids = (
             set(_state._frame_motion_prev)
+            | set(_state._frame_motion_last_frame)
+            | set(_state._frame_motion_last_gray)
             | set(_state._frame_motion_mog2)
+            | set(_state._frame_motion_mog2_meta)
+            | set(_state._frame_motion_scene_streak)
+            | set(_state._frame_motion_error_cameras)
         )
         stale = [cid for cid in tracked_ids if cid not in active_ids]
         for cid in stale:
@@ -476,9 +485,9 @@ def _prune_frame_motion_state() -> None:
             _state._frame_motion_mog2.pop(cid, None)
             _state._frame_motion_mog2_meta.pop(cid, None)
             _state._frame_motion_scene_streak.pop(cid, None)
+            _state._frame_motion_error_cameras.discard(cid)
     for cid in stale:
         _state._periodic_scan_last_ts.pop(cid, None)
-        _state._frame_motion_error_cameras.discard(cid)
         with _state._motion_confirm_lock:
             _state._motion_confirm_streaks.pop(cid, None)
         with _state._object_tracks_lock:
@@ -947,7 +956,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # the independent object-detection path: some callers provide detector-
     # compatible input that the optional motion decoder cannot parse. Keep the
     # zero-confidence motion result and let object inference decide normally.
-    with _state._frame_motion_lock:
+    with frame_motion_lock(camera_id):
         motion_gate_error = camera_id in _state._frame_motion_error_cameras
     # Publish the measurement immediately, before any ONNX work or downstream
     # zone/alert filtering. The live page is a motion diagnostic, so it must
@@ -1619,11 +1628,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # recording link is applied afterwards because clip creation is asynchronous
     # with respect to event persistence.
     if triggered:
-        notify_thread = threading.Thread(target=_deliver_alert_notifications, args=(triggered, event_id, zone_rules), name=f'alert-notify-{event_id}', daemon=True)
-        notify_thread.start()
-        with _state._notification_threads_lock:
-            _state._notification_threads[:] = [thread for thread in _state._notification_threads if thread.is_alive()]
-            _state._notification_threads.append(notify_thread)
+        submit_alert_notification(_deliver_alert_notifications, triggered, event_id, zone_rules)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     email_rules = [
         rule for rule in zone_rules

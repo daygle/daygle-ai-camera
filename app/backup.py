@@ -28,6 +28,7 @@ import shutil
 import sqlite3
 import tempfile
 import threading
+import time
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
@@ -677,6 +678,61 @@ def refresh_runtime_after_database_restore() -> None:
     # The object-label groups cache may have been primed from the OLD database;
     # re-read so zone/alert matching reflects the restored group map.
     refresh_label_groups()
+
+
+_AUTOMATIC_RECORDING_RETENTION_INTERVAL_SECONDS = 300.0
+_automatic_retention_lock = threading.Lock()
+_automatic_retention_last_started: float | None = None
+_automatic_retention_running = False
+
+
+def schedule_recordings_retention() -> bool:
+    """Coalesce automatic retention requests and run the sweep off hot paths.
+
+    Event recording and continuous-chunk callbacks can run on latency-sensitive
+    workers. They only schedule one best-effort sweep per interval; startup
+    maintenance and the explicit admin purge continue to call the synchronous
+    policy function directly.
+    """
+    global _automatic_retention_last_started, _automatic_retention_running
+    now = time.monotonic()
+    with _automatic_retention_lock:
+        if _automatic_retention_running:
+            return False
+        if (
+            _automatic_retention_last_started is not None
+            and now - _automatic_retention_last_started
+            < _AUTOMATIC_RECORDING_RETENTION_INTERVAL_SECONDS
+        ):
+            return False
+        _automatic_retention_last_started = now
+        _automatic_retention_running = True
+
+    def _run() -> None:
+        global _automatic_retention_last_started, _automatic_retention_running
+        succeeded = False
+        try:
+            purge_recordings_by_policy()
+            succeeded = True
+        except Exception:
+            logger.warning('Automatic recording retention failed', exc_info=True)
+        finally:
+            with _automatic_retention_lock:
+                _automatic_retention_running = False
+                if not succeeded:
+                    _automatic_retention_last_started = None
+
+    try:
+        threading.Thread(
+            target=_run, name='automatic-recording-retention', daemon=True,
+        ).start()
+    except Exception:
+        with _automatic_retention_lock:
+            _automatic_retention_running = False
+            _automatic_retention_last_started = None
+        logger.warning('Could not start automatic recording retention', exc_info=True)
+        return False
+    return True
 
 
 def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:

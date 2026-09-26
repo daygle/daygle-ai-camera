@@ -485,45 +485,86 @@ class RecordingsMixin:
             (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         )
         with self.write_slot(), self.connect() as db:
-            # When only age-based purge is needed, filter in the database.
-            # Size-based purge needs all rows to correctly identify oldest recordings.
-            if bound_older_than and max_storage_bytes is None:
-                candidates = [dict(row) for row in db.execute(
-                    "SELECT * FROM recordings WHERE started_at < ? ORDER BY started_at ASC",
-                    (bound_older_than,),
-                ).fetchall()]
-            else:
-                candidates = [dict(row) for row in db.execute("SELECT * FROM recordings ORDER BY started_at ASC").fetchall()]
             purge_ids: set[int] = set()
-            if bound_older_than:
-                purge_ids.update(int(row["id"]) for row in candidates if str(row["started_at"]) < bound_older_than)
-            if max_storage_bytes is not None:
-                # Grace period: recordings created in the last 10 minutes may still be
-                # written by a background capture thread. Don't treat a missing file as
-                # an orphan if the record is this new - purging it would leave the file
-                # on disk with no database entry once the thread finishes writing.
-                # ``bound_grace_cutoff`` is the canonical UTC ``+00:00`` form computed
-                # at the top so the ``created_at`` <=> grace_cutoff string compare
-                # below lands on the correct side of the boundary too.
-                existing_with_sizes: list[tuple[dict[str, Any], int]] = []
+            if bound_older_than and max_storage_bytes is None:
+                # Age-only retention is fully index-filtered and needs no media stats.
+                purge_ids.update(
+                    int(row["id"])
+                    for row in db.execute(
+                        "SELECT id FROM recordings WHERE started_at < ? ORDER BY started_at ASC",
+                        (bound_older_than,),
+                    )
+                )
+            elif max_storage_bytes is not None:
+                # Stream compact rows newest-first. Once retained media exceeds
+                # the cap, every older recording must be evicted; no more sizes
+                # are needed for those rows. This preserves the same newest-first
+                # survivor set as an oldest-first total-and-subtract pass, while
+                # avoiding a stat sweep of the cold tail when the cap is reached.
+                candidates = db.execute(
+                    "SELECT id, started_at, created_at, file_path "
+                    "FROM recordings ORDER BY started_at DESC, id DESC"
+                )
+                retained_bytes = 0
+                storage_limit_crossed = False
                 for row in candidates:
+                    recording_id = int(row["id"])
+                    if bound_older_than and str(row["started_at"]) < bound_older_than:
+                        purge_ids.add(recording_id)
+                        continue
+                    created_at = str(row["created_at"] or "")
+                    is_within_grace = created_at >= bound_grace_cutoff
+                    if storage_limit_crossed:
+                        # Older rows are over-cap and should be removed without
+                        # stats. Only check recent rows to preserve the existing
+                        # protection for a capture whose file is not finalized yet.
+                        if is_within_grace:
+                            try:
+                                path = safe_storage_path(row["file_path"], roots=('recordings_dir',))
+                                if path is None:
+                                    raise OSError('recording path is outside configured storage')
+                                path.stat()
+                            except OSError:
+                                continue
+                        purge_ids.add(recording_id)
+                        continue
+                    # Grace period: don't treat a recent missing file as an orphan.
                     try:
-                        path = safe_storage_path(row.get("file_path"), roots=('recordings_dir',))
+                        path = safe_storage_path(row["file_path"], roots=('recordings_dir',))
                         if path is None:
                             raise OSError('recording path is outside configured storage')
-                        existing_with_sizes.append((row, path.stat().st_size))
+                        size = path.stat().st_size
                     except OSError:
-                        if str(row.get("created_at") or "") < bound_grace_cutoff:
-                            purge_ids.add(int(row["id"]))
-                total = sum(size for _, size in existing_with_sizes)
-                for row, size in existing_with_sizes:
-                    if total <= max_storage_bytes:
-                        break
-                    purge_ids.add(int(row["id"]))
-                    total -= size
+                        if not is_within_grace:
+                            purge_ids.add(recording_id)
+                        continue
+                    retained_bytes += size
+                    if retained_bytes > max_storage_bytes:
+                        purge_ids.add(recording_id)
+                        storage_limit_crossed = True
+            elif bound_older_than:
+                # Defensive fallback if the policy caller explicitly disables the
+                # size cap while still requesting age-based retention.
+                purge_ids.update(
+                    int(row["id"])
+                    for row in db.execute(
+                        "SELECT id FROM recordings WHERE started_at < ? ORDER BY started_at ASC",
+                        (bound_older_than,),
+                    )
+                )
+            else:
+                # No active retention limits; preserve the previous no-op behavior.
+                return []
             if not purge_ids:
                 return []
-            rows = [row for row in candidates if int(row["id"]) in purge_ids]
+            rows: list[dict[str, Any]] = []
+            for batch in _batched(sorted(purge_ids)):
+                placeholders = ','.join('?' * len(batch))
+                rows.extend(dict(row) for row in db.execute(
+                    f"SELECT * FROM recordings WHERE id IN ({placeholders})",
+                    batch,
+                ))
+            rows.sort(key=lambda row: (str(row.get("started_at") or ""), int(row["id"])))
             ordered_purge_ids = sorted(purge_ids)
             if _linked_event_ids is not None:
                 for batch in _batched(ordered_purge_ids):

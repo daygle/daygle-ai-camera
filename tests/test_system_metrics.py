@@ -183,6 +183,43 @@ def test_system_resources_caches_nvidia_smi_across_polls(monkeypatch):
     assert calls['n'] == 1  # one spawn for five polls inside the TTL
 
 
+def test_system_resources_serves_stale_gpu_snapshot_while_refreshing(monkeypatch):
+    calls = {'n': 0}
+    now = {'value': 100.0}
+    refresh_targets = []
+
+    def _counting_run(*_args, **_kwargs):
+        calls['n'] += 1
+        temperature = 60 + calls['n']
+        return _FakeCompletedProcess(0, P4_LINE.replace('90, 100', f'{temperature}, 100'))
+
+    class _DeferredThread:
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            refresh_targets.append(self.target)
+
+    monkeypatch.setattr(system_metrics.subprocess, 'run', _counting_run)
+    monkeypatch.setattr(system_metrics.time, 'monotonic', lambda: now['value'])
+    monkeypatch.setattr(system_metrics.threading, 'Thread', _DeferredThread)
+
+    initial = system_metrics.system_resources()['gpu']['primary']['temperature_c']
+    assert initial == 61
+    assert calls['n'] == 1
+
+    now['value'] += system_metrics._GPU_SNAPSHOT_TTL_SECONDS + 1
+    stale = system_metrics.system_resources()['gpu']['primary']['temperature_c']
+    assert stale == initial
+    assert calls['n'] == 1  # expired data returns immediately; refresh is deferred
+    assert len(refresh_targets) == 1
+
+    refresh_targets.pop()()
+    refreshed = system_metrics.system_resources()['gpu']['primary']['temperature_c']
+    assert refreshed == 62
+    assert calls['n'] == 2
+
+
 def test_system_resources_no_gpu_does_not_respawn(monkeypatch):
     """A host without a GPU caches the None result too, so repeated polls do
     not keep spawning nvidia-smi just to fail again."""

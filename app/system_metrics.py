@@ -229,43 +229,84 @@ def gpu_status(
 
 # The dashboard polls /api/system/resources every ~5s, and several open tabs
 # poll independently -- each call would otherwise spawn a fresh nvidia-smi
-# process (up to the 3s timeout, blocking a threadpool worker). A short TTL
-# snapshot collapses those into at most one nvidia-smi read per window,
-# regardless of tab count. Kept out of ``nvidia_smi_devices`` / ``gpu_status``
-# so those stay pure for direct callers and tests; only the polled
-# ``system_resources`` path reads through the cache.
-_GPU_SNAPSHOT_TTL_SECONDS: float = 4.0
+# process (up to the 3s timeout, blocking a threadpool worker). Keep the cache
+# longer than the dashboard's 5s poll interval so even a single tab reuses a
+# snapshot across polls. Kept out of ``nvidia_smi_devices`` / ``gpu_status`` so
+# direct callers stay uncached; only ``system_resources`` reads through it.
+_GPU_SNAPSHOT_TTL_SECONDS: float = 10.0
 _gpu_snapshot_lock: threading.Lock = threading.Lock()
 _gpu_snapshot: list[dict] | None = None
 _gpu_snapshot_ts: float = 0.0
 _gpu_snapshot_valid: bool = False
+_gpu_snapshot_refreshing: bool = False
+
+
+def _refresh_gpu_snapshot() -> None:
+    """Refresh the cached snapshot and release the single-flight guard."""
+    global _gpu_snapshot, _gpu_snapshot_ts, _gpu_snapshot_valid, _gpu_snapshot_refreshing
+    try:
+        devices = nvidia_smi_devices()
+        with _gpu_snapshot_lock:
+            _gpu_snapshot = devices
+            _gpu_snapshot_ts = time.monotonic()
+            _gpu_snapshot_valid = True
+    finally:
+        with _gpu_snapshot_lock:
+            _gpu_snapshot_refreshing = False
 
 
 def _cached_nvidia_smi_devices() -> list[dict] | None:
-    """``nvidia_smi_devices`` behind a short TTL so rapid pollers share one read.
+    """Return cached GPU data and refresh expired snapshots stale-while-revalidate.
 
-    Caches the ``None`` result too, so a host without an NVIDIA GPU does not
-    re-spawn nvidia-smi on every poll just to fail again.
+    The first poll fetches synchronously to populate the card. Once initialized,
+    expired snapshots are returned immediately while one daemon thread refreshes
+    them. A ``None`` snapshot is cached too, so hosts without NVIDIA do not
+    repeatedly spawn a failing process.
     """
-    global _gpu_snapshot, _gpu_snapshot_ts, _gpu_snapshot_valid
+    global _gpu_snapshot_refreshing
     now = time.monotonic()
     with _gpu_snapshot_lock:
-        if _gpu_snapshot_valid and (now - _gpu_snapshot_ts) < _GPU_SNAPSHOT_TTL_SECONDS:
-            return _gpu_snapshot
-    devices = nvidia_smi_devices()
+        if _gpu_snapshot_valid:
+            if (now - _gpu_snapshot_ts) < _GPU_SNAPSHOT_TTL_SECONDS:
+                return _gpu_snapshot
+            if _gpu_snapshot_refreshing:
+                return _gpu_snapshot
+            _gpu_snapshot_refreshing = True
+            stale_snapshot = _gpu_snapshot
+        else:
+            if _gpu_snapshot_refreshing:
+                return None
+            _gpu_snapshot_refreshing = True
+            stale_snapshot = None
+            now = None
+
+    if now is not None:
+        try:
+            threading.Thread(
+                target=_refresh_gpu_snapshot,
+                name='gpu-metrics-refresh',
+                daemon=True,
+            ).start()
+        except Exception:
+            with _gpu_snapshot_lock:
+                _gpu_snapshot_refreshing = False
+        return stale_snapshot
+
+    # Cold cache: populate before returning so the first dashboard response can
+    # already display GPU data. Concurrent cold requests see the refresh guard
+    # and return promptly instead of launching additional subprocesses.
+    _refresh_gpu_snapshot()
     with _gpu_snapshot_lock:
-        _gpu_snapshot = devices
-        _gpu_snapshot_ts = time.monotonic()
-        _gpu_snapshot_valid = True
-    return devices
+        return _gpu_snapshot
 
 
 def reset_gpu_snapshot_cache() -> None:
     """Drop the cached nvidia-smi snapshot (tests / after a driver change)."""
-    global _gpu_snapshot, _gpu_snapshot_valid
+    global _gpu_snapshot, _gpu_snapshot_valid, _gpu_snapshot_refreshing
     with _gpu_snapshot_lock:
         _gpu_snapshot = None
         _gpu_snapshot_valid = False
+        _gpu_snapshot_refreshing = False
 
 
 def system_resources(

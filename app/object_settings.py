@@ -74,6 +74,7 @@ from typing import Any
 
 import app.state as _state
 from app.label_groups import cached_label_groups
+from app.runtime_config import cached_snapshot
 from app.zone_schema import canonical_label
 
 logger = logging.getLogger('daygle.ai')
@@ -208,6 +209,10 @@ def _normalize_still_alert_minutes(value: Any) -> int | None:
 
 def effective_object_settings() -> dict[str, Any]:
     """The runtime ``objects`` settings (database override + defaults)."""
+    return cached_snapshot(_state.database, 'objects', _build_effective_object_settings)
+
+
+def _build_effective_object_settings() -> dict[str, Any]:
     raw = None
     db = _state.database
     if db is not None:

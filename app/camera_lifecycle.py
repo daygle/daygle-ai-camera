@@ -182,7 +182,8 @@ def _cleanup_camera_runtime_state(removed_ids: set[str]) -> None:
     with _state._motion_confirm_lock:
         for cam_id in removed_ids:
             _state._motion_confirm_streaks.pop(cam_id, None)
-    with _state._frame_motion_lock:
+    from app.detection_state import frame_motion_locks
+    with frame_motion_locks():
         for cam_id in removed_ids:
             _state._frame_motion_prev.pop(cam_id, None)
             _state._frame_motion_last_frame.pop(cam_id, None)

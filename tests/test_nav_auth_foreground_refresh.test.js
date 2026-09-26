@@ -49,3 +49,12 @@ test('a persisted pageshow (bfcache restore) triggers the re-verify', () => {
   assert.match(body, /event\.persisted/);
   assert.match(body, /onReturnToForeground\(\)/);
 });
+
+test('refreshed auth state restores admin nav groups for admins', () => {
+  assert.match(navSource, /nav\.querySelectorAll\('\[data-admin="true"\]'\)\.forEach\(\(el\) => \{\s*el\.hidden = user\.role !== 'admin';/);
+});
+
+test('dashboard refreshes role-gated dismiss actions when auth state changes', () => {
+  const appSource = readFileSync(path.resolve(here, '../web/app.js'), 'utf8');
+  assert.match(appSource, /addEventListener\('daygle:auth-state-changed', \(\) => \{\s*renderActivityFeed\(\);\s*updateDismissButtons\(\);/);
+});

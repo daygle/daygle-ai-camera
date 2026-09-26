@@ -351,8 +351,8 @@ function renderActivityFooter() {
   if (!eventsPager || eventsPager.done) return '';
   return `
     <div class="list-load-more" id="activity-more">
-      <button type="button" class="secondary list-load-more-btn" id="activity-more-btn">Load more detections</button>
-      <span class="muted">Older detections load as you scroll.</span>
+      <button type="button" class="secondary list-load-more-btn" id="activity-more-btn">Load More</button>
+      <span class="muted">Older detections are available here or load automatically as you scroll.</span>
     </div>`;
 }
 
@@ -1133,6 +1133,14 @@ async function refreshAll() {
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
   renderActivityFeed();
 };
+
+// Admin-only row actions depend on the user role. Rebuild the activity feed
+// when auth is revalidated (for example, when returning to a background tab)
+// so dismiss controls track the refreshed permissions without a page reload.
+window.addEventListener('daygle:auth-state-changed', () => {
+  renderActivityFeed();
+  updateDismissButtons();
+});
 
 // ─── Clip player event listeners ───────────────────────────────────────────
 els.clipPlayerClose?.addEventListener('click', () => hideInlinePlayer());

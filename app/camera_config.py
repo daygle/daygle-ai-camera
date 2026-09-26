@@ -160,19 +160,23 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
             _state.live_detection_history[new_id] = (
                 _state.live_detection_history.pop(old_id)
             )
-    with _state._frame_motion_lock:
-        if old_id in _state._frame_motion_prev:
-            _state._frame_motion_prev[new_id] = (
-                _state._frame_motion_prev.pop(old_id)
-            )
-        if old_id in _state._frame_motion_last_frame:
-            _state._frame_motion_last_frame[new_id] = (
-                _state._frame_motion_last_frame.pop(old_id)
-            )
-        if old_id in _state._frame_motion_last_gray:
-            _state._frame_motion_last_gray[new_id] = (
-                _state._frame_motion_last_gray.pop(old_id)
-            )
+    from app.detection_state import frame_motion_locks
+    # Lock every stripe in stable order so active detection cannot race a move.
+    with frame_motion_locks():
+        for mapping_name in (
+            '_frame_motion_prev',
+            '_frame_motion_last_frame',
+            '_frame_motion_last_gray',
+            '_frame_motion_mog2',
+            '_frame_motion_mog2_meta',
+            '_frame_motion_scene_streak',
+        ):
+            mapping = getattr(_state, mapping_name)
+            if old_id in mapping:
+                mapping[new_id] = mapping.pop(old_id)
+        if old_id in _state._frame_motion_error_cameras:
+            _state._frame_motion_error_cameras.discard(old_id)
+            _state._frame_motion_error_cameras.add(new_id)
     with _state._apply_settings_lock:
         service = _state.recording_service
         if service is not None:

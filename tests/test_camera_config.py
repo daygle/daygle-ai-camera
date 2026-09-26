@@ -152,6 +152,7 @@ def _stub_main_with_camera_recording_renamer(monkeypatch):
     monkeypatch.setattr(_state, 'live_detection_history_lock', _LockStub('history', log))
     monkeypatch.setattr(_state, 'live_detection_history', {'old': ['a', 'b']})
     monkeypatch.setattr(_state, '_frame_motion_lock', _LockStub('motion', log))
+    monkeypatch.setattr(_state, '_frame_motion_locks', (_LockStub('stripe', log),))
     monkeypatch.setattr(_state, '_frame_motion_prev', {'old': {'m': 1}})
     monkeypatch.setattr(
         _state,
@@ -310,8 +311,8 @@ def test_migrate_camera_id_renames_in_memory_state_across_both_locks(monkeypatch
     assert state.live_detection_history['new'] == ['a', 'b']
     assert 'old' not in state._frame_motion_prev
     assert state._frame_motion_prev['new'] == {'m': 1}
-    # Both locks were taken + released in order.
-    assert lock_log == ['acquire:history', 'release:history', 'acquire:motion', 'release:motion']
+    # The history lock and striped motion guard were taken + released in order.
+    assert lock_log == ['acquire:history', 'release:history', 'acquire:stripe', 'release:stripe']
 
 
 def test_migrate_camera_id_is_noop_when_old_id_absent_from_state(monkeypatch, cc):
@@ -323,7 +324,7 @@ def test_migrate_camera_id_is_noop_when_old_id_absent_from_state(monkeypatch, cc
 
     cc._migrate_camera_id('ghost', 'new')
 
-    assert lock_log == ['acquire:history', 'release:history', 'acquire:motion', 'release:motion']
+    assert lock_log == ['acquire:history', 'release:history', 'acquire:stripe', 'release:stripe']
     assert state.live_detection_history == {}
     assert state._frame_motion_prev == {}
 

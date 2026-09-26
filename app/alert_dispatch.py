@@ -4,7 +4,7 @@ This module owns the five helpers that previously lived inline on
 ``app/main.py``:
 
 * ``wait_for_pending_alert_notifications`` - sync barrier for tests,
-  blocks until in-flight email/push delivery threads complete.
+  blocks until queued/running email and push deliveries complete.
 * ``deliver_alert_notifications`` - the main orchestrator that runs
   email + push delivery for a triggered event.
 * ``deliver_email_alerts`` - email-side delivery (uses
@@ -14,11 +14,9 @@ This module owns the five helpers that previously lived inline on
 * ``deliver_sound_alert_notifications`` - sound-rule specific
   orchestrator that delegates to email + push.
 
-The two state primitives live in ``app.state`` (accessed via ``_state.*``):
-
-* ``_notification_threads_lock`` - ``threading.Lock`` guarding
-  ``_notification_threads``.
-* ``_notification_threads`` - list of in-flight delivery threads.
+Alert work is submitted to a bounded notification pool in
+``app.postprocess_pool``. The legacy thread-list state remains available for
+compatibility, but new dispatch does not create one thread per event.
 
 **Pool-A rebind (in ``app/main.py``):** every helper is re-bound as
 ``main.<orig_name>``. The two originally-underscored names
@@ -31,8 +29,8 @@ modification (the new module exposes them as clean public APIs:
 **Pool-C reach sites used by this module (each resolved lazily via
 ``import app.main as main``):**
 
-* ``_state._notification_threads_lock``, ``_state._notification_threads``
-  - state primitives in ``app.state`` (not reached via ``main.*``).
+* ``app.postprocess_pool.notification_pool`` - bounded worker dispatch for
+  asynchronous alert delivery.
 * ``_state.database`` - the singleton DB handle via ``app.state``.
 * ``_state.auth`` - the AuthService singleton via ``app.state``
   (used by ``_alert_datetime_prefs``).
@@ -73,9 +71,8 @@ resolved at call time only).
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
+import math
 import threading
 import time
 from datetime import datetime, timezone
@@ -117,6 +114,37 @@ def invalidate_min_rule_confidence_cache() -> None:
         _min_rule_confidence_cache = None
         _per_camera_min_rule_confidence_cache.clear()
 
+def _confidence_rules_signature(camera_settings: dict[str, Any]) -> tuple[Any, ...]:
+    """Fingerprint only the active zones and rule fields used by the floor."""
+    detection = camera_settings.get('detection') or {}
+    zones_signature = []
+    for zone in detection.get('zones') or []:
+        if not isinstance(zone, dict) or zone.get('enabled', True) is False:
+            continue
+        rules_signature = []
+        for rule in zone.get('object_rules') or []:
+            if not isinstance(rule, dict) or not rule.get('enabled', True):
+                continue
+            label = str(rule.get('label') or '').strip().lower()
+            if label == 'motion':
+                continue
+            raw_confidence = rule.get('min_confidence')
+            try:
+                confidence = float(raw_confidence)
+                confidence_key: float | str | None = confidence if math.isfinite(confidence) else None
+            except (TypeError, ValueError):
+                confidence_key = None
+            rules_signature.append((label, confidence_key))
+        if rules_signature:
+            zones_signature.append(tuple(sorted(rules_signature, key=repr)))
+    zones_signature.sort(key=repr)
+    # Tuple repr is a compact deterministic signature of the exact behaviorally
+    # relevant subset; hashing serialized whole-camera settings was unnecessary.
+    return (
+        str(camera_settings.get('id') or camera_settings.get('name') or '').strip(),
+        tuple(zones_signature),
+    )
+
 
 def compute_minimum_rule_confidence(fallback: float | None = None, camera_settings: dict | None = None) -> float:
     """Return the lowest min_confidence across enabled object rules.
@@ -133,16 +161,10 @@ def compute_minimum_rule_confidence(fallback: float | None = None, camera_settin
     """
     global _min_rule_confidence_cache
     camera_key = ''
-    settings_signature: str | None = None
+    settings_signature: tuple[Any, ...] | None = None
     if camera_settings is not None:
         camera_key = str(camera_settings.get('id') or camera_settings.get('name') or '').strip()
-        # The settings object is already resolved on the hot path. Hashing its
-        # rules makes a confidence/zone edit invalidate the cache immediately,
-        # while avoiding a database read on every frame. Legacy cache entries
-        # without a signature are simply treated as misses.
-        settings_signature = hashlib.sha256(
-            json.dumps(camera_settings, sort_keys=True, default=str, separators=(',', ':')).encode('utf-8')
-        ).hexdigest()
+        settings_signature = _confidence_rules_signature(camera_settings)
     cached = _min_rule_confidence_cache if not camera_key else None
     if cached is not None:
         cached_value, cached_at, cached_signature = cached
@@ -275,12 +297,53 @@ def _format_alert_datetime(iso_str: str) -> str:
 
 
 def wait_for_pending_alert_notifications(timeout: float = 10.0) -> None:
-    """Block until in-flight alert email/push deliveries finish (used by tests)."""
-    deadline = time.time() + max(0.0, timeout)
-    with _state._notification_threads_lock:
-        pending = [thread for thread in _state._notification_threads if thread.is_alive()]
-    for thread in pending:
-        thread.join(timeout=max(0.0, deadline - time.time()))
+    """Wait until queued and in-flight alert email/push deliveries finish."""
+    pool = notification_pool_if_created()
+    if pool is not None:
+        pool.wait_until_idle(timeout)
+
+
+def notification_pool_if_created():
+    """Return the current notification pool without creating idle workers."""
+    import app.postprocess_pool as pools
+    with pools._pool_lock:
+        return pools._notification_pool
+
+
+def submit_alert_notification(
+    delivery: Any,
+    triggered: list[dict[str, Any]],
+    event_id: int,
+    rules: list[dict[str, Any]] | None,
+) -> bool:
+    """Queue one delivery without ever backpressuring the detection callback."""
+    from app.postprocess_pool import notification_pool
+
+    accepted = notification_pool().submit(
+        delivery, list(triggered), event_id, rules, block=False,
+        label=f'event-{event_id}',
+    )
+    if not accepted:
+        logger.warning('Alert notification queue full or shutting down; dropping event %s notification', event_id)
+    return accepted
+
+
+def submit_sound_alert_notification(
+    delivery: Any,
+    triggered: list[dict[str, Any]],
+    event_id: int,
+    rule: dict[str, Any],
+) -> bool:
+    """Queue a sound notification without blocking its detector callback."""
+    from app.postprocess_pool import notification_pool
+
+    accepted = notification_pool().submit(
+        delivery, list(triggered), event_id, dict(rule), block=False,
+        label=f'sound-event-{event_id}',
+    )
+    if not accepted:
+        logger.warning('Alert notification queue full or shutting down; dropping sound event %s notification', event_id)
+    return accepted
 
 
 def deliver_alert_notifications(

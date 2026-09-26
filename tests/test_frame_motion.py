@@ -111,6 +111,58 @@ def test_camera_motion_auto_detection_gated_off_for_fixed_camera():
     assert ds.update_camera_motion(cam, 0.0, allow_auto_detection=False)['active'] is True
 
 
+def test_frame_motion_locks_allow_independent_cameras_and_clear_state_safely():
+    import threading
+
+    camera_a = 'stripe-camera-a'
+    camera_b = next(
+        f'stripe-camera-{index}'
+        for index in range(1000)
+        if ds.frame_motion_lock(f'stripe-camera-{index}') is not ds.frame_motion_lock(camera_a)
+    )
+    lock_a = ds.frame_motion_lock(camera_a)
+    lock_b = ds.frame_motion_lock(camera_b)
+    assert lock_a is not lock_b
+    assert lock_a.acquire(blocking=False)
+    try:
+        assert lock_b.acquire(blocking=False)
+        lock_b.release()
+    finally:
+        lock_a.release()
+
+    stripe = ds.frame_motion_lock(camera_a)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def hold_camera_lock():
+        with stripe:
+            entered.set()
+            release.wait(2.0)
+
+    thread = threading.Thread(target=hold_camera_lock)
+    thread.start()
+    assert entered.wait(1.0)
+    st._frame_motion_prev[camera_a] = 'previous'
+    st._frame_motion_error_cameras.add(camera_a)
+    cleanup_done = threading.Event()
+
+    def clear_camera():
+        ds.clear_frame_motion_state(camera_a)
+        cleanup_done.set()
+
+    cleaner = threading.Thread(target=clear_camera)
+    cleaner.start()
+    assert not cleanup_done.wait(0.05), 'clear must wait for that camera stripe'
+    release.set()
+    thread.join(timeout=1.0)
+    cleaner.join(timeout=1.0)
+    assert cleanup_done.is_set()
+    assert camera_a not in st._frame_motion_prev
+    assert camera_a not in st._frame_motion_error_cameras
+    assert lock_b.acquire(blocking=False)
+    lock_b.release()
+
+
 def test_motion_confirmation_requires_two_consecutive_zone_frames():
     """A one-frame zone spike must not create a motion event or recording."""
     cam = "motion-confirmation"

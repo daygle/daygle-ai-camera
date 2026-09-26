@@ -73,6 +73,12 @@ test('day and night profiles are edited in separate, always-visible sections', (
   // ...and both are collected independently on save.
   assert.match(source, /readProfileFromForm\(form, 'day'\)/);
   assert.match(source, /readProfileFromForm\(form, 'night'\)/);
+  // Adaptive Cadence is available in both profile forms, typed as a boolean,
+  // and included in the profile field allowlist used by reads and presets.
+  assert.match(source, /'adaptive_detection_enabled'/);
+  assert.match(source, /selectField\('adaptive_detection_enabled'/);
+  assert.match(source, /label: 'Adaptive Cadence'/);
+  assert.match(source, /case 'adaptive_detection_enabled'/);
   // Switching the Active Profile select must NOT reload stored values into
   // the form: the old change handler silently discarded unsaved edits, which
   // is what made profile updates look like they reverted.

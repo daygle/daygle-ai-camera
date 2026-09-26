@@ -126,6 +126,61 @@ def test_single_worker_pool_is_fully_serial() -> None:
 
 # ─── bounded backlog / backpressure ───────────────────────────────────────
 
+def test_wait_until_idle_includes_queued_and_running_jobs() -> None:
+    pool = PostProcessPool('idle-barrier', max_workers=1, max_pending=2)
+    pool.start()
+    release = threading.Event()
+    started = threading.Event()
+
+    def job() -> None:
+        started.set()
+        release.wait(2.0)
+
+    try:
+        assert pool.submit(job)
+        assert started.wait(1.0)
+        assert pool.submit(lambda: None)
+        assert pool.wait_until_idle(timeout=0.02) is False
+        release.set()
+        assert pool.wait_until_idle(timeout=2.0) is True
+    finally:
+        release.set()
+        pool.shutdown(timeout=2.0)
+
+
+def test_alert_notification_dispatch_is_async_bounded_and_waitable(monkeypatch) -> None:
+    import app.alert_dispatch as dispatch
+    import app.postprocess_pool as pools
+
+    pool = PostProcessPool('alert-bounded-test', max_workers=1, max_pending=1)
+    pool.start()
+    monkeypatch.setattr(pools, 'notification_pool', lambda: pool)
+    monkeypatch.setattr(pools, '_notification_pool', pool)
+    release = threading.Event()
+    started = threading.Event()
+
+    def delivery(_triggered, _event_id, _rules):
+        started.set()
+        release.wait(2.0)
+
+    try:
+        assert dispatch.submit_alert_notification(delivery, [{'label': 'person'}], 1, []) is True
+        assert started.wait(1.0)
+        assert dispatch.submit_alert_notification(delivery, [{'label': 'car'}], 2, []) is True
+        started_at = time.monotonic()
+        assert dispatch.submit_alert_notification(delivery, [], 3, []) is False
+        assert time.monotonic() - started_at < 0.2, 'full queues must not block detection callbacks'
+        assert pool.stats()['pending'] == 1
+        assert dispatch.wait_for_pending_alert_notifications(timeout=0.02) is None
+        assert pool.stats()['inflight'] == 1
+        release.set()
+        assert pool.wait_until_idle(timeout=2.0) is True
+        assert pool.stats()['rejected'] == 1
+    finally:
+        release.set()
+        pool.shutdown(timeout=2.0)
+
+
 def test_non_blocking_submit_is_rejected_once_the_backlog_is_full() -> None:
     pool = PostProcessPool('bounded', max_workers=1, max_pending=2)
     pool.start()

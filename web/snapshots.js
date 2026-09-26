@@ -69,6 +69,14 @@ function renderFilterTimeSelects() {
 
 renderFilterTimeSelects();
 
+// The page opens scoped to today's local calendar day, matching /recordings.
+function applyDefaultDateFilters() {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  if (els.dateFrom) els.dateFrom.value = today;
+  if (els.dateTo) els.dateTo.value = today;
+}
+
 // ── Snapshot classification ─────────────────────────────────────────────
 // Mirrors the events page so the pill labels read identically: sound events
 // come from the sound detector; motion-only frames carry no concrete object
@@ -579,6 +587,7 @@ window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
+  applyDefaultDateFilters();
   wireControls();
   // Await the shared /api/auth/me so the delete button only renders for
   // admins (the backend enforces this either way).

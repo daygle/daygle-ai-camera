@@ -93,7 +93,7 @@ def _run_chunk_callback(monkeypatch, *, probed, tmp_path):
     monkeypatch.setattr(rext, 'probe_video_duration', lambda _p: probed)
     monkeypatch.setattr(rext, 'write_live_history_detection_track', lambda *a, **k: True)
     monkeypatch.setattr(ds, 'build_track_from_live_history', lambda *a, **k: [])
-    monkeypatch.setattr(backup, 'purge_recordings_by_policy', lambda *a, **k: None)
+    monkeypatch.setattr(backup, 'schedule_recordings_retention', lambda *a, **k: None)
     fake_db = _CapturingDatabase()
     # The callback reads ``_state.database`` (``_state`` is this same ``app.state``
     # module object), so patching it here is exactly what the callback sees.

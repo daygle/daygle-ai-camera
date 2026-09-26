@@ -17,6 +17,7 @@ from typing import Any
 
 import app.state as _state
 from app import behaviour, behaviour_baseline
+from app.alert_dispatch import submit_alert_notification
 
 logger = logging.getLogger('daygle.ai')
 
@@ -253,14 +254,7 @@ def _emit_one(camera_id: str, settings: dict[str, Any], crossing: dict[str, Any]
 
     if alert_active:
         alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
-        thread = threading.Thread(
-            target=deliver_alert_notifications, args=([alert_payload], event_id, [notify_rule]),
-            name=f'tripwire-notify-{event_id}', daemon=True,
-        )
-        with _state._notification_threads_lock:
-            _state._notification_threads[:] = [t for t in _state._notification_threads if t.is_alive()]
-            _state._notification_threads.append(thread)
-        thread.start()
+        submit_alert_notification(deliver_alert_notifications, [alert_payload], event_id, [notify_rule])
     logger.info('Tripwire crossing on %s: %s %s -> %s (event %s)', camera_id, label, wire_name, direction, event_id)
 
 
@@ -471,14 +465,7 @@ def _emit_loiter(camera_id: str, settings: dict[str, Any], fire: dict[str, Any],
 
     if alert_active:
         alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
-        thread = threading.Thread(
-            target=deliver_alert_notifications, args=([alert_payload], event_id, [notify_rule]),
-            name=f'loiter-notify-{event_id}', daemon=True,
-        )
-        with _state._notification_threads_lock:
-            _state._notification_threads[:] = [t for t in _state._notification_threads if t.is_alive()]
-            _state._notification_threads.append(thread)
-        thread.start()
+        submit_alert_notification(deliver_alert_notifications, [alert_payload], event_id, [notify_rule])
     logger.info('Loiter on %s: %s in %s (%.0fs, event %s)', camera_id, label, zone_name, dwell, event_id)
 
 
@@ -680,14 +667,7 @@ def _emit_time(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], r
 
     if alert_active:
         alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
-        thread = threading.Thread(
-            target=deliver_alert_notifications, args=([alert_payload], event_id, [notify_rule]),
-            name=f'time-notify-{event_id}', daemon=True,
-        )
-        with _state._notification_threads_lock:
-            _state._notification_threads[:] = [t for t in _state._notification_threads if t.is_alive()]
-            _state._notification_threads.append(thread)
-        thread.start()
+        submit_alert_notification(deliver_alert_notifications, [alert_payload], event_id, [notify_rule])
     logger.info('Unusual time on %s: %s in %s at %02d:00 (event %s)', camera_id, label, zone_name, hour, event_id)
 
 

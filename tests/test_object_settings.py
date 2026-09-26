@@ -120,6 +120,32 @@ def test_effective_object_settings_reads_database(monkeypatch):
         _state.database = previous
 
 
+def test_effective_object_settings_caches_by_settings_generation_and_returns_copies(monkeypatch):
+    class _VersionedDatabase(_FakeDatabase):
+        _settings_cache_gen = 0
+
+    db = _VersionedDatabase({'default_mode': 'moving', 'labels': {'car': 'still'}})
+    calls = 0
+    original_get_setting = db.get_setting
+
+    def counted_get_setting(key):
+        nonlocal calls
+        calls += 1
+        return original_get_setting(key)
+
+    db.get_setting = counted_get_setting
+    monkeypatch.setattr(_state, 'database', db)
+    first = os.effective_object_settings()
+    first['labels']['car'] = 'moving'
+    assert os.effective_object_settings()['labels']['car'] == 'still'
+    assert calls == 1
+
+    db.setting = {'default_mode': 'any', 'labels': {}}
+    db._settings_cache_gen += 1
+    assert os.effective_object_settings()['default_mode'] == 'any'
+    assert calls == 2
+
+
 def test_effective_object_settings_defaults_without_database(monkeypatch):
     previous = _state.database
     try:

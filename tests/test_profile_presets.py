@@ -34,6 +34,11 @@ def test_builtin_presets_are_separate_day_and_night_records():
     assert night['settings']['object_detection_tiling'] == '2x2'
     assert day['settings']['detection_confirm_frames'] == 2
     assert night['settings']['detection_confirm_frames'] == 2
+    assert all(preset['settings']['adaptive_detection_enabled'] is True for preset in presets)
+    assert all(
+        preset['settings']['motion_shadow_suppression'] == ('off' if preset['mode'] == 'night' else 'on')
+        for preset in presets
+    )
 
 
 def test_recall_profiles_do_not_add_confirmation_latency():
@@ -73,6 +78,12 @@ def test_create_preset_is_mode_specific_and_avoids_duplicate_ids():
     assert first['mode'] == 'day'
     assert first['settings']['detection_interval_seconds'] == 0.5
     assert night['settings']['detection_interval_seconds'] == 0.3
+    assert normalize_preset({
+        'id': 'fixed-cadence-day',
+        'name': 'Fixed Cadence',
+        'mode': 'day',
+        'settings': {'adaptive_detection_enabled': False},
+    })['settings']['adaptive_detection_enabled'] is False
 
 
 def test_legacy_combined_custom_presets_expand_into_modes():

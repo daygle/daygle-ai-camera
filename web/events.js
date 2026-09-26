@@ -267,7 +267,7 @@ function renderListFooter() {
   if (!eventsPager || eventsPager.done) return '';
   return `
     <div class="list-load-more" id="event-feed-more">
-      <button type="button" class="secondary list-load-more-btn" id="event-feed-more-btn">Load more events</button>
+      <button type="button" class="secondary list-load-more-btn" id="event-feed-more-btn">Load More</button>
       <span class="muted">Older events load as you scroll.</span>
     </div>`;
 }

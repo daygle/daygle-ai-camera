@@ -6,7 +6,7 @@ in-memory bookkeeping** that runs once per active camera:
 - the per-camera detection-history deques (``live_detection_history`` +
   ``live_detection_history_lock``) under Phase-26 ownership,
 - the per-camera adaptive-background motion model
-  (``_frame_motion_prev`` + ``_frame_motion_last_frame`` + ``_frame_motion_lock`` + ``_frame_motion_error_cameras``)
+  (``_frame_motion_prev`` + ``_frame_motion_last_frame`` + striped locks + ``_frame_motion_error_cameras``)
   + the four tuning constants (``_MOTION_PIXEL_THRESHOLD`` /
   ``_MOTION_GATE_FRACTION`` / ``_MOTION_SCALE_FRACTION`` /
   ``_MOTION_BACKGROUND_ALPHA``) and the two frame-size constants
@@ -40,7 +40,7 @@ working unchanged:
 - ``main.live_detection_history_lock`` -
   ``record_live_detection_history``, ``build_track_from_live_history``
 - ``main.live_detection_history`` - same two
-- ``main._frame_motion_lock`` - ``detect_frame_motion``
+- ``app.state._frame_motion_locks`` - ``detect_frame_motion`` and maintenance locks
 - ``main._frame_motion_prev`` - ``detect_frame_motion``
 - ``main._frame_motion_last_frame`` - ``detect_frame_motion``
 - ``main._frame_motion_last_gray`` - ``detect_frame_motion``
@@ -75,6 +75,7 @@ import io
 import logging
 import time
 from bisect import bisect_left, bisect_right
+from contextlib import ExitStack, contextmanager
 from collections import deque
 from itertools import islice
 from typing import Any
@@ -531,6 +532,35 @@ def _mog2_available() -> bool:
 
 
 _MOG2_AVAILABLE: bool | None = None
+
+
+def frame_motion_lock(camera_id: str) -> Any:
+    """Return a stable striped lock for one camera's temporal motion state."""
+    locks = _state._frame_motion_locks
+    return locks[hash(str(camera_id)) % len(locks)]
+
+
+@contextmanager
+def frame_motion_locks():
+    """Acquire every stripe for maintenance that must inspect all cameras."""
+    with ExitStack() as stack:
+        for lock in _state._frame_motion_locks:
+            stack.enter_context(lock)
+        yield
+
+
+def clear_frame_motion_state(camera_id: str) -> None:
+    """Clear both motion engines' per-camera state under its stripe lock."""
+    with frame_motion_lock(camera_id):
+        _state._frame_motion_prev.pop(camera_id, None)
+        _state._frame_motion_last_frame.pop(camera_id, None)
+        _state._frame_motion_last_gray.pop(camera_id, None)
+        _state._frame_motion_mog2.pop(camera_id, None)
+        _state._frame_motion_mog2_meta.pop(camera_id, None)
+        _state._frame_motion_scene_streak.pop(camera_id, None)
+        _state._frame_motion_error_cameras.discard(camera_id)
+
+
 # MOG2 varThreshold is expressed on the squared Mahalanobis distance; keep it in
 # a sane band so an out-of-range pixel threshold cannot make the model match
 # everything (too high) or nothing (too low).
@@ -678,7 +708,7 @@ def _detect_frame_motion_mog2(
         subtractor.apply(resized, learningRate=1.0)
         return subtractor
 
-    with _state._frame_motion_lock:
+    with frame_motion_lock(camera_id):
         subtractor = _state._frame_motion_mog2.get(camera_id)
         meta = _state._frame_motion_mog2_meta.get(camera_id)
         if subtractor is None or meta != signature:
@@ -811,7 +841,7 @@ def detect_frame_motion(
                 frame_size=frame_size,
             )
         except _EXPECTED_MOTION_ERRORS as exc:
-            with _state._frame_motion_lock:
+            with frame_motion_lock(camera_id):
                 if camera_id not in _state._frame_motion_error_cameras:
                     logger.warning(
                         'MOG2 motion gate unavailable for camera %s: %s; suppressing motion until a valid frame is available',
@@ -820,7 +850,7 @@ def detect_frame_motion(
                     _state._frame_motion_error_cameras.add(camera_id)
             return (False, 0.0, None, 0.0)
         except Exception:
-            with _state._frame_motion_lock:
+            with frame_motion_lock(camera_id):
                 if camera_id not in _state._frame_motion_error_cameras:
                     logger.exception(
                         'Unexpected MOG2 motion gate failure for camera %s; suppressing motion until a valid frame is available',
@@ -899,7 +929,7 @@ def _detect_frame_motion_diff(camera_id: str, image: Any, *, pixel_threshold: fl
             full_gray = np.array(full_image, dtype=np.uint8)
             resized = full_image.resize((frame_w, frame_h), _Image.NEAREST)
             current = np.array(resized, dtype=np.float32)
-        with _state._frame_motion_lock:
+        with frame_motion_lock(camera_id):
             background = _state._frame_motion_prev.get(camera_id)
             previous_frame = _state._frame_motion_last_frame.get(camera_id)
             previous_gray = _state._frame_motion_last_gray.get(camera_id)
@@ -1003,7 +1033,7 @@ def _detect_frame_motion_diff(camera_id: str, image: Any, *, pixel_threshold: fl
             return (False, 0.0, diff_mask, round(changed_fraction, 6))
         return (True, confidence, diff_mask, round(changed_fraction, 6))
     except _EXPECTED_MOTION_ERRORS as exc:
-        with _state._frame_motion_lock:
+        with frame_motion_lock(camera_id):
             if camera_id not in _state._frame_motion_error_cameras:
                 logger.warning(
                     'Motion gate unavailable for camera %s: %s; suppressing motion until a valid frame is available',
@@ -1016,7 +1046,7 @@ def _detect_frame_motion_diff(camera_id: str, image: Any, *, pixel_threshold: fl
         # rule and create a recording of a static scene.
         return (False, 0.0, None, 0.0)
     except Exception:
-        with _state._frame_motion_lock:
+        with frame_motion_lock(camera_id):
             if camera_id not in _state._frame_motion_error_cameras:
                 logger.exception(
                     'Unexpected motion gate failure for camera %s; suppressing motion until a valid frame is available',

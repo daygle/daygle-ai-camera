@@ -232,18 +232,17 @@ async def app_lifespan(_app: FastAPI):
     try:
         yield
     finally:
-        _state.recording_service.stop_prebuffer_workers()
-        _state.recording_service.stop_all_continuous_recordings()
-        # Stop the bounded post-process pools (Item 12) after the recording
-        # workers they render clips for, and before the monitors that submit
-        # work to them. Queued jobs are abandoned rather than drained: on a
-        # restart nobody reads a clip that finishes after the process exits.
-        shutdown_pools(timeout=POSTPROCESS_SHUTDOWN_TIMEOUT_SECONDS)
         stop_live_alert_monitor()
         stop_profile_monitor()
+        stop_sound_monitor()
+        _state.recording_service.stop_prebuffer_workers()
+        _state.recording_service.stop_all_continuous_recordings()
+        # All pool submitters are stopped. Shut bounded pools before database
+        # teardown, allowing active deliveries a brief completion window and
+        # abandoning any excess queue safely.
+        shutdown_pools(timeout=POSTPROCESS_SHUTDOWN_TIMEOUT_SECONDS)
         if _state.database is not None:
             _state.database.stop_maintenance()
-        stop_sound_monitor()
         if _state.cloudflare_tunnel_manager is not None:
             _state.cloudflare_tunnel_manager.stop()
 

@@ -177,7 +177,14 @@ _periodic_scan_last_ts: dict = {}
 # Frame-motion shared state
 # ---------------------------------------------------------------------------
 
+# Keep legacy global guard for external compatibility. Frame processing uses
+# striped camera locks below so independent cameras need not serialize behind
+# one OpenCV subtractor call.
 _frame_motion_lock: threading.Lock = threading.Lock()
+_FRAME_MOTION_LOCK_STRIPES = 64
+_frame_motion_locks: tuple[threading.Lock, ...] = tuple(
+    threading.Lock() for _ in range(_FRAME_MOTION_LOCK_STRIPES)
+)
 _frame_motion_prev: dict = {}
 # Last analyzed thumbnail per camera. Comparing consecutive thumbnails catches
 # moving subjects that occupy too few pixels to clear the adaptive-background
@@ -188,8 +195,9 @@ _frame_motion_last_frame: dict = {}
 _frame_motion_last_gray: dict = {}
 _frame_motion_error_cameras: set = set()
 # Per-camera OpenCV MOG2 background subtractor + the geometry/params it was
-# built with (so a live frame-size or threshold change rebuilds it). Populated
-# and mutated only under ``_frame_motion_lock`` from app/detection_state.py.
+# built with (so a live frame-size or threshold change rebuilds it). Each camera
+# is protected by its deterministic striped lock from app/detection_state.py; a
+# coarse compatibility lock is retained for legacy integrations.
 # codeql[py/unused-global-variable]
 _frame_motion_mog2: dict = {}
 # codeql[py/unused-global-variable]
@@ -248,9 +256,8 @@ _camera_health_lock: threading.Lock = threading.Lock()
 _camera_health_state: dict = {}
 
 # ---------------------------------------------------------------------------
-# Notification thread pool
-# ---------------------------------------------------------------------------
-
+# Legacy compatibility state for notification-thread consumers. New deliveries
+# are tracked by the bounded notification pool in app.postprocess_pool.
 _notification_threads_lock: threading.Lock = threading.Lock()
 _notification_threads: list = []
 

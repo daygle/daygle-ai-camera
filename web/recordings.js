@@ -442,7 +442,7 @@ function renderRecordingsFooter() {
   if (!recordingsPager || recordingsPager.done) return '';
   return `
     <div class="list-load-more" id="recordings-more">
-      <button type="button" class="secondary list-load-more-btn" id="recordings-more-btn">Load more clips</button>
+      <button type="button" class="secondary list-load-more-btn" id="recordings-more-btn">Load More</button>
       <span class="muted">Older clips load as you scroll.</span>
     </div>`;
 }

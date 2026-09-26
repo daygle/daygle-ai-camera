@@ -22,6 +22,7 @@ from typing import Any
 
 import app.state as _state
 from app.config_facades import effective_face_recognition_config
+from app.runtime_config import cached_snapshot
 from app.utils import normalize_bool_setting as _coerce_bool
 
 logger = logging.getLogger('daygle.ai')
@@ -46,11 +47,13 @@ _face_rule_cooldown_lock = threading.Lock()
 
 
 def effective_face_detection_rules() -> dict[str, Any]:
-    """Read the stored face-detection-rules dict.
+    """Read face rules through the generation-aware parsed settings cache."""
+    return cached_snapshot(
+        _state.database, 'face_detection_rules', _build_effective_face_detection_rules,
+    )
 
-    Returns ``_DEFAULT_RULES`` when the setting is absent or the database
-    is not yet initialised.
-    """
+
+def _build_effective_face_detection_rules() -> dict[str, Any]:
     if _state.database is None:
         return dict(_DEFAULT_RULES)
     stored = _state.database.get_setting('face_detection_rules')

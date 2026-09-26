@@ -361,13 +361,16 @@ def test_offline_eligible_blocked_when_already_notified(ch, main_module):
     assert ch._camera_offline_notification_eligible('cam-1') is False
 
 
-def test_offline_eligible_blocked_when_online(ch, main_module):
+def test_offline_eligible_blocked_when_online_without_reading_settings(ch, main_module, monkeypatch):
     main_module._state._camera_health_state['cam-1'] = {
         'online': True,
         'offline_since': None,
         'offline_notified': False,
         'recovery_notified': False,
     }
+    def fail_settings_read():
+        raise AssertionError('online cameras should skip offline-alert setting reads')
+    monkeypatch.setattr(ch, 'effective_camera_offline_alert_settings', fail_settings_read)
     assert ch._camera_offline_notification_eligible('cam-1') is False
 
 
@@ -378,10 +381,9 @@ def test_offline_eligible_blocked_when_state_missing(ch, main_module):
 def test_offline_eligible_respects_custom_delay(ch, main_module, monkeypatch):
     # 10-minute delay: a 60-second offline streak is NOT eligible; a 700-second
     # offline streak IS eligible. Override at the singleton level only.
-    monkeypatch.setattr(
-        main_module.database, 'get_setting',
-        lambda key: {'enabled': True, 'offline_delay_minutes': 10, 'recipients': []},
-    )
+    monkeypatch.setattr(ch, 'effective_camera_offline_alert_settings', lambda: {
+        'enabled': True, 'offline_delay_minutes': 10, 'recipients': [],
+    })
     main_module._state._camera_health_state['cam-1'] = {
         'online': False,
         'offline_since': time.time() - 60,  # 60s ago, 10-min delay -> NOT eligible
