@@ -153,6 +153,12 @@ const INCREMENTAL_BATCH = 60;
  * @param {Function} renderItem  item -> HTML string for one row
  * @param {Object} [options]
  * @param {Function} [options.onComplete]        called once the last batch lands
+ * @param {Boolean} [options.append]            append `items` to the container
+ *   instead of replacing its children - used by the paginated lists to add a
+ *   freshly streamed page to rows already on screen. Only safe when the
+ *   container's previous render has COMPLETED (onComplete fired): a full
+ *   re-render always supersedes, and canceling a half-painted full render to
+ *   append would drop the rows it had not painted yet.
  *
  * Rows are appended DIRECTLY to `container` - there is deliberately no wrapper
  * element around them. A wrapper defaulted to `tbody` here, which put a nested
@@ -165,6 +171,7 @@ const INCREMENTAL_BATCH = 60;
 function renderIncrementally(container, items, renderItem, options = {}) {
   const {
     onComplete = null,
+    append = false,
   } = options;
 
   // A newer render always supersedes an older one, otherwise two incremental
@@ -188,7 +195,7 @@ function renderIncrementally(container, items, renderItem, options = {}) {
   if (!container) return cancel;
 
   if (!list.length) {
-    container.innerHTML = '';
+    if (!append) container.innerHTML = '';
     if (onComplete) onComplete();
     return cancel;
   }
@@ -200,7 +207,8 @@ function renderIncrementally(container, items, renderItem, options = {}) {
   // The container is emptied exactly once (a single reflow) and batches are
   // appended straight into it: rows land exactly where the page put them -
   // the existing <tbody> for the table pages, the gallery for snapshots.
-  container.innerHTML = '';
+  // In append mode the existing rows are the previous page's and are kept.
+  if (!append) container.innerHTML = '';
 
   let index = 0;
   const paint = (count) => {
@@ -646,27 +654,113 @@ async function api(path, options = {}) {
 }
 window.api = api;
 
-// Follow an API list's opaque cursor until the complete result set is loaded.
-// Callers still perform their existing client-side filtering (motion/face),
-// but no longer trade correctness for a fixed 500/10,000-row ceiling.
-// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
-async function fetchAllCursorPages(path, pageSize = 500) {
+// Stream a cursor-paginated list one server page at a time. The backend lists
+// are keyset-paginated (/api/events, /api/recordings, /api/snapshots return
+// { items, next_cursor }), so the client can paint each page the moment it
+// lands instead of draining the whole history first - a mature install's
+// recording history must not need N round trips before the first row shows.
+//
+// The pager owns exactly one piece of state: the opaque cursor for the next
+// page. Callers accumulate and render; loadPage() coalesces concurrent calls
+// into one request so a scroll sentinel and the load-more button can never
+// double-fetch or double-append the same page.
+function createCursorPager(path, pageSize = 200) {
   const separator = path.includes('?') ? '&' : '?';
-  const size = Math.max(1, Number(pageSize) || 500);
-  const items = [];
+  const size = Math.max(1, Number(pageSize) || 200);
   const seenCursors = new Set();
   let cursor = '';
-  do {
+  let done = false;
+  let inflight = null;
+
+  async function fetchPage() {
     const query = `${path}${separator}limit=${encodeURIComponent(size)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     const page = await api(query);
-    // Accept the historical array shape during rolling upgrades.
-    if (Array.isArray(page)) return [...items, ...page];
-    items.push(...(Array.isArray(page?.items) ? page.items : []));
+    // Accept the historical array shape during rolling upgrades: it carries
+    // no cursor, so it is by definition the complete set.
+    if (Array.isArray(page)) {
+      done = true;
+      return { items: page, done };
+    }
+    const items = Array.isArray(page?.items) ? page.items : [];
     cursor = String(page?.next_cursor || '');
     if (cursor && seenCursors.has(cursor)) throw new Error('API returned a repeated pagination cursor.');
     if (cursor) seenCursors.add(cursor);
-  } while (cursor);
+    else done = true;
+    return { items, done };
+  }
+
+  return {
+    get done() { return done; },
+    get loading() { return Boolean(inflight); },
+    loadPage() {
+      if (inflight) return inflight;
+      if (done) return Promise.resolve({ items: [], done });
+      inflight = fetchPage().finally(() => { inflight = null; });
+      return inflight;
+    },
+  };
+}
+
+// Follow an API list's opaque cursor until the complete result set is loaded.
+// Callers still perform their existing client-side filtering (motion/face),
+// but no longer trade correctness for a fixed 500/10,000-row ceiling. For
+// lists that must PAINT before the whole history arrives (events, recordings)
+// use createCursorPager directly instead of draining through this helper.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+async function fetchAllCursorPages(path, pageSize = 500) {
+  const size = Math.max(1, Number(pageSize) || 500);
+  const pager = createCursorPager(path, size);
+  const items = [];
+  do {
+    const page = await pager.loadPage();
+    items.push(...page.items);
+  } while (!pager.done);
   return items;
+}
+
+// ─── Load-more sentinel ───────────────────────────────────────────────────
+// The trigger for "the next streamed page" is twofold: an explicit button, and
+// a sentinel element near the bottom of the list that the user scrolls toward.
+// One IntersectionObserver is shared per key ('events', 'recordings', ...).
+//
+// Re-setting the same sentinel re-registers it, and an observer's initial
+// callback always fires on observe(): that re-kick is what lets an appended
+// page whose list still leaves the sentinel on-screen continue streaming
+// without waiting for a scroll that will never come.
+const _daygleLoadMoreSentinels = new Map();
+
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function setLoadMoreSentinel(key, element, loadMore) {
+  if (typeof IntersectionObserver !== 'function') return null;
+  let entry = _daygleLoadMoreSentinels.get(key);
+  if (entry && entry.element) {
+    entry.observer.unobserve(entry.element);
+    entry.element = null;
+  }
+  if (!element) {
+    if (entry) _daygleLoadMoreSentinels.delete(key);
+    return null;
+  }
+  if (!entry) {
+    const observer = new IntersectionObserver((records) => {
+      for (const record of records) {
+        if (!record.isIntersecting) continue;
+        const kick = record.target._daygleLoadMore;
+        if (kick) kick();
+      }
+    }, {
+      // Start fetching a little before the sentinel is reached so the next
+      // page is usually in by the time the user hits the bottom.
+      rootMargin: '320px 0px',
+      threshold: 0,
+    });
+    entry = { observer, element: null };
+    _daygleLoadMoreSentinels.set(key, entry);
+  }
+  entry.element = element;
+  element._daygleLoadMore = loadMore;
+  entry.observer.observe(element);
+  return entry.observer;
 }
 
 // ─── CSRF self-heal ──────────────────────────────────────────────────────

@@ -66,6 +66,10 @@ const WEB_SHARED_GLOBALS = {
   cameraLabel: 'readonly',
   collectRecordingFaceIdentities: 'readonly',
   continuousPill: 'readonly',
+  // web/utils.js - streaming server-side pagination (events, recordings):
+  // createCursorPager consumes { items, next_cursor } pages lazily and
+  // setLoadMoreSentinel drives "next page" from a scroll sentinel + button.
+  createCursorPager: 'readonly',
   daygleSinceParamForRange: 'readonly',
   DETECTION_CONTINUOUS_ICON: 'readonly',
   DETECTION_EYE_ICON: 'readonly',
@@ -104,6 +108,7 @@ const WEB_SHARED_GLOBALS = {
   renderTimeSelect: 'readonly',
   requireElements: 'readonly',
   safeHtml: 'readonly',
+  setLoadMoreSentinel: 'readonly',
   setTimeSelectValue: 'readonly',
   showToast: 'readonly',
   startPageInterval: 'readonly',

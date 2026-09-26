@@ -331,6 +331,53 @@ function renderStats(recordings) {
 let recordingsSortState = null;
 let currentRecordings = [];
 
+// ── Server-side pagination ───────────────────────────────────────────────
+// The library STREAMS: the first server page paints immediately, further
+// pages arrive when the user asks ("Load more") or scrolls near the bottom
+// (sentinel). currentRecordings holds only the pages loaded so far, so a
+// huge history is never fetched wholesale before the first paint.
+const RECORDINGS_PAGE_SIZE = 200;
+// A post-filtered view (motion-only / face) keeps drawing server pages until
+// it can show a batch, but never more than this per action so one click can't
+// quietly drain a sparse history.
+const RECORDINGS_MAX_PAGES_PER_LOAD = 10;
+let recordingsPager = null;
+// Each loadRecordings() supersedes the previous one: a late page from an old
+// session must not land in the new list.
+let recordingsLoadSession = 0;
+let recordingsMoreLoading = false;
+// True while the incremental renderer has FINISHED painting the current
+// table; a streamed page is only appended to a completed <tbody>.
+let recordingsRowsReady = false;
+// Client-side post-filters SQL can't express (motion-only, face identity),
+// applied to every streamed page by collectVisibleRecordings().
+let recordingsViewFilter = null;
+
+function recordingMatchesView(recording) {
+  if (!recordingsViewFilter) return true;
+  if (recordingsViewFilter.motionOnly && !isMotionOnlyRecording(recording)) return false;
+  if (recordingsViewFilter.face
+    && !matchesFaceFilter(collectRecordingFaceIdentities(recording), recordingsViewFilter.face)) return false;
+  return true;
+}
+
+// Stream server pages through the post-filters until `targetCount` visible
+// rows are collected (or the history runs out, or the per-action page budget
+// is spent). Unfiltered views stop after one page.
+async function collectVisibleRecordings(targetCount) {
+  const collected = [];
+  let pages = 0;
+  while (!recordingsPager.done && collected.length < targetCount && pages < RECORDINGS_MAX_PAGES_PER_LOAD) {
+    const page = await recordingsPager.loadPage();
+    pages += 1;
+    for (const item of page.items) {
+      if (recordingMatchesView(item)) collected.push(item);
+    }
+    if (!page.items.length) break;
+  }
+  return collected;
+}
+
 function recordingSortValue(recording, key) {
   switch (key) {
     case 'type': {
@@ -391,6 +438,74 @@ function bindSortHeaders() {
   });
 }
 
+function renderRecordingsFooter() {
+  if (!recordingsPager || recordingsPager.done) return '';
+  return `
+    <div class="list-load-more" id="recordings-more">
+      <button type="button" class="secondary list-load-more-btn" id="recordings-more-btn">Load more clips</button>
+      <span class="muted">Older clips load as you scroll.</span>
+    </div>`;
+}
+
+function wireRecordingLoadMore() {
+  const button = document.getElementById('recordings-more-btn');
+  if (button) button.addEventListener('click', () => loadMoreRecordings());
+  const sentinel = document.getElementById('recordings-more');
+  setLoadMoreSentinel('recordings', (recordingsPager && !recordingsPager.done) ? sentinel : null, loadMoreRecordings);
+}
+
+// Preparing clips keep the 3s auto-refresh armed; anything else disarms it.
+function scheduleRecordingRefresh() {
+  if (currentRecordings.some((recording) => recording.media_ready === false)) {
+    clearTimeout(recordingRefreshTimer);
+    recordingRefreshTimer = setTimeout(() => loadRecordings(), 3000);
+  } else {
+    clearTimeout(recordingRefreshTimer);
+    recordingRefreshTimer = null;
+  }
+}
+
+// Append one streamed page's visible rows to the painted table. Falls back to
+// a full repaint when appending is unsafe: a custom column sort must re-order
+// the whole loaded set, the empty state has no <tbody>, and a half-painted
+// render would lose its unpainted rows to a superseding append.
+function appendRecordingRows(rows) {
+  const tbody = document.getElementById('recordings-list-rows');
+  if (!tbody || !recordingsRowsReady || recordingsSortState) {
+    renderRecordings(currentRecordings);
+    return;
+  }
+  recordingsRowsReady = false;
+  renderIncrementally(tbody, rows, recordingRowHtml, {
+    append: true,
+    onComplete: () => {
+      recordingsRowsReady = true;
+      bindRecordingButtons();
+    },
+  });
+  wireRecordingLoadMore();
+  scheduleRecordingRefresh();
+}
+
+async function loadMoreRecordings() {
+  if (!recordingsPager || recordingsPager.done || recordingsMoreLoading) return;
+  recordingsMoreLoading = true;
+  const session = recordingsLoadSession;
+  try {
+    const fresh = await collectVisibleRecordings(RECORDINGS_PAGE_SIZE);
+    if (session !== recordingsLoadSession) return;
+    currentRecordings = currentRecordings.concat(fresh);
+    renderStats(currentRecordings);
+    appendRecordingRows(fresh);
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    window.showToast?.(`Failed to load more recordings: ${error.message}`, true);
+  } finally {
+    recordingsMoreLoading = false;
+  }
+}
+
 function renderRecordings(recordings) {
   currentRecordings = recordings;
   renderStats(recordings);
@@ -402,7 +517,9 @@ function renderRecordings(recordings) {
         </div>
         <h2>No recordings match the current filters</h2>
         <p class="muted">Try resetting the filters, or wait for a new event to be captured.</p>
-      </div>`;
+      </div>${renderRecordingsFooter()}`;
+    recordingsRowsReady = false;
+    wireRecordingLoadMore();
     return;
   }
   const ordered = recordingsSortState
@@ -422,21 +539,23 @@ function renderRecordings(recordings) {
       '<th class="cell-center" scope="col">Actions</th>' +
     '</tr></thead>' +
     '<tbody id="recordings-list-rows"></tbody>' +
-    '</table></div>';
+    '</table></div>' +
+    renderRecordingsFooter();
+  recordingsRowsReady = false;
   renderIncrementally(
     document.getElementById('recordings-list-rows'),
     ordered,
     recordingRowHtml,
-    { onComplete: () => bindRecordingButtons() },
+    {
+      onComplete: () => {
+        recordingsRowsReady = true;
+        bindRecordingButtons();
+      },
+    },
   );
-  if (recordings.some((recording) => recording.media_ready === false)) {
-    clearTimeout(recordingRefreshTimer);
-    recordingRefreshTimer = setTimeout(() => loadRecordings(), 3000);
-  } else {
-    clearTimeout(recordingRefreshTimer);
-    recordingRefreshTimer = null;
-  }
+  scheduleRecordingRefresh();
   bindSortHeaders();
+  wireRecordingLoadMore();
 }
 
 // One recording table row. Extracted from renderRecordings (Item 15) so it can
@@ -934,7 +1053,12 @@ async function playRecording(id) {
 
 function bindRecordingButtons() {
   // Inline play buttons: open the clip player above the library card.
+  // The bound marker keeps this idempotent: a streamed page appends rows and
+  // re-binds the container, which must not stack a second handler on the rows
+  // already on screen (they would open play/delete twice).
   document.querySelectorAll('[data-play-recording]').forEach((button) => {
+    if (button.dataset.daygleBound) return;
+    button.dataset.daygleBound = '1';
     button.addEventListener('click', (event) => {
       event.preventDefault();
       const id = button.dataset.playRecording;
@@ -942,6 +1066,8 @@ function bindRecordingButtons() {
     });
   });
   document.querySelectorAll('[data-delete-recording]').forEach((button) => {
+    if (button.dataset.daygleBound) return;
+    button.dataset.daygleBound = '1';
     button.addEventListener('click', async () => {
       const id = button.dataset.deleteRecording;
       if (!confirm(`Delete recording #${id}? This cannot be undone.`)) return;
@@ -1045,29 +1171,40 @@ async function loadRecordings(filters = {}) {
   const startedBefore = formatIsoDateForFilter(resolved.dateTo, true, resolved.timeTo);
   if (startedBefore) params.set('started_before', startedBefore);
   if (resolved.sort) params.set('sort', resolved.sort);
-  const queryString = params.toString();
-  let recordings;
   if (resolved.label === 'motion') {
     // Backend strips generic trigger words (motion/alert/human/object/none/off/
     // continuous) from `recording.labels` so a server-side `label=motion`
-    // query returns nothing. Fetch without a label filter and re-filter
-    // motion-only recordings on the client so the dropdown option works.
-    const draftParams = new URLSearchParams(params);
-    draftParams.delete('label');
-    const draftQuery = draftParams.toString();
-    const all = await fetchAllCursorPages(`/api/recordings${draftQuery ? `?${draftQuery}` : ''}`);
-    recordings = all.filter((rec) => isMotionOnlyRecording(rec));
-  } else {
-    recordings = await fetchAllCursorPages(`/api/recordings${queryString ? `?${queryString}` : ''}`);
+    // query returns nothing. Stream without a label filter and keep only
+    // motion-only recordings as pages arrive so the dropdown option works.
+    params.delete('label');
   }
   // Face identity is filtered on the client: it lives in the linked event
   // metadata (recording.event / recording.events) that /api/recordings already
   // returns, and the endpoint has no identity query param. This mirrors the
-  // motion special-case above -- re-filter the fetched set rather than widen
-  // the SQL. The default limit returns the full set, so this stays complete.
-  if (resolved.face) {
-    recordings = recordings.filter((rec) => matchesFaceFilter(collectRecordingFaceIdentities(rec), resolved.face));
+  // motion special-case above -- post-filter each streamed page rather than
+  // widen the SQL. Both post-filters live in recordingsViewFilter, which
+  // collectVisibleRecordings applies to every page it streams.
+  recordingsViewFilter = {
+    motionOnly: resolved.label === 'motion',
+    face: resolved.face || '',
+  };
+  recordingsLoadSession += 1;
+  const session = recordingsLoadSession;
+  const queryString = params.toString();
+  recordingsPager = createCursorPager(`/api/recordings${queryString ? `?${queryString}` : ''}`, RECORDINGS_PAGE_SIZE);
+  currentRecordings = [];
+  // One streamed batch first (up to a screenful of VISIBLE rows, so a sparse
+  // post-filter still paints something); the rest arrives on demand.
+  let recordings;
+  try {
+    recordings = await collectVisibleRecordings(RECORDINGS_PAGE_SIZE);
+  } catch (error) {
+    // The failed stream must not leave the old sentinel wired to a dead pager;
+    // the error itself keeps propagating to the callers' status/toast handling.
+    setLoadMoreSentinel('recordings', null, loadMoreRecordings);
+    throw error;
   }
+  if (session !== recordingsLoadSession) return currentRecordings;
   const activeFilters = describeFilters(resolved);
   if (activeFilters.length) {
     updateFilterStat('Filtered', `Showing clips matching ${activeFilters.join(' and ')}.`);
@@ -1210,10 +1347,20 @@ els.recordingClearBtn?.addEventListener('click', () => {
 async function populateLabelFilterOptionsFromApi() {
   if (!els.labelFilter) return;
   try {
-    // Load all recordings without any filter to populate the full label list
-    const allRecordings = await fetchAllCursorPages('/api/recordings');
-    populateLabelFilterOptions(allRecordings);
-    populateFaceFilterOptions(allRecordings);
+    // Build the label/face dropdowns from the most recent slice of the
+    // library instead of draining the whole history: fetching every clip just
+    // to populate a <select> would re-introduce the full-table fetch this page
+    // avoids everywhere else. 1000 recent clips cover the labels in active
+    // use; the option counts read as recent-sample counts.
+    const samplePager = createCursorPager('/api/recordings', 500);
+    const sample = [];
+    while (sample.length < 1000 && !samplePager.done) {
+      const page = await samplePager.loadPage();
+      sample.push(...page.items);
+      if (!page.items.length) break;
+    }
+    populateLabelFilterOptions(sample);
+    populateFaceFilterOptions(sample);
   } catch (_error) {
     // Silent api() fallback (no UI mutation) - redirect guard skipped by design.
   }

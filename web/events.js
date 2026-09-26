@@ -24,6 +24,24 @@ let allEvents = [];
 let activeFilter = 'all';
 let activeRange = 'today';
 
+// ─── Server-side pagination ─────────────────────────────────────────────────
+// The list STREAMS: the first server page paints immediately, further pages
+// arrive when the user asks ("Load more") or scrolls near the bottom
+// (sentinel), so a huge history is never fetched wholesale before the first
+// rows are on screen. allEvents holds only the pages loaded so far - the
+// filter pills, the stat cards and the column sorts all describe that loaded
+// set, and the status line says when more is available.
+const EVENTS_PAGE_SIZE = 200;
+let eventsPager = null;
+// Each loadEvents() supersedes the previous one: a late page from an old
+// session must not land in the new list (or paint into the new table).
+let eventsLoadSession = 0;
+let eventsMoreLoading = false;
+// True while the incremental renderer has FINISHED painting the current
+// table. A streamed page can only be appended to a <tbody> whose previous
+// render completed; anything else repaints the whole loaded set instead.
+let eventsRowsReady = false;
+
 // Click-to-sort column headers re-order the currently loaded list
 // client-side. `null` means the server order (newest first) applies;
 // clicking a column cycles asc → desc → back to the default. The sort
@@ -232,13 +250,80 @@ function renderStats() {
   if (els.statSoundEvents) els.statSoundEvents.textContent = String(sound);
 }
 
+// The status line counts the LOADED rows and says when the history has more,
+// so a count on a partially-streamed list never reads as the full history.
+function updateEventListStatus() {
+  if (!els.listStatus) return;
+  const events = visibleEvents();
+  const more = Boolean(eventsPager && !eventsPager.done);
+  if (!events.length) {
+    els.listStatus.textContent = more ? 'More events available' : '';
+    return;
+  }
+  els.listStatus.textContent = `${events.length} event${events.length === 1 ? '' : 's'}${more ? ' loaded · more available' : ''}`;
+}
+
+function renderListFooter() {
+  if (!eventsPager || eventsPager.done) return '';
+  return `
+    <div class="list-load-more" id="event-feed-more">
+      <button type="button" class="secondary list-load-more-btn" id="event-feed-more-btn">Load more events</button>
+      <span class="muted">Older events load as you scroll.</span>
+    </div>`;
+}
+
+function wireLoadMore() {
+  const button = document.getElementById('event-feed-more-btn');
+  if (button) button.addEventListener('click', () => loadMoreEvents());
+  const sentinel = document.getElementById('event-feed-more');
+  setLoadMoreSentinel('events', (eventsPager && !eventsPager.done) ? sentinel : null, loadMoreEvents);
+}
+
+// Append one streamed page's visible rows to the painted table. Falls back to
+// a full repaint when appending is unsafe: a custom column sort must re-order
+// the whole loaded set, the empty state has no <tbody>, and a half-painted
+// render would lose its unpainted rows to a superseding append.
+function appendEventRows(rows) {
+  const tbody = document.getElementById('event-feed-rows');
+  if (!tbody || !eventsRowsReady || eventsSortState) {
+    renderList();
+    return;
+  }
+  eventsRowsReady = false;
+  renderIncrementally(tbody, rows, renderEventRow, {
+    append: true,
+    onComplete: () => {
+      eventsRowsReady = true;
+      observeMediaLifecycle(els.eventFeed);
+    },
+  });
+  wireLoadMore();
+}
+
+async function loadMoreEvents() {
+  if (!eventsPager || eventsPager.done || eventsMoreLoading) return;
+  eventsMoreLoading = true;
+  const session = eventsLoadSession;
+  try {
+    const page = await eventsPager.loadPage();
+    if (session !== eventsLoadSession) return;
+    allEvents = allEvents.concat(page.items);
+    renderStats();
+    appendEventRows(page.items.filter(
+      (event) => activeFilter === 'all' || eventKind(event) === activeFilter,
+    ));
+    updateEventListStatus();
+  } catch (_err) {
+    if (session !== eventsLoadSession) return;
+    if (typeof showToast === 'function') showToast('Failed to load more events.', true);
+  } finally {
+    eventsMoreLoading = false;
+  }
+}
+
 function renderList() {
   const events = visibleEvents();
-  if (els.listStatus) {
-    els.listStatus.textContent = events.length
-      ? `${events.length} event${events.length === 1 ? '' : 's'}`
-      : '';
-  }
+  updateEventListStatus();
   if (!els.eventFeed) return;
   if (!events.length) {
     els.eventFeed.innerHTML = `
@@ -248,7 +333,9 @@ function renderList() {
         </div>
         <h2>No events in this range</h2>
         <p class="muted">Try a wider time range, or wait for a new detection.</p>
-      </div>`;
+      </div>${renderListFooter()}`;
+    eventsRowsReady = false;
+    wireLoadMore();
     return;
   }
   const ordered = eventsSortState
@@ -268,28 +355,46 @@ function renderList() {
       '<th class="cell-center" scope="col">Actions</th>' +
     '</tr></thead>' +
     '<tbody id="event-feed-rows"></tbody>' +
-    '</table></div>';
+    '</table></div>' +
+    renderListFooter();
   const rows = document.getElementById('event-feed-rows');
+  eventsRowsReady = false;
   renderIncrementally(rows, ordered, renderEventRow, {
-    onComplete: () => observeMediaLifecycle(els.eventFeed),
+    onComplete: () => {
+      eventsRowsReady = true;
+      observeMediaLifecycle(els.eventFeed);
+    },
   });
   bindSortHeaders();
+  wireLoadMore();
 }
 
 async function loadEvents() {
   if (els.eventFeed) els.eventFeed.innerHTML = '<p class="muted">Loading events…</p>';
+  eventsLoadSession += 1;
+  const session = eventsLoadSession;
   const params = new URLSearchParams();
   const since = getSinceParam();
   if (since) params.set('since', since);
+  const query = params.toString();
+  // One page first: the list paints off the first response and streams the
+  // rest on demand instead of awaiting the whole history.
+  eventsPager = createCursorPager(`/api/events${query ? `?${query}` : ''}`, EVENTS_PAGE_SIZE);
+  allEvents = [];
   try {
-    const query = params.toString();
-    allEvents = await fetchAllCursorPages(`/api/events${query ? `?${query}` : ''}`, 500);
+    const page = await eventsPager.loadPage();
+    if (session !== eventsLoadSession) return;
+    allEvents = page.items;
   } catch (_err) {
+    if (session !== eventsLoadSession) return;
     allEvents = [];
+    // The failed stream must not leave the old sentinel wired to a dead pager.
+    setLoadMoreSentinel('events', null, loadMoreEvents);
     if (els.eventFeed) els.eventFeed.innerHTML = '<p class="muted empty-state">Could not load events.</p>';
     if (typeof showToast === 'function') showToast('Failed to load events.', true);
     return;
   }
+  if (session !== eventsLoadSession) return;
   renderStats();
   renderList();
 }
