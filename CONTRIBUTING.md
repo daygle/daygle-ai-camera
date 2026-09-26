@@ -23,6 +23,66 @@ Enable the pre-commit hooks so lint failures never reach CI:
 pre-commit install
 ```
 
+### Running the backend suite locally
+
+```bash
+python -m pytest -n auto --dist loadfile
+```
+
+Two things about that command are load-bearing.
+
+**`--dist loadfile` with `pytest-xdist`** (a dev-only extra, not a runtime
+dependency) cuts a full run from roughly five minutes to under two on a small
+box. Use `loadfile`, not the default `load`: most of the suite boots the app on
+a uvicorn thread against a tmpdir config, and the harness in `tests/support.py`
+wipes and re-imports the whole `app.*` namespace per test, so interleaving two
+files onto one worker produces cross-test contamination that looks like a real
+failure.
+
+**Add `--no-cov` when running a subset.** `pytest.ini` sets
+`--cov-fail-under=60`, so running one file reports a coverage failure and exits
+non-zero even when every test passed. Only the full-suite run should be subject
+to the floor.
+
+### A partially-installed environment fails silently
+
+This is the trap worth knowing about. If `fastapi`, `numpy` or `cv2` is absent,
+pytest does not report a clean "you are missing dependencies" - it emits ~150
+collection errors and ~120 failures that are indistinguishable at a glance from
+real breakage. Code paths that merely *import* those modules never execute, so
+tests covering them skip or error rather than fail loudly.
+
+Before trusting a red suite, check that it is red for the right reason:
+
+```bash
+python -m pytest --no-cov -q --collect-only 2>&1 | tail -3   # want: "N tests collected", 0 errors
+```
+
+If collection reports errors, the environment is incomplete and no failure
+count is meaningful yet. The full dependency set is in `requirements.txt` and
+needs Python 3.11+ (the supported floor); `scripts/install_python_deps.sh` is
+the supported installer.
+
+### Judge a change by the delta, not the absolute count
+
+Even with a healthy environment, the useful signal when validating a change is
+how the set of failures *changed*, not how many there are:
+
+```bash
+python -m pytest --no-cov -q tests/ --continue-on-collection-errors 2>&1 \
+  | grep -E "^(FAILED|ERROR)" | sed 's/ - .*//' | sort > /tmp/after.txt
+git stash push -u
+python -m pytest --no-cov -q tests/ --continue-on-collection-errors 2>&1 \
+  | grep -E "^(FAILED|ERROR)" | sed 's/ - .*//' | sort > /tmp/before.txt
+git stash pop
+diff /tmp/before.txt /tmp/after.txt && echo "no regressions"
+```
+
+An identical diff proves the change introduced no regressions even when the
+absolute failure count is non-zero. It does **not** prove the change works - a
+new test that never runs locally still has to be checked in CI, which is the
+only place the full stack is guaranteed.
+
 ## The two test suites
 
 The repository carries two independent suites and CI (`.github/workflows/python-app.yml`) runs both on every push/PR:

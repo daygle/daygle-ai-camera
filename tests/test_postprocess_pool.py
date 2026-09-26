@@ -366,6 +366,15 @@ def test_stats_report_no_mean_before_any_job_finishes() -> None:
 
 
 def test_queue_wait_is_tracked_apart_from_run_time() -> None:
+    # The known duration of the job we submit. The bounds below are derived
+    # from this CONSTANT rather than from the other measured bucket: job 2
+    # waits for job 1 to finish, so queue_wait ~= one job and run ~= two jobs.
+    # Asserting wait >= run/2 compares two wall-clock measurements that are
+    # mathematically near-identical -- it passed with a 0.5 ms margin on an
+    # idle machine and failed under any load, which is a coin flip, not a
+    # test. Pinning to the sleep duration keeps the same intent with real
+    # headroom on both sides.
+    job_seconds = 0.4
     pool = PostProcessPool('timing', max_workers=1, max_pending=4)
     pool.start()
     try:
@@ -374,7 +383,7 @@ def test_queue_wait_is_tracked_apart_from_run_time() -> None:
         # is the point: a starved queue and a slow job are different problems
         # and must not collapse into one number.
         def slow() -> None:
-            time.sleep(0.4)
+            time.sleep(job_seconds)
 
         pool.submit(slow)
         pool.submit(slow)
@@ -382,8 +391,12 @@ def test_queue_wait_is_tracked_apart_from_run_time() -> None:
         stats = pool.stats()
         assert stats['queue_wait_seconds'] > 0
         assert stats['run_seconds'] > 0
-        # The waiter spent its time queued, not running: the wait is at least
-        # as large as one job's run, since it waited behind exactly one.
-        assert stats['queue_wait_seconds'] >= stats['run_seconds'] / 2
+        # The waiter queued for roughly one job, not a fraction of a second and
+        # not the whole pool lifetime.
+        assert stats['queue_wait_seconds'] >= job_seconds / 2
+        assert stats['queue_wait_seconds'] <= job_seconds * 1.5
+        # Both jobs actually ran, so the run bucket is a full job, not the
+        # wait being mislabelled as run time.
+        assert stats['run_seconds'] >= job_seconds
     finally:
         pool.shutdown(timeout=2.0)
