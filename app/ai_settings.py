@@ -68,6 +68,7 @@ import copy
 import importlib.util
 import json
 import logging
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -136,6 +137,48 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MODELS_DIR = BASE_DIR / 'models'
 
 
+# A single path component inside ``models/``: it must start with a letter or
+# digit and may then contain letters, digits, dots, dashes, or underscores.
+# This rejects ``..``, ``.``, separators, null bytes, and anything else exotic,
+# so a validated relative path can only ever name a plain file or directory
+# under ``models/``.
+_SAFE_MODELS_PATH_PART = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*\Z')
+
+
+def _models_relative_parts(raw: Any) -> list[str] | None:
+    """Split a ``models/`` path into validated components, lexically.
+
+    Accepts the project-relative form (``models/yolo11n.onnx``), the absolute
+    form under the application root, and ``./`` / duplicate-separator noise;
+    returns ``None`` for anything else (empty input, ``..`` traversal, an
+    absolute path elsewhere, or the ``models/`` directory itself).
+
+    Deliberately does NOT touch the filesystem: a caller-supplied string is
+    only ever split, compared, and matched against the allowlist regex, and is
+    never joined onto a base path. Callers that need an actual ``Path`` go
+    through :func:`models_dir_file`, which resolves the name from a directory
+    listing instead. That keeps request data out of path expressions entirely
+    (an unvalidated join would be a path-traversal sink, and a post-hoc
+    ``resolve()`` check does not prevent the unsafe read).
+    """
+    text = str(raw or '').strip().replace('\\', '/')
+    if not text:
+        return None
+    root = f'{BASE_DIR.as_posix()}/'
+    if text.startswith(root):
+        # Absolute form inside the application root -> project-relative.
+        text = text[len(root):]
+    # ``./`` and duplicate separators are noise, not path components; ``..``
+    # deliberately survives this filter so the allowlist below rejects it.
+    parts = [part for part in text.split('/') if part not in ('', '.')]
+    if len(parts) < 2 or parts[0] != 'models':
+        return None
+    relative = parts[1:]
+    if not all(_SAFE_MODELS_PATH_PART.match(part) for part in relative):
+        return None
+    return relative
+
+
 def _canonical_models_path(raw: Any, field: str) -> str:
     """Validate that a model / labels path stays inside ``models/``.
 
@@ -147,18 +190,72 @@ def _canonical_models_path(raw: Any, field: str) -> str:
     free-text Model Path / Labels Path field surfaces a clean error instead
     of being persisted and silently disabling detection.
     """
-    text = str(raw or '').strip()
-    if not text:
-        raise HTTPException(status_code=400, detail=f'{field} must not be empty.')
-    candidate = Path(text)
-    resolved = (candidate if candidate.is_absolute() else BASE_DIR / candidate).resolve()
-    models_root = MODELS_DIR.resolve()
-    if resolved == models_root or not resolved.is_relative_to(models_root):
+    relative = _models_relative_parts(raw)
+    if relative is None:
         raise HTTPException(
             status_code=400,
             detail=f'{field} must point to a file inside the models/ directory.',
         )
-    return resolved.relative_to(BASE_DIR).as_posix()
+    return '/'.join(['models', *relative])
+
+
+def _walk_listing(root: Path, parts: list[str]) -> Path | None:
+    """Resolve ``parts`` under ``root`` by walking directory entries.
+
+    Each step picks an entry from a listing of the CURRENT directory, so the
+    returned ``Path`` always comes from the filesystem and the caller's parts
+    are only ever used as lookup keys - never joined onto a base path. A
+    symlink that leaves ``root`` and directories are rejected.
+    """
+    current = root
+    for part in parts:
+        try:
+            entries = {entry.name: entry for entry in current.iterdir()}
+        except OSError:
+            return None
+        entry = entries.get(part)
+        if entry is None:
+            return None
+        current = entry
+    try:
+        resolved = current.resolve()
+        root_resolved = root.resolve()
+    except OSError:
+        return None
+    if resolved == root_resolved or not resolved.is_relative_to(root_resolved):
+        return None
+    return resolved if resolved.is_file() else None
+
+
+def models_dir_file(relative_path: Any) -> Path | None:
+    """Resolve a validated ``models/`` path to a real file, or ``None``."""
+    relative = _models_relative_parts(relative_path)
+    if relative is None:
+        return None
+    return _walk_listing(MODELS_DIR, relative)
+
+
+def project_file(relative_path: Any) -> Path | None:
+    """Existence check for any project-relative path, without a raw join.
+
+    ``models/`` paths (the only kind the settings API stores) resolve through
+    :func:`models_dir_file`. A hand-edited ``config.yaml`` may point
+    ``ai.model_path`` somewhere else in the tree, so that form is walked from
+    the application root one validated component at a time and still reports
+    its true state.
+    """
+    text = str(relative_path or '').strip().replace('\\', '/')
+    if not text:
+        return None
+    if _models_relative_parts(text) is not None:
+        return models_dir_file(text)
+    root = BASE_DIR.as_posix()
+    if text.startswith(f'{root}/'):
+        text = text[len(root) + 1:]
+    parts = [part for part in text.split('/') if part not in ('', '.')]
+    if not parts or not all(_SAFE_MODELS_PATH_PART.match(part) for part in parts):
+        return None
+    return _walk_listing(BASE_DIR, parts)
 
 
 def is_face_family_model(model_path: Any, labels_path: Any = None) -> bool:

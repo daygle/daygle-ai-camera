@@ -17,7 +17,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 import app.state as _state
-from app.ai_settings import BASE_DIR
+from app.ai_settings import models_dir_file
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.camera_id import normalize_camera_id
@@ -139,12 +139,16 @@ async def assign_camera_model(
         )
     model_path = normalize_camera_model_path(raw_model, strict=True)
     labels_path = normalize_camera_labels_path(payload.get('labels_path'), strict=True) or DEFAULT_LABELS_PATH
-    if not (BASE_DIR / str(model_path)).is_file():
+    # Existence is resolved through the models/ listing (app.ai_settings), not
+    # by joining the submitted path onto the application root: the request
+    # string only selects a name, the returned Path always comes from the
+    # filesystem.
+    if models_dir_file(model_path) is None:
         raise HTTPException(
             status_code=404,
             detail=f'Model file not found: {model_path}. Install it on /onnx first.',
         )
-    if not (BASE_DIR / labels_path).is_file():
+    if models_dir_file(labels_path) is None:
         raise HTTPException(status_code=404, detail=f'Labels file not found: {labels_path}.')
     row = _persist_camera_model(
         normalized, str(model_path), labels_path, request, db, apply_cameras_settings, 'assign',

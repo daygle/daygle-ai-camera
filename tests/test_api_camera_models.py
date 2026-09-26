@@ -46,6 +46,49 @@ def test_normalize_camera_model_path_rules():
         normalize_camera_labels_path('models/face.names', strict=True)
 
 
+def test_models_path_validation_is_lexical_and_lookup_is_listing_based(tmp_path, monkeypatch):
+    """``models/`` paths are validated as strings, and existence is resolved
+    by walking a directory listing - so a request-supplied path is never
+    joined onto a base path (path-injection sink)."""
+    import app.ai_settings as ai_settings
+
+    models_dir = tmp_path / 'models'
+    models_dir.mkdir()
+    (models_dir / 'ok.onnx').write_bytes(b'fake')
+    outside = tmp_path / 'secret.txt'
+    outside.write_text('nope', encoding='utf-8')
+    monkeypatch.setattr(ai_settings, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(ai_settings, 'MODELS_DIR', models_dir)
+
+    # Canonical form: project-relative, absolute under the app root, and
+    # ./ / duplicate-separator noise all normalise to models/<name>.
+    assert ai_settings._canonical_models_path('models/ok.onnx', 'model_path') == 'models/ok.onnx'
+    assert ai_settings._canonical_models_path(str(models_dir / 'ok.onnx'), 'model_path') == 'models/ok.onnx'
+    assert ai_settings._canonical_models_path('./models//ok.onnx', 'model_path') == 'models/ok.onnx'
+
+    # Traversal, outside paths, and the bare directory are rejected.
+    for bad in ('', '   ', '../secret.txt', 'models/../secret.txt', str(outside), '/etc/passwd', 'models', 'models/'):
+        with pytest.raises(HTTPException) as excinfo:
+            ai_settings._canonical_models_path(bad, 'model_path')
+        assert excinfo.value.status_code == 400, bad
+
+    # The lookup only ever returns real files under models/.
+    assert ai_settings.models_dir_file('models/ok.onnx') == (models_dir / 'ok.onnx').resolve()
+    assert ai_settings.models_dir_file('models/missing.onnx') is None
+    assert ai_settings.models_dir_file('models/../secret.txt') is None
+    assert ai_settings.models_dir_file('models') is None
+    assert ai_settings.models_dir_file(str(outside)) is None
+
+    # A symlink that leaves models/ is refused.
+    (models_dir / 'escape.onnx').symlink_to(outside)
+    assert ai_settings.models_dir_file('models/escape.onnx') is None
+
+    # project_file keeps reporting a config.yaml path outside models/.
+    assert ai_settings.project_file('models/ok.onnx') == (models_dir / 'ok.onnx').resolve()
+    assert ai_settings.project_file('secret.txt') == outside.resolve()
+    assert ai_settings.project_file('../secret.txt') is None
+
+
 def test_camera_model_assignment_reads_detection_block():
     from app.camera_models import camera_model_assignment
 
@@ -116,13 +159,12 @@ def _install_test_models(tmp_path, monkeypatch):
     Returns (models_dir, first, second)."""
     import app.ai_settings
     import app.camera_models
-    import app.api.camera_models_router as camera_models_router
 
     models_dir = tmp_path / 'models'
     models_dir.mkdir(parents=True, exist_ok=True)
-    for module in (app.ai_settings, app.camera_models, camera_models_router):
+    for module in (app.ai_settings, app.camera_models):
         monkeypatch.setattr(module, 'BASE_DIR', tmp_path)
-        monkeypatch.setattr(module, 'MODELS_DIR', models_dir, raising=False)
+        monkeypatch.setattr(module, 'MODELS_DIR', models_dir)
     first = models_dir / f'zz-test-a-{uuid.uuid4().hex[:8]}.onnx'
     second = models_dir / f'zz-test-b-{uuid.uuid4().hex[:8]}.onnx'
     first.write_bytes(b'not really an onnx model')

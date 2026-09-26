@@ -41,6 +41,7 @@ from app.ai_settings import (
     YOLO_MODELS,
     _canonical_models_path,
     is_face_family_model,
+    project_file,
 )
 
 DEFAULT_LABELS_PATH = 'models/coco.names'
@@ -292,5 +293,5 @@ def camera_model_row(
         'model_name': _model_label(effective_model) if effective_model else None,
         'effective_model_path': effective_model or None,
         'effective_labels_path': effective_labels,
-        'model_exists': bool(effective_model) and (BASE_DIR / effective_model).is_file(),
+        'model_exists': project_file(effective_model) is not None,
     }
