@@ -488,3 +488,121 @@ def time_of_day_step(
         })
 
     return {'fires': fires, 'committed': committed}
+
+
+# ─── Activity spike (Tier 2) ─────────────────────────────────────────────────
+# A third "learns your site" anomaly: per ``(zone, label, hour-of-day)`` it
+# learns the normal NUMBER of distinct objects seen in that hour, then flags an
+# unusual burst -- far more activity than typical for the hour. This reuses the
+# Welford dwell baseline with *count* semantics: the "value" is a per-hour
+# distinct-track count and the anomaly rule is the same
+# ``max(min_count, mean + sensitivity*std)`` threshold. The per-hour bucketing
+# mirrors the time-of-day step; only completed hours are learned, and nothing
+# fires until ``min_days`` of that hour have accrued (so it is quiet while
+# learning rather than crying wolf on day one).
+ACTIVITY_DEFAULT_MIN_COUNT = 5
+ACTIVITY_DEFAULT_SENSITIVITY = 3.0
+ACTIVITY_MIN_DAYS = 5
+
+
+def activity_step(
+    today: Any,
+    baselines: Any,
+    cooldowns: Any,
+    observations: Any,
+    now: float,
+    *,
+    min_days: int = ACTIVITY_MIN_DAYS,
+) -> dict[str, Any]:
+    """Advance one detection cycle of activity-spike tracking. Pure.
+
+    ``today`` maps ``camera|zone|label`` to the in-progress hour bucket
+    (``{day, hour, baseline_key, tracks, fired}``); ``baselines`` maps
+    ``camera|zone|label|hour`` to a Welford count baseline; ``cooldowns`` maps
+    the same to the last alert time. ``observations`` is the detections inside an
+    activity-enabled zone THIS cycle, each::
+
+        {"key", "baseline_key", "zone_id", "zone_name", "label", "track_id",
+         "confidence", "day", "hour", "min_count", "sensitivity",
+         "cooldown_seconds"}
+
+    Distinct ``track_id``s accumulate per hour bucket; when the bucket rolls over
+    (new hour/day) its final count is folded into the matching baseline. A bucket
+    fires once, when its running distinct-track count exceeds the learned
+    threshold ``max(min_count, mean + sensitivity*std)`` -- but only once the
+    baseline has ``min_days`` of history, so it stays quiet while learning.
+    Returns ``{"fires": [...], "committed": int}``.
+    """
+    if not isinstance(today, dict):
+        today = {}
+    if not isinstance(baselines, dict):
+        baselines = {}
+    if not isinstance(cooldowns, dict):
+        cooldowns = {}
+    fires: list[dict[str, Any]] = []
+    committed = 0
+
+    for obs in observations or []:
+        if not isinstance(obs, dict):
+            continue
+        key = obs.get('key')
+        if not key:
+            continue
+        try:
+            day = int(obs.get('day'))
+            hour = int(obs.get('hour'))
+        except (TypeError, ValueError):
+            continue
+        baseline_key = obs.get('baseline_key') or f'{key}|{hour}'
+        state = today.get(key)
+        if state is None or state.get('day') != day or state.get('hour') != hour:
+            if state is not None and state.get('tracks'):
+                prev_key = state.get('baseline_key') or key
+                baselines[prev_key] = update_dwell_baseline(baselines.get(prev_key), float(len(state['tracks'])))
+                committed += 1
+            state = {'day': day, 'hour': hour, 'baseline_key': baseline_key, 'tracks': set(), 'fired': False}
+            today[key] = state
+
+        track_id = obs.get('track_id')
+        if track_id is not None:
+            state['tracks'].add(track_id)
+        if state['fired']:
+            continue
+
+        count = float(len(state['tracks']))
+        try:
+            min_count = float(obs.get('min_count', ACTIVITY_DEFAULT_MIN_COUNT))
+        except (TypeError, ValueError):
+            min_count = float(ACTIVITY_DEFAULT_MIN_COUNT)
+        try:
+            sensitivity = float(obs.get('sensitivity', ACTIVITY_DEFAULT_SENSITIVITY))
+        except (TypeError, ValueError):
+            sensitivity = ACTIVITY_DEFAULT_SENSITIVITY
+        result = evaluate_dwell(
+            baselines.get(baseline_key), count,
+            min_dwell_seconds=min_count, sensitivity=sensitivity, min_samples=min_days,
+        )
+        # Quiet while learning; only a true over-threshold burst fires.
+        if result['learning'] or not result['anomalous']:
+            continue
+        try:
+            cooldown = max(0.0, float(obs.get('cooldown_seconds', 0)))
+        except (TypeError, ValueError):
+            cooldown = 0.0
+        if not _cooldown_ok(cooldowns.get(baseline_key), now, cooldown):
+            continue
+        state['fired'] = True
+        cooldowns[baseline_key] = now
+        fires.append({
+            'zone_id': obs.get('zone_id'),
+            'zone_name': obs.get('zone_name'),
+            'label': obs.get('label'),
+            'track_id': track_id,
+            'count': int(count),
+            'threshold': round(result['threshold'], 2),
+            'mean': round(result['mean'], 2),
+            'hour': hour,
+            'confidence': obs.get('confidence'),
+        })
+
+    return {'fires': fires, 'committed': committed}

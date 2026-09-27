@@ -31,6 +31,10 @@ const currentRules = () => {
     const rule = currentZone()?.time_of_day;
     return rule ? [rule] : [];
   }
+  if (alertType === 'activity') {
+    const rule = currentZone()?.activity_spike;
+    return rule ? [rule] : [];
+  }
   return currentZone()?.object_rules || [];
 };
 
@@ -221,7 +225,9 @@ function renderSelectors() {
             ? 'Loitering is enabled - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
             : alertType === 'time'
               ? 'Unusual time-of-day is enabled - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
-              : 'Add recognized-person and stranger alerts here. Enrol people on the Face Recognition page.';
+              : alertType === 'activity'
+                ? 'Activity spike is enabled - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
+                : 'Add recognized-person and stranger alerts here. Enrol people on the Face Recognition page.';
   }
 }
 
@@ -231,6 +237,7 @@ function ruleLabel(rule) {
   if (alertType === 'tripwire') return titleCase(rule.name || 'Tripwire');
   if (alertType === 'loiter') return titleCase(rule.name || 'Loitering');
   if (alertType === 'time') return titleCase(rule.name || 'Unusual time');
+  if (alertType === 'activity') return titleCase(rule.name || 'Activity spike');
   return String(rule.label || '').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
@@ -291,7 +298,9 @@ function renderPolicies() {
             ? 'No loitering rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Loitering, then set its alerts here.'
             : alertType === 'time'
               ? 'No unusual time-of-day rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Unusual time, then set its alerts here.'
-              : 'No recognized-person alert policies yet. Add one below to get started.';
+              : alertType === 'activity'
+                ? 'No activity-spike rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Activity spike, then set its alerts here.'
+                : 'No recognized-person alert policies yet. Add one below to get started.';
     $('alertsList').innerHTML = `<div class="empty">${emptyMessage}</div>`;
     return;
   }
@@ -302,10 +311,12 @@ function renderPolicies() {
     const tripwire = alertType === 'tripwire';
     const loiter = alertType === 'loiter';
     const time = alertType === 'time';
-    // Tripwire, loiter and unusual-time are single per-zone behaviour rules: no
-    // confidence axis, and detection runs whenever enabled, so they show only a
-    // Notify window (no Detect-from/until) - just how each one notifies you.
-    const behaviour = tripwire || loiter || time;
+    const activity = alertType === 'activity';
+    // Tripwire, loiter, unusual-time and activity-spike are single per-zone
+    // behaviour rules: no confidence axis, and detection runs whenever enabled,
+    // so they show only a Notify window (no Detect-from/until) - just how each
+    // one notifies you.
+    const behaviour = tripwire || loiter || time || activity;
     const confidence = people ? rule.min_confidence : sound ? rule.confidence_threshold : rule.min_confidence;
     const cooldown = people ? rule.cooldown_minutes : rule.cooldown_seconds;
     const confidenceLabel = people ? 'Minimum Recognition Confidence' : sound ? 'Confidence Threshold' : 'Minimum Confidence';
@@ -324,7 +335,9 @@ function renderPolicies() {
             ? 'Enabled on the Zones page. Removing here turns loitering off for the area.'
             : time
               ? 'Enabled on the Zones page. Removing here turns unusual-time off for the area.'
-              : 'Assigned on the Zones page. Removing here unassigns this item from the area.';
+              : activity
+                ? 'Enabled on the Zones page. Removing here turns activity-spike off for the area.'
+                : 'Assigned on the Zones page. Removing here unassigns this item from the area.';
     return `
     <tr class="alerts-policy-row ${status.className}" data-rule-index="${index}" title="${escapeHtml(status.title)}">
       <td class="alerts-policy-name" data-label="Policy"><strong>${escapeHtml(ruleLabel(rule))}</strong><span>Policy ${index + 1}</span><span class="alerts-policy-state">${escapeHtml(status.label)}</span></td>
@@ -466,6 +479,9 @@ function renderPolicies() {
       } else if (alertType === 'time') {
         const zone = currentZone();
         if (zone) delete zone.time_of_day;
+      } else if (alertType === 'activity') {
+        const zone = currentZone();
+        if (zone) delete zone.activity_spike;
       } else {
         const allRules = alertType === 'sound' ? currentCamera().detection.sound.rules : currentZone().object_rules;
         const actualIndex = allRules.indexOf(rule);

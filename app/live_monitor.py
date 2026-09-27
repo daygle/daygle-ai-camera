@@ -79,6 +79,7 @@ from app.object_settings import (
 from app.object_tracking import update_object_tracks
 from app.behaviour_monitor import (
     clear_behavioural_state,
+    emit_activity_spike_anomalies,
     emit_loiter_anomalies,
     emit_time_of_day_anomalies,
     emit_tripwire_crossings,
@@ -1184,6 +1185,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             emit_time_of_day_anomalies(camera_id, settings, detections)
         except Exception as exc:  # noqa: BLE001
             logger.warning('Time-of-day check failed on %s: %s', camera_id, exc)
+        # Tier-2 behavioural intelligence: activity spike (unusual burst of activity
+        # for the hour). Same freshly-tracked detections; also isolated/best-effort.
+        try:
+            emit_activity_spike_anomalies(camera_id, settings, detections)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('Activity-spike check failed on %s: %s', camera_id, exc)
     # Object settings (default mode + per-label overrides + still-alert
     # thresholds) drive both the still/moving filter and the still-dwell
     # tracker below, so resolve them once per cycle rather than reading the

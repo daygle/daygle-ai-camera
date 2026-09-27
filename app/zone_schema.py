@@ -636,6 +636,64 @@ def normalize_zone_time(zone: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def normalize_zone_activity(zone: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize an optional per-zone behavioural **activity spike** rule
+    (Tier 2). Returns ``None`` when none is configured.
+
+    Shape::
+
+        {
+            "enabled": bool,
+            "name": str,
+            "labels": [str, ...],       # object labels that count ([] = any)
+            "min_count": int,           # absolute floor before a burst can fire
+            "sensitivity": float,       # std multiplier k in mean + k*std
+            "cooldown_seconds": int,
+            "record_on_detect": bool,
+            "email_enabled": bool,
+            "email_recipients": [str, ...],
+            "push_enabled": bool,
+            "notify_start": str | None, # HH:MM quiet-hours window (notify only)
+            "notify_end": str | None,
+        }
+
+    The learned per-(zone, label, hour) count baseline is NOT stored here -- this
+    is only the user-facing policy; the running statistics live with the monitor.
+    """
+    raw = zone.get('activity_spike')
+    if not isinstance(raw, dict):
+        return None
+    try:
+        min_count = max(1, int(raw.get('min_count') if raw.get('min_count') is not None else 5))
+    except (TypeError, ValueError):
+        min_count = 5
+    try:
+        sensitivity = float(raw.get('sensitivity') if raw.get('sensitivity') is not None else 3.0)
+    except (TypeError, ValueError):
+        sensitivity = 3.0
+    if not math.isfinite(sensitivity):
+        sensitivity = 3.0
+    sensitivity = max(0.0, min(10.0, sensitivity))
+    try:
+        cooldown = max(0, int(raw.get('cooldown_seconds') if raw.get('cooldown_seconds') is not None else 900))
+    except (TypeError, ValueError):
+        cooldown = 900
+    return {
+        'enabled': bool(raw.get('enabled', True)),
+        'name': str(raw.get('name') or 'Activity spike').strip() or 'Activity spike',
+        'labels': normalize_label_list(raw.get('labels')),
+        'min_count': min_count,
+        'sensitivity': round(sensitivity, 3),
+        'cooldown_seconds': cooldown,
+        'record_on_detect': bool(raw.get('record_on_detect', True)),
+        'email_enabled': bool(raw.get('email_enabled', False)),
+        'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
+        'push_enabled': bool(raw.get('push_enabled', False)),
+        'notify_start': normalize_hhmm(raw.get('notify_start')),
+        'notify_end': normalize_hhmm(raw.get('notify_end')),
+    }
+
+
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     if not isinstance(zones, list):
@@ -742,5 +800,9 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
         time_rule = normalize_zone_time(zone)
         if time_rule is not None:
             entry['time_of_day'] = time_rule
+        # Optional Tier-2 activity-spike rule.
+        activity = normalize_zone_activity(zone)
+        if activity is not None:
+            entry['activity_spike'] = activity
         normalized.append(entry)
     return normalized

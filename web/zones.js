@@ -362,6 +362,34 @@ function ensureTime(zone) {
   return zone.time_of_day;
 }
 
+// ─── Behavioural activity-spike rule (Tier 2) ───────────────────────────────
+function activityOf(zone) {
+  return zone && zone.activity_spike && typeof zone.activity_spike === 'object' ? zone.activity_spike : null;
+}
+
+function ensureActivity(zone) {
+  const existing = activityOf(zone);
+  if (existing) {
+    existing.enabled = true;
+    return existing;
+  }
+  zone.activity_spike = {
+    enabled: true,
+    name: 'Activity spike',
+    labels: [],
+    min_count: 5,
+    sensitivity: 3,
+    cooldown_seconds: 900,
+    record_on_detect: true,
+    email_enabled: false,
+    email_recipients: [],
+    push_enabled: false,
+    notify_start: null,
+    notify_end: null,
+  };
+  return zone.activity_spike;
+}
+
 function normalizeAlertSchedules(rule) {
   const source = Array.isArray(rule.alert_schedules) && rule.alert_schedules.length
     ? rule.alert_schedules
@@ -461,6 +489,10 @@ function normalizeZone(zone) {
   const timeRule = normalizeTime(zone.time_of_day);
   if (timeRule) zone.time_of_day = timeRule;
   else if ('time_of_day' in zone) delete zone.time_of_day;
+  // And the optional activity-spike rule (Tier 2).
+  const activity = normalizeActivity(zone.activity_spike);
+  if (activity) zone.activity_spike = activity;
+  else if ('activity_spike' in zone) delete zone.activity_spike;
   updateZoneBounds(zone);
   return zone;
 }
@@ -906,6 +938,60 @@ function renderTimeCard(zone, zoneIndex) {
     </div>`;
 }
 
+// Removable chips for the object labels an activity-spike rule counts.
+function activityLabelChips(rule, zoneIndex) {
+  const labels = rule && Array.isArray(rule.labels) ? rule.labels : [];
+  if (!labels.length) return '<span class="tripwire-any">Any object</span>';
+  return labels.map((label, labelIndex) => (
+    `<span class="zone-object-chip tripwire-chip">${escapeHtml(titleCase(label))}<button type="button" class="tripwire-chip-remove" data-activity-label-remove="${zoneIndex}:${labelIndex}" title="Stop counting ${escapeHtml(titleCase(label))}" aria-label="Stop counting ${escapeHtml(titleCase(label))}">×</button></span>`
+  )).join('');
+}
+
+// The editable body of an enabled activity-spike card. Detection only (min
+// count, sensitivity, which objects, record); delivery on the Alerts page.
+function activityBody(rule, zoneIndex) {
+  return `
+    <div class="zone-tripwire-body">
+      <label class="sound-rule-field tripwire-name-field">
+        <span>Name</span>
+        <input type="text" data-activity-name="${zoneIndex}" value="${escapeHtml(rule.name || 'Activity spike')}" maxlength="60" placeholder="Activity spike" />
+      </label>
+      <div class="tripwire-toggles">
+        <label class="sound-rule-field">
+          <span>Min count</span>
+          <input type="number" data-activity-min-count="${zoneIndex}" min="1" step="1" value="${escapeHtml(rule.min_count ?? 5)}" title="At least this many distinct objects in an hour before a burst can fire (a floor under the learned normal)." />
+        </label>
+        <label class="sound-rule-field">
+          <span>Sensitivity</span>
+          <input type="number" data-activity-sensitivity="${zoneIndex}" min="0" max="10" step="0.5" value="${escapeHtml(rule.sensitivity ?? 3)}" title="How far above the hour's normal count before it counts as a spike (x the normal spread). Lower = more sensitive." />
+        </label>
+      </div>
+      <div class="sound-rule-field tripwire-labels-field">
+        <span>Counts</span>
+        <div class="tripwire-labels" data-activity-labels="${zoneIndex}">${activityLabelChips(rule, zoneIndex)}</div>
+        <select class="rule-add-select tripwire-label-add" data-activity-label-add="${zoneIndex}" aria-label="Limit which objects this rule counts">${tripwireLabelAddOptions(rule.labels)}</select>
+      </div>
+      <div class="tripwire-toggles">
+        ${tripwireToggleField('Record', `data-activity-record="${zoneIndex}"`, rule.record_on_detect !== false, 'Record a clip when an activity spike is detected')}
+      </div>
+      <p class="muted tripwire-hint">Learns how busy this area normally is each hour (needs about a week), then alerts on an unusual burst. <a class="zone-assigned-link" href="/alerts">Set email / push alerts</a></p>
+    </div>`;
+}
+
+// Per-zone activity-spike card, rendered under the unusual-time card.
+function renderActivityCard(zone, zoneIndex) {
+  const rule = activityOf(zone);
+  const enabled = Boolean(rule && rule.enabled !== false);
+  return `
+    <div class="zone-tripwire-card zone-activity-card${enabled ? ' is-enabled' : ''}" data-zone-activity-for="${zoneIndex}">
+      <div class="zone-tripwire-head">
+        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">📈</span><strong>Activity Spike</strong><span class="muted zone-tripwire-sub">Alert on an unusual burst of activity for the hour</span></div>
+        ${ruleToggleCell(`data-activity-enabled="${zoneIndex}"`, enabled, 'Enable activity-spike detection for this area', false)}
+      </div>
+      ${enabled ? activityBody(rule, zoneIndex) : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to learn how busy this area normally is and get alerted on an unusual burst of activity.</p>'}
+    </div>`;
+}
+
 function renderZones() {
   if (!selectedCamera) return;
   syncZoneOverlayToImage();
@@ -1003,6 +1089,7 @@ function renderObjectDetectionRules() {
         ${renderTripwireCard(zone, zoneIndex)}
         ${renderLoiterCard(zone, zoneIndex)}
         ${renderTimeCard(zone, zoneIndex)}
+        ${renderActivityCard(zone, zoneIndex)}
       </div>`;
   }).join('');
   bindObjectRuleControls();
@@ -1027,6 +1114,7 @@ function bindObjectRuleControls() {
   bindTripwireControls();
   bindLoiterControls();
   bindTimeControls();
+  bindActivityControls();
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
@@ -1418,6 +1506,94 @@ function bindTimeControls() {
   document.querySelectorAll('[data-time-record]').forEach((cb) => {
     cb.addEventListener('change', () => {
       const rule = timeOf(zoneAt(cb.dataset.timeRecord));
+      if (!rule) return;
+      rule.record_on_detect = cb.checked;
+      const pill = cb.parentElement?.querySelector('span');
+      if (pill) pill.textContent = cb.checked ? 'On' : 'Off';
+      markZoneUnsaved();
+    });
+  });
+}
+
+// Activity-spike card bindings, mirroring the loiter card.
+function bindActivityControls() {
+  const zoneAt = (index) => cameraDetection().zones[Number(index)];
+
+  document.querySelectorAll('[data-activity-enabled]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const zone = zoneAt(cb.dataset.activityEnabled);
+      if (!zone) return;
+      selectedZoneIndex = Number(cb.dataset.activityEnabled);
+      if (cb.checked) {
+        ensureActivity(zone);
+        liveEls.status.textContent = 'Activity spike enabled - it will learn how busy this area normally is (about a week), then Save Zones.';
+      } else if (activityOf(zone)) {
+        zone.activity_spike.enabled = false;
+      }
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-activity-label-add]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const label = String(select.value || '').trim().toLowerCase();
+      if (!label) return;
+      const rule = activityOf(zoneAt(select.dataset.activityLabelAdd));
+      if (!rule) return;
+      rule.labels = Array.isArray(rule.labels) ? rule.labels : [];
+      if (!rule.labels.includes(label)) rule.labels.push(label);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-activity-label-remove]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [zoneIndex, labelIndex] = String(button.dataset.activityLabelRemove).split(':').map(Number);
+      const rule = activityOf(zoneAt(zoneIndex));
+      if (!rule || !Array.isArray(rule.labels)) return;
+      rule.labels.splice(labelIndex, 1);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-activity-name]').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const rule = activityOf(zoneAt(inp.dataset.activityName));
+      if (!rule) return;
+      rule.name = inp.value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-activity-min-count]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const rule = activityOf(zoneAt(inp.dataset.activityMinCount));
+      if (!rule) return;
+      const value = Math.max(1, Number.parseInt(inp.value, 10) || 1);
+      rule.min_count = value;
+      inp.value = value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-activity-sensitivity]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const rule = activityOf(zoneAt(inp.dataset.activitySensitivity));
+      if (!rule) return;
+      const raw = Number(inp.value);
+      const value = Number.isFinite(raw) ? Math.max(0, Math.min(10, raw)) : 3;
+      rule.sensitivity = value;
+      inp.value = value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-activity-record]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const rule = activityOf(zoneAt(cb.dataset.activityRecord));
       if (!rule) return;
       rule.record_on_detect = cb.checked;
       const pill = cb.parentElement?.querySelector('span');

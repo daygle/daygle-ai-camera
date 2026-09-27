@@ -1735,6 +1735,9 @@ input[type="file"] { padding: 10px; }
 /* Unusual time-of-day card: distinct sky accent. */
 .zone-time-card { border-color: rgba(56,189,248,.3); background: rgba(56,189,248,.05); }
 .zone-time-card.is-enabled { border-color: rgba(56,189,248,.55); }
+/* Activity-spike card: distinct rose accent. */
+.zone-activity-card { border-color: rgba(251,113,133,.3); background: rgba(251,113,133,.05); }
+.zone-activity-card.is-enabled { border-color: rgba(251,113,133,.55); }
 .zone-tripwire-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .zone-tripwire-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .zone-tripwire-title strong { font-size: 13px; }
