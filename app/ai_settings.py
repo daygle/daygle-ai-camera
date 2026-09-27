@@ -68,7 +68,6 @@ import copy
 import importlib.util
 import json
 import logging
-import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -170,7 +169,35 @@ def default_model_path() -> str:
 # This rejects ``..``, ``.``, separators, null bytes, and anything else exotic,
 # so a validated relative path can only ever name a plain file or directory
 # under ``models/``.
-_SAFE_MODELS_PATH_PART = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*\Z')
+#
+# Written as a linear character scan rather than a regex on purpose: these
+# components come straight from request-supplied model/labels paths, and a
+# regex with adjacent overlapping classes (``[A-Za-z0-9][A-Za-z0-9._-]*``) is
+# flagged as a polynomial-time ReDoS surface (CodeQL py/polynomial-redos). The
+# scan is O(n) with no backtracking and keeps the exact same allowlist.
+_SAFE_PATH_EXTRA_CHARS = frozenset('._-')
+
+
+def _is_safe_models_path_part(part: str) -> bool:
+    """Return ``True`` when *part* is one safe ``models/`` path component.
+
+    Mirrors the allowlist ``[A-Za-z0-9][A-Za-z0-9._-]*\\Z`` without a regex:
+    the first character must be ASCII alphanumeric, and every character after
+    it must be ASCII alphanumeric or one of ``. _ -``. ASCII-only checks are
+    deliberate -- ``str.isalnum`` would also accept non-ASCII letters such as
+    ``é`` and silently widen the allowlist. This rejects ``..``, ``.``,
+    separators, null bytes, and any other exotic byte.
+    """
+    if not part:
+        return False
+    if not ('a' <= part[0] <= 'z' or 'A' <= part[0] <= 'Z' or '0' <= part[0] <= '9'):
+        return False
+    for ch in part:
+        if ch in _SAFE_PATH_EXTRA_CHARS:
+            continue
+        if not ('a' <= ch <= 'z' or 'A' <= ch <= 'Z' or '0' <= ch <= '9'):
+            return False
+    return True
 
 
 def _models_relative_parts(raw: Any) -> list[str] | None:
@@ -202,7 +229,7 @@ def _models_relative_parts(raw: Any) -> list[str] | None:
     if len(parts) < 2 or parts[0] != 'models':
         return None
     relative = parts[1:]
-    if not all(_SAFE_MODELS_PATH_PART.match(part) for part in relative):
+    if not all(_is_safe_models_path_part(part) for part in relative):
         return None
     return relative
 
@@ -281,7 +308,7 @@ def project_file(relative_path: Any) -> Path | None:
     if text.startswith(f'{root}/'):
         text = text[len(root) + 1:]
     parts = [part for part in text.split('/') if part not in ('', '.')]
-    if not parts or not all(_SAFE_MODELS_PATH_PART.match(part) for part in parts):
+    if not parts or not all(_is_safe_models_path_part(part) for part in parts):
         return None
     return _walk_listing(BASE_DIR, parts)
 
