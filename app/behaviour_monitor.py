@@ -116,6 +116,15 @@ def reset_behavioural_state(camera_id: str) -> None:
                 _tripwire_last_fired.pop(stale, None)
     except Exception as exc:  # noqa: BLE001
         logger.debug('Tripwire cooldown reset failed for %s: %s', key, exc)
+    try:
+        # ``_activity_today`` is keyed ``camera|zone|label``; drop this camera's
+        # in-progress hour buckets so a burst isn't falsely continued after a pause.
+        prefix = f'{key}|'
+        with _activity_lock:
+            for stale in [k for k in _activity_today if k.startswith(prefix)]:
+                _activity_today.pop(stale, None)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug('Activity-spike state reset failed for %s: %s', key, exc)
 
 
 def behaviour_paused(camera_id: str) -> bool:
@@ -669,6 +678,216 @@ def _emit_time(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], r
         alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
         submit_alert_notification(deliver_alert_notifications, [alert_payload], event_id, [notify_rule])
     logger.info('Unusual time on %s: %s in %s at %02d:00 (event %s)', camera_id, label, zone_name, hour, event_id)
+
+
+# ─── Tier-2 behavioural intelligence: activity spike ─────────────────────────
+# Per-(camera, zone, label, hour) count baselines learn the normal number of
+# distinct objects an hour sees, and fire on an unusual burst. Same lock +
+# KV-store persistence pattern as the other behaviour monitors; the pure
+# decision lives in ``behaviour_baseline.activity_step``.
+_activity_today: dict[str, dict[str, Any]] = {}
+_activity_baselines: dict[str, dict[str, Any]] = {}
+_activity_cooldowns: dict[str, float] = {}
+_activity_lock = threading.Lock()
+_activity_state: dict[str, Any] = {'loaded': False, 'dirty': False, 'last_flush': 0.0}
+_ACTIVITY_BASELINES_KEY = 'behaviour_activity_baselines'
+_ACTIVITY_FLUSH_INTERVAL_SECONDS = 60.0
+
+
+def _enabled_zones_with_activity(settings: Any) -> list[dict[str, Any]]:
+    zones = (settings.get('detection') or {}).get('zones', []) if isinstance(settings, dict) else []
+    out: list[dict[str, Any]] = []
+    for zone in zones or []:
+        if not isinstance(zone, dict) or zone.get('enabled') is False:
+            continue
+        rule = zone.get('activity_spike')
+        if isinstance(rule, dict) and rule.get('enabled') is not False:
+            out.append(zone)
+    return out
+
+
+def _ensure_activity_loaded_locked() -> None:
+    if _activity_state['loaded']:
+        return
+    _activity_state['loaded'] = True
+    try:
+        raw = _state.database.get_setting(_ACTIVITY_BASELINES_KEY)
+    except Exception as exc:  # noqa: BLE001 - a missing/locked DB just means "start fresh"
+        logger.warning('Activity baseline load failed: %s', exc)
+        return
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if not isinstance(value, dict):
+                continue
+            try:
+                _activity_baselines[str(key)] = {
+                    'count': max(0.0, float(value.get('count') or 0.0)),
+                    'mean': max(0.0, float(value.get('mean') or 0.0)),
+                    'm2': max(0.0, float(value.get('m2') or 0.0)),
+                }
+            except (TypeError, ValueError):
+                continue
+
+
+def _flush_activity_baselines_locked(now: float, now_iso: str) -> None:
+    if not _activity_state['dirty'] or (now - _activity_state['last_flush']) < _ACTIVITY_FLUSH_INTERVAL_SECONDS:
+        return
+    try:
+        _state.database.set_setting(_ACTIVITY_BASELINES_KEY, dict(_activity_baselines), now_iso)
+        _activity_state['dirty'] = False
+        _activity_state['last_flush'] = now
+    except Exception as exc:  # noqa: BLE001 - persistence is best-effort
+        logger.warning('Activity baseline flush failed: %s', exc)
+
+
+def emit_activity_spike_anomalies(camera_id: str, settings: dict[str, Any], detections: list[dict[str, Any]]) -> int:
+    """Detect and emit activity-spike anomalies for one detection cycle.
+
+    Learns, per (zone, label, hour), the normal number of distinct objects, and
+    fires on an unusual burst. Returns the number of anomalies emitted.
+    Best-effort and fully isolated.
+    """
+    zones = _enabled_zones_with_activity(settings)
+    if not zones:
+        return 0
+    from app.zone_detection import detection_matches_zone
+
+    now = time.time()
+    local = datetime.fromtimestamp(now)
+    hour = local.hour
+    day = local.toordinal()
+
+    observations: list[dict[str, Any]] = []
+    activity_by_zone: dict[str, dict[str, Any]] = {}
+    for zone in zones:
+        rule = zone.get('activity_spike') or {}
+        zone_id = str(zone.get('id') or zone.get('name') or '')
+        zone_name = str(zone.get('name') or zone.get('id') or '').strip() or None
+        activity_by_zone[zone_id] = rule
+        wanted = {str(label).strip().lower() for label in (rule.get('labels') or []) if str(label).strip()}
+        for det in detections or []:
+            if not isinstance(det, dict) or det.get('track_id') is None:
+                continue
+            label = str(det.get('label') or '').strip().lower()
+            if wanted and label not in wanted:
+                continue
+            if not detection_matches_zone(det, zone):
+                continue
+            try:
+                confidence = float(det.get('confidence') or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            observations.append({
+                'key': f"{camera_id}|{zone_id}|{label}",
+                'baseline_key': f"{camera_id}|{zone_id}|{label}|{hour}",
+                'zone_id': zone_id,
+                'zone_name': zone_name,
+                'label': label,
+                'track_id': det.get('track_id'),
+                'confidence': confidence,
+                'day': day,
+                'hour': hour,
+                'min_count': rule.get('min_count', 5),
+                'sensitivity': rule.get('sensitivity', 3.0),
+                'cooldown_seconds': rule.get('cooldown_seconds', 900),
+            })
+
+    if not observations:
+        return 0
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with _activity_lock:
+        _ensure_activity_loaded_locked()
+        result = behaviour_baseline.activity_step(
+            _activity_today, _activity_baselines, _activity_cooldowns, observations, now,
+        )
+        if result['committed']:
+            _activity_state['dirty'] = True
+        if len(_activity_cooldowns) > 4096:
+            cutoff = now - 86400
+            for stale in [k for k, ts in _activity_cooldowns.items() if ts < cutoff]:
+                _activity_cooldowns.pop(stale, None)
+        _flush_activity_baselines_locked(now, now_iso)
+
+    fired = 0
+    for fire in result['fires']:
+        rule = activity_by_zone.get(fire['zone_id']) or {}
+        try:
+            _emit_activity(camera_id, settings, fire, rule, now_iso)
+            fired += 1
+        except Exception as exc:  # noqa: BLE001 - one anomaly must not break the loop
+            logger.warning('Activity-spike emit failed on %s: %s', camera_id, exc)
+    return fired
+
+
+def _emit_activity(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], rule: dict[str, Any], now_iso: str) -> None:
+    from app.alert_dispatch import _rule_notify_active_now, deliver_alert_notifications
+    from app.utils import normalize_bool_setting, normalize_email_recipients
+
+    zone_name = fire.get('zone_name') or 'zone'
+    label = fire.get('label') or 'object'
+    try:
+        count = int(fire.get('count') or 0)
+    except (TypeError, ValueError):
+        count = 0
+    try:
+        threshold = float(fire.get('threshold') or 0.0)
+    except (TypeError, ValueError):
+        threshold = 0.0
+    try:
+        confidence = float(fire.get('confidence') or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    email_enabled = normalize_bool_setting(rule.get('email_enabled'), False)
+    push_enabled = normalize_bool_setting(rule.get('push_enabled'), False)
+    email_recipients = normalize_email_recipients(rule.get('email_recipients') or [])
+    notify_enabled = email_enabled or push_enabled
+    camera_name = str((settings or {}).get('name') or '').strip() or None
+    rule_display = str(rule.get('name') or 'Activity spike').strip() or 'Activity spike'
+    plural = 's' if label and not label.endswith('s') else ''
+
+    metadata = {
+        'source': 'activity_spike',
+        'camera_id': camera_id,
+        'camera_name': camera_name,
+        'zone_id': fire.get('zone_id'),
+        'zone_name': fire.get('zone_name'),
+        'label': label,
+        'count': count,
+        'threshold': round(threshold, 2),
+        'mean': fire.get('mean'),
+        'hour': fire.get('hour'),
+        'confidence': round(confidence, 3),
+    }
+    rule_name = f'{zone_name} · {rule_display}'
+    message = f'Unusual activity in {zone_name}: {count} {str(label).title()}{plural} (normally ~{fire.get("mean")})'
+    notify_rule = {
+        'name': rule_name,
+        'email_enabled': email_enabled,
+        'push_enabled': push_enabled,
+        'email_recipients': email_recipients,
+        'notify_start': str(rule.get('notify_start') or '').strip() or None,
+        'notify_end': str(rule.get('notify_end') or '').strip() or None,
+    }
+    alert_active = notify_enabled and _rule_notify_active_now(notify_rule)
+    alerts = [{
+        'created_at': now_iso, 'rule_name': rule_name, 'label': label,
+        'confidence': confidence, 'message': message,
+    }] if alert_active else []
+    event_id = _state.database.add_event_with_alerts(
+        created_at=now_iso, source='behaviour', snapshot_path=None,
+        detections=[], alerts=alerts, alert_triggered=notify_enabled,
+        metadata=metadata,
+    )
+
+    if normalize_bool_setting(rule.get('record_on_detect'), True):
+        _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
+
+    if alert_active:
+        alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
+        submit_alert_notification(deliver_alert_notifications, [alert_payload], event_id, [notify_rule])
+    logger.info('Activity spike on %s: %d %s in %s (event %s)', camera_id, count, label, zone_name, event_id)
 
 
 def _attach_recording(camera_id: str, settings: dict[str, Any], event_id: int, now_iso: str, label: str, confidence: float) -> int | None:

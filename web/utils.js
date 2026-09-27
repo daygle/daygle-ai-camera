@@ -1816,6 +1816,39 @@ function normalizeTime(raw) {
   };
 }
 
+// Client mirror of app/zone_schema.py::normalize_zone_activity (Tier-2 activity
+// spike), used by the Zones save path. Same contract as the other behaviour
+// normalizers: null when absent (field dropped), else the normalized policy.
+function normalizeActivity(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  let minCount = Number.parseInt(raw.min_count, 10);
+  if (raw.min_count == null || !Number.isFinite(minCount)) minCount = 5;
+  minCount = Math.max(1, minCount);
+  let sensitivity = Number(raw.sensitivity);
+  if (raw.sensitivity == null || !Number.isFinite(sensitivity)) sensitivity = 3.0;
+  sensitivity = Math.round(Math.max(0, Math.min(10, sensitivity)) * 1000) / 1000;
+  let cooldown = Number.parseInt(raw.cooldown_seconds, 10);
+  if (raw.cooldown_seconds == null || !Number.isFinite(cooldown)) cooldown = 900;
+  cooldown = Math.max(0, cooldown);
+  const labels = Array.isArray(raw.labels)
+    ? [...new Set(raw.labels.map((label) => String(label).trim().toLowerCase()).filter(Boolean))]
+    : [];
+  return {
+    enabled: raw.enabled !== false,
+    name: String(raw.name || 'Activity spike').trim() || 'Activity spike',
+    labels,
+    min_count: minCount,
+    sensitivity,
+    cooldown_seconds: cooldown,
+    record_on_detect: raw.record_on_detect !== false,
+    email_enabled: raw.email_enabled === true,
+    email_recipients: normalizeEmailList(raw.email_recipients),
+    push_enabled: raw.push_enabled === true,
+    notify_start: tripwireHhmm(raw.notify_start),
+    notify_end: tripwireHhmm(raw.notify_end),
+  };
+}
+
 // ─── User display preferences (date_format / time_format) ──────────────────
 // Populated by nav.js after /api/auth/me resolves, but exposed as early as
 // possible so every page (dashboard, events, alerts, recordings, etc.) renders
@@ -2228,7 +2261,7 @@ window.daygleUi = {
   // Behavioural tripwire geometry + normalisation (Zones canvas ↔ backend)
   TRIPWIRE_DIRECTIONS, roundTripwireCoord, tripwirePoint, tripwireZoneBounds,
   tripwireDefaultLine, tripwireOrientation, tripwireForwardNormal, tripwireMidpoint,
-  normalizeTripwire, normalizeLoiter, normalizeTime,
+  normalizeTripwire, normalizeLoiter, normalizeTime, normalizeActivity,
   // Theme management
   setDaygleThemePref, getDaygleThemePref, applyDaygleTheme,
   watchDaygleSystemTheme, unwatchDaygleSystemTheme,
