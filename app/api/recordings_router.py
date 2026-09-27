@@ -58,7 +58,7 @@ def recordings(
     session_role = str(user.get('role') or '').strip().lower()
     labels: list[str] | None = None
     if label:
-        labels = [l.strip().lower() for l in str(label).split(',') if l.strip()]
+        labels = [part.strip().lower() for part in str(label).split(',') if part.strip()]
     try:
         decoded = decode_cursor(cursor, 'recordings', sort) if cursor else None
     except ValueError as exc:

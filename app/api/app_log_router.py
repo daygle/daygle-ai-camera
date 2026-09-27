@@ -144,8 +144,8 @@ def get_app_log(
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         entries: list[dict] = []
-        for line in result.stdout.splitlines():
-            line = line.strip()
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
             if not line:
                 continue
             try:

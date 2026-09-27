@@ -14,7 +14,12 @@ from starlette.concurrency import run_in_threadpool
 
 from app.auth import utc_now
 from app.auth_gates import require_admin
-from app.camera_config import _migrate_camera_id, _redact_camera, normalize_camera_id
+from app.camera_config import (
+    _migrate_camera_id,
+    _redact_camera,
+    camera_id_renames,
+    normalize_camera_id,
+)
 from app.config_facades import effective_cameras_config, get_camera_config
 from app.media_utils import ffmpeg_decoder_available, is_hevc_codec, video_codec_label
 from app.utils import build_stream_url
@@ -89,25 +94,27 @@ async def update_cameras(
     require_admin(request)
     settings = validate_cameras_settings(await request.json())
     old_configs = list(effective_cameras_config())
-    for old, new in zip(old_configs, settings):
-        if old.get('id') and new.get('id') and old['id'] != new['id']:
-            # Stop the OLD camera's ingest workers BEFORE renaming its on-disk
-            # dirs. The running ffmpeg writes via precomputed path strings and
-            # never re-mkdirs mid-run, so renaming underneath it makes every
-            # segment/frame/audio write fail ENOENT until the stall detector
-            # kill-loops the worker -- destroying that camera's rolling
-            # prebuffer right when an operator renames it.
-            stop_workers = getattr(
-                getattr(_state, 'recording_service', None),
-                'stop_camera_workers',
-                None,
-            )
-            if callable(stop_workers):
-                try:
-                    stop_workers(str(old['id']))
-                except Exception as exc:  # sentinel / mid-swap: rename is still safe
-                    logger.debug('Could not stop workers before camera id rename: %s', exc)
-            _migrate_camera_id(old['id'], new['id'])
+    # Only migrate state/dirs for unambiguous single renames. See
+    # ``camera_id_renames``: pairing the two lists positionally would migrate a
+    # camera's state onto an unrelated camera whenever the list length changes.
+    for old_id, new_id in camera_id_renames(old_configs, settings):
+        # Stop the OLD camera's ingest workers BEFORE renaming its on-disk
+        # dirs. The running ffmpeg writes via precomputed path strings and
+        # never re-mkdirs mid-run, so renaming underneath it makes every
+        # segment/frame/audio write fail ENOENT until the stall detector
+        # kill-loops the worker -- destroying that camera's rolling
+        # prebuffer right when an operator renames it.
+        stop_workers = getattr(
+            getattr(_state, 'recording_service', None),
+            'stop_camera_workers',
+            None,
+        )
+        if callable(stop_workers):
+            try:
+                stop_workers(str(old_id))
+            except Exception as exc:  # sentinel / mid-swap: rename is still safe
+                logger.debug('Could not stop workers before camera id rename: %s', exc)
+        _migrate_camera_id(old_id, new_id)
     # Serialize against the profile monitor's persist (and the other API
     # writers) so its stale whole-list snapshot cannot resurrect a reverted
     # edit over this one.

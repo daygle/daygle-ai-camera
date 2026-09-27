@@ -159,6 +159,41 @@ def normalize_camera_settings(
     return camera_settings
 
 
+def camera_id_renames(
+    old_configs: list[dict[str, Any]],
+    new_settings: list[dict[str, Any]],
+) -> list[tuple[str, str]]:
+    """Return unambiguous ``(old_id, new_id)`` camera-id renames between two
+    camera lists.
+
+    ``update_cameras`` receives the WHOLE new camera list alongside the current
+    one. Pairing the two **positionally** (``zip``) is wrong the moment the lists
+    differ in length: adding, removing, or reordering a camera shifts every
+    later entry, so a delete would pair an unrelated old/new camera and
+    "migrate" one camera's live-detection state and on-disk ingest dirs onto
+    another -- silently corrupting them.
+
+    A rename is therefore acted on only when it is unambiguous: exactly one id
+    disappears from the old list and exactly one new id appears. Adds (nothing
+    disappears), deletes (nothing appears), enable/disable toggles (no id
+    change), and reorders (same id set) all yield no pairs and thus no
+    migration. Multiple renames in a single save are deliberately not guessed
+    at either -- their ids stay unmigrated (state is re-keyed fresh on the next
+    cycle) rather than being paired incorrectly.
+    """
+    old_ids = [str(cfg.get('id') or '') for cfg in old_configs]
+    new_ids = [str(cfg.get('id') or '') for cfg in new_settings]
+    old_set = {i for i in old_ids if i}
+    new_set = {i for i in new_ids if i}
+    # dict.fromkeys preserves first-seen order while de-duplicating, so a
+    # repeated id cannot make a single rename look like several.
+    removed = [i for i in dict.fromkeys(old_ids) if i and i not in new_set]
+    added = [i for i in dict.fromkeys(new_ids) if i and i not in old_set]
+    if len(removed) == 1 and len(added) == 1:
+        return [(removed[0], added[0])]
+    return []
+
+
 def _migrate_camera_id(old_id: str, new_id: str) -> None:
     """Rename ``old_id`` -> ``new_id`` across in-memory state and on-disk
     ingest dirs in one lock-protected sweep.

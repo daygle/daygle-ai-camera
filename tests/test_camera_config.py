@@ -340,3 +340,58 @@ def test_migrate_camera_id_handles_recording_service_none(monkeypatch, cc):
 
     assert state.live_detection_history['new'] == ['a', 'b']
     assert state._frame_motion_prev['new'] == {'m': 1}
+
+
+# -- camera_id_renames ----------------------------------------------------
+# Regression coverage for the rename gate in ``update_cameras``. Pairing the
+# old/new camera lists positionally migrated one camera's live-detection state
+# and on-disk ingest dirs onto an UNRELATED camera whenever the list length
+# changed (add/delete) or the order shifted. ``camera_id_renames`` must return
+# a rename pair only for an unambiguous single rename.
+
+
+def _cams(*ids):
+    return [{'id': i} for i in ids]
+
+
+def test_camera_id_renames_single_rename(cc):
+    """One id disappears and one appears -> that is the rename."""
+    assert cc.camera_id_renames(_cams('a', 'b', 'c'), _cams('a', 'x', 'c')) == [('b', 'x')]
+
+
+def test_camera_id_renames_delete_yields_no_pairs(cc):
+    """A delete shortens the list. Positional pairing would migrate the
+    remaining cameras onto each other; the fix must emit nothing."""
+    assert cc.camera_id_renames(_cams('a', 'b', 'c'), _cams('a', 'c')) == []
+
+
+def test_camera_id_renames_add_yields_no_pairs(cc):
+    """An add lengthens the list and must not trigger a rename."""
+    assert cc.camera_id_renames(_cams('a', 'b'), _cams('a', 'b', 'z')) == []
+
+
+def test_camera_id_renames_reorder_yields_no_pairs(cc):
+    """Same id set in a new order is a reorder, not a rename."""
+    assert cc.camera_id_renames(_cams('a', 'b', 'c'), _cams('c', 'a', 'b')) == []
+
+
+def test_camera_id_renames_toggle_only_yields_no_pairs(cc):
+    """An enable/disable toggle leaves ids unchanged."""
+    assert cc.camera_id_renames(_cams('a', 'b'), _cams('a', 'b')) == []
+
+
+def test_camera_id_renames_multi_rename_not_guessed(cc):
+    """Two ids changing at once is ambiguous - emit nothing rather than
+    pair them incorrectly and corrupt on-disk state."""
+    assert cc.camera_id_renames(_cams('a', 'b'), _cams('x', 'y')) == []
+
+
+def test_camera_id_renames_ignores_blank_ids(cc):
+    """A camera without an id is never treated as a rename source/dest."""
+    assert cc.camera_id_renames(_cams('', 'b'), _cams('x', 'b')) == []
+    assert cc.camera_id_renames(_cams('a', 'b'), _cams('', 'b')) == []
+
+
+def test_camera_id_renames_duplicate_ids_do_not_multiply_pairs(cc):
+    """A repeated id must not make one rename look like several."""
+    assert cc.camera_id_renames(_cams('a', 'a', 'b'), _cams('a', 'a', 'x')) == [('b', 'x')]
