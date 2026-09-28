@@ -1757,9 +1757,9 @@ tzdata==2026.4 \
     --hash=sha256:c2169a8b0a7a5e9674da5a135ccdfb2b3e671b333ed9fed17b41f73c34476e81 \
     --hash=sha256:f1b8bd365d8d210c55353f4d7f8d6d8561c0ba50d704b700d195a9424bba0d79
     # via -r requirements.txt
-ultralytics==8.4.147 \
-    --hash=sha256:83e3339dd3de85d34773d115f7d8af0b258eff793afc615cefd35e63837c6104 \
-    --hash=sha256:e7b274227e98c80fb49f343ebe970c9d9381aadfffa0606cb5daa95a370892fb
+ultralytics==8.4.163 \
+    --hash=sha256:65b911abbefe69eee088589fdb579e810844c57c4fd8669f28368380d302e2ad \
+    --hash=sha256:ec00601ad4ad1b0a61d1b763f5422f653e549645d87c768f2381f87092d24e7c
     # via -r requirements.txt
 ultralytics-platform==0.1.65 \
     --hash=sha256:44cee7cf52b21d079ec98d541b20daa233bc652be392e865cc1209bf34e22ee4 \
