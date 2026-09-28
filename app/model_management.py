@@ -545,7 +545,7 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
             onnx_path = legacy_path
     except RuntimeError as exc:
         raise HTTPException(
-            status_code=502,
+            status_code=500,
             detail=f"Model path is invalid for {info['label']}.",
         ) from exc
 
@@ -687,7 +687,7 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
     try:
         destination = _resolution_path(model_name, imgsz)
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=f"Model export destination is invalid for {info['label']}.") from exc
+        raise HTTPException(status_code=500, detail=f"Model export destination is invalid for {info['label']}.") from exc
     # Route the registry filename through the strict basename
     # canonicaliser so a malformed entry cannot become an export destination
     # outside the models directory. Rejections are mapped to a generic 502
@@ -736,7 +736,7 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
             ),
         ) from exc
     except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to export {info['label']} ONNX model. Install export dependencies with `pip install ultralytics onnx`, then retry. Details: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to export {info['label']} ONNX model. Install export dependencies with `pip install ultralytics onnx`, then retry. Details: {exc}") from exc
     installed_version = _installed_package_version('ultralytics')
     with _installed_models_lock:
         installed_meta = _read_installed_models()

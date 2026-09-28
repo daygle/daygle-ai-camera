@@ -211,6 +211,20 @@ three things:
   and force-reinstalls (`--no-deps`) only the wheels whose files changed;
 - rewrites `/etc/ld.so.conf.d/daygle-cuda.conf` with the cu13 exclusion.
 
+The same step switches **torch/torchvision to their CPU-only builds** (same
+versions, from `https://download.pytorch.org/whl/cpu`). Torch is only used to
+export models, current CUDA torch wheels no longer run on Pascal, and their
+CUDA 13 dependencies are what overwrite cuDNN in the first place. The CPU build
+carries no NVIDIA wheels, so exports run on the CPU and cannot break GPU
+inference. FP16 export needs a CUDA torch; on a P4, export FP32 models.
+
+If the model **Update** button fails after removing the cu13 wheels by hand,
+`import torch` is broken. Install the CPU build:
+
+```bash
+"$V" -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision
+```
+
 Set `DAYGLE_PASCAL_CUDA_REPAIR=0` to disable the repair, or `=1` to force it.
 To repair by hand:
 

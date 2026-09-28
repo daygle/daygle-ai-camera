@@ -167,3 +167,35 @@ def test_cpu_variant_is_left_alone(harness):
     harness["lib"].write_bytes(b"something else")
     _stdout, log = harness["run"](DAYGLE_ONNXRUNTIME_VARIANT="cpu")
     assert _reinstalls(log) == []
+
+
+def _fake_dist(site, name, version):
+    dist_info = site / f"{name}-{version}.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n", encoding="utf-8")
+    (dist_info / "RECORD").write_text("", encoding="utf-8")
+
+
+def _torch_installs(log):
+    return [line for line in log if line.startswith("install") and "download.pytorch.org/whl/cpu" in line]
+
+
+def test_cuda_torch_is_swapped_for_the_cpu_build(harness):
+    _fake_dist(harness["site"], "torch", "2.13.0")
+    _fake_dist(harness["site"], "torchvision", "0.28.0")
+    stdout, log = harness["run"]()
+    installs = _torch_installs(log)
+    assert len(installs) == 1
+    assert "--no-deps" in installs[0]
+    assert installs[0].endswith("torch==2.13.0+cpu torchvision==0.28.0+cpu")
+    assert "CPU-only build" in stdout
+
+
+def test_cpu_torch_and_non_pascal_hosts_are_left_alone(harness):
+    _fake_dist(harness["site"], "torch", "2.13.0+cpu")
+    _stdout, log = harness["run"]()
+    assert _torch_installs(log) == []
+    shutil.rmtree(next(harness["site"].glob("torch-*.dist-info")))
+    _fake_dist(harness["site"], "torch", "2.13.0")
+    _stdout, log = harness["run"](DAYGLE_TEST_COMPUTE_CAP="8.6")
+    assert _torch_installs(log) == []

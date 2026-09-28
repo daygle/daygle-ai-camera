@@ -651,6 +651,11 @@ async function apiOnce(path, options = {}) {
     }
   }
   if (!response.ok) {
+    if (!(payload && payload.detail) && (response.status === 502 || response.status === 504)) {
+      // A reverse proxy (e.g. Cloudflare) replaces 502/504 bodies with its own
+      // page, so the server's reason never arrives. Point at where it is.
+      throw new Error(`Request failed: ${response.status}. A proxy replaced the server's error message; check the Application Log for details.`);
+    }
     throw new Error((payload && payload.detail) || `Request failed: ${response.status}`);
   }
   return payload || {};
