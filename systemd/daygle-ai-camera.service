@@ -19,7 +19,31 @@ ExecStart=/opt/daygle-ai-camera/.venv/bin/python -m app.server
 Restart=on-failure
 RestartSec=5
 
-# Minimal sandboxing (safe + compatible)
+# Sandboxing compatible with running as root (scripts/install_debian.sh switches
+# User/Group to root; the in-app updater needs it). The service and every
+# child it starts (ffmpeg, the updater, cloudflared) never load kernel modules,
+# change kernel/cgroup settings or the hostname, create namespaces, switch
+# execution personality, request realtime scheduling or create setuid files.
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+PrivateTmp=yes
+# Deliberately NOT set, because each breaks a feature:
+#   PrivateDevices / DevicePolicy / ProtectClock / ProtectKernelLogs - they
+#     restrict /dev (directly or via an implied DeviceAllow=), hiding the
+#     NVIDIA GPU and local camera devices.
+#   ProtectSystem / ProtectHome - the in-app updater writes the application
+#     tree and installs cloudflared into /usr/local/bin.
+#   NoNewPrivileges - the updater escalates via sudo when not running as root.
+#   MemoryDenyWriteExecute - inference runtimes may JIT-compile kernels.
+# ReadWritePaths only takes effect alongside ProtectSystem=; it is kept so the
+# installer's path substitution and a future ProtectSystem= have a target.
 ReadWritePaths=/etc/daygle-ai-camera /opt/daygle-ai-camera/data
 
 [Install]

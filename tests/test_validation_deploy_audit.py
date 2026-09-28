@@ -221,3 +221,38 @@ def test_update_script_allowlist_is_anchored():
     text = (Path(__file__).resolve().parents[1] / 'scripts' / 'update.sh').read_text()
     assert "EXPECTED_REMOTE_REGEX='^(" in text
     assert 'git pull --ff-only origin' in text
+
+
+def _unit_directives() -> dict[str, str]:
+    text = (Path(__file__).resolve().parents[1] / 'systemd' / 'daygle-ai-camera.service').read_text()
+    directives: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith(('#', '[')) and '=' in line:
+            key, value = line.split('=', 1)
+            directives[key] = value
+    return directives
+
+
+def test_systemd_unit_carries_root_compatible_hardening():
+    directives = _unit_directives()
+    for key in (
+        'ProtectKernelModules', 'ProtectKernelTunables', 'ProtectControlGroups',
+        'ProtectHostname', 'RestrictNamespaces', 'LockPersonality',
+        'RestrictRealtime', 'RestrictSUIDSGID', 'PrivateTmp',
+    ):
+        assert directives.get(key) == 'yes', key
+    assert directives.get('SystemCallArchitectures') == 'native'
+
+
+def test_systemd_unit_does_not_restrict_devices_or_the_updater():
+    """These break real features: /dev restrictions (including the implicit
+    DeviceAllow= from ProtectClock / ProtectKernelLogs) hide the GPU and
+    cameras; ProtectSystem/ProtectHome/NoNewPrivileges break the in-app
+    updater; MemoryDenyWriteExecute can break JIT-compiling inference runtimes."""
+    directives = _unit_directives()
+    for key in (
+        'PrivateDevices', 'DevicePolicy', 'DeviceAllow', 'ProtectClock', 'ProtectKernelLogs',
+        'ProtectSystem', 'ProtectHome', 'NoNewPrivileges', 'MemoryDenyWriteExecute',
+    ):
+        assert key not in directives, key
