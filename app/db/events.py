@@ -758,7 +758,7 @@ class EventsMixin:
         recordings_by_id: dict[int, dict[str, Any]] = {}
         for recording_ids in _batched(all_recording_ids):
             placeholders = ','.join('?' * len(recording_ids))
-            label_map, confidence_map = self._fetch_labels_for_recordings(db, recording_ids)
+            label_map, confidence_map, ai_label_map = self._fetch_labels_for_recordings(db, recording_ids)
             for recording in db.execute(
                 f'SELECT * FROM recordings WHERE id IN ({placeholders}) ORDER BY started_at DESC, id DESC',
                 recording_ids,
@@ -767,6 +767,7 @@ class EventsMixin:
                 item = self._recording_row(recording)
                 item['labels'] = label_map.get(recording_id, [])
                 item['label_confidences'] = confidence_map.get(recording_id, {})
+                item['ai_labels'] = ai_label_map.get(recording_id, [])
                 recordings_by_id[recording_id] = item
 
         for event_id in event_ids:

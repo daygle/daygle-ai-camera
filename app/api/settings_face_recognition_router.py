@@ -166,7 +166,7 @@ async def download_embedding_model(
         )
     except RuntimeError as exc:
         logger.warning('Embedding model download failed for %s: %s', catalog_id, exc)
-        raise HTTPException(status_code=502, detail='Embedding model download failed.') from exc
+        raise HTTPException(status_code=500, detail='Embedding model download failed.') from exc
     rel_path, available, reason = await run_in_threadpool(_activate_embedding_model, info, db, reload_service)
     write_audit_log(request, db, 'download', 'settings.face_recognition.embedding_model', details={
         'catalog_id': catalog_id,
@@ -231,7 +231,7 @@ async def update_embedding_model(
         )
     except RuntimeError as exc:
         logger.warning('Embedding model update failed for %s: %s', catalog_id, exc)
-        raise HTTPException(status_code=502, detail='Embedding model update failed.') from exc
+        raise HTTPException(status_code=500, detail='Embedding model update failed.') from exc
     available = reason = None
     if _relative_model_path(destination) == str(effective_face_recognition_config().get('model_path') or ''):
         # Refreshed the active model -> reload so the new bytes are used.

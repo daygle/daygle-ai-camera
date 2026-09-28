@@ -82,6 +82,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 from app.camera_id import normalize_camera_id
@@ -694,6 +695,75 @@ def normalize_zone_activity(zone: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+AI_TAG_MATCH_MODES = ('tags', 'description', 'both')
+_AI_TAG_TERM_RE = re.compile(r'^[a-z][a-z0-9\- ]{1,29}$')
+MAX_AI_TAG_RULE_TERMS = 20
+
+
+def normalize_zone_ai_tags(zone: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize an optional per-zone **AI tag alert** rule.
+
+    Fires when the local vision model's description of an event in this zone
+    (app.ai_verification) names one of ``tags``: in its tag list, its
+    sentence, or either, per ``match``. Returns ``None`` when not configured.
+
+    Shape::
+
+        {
+            "enabled": bool,
+            "name": str,
+            "tags": [str, ...],           # lowercase, 1-3 words each
+            "match": "tags" | "description" | "both",
+            "cooldown_seconds": int,
+            "email_enabled": bool,
+            "email_recipients": [str, ...],
+            "push_enabled": bool,
+            "notify_start": str | None,   # HH:MM quiet-hours window
+            "notify_end": str | None,
+        }
+    """
+    raw = zone.get('ai_tags')
+    if not isinstance(raw, dict):
+        return None
+    raw_tags = raw.get('tags')
+    if isinstance(raw_tags, str):
+        raw_tags = raw_tags.split(',')
+    tags: list[str] = []
+    for item in raw_tags if isinstance(raw_tags, list) else []:
+        if not isinstance(item, str):
+            continue
+        tag = ' '.join(item.strip().lower().replace('_', ' ').split())
+        if _AI_TAG_TERM_RE.match(tag) and len(tag.split()) <= 3 and tag not in tags:
+            tags.append(tag)
+        if len(tags) >= MAX_AI_TAG_RULE_TERMS:
+            break
+    match = str(raw.get('match') or 'both').strip().lower()
+    if match not in AI_TAG_MATCH_MODES:
+        match = 'both'
+    try:
+        cooldown = max(0, int(raw.get('cooldown_seconds') if raw.get('cooldown_seconds') is not None else 300))
+    except (TypeError, ValueError):
+        cooldown = 300
+    return {
+        'enabled': bool(raw.get('enabled', True)),
+        'name': str(raw.get('name') or 'AI tag alert').strip()[:60] or 'AI tag alert',
+        'tags': tags,
+        'match': match,
+        'cooldown_seconds': cooldown,
+        'email_enabled': bool(raw.get('email_enabled', False)),
+        'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
+        'push_enabled': bool(raw.get('push_enabled', False)),
+        'notify_start': _strict_hhmm(raw.get('notify_start')),
+        'notify_end': _strict_hhmm(raw.get('notify_end')),
+    }
+
+
+def _strict_hhmm(value: Any) -> str | None:
+    """``normalize_hhmm`` but an unparseable value means "no window"."""
+    text = normalize_hhmm(value)
+    return text if text and re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', text) else None
+
+
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     if not isinstance(zones, list):
@@ -809,5 +879,9 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
         activity = normalize_zone_activity(zone)
         if activity is not None:
             entry['activity_spike'] = activity
+        # Optional AI tag alert rule (app.ai_tag_alerts).
+        ai_tags = normalize_zone_ai_tags(zone)
+        if ai_tags is not None:
+            entry['ai_tags'] = ai_tags
         normalized.append(entry)
     return normalized

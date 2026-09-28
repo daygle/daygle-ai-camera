@@ -301,8 +301,8 @@
       <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">🤖</div>
         <div>
-          <h2>AI Alert Verification</h2>
-          <p class="settings-section-subtitle">Before an object alert's email or push notification is sent, a local vision model looks at the snapshot and confirms the object is really there. Alerts it rejects (shadows, reflections, bushes) are not notified, but the event and recording are kept and marked in the Events list. If the model is unreachable or slow, alerts are sent as normal. Works with any OpenAI-compatible server, such as Ollama.</p>
+          <h2>AI Alert Verification &amp; Descriptions</h2>
+          <p class="settings-section-subtitle">A local vision model looks at event snapshots. <strong>Verification</strong> confirms an object alert is real before its email or push notification is sent; rejected alerts (shadows, reflections, bushes) are not notified but stay in the Events list, marked. <strong>Descriptions</strong> add a plain-English sentence to notifications and events, and make footage searchable on the Events page. If the model is unreachable or slow, alerts are sent as normal. Works with any OpenAI-compatible server, such as Ollama.</p>
         </div>
       </div>
       <form id="aiVerificationForm" class="form-grid">
@@ -336,12 +336,32 @@
             <option value="true">Enabled</option>
             <option value="false">Disabled</option>
           </select></label>
+        <label>
+          <span>Describe Events <span class="info-tip" data-tip="Adds a one-sentence description to notifications and the Events list, and makes events searchable. Alerts only: events that notify. All events: every event with a snapshot, described in the background (uses more GPU time). Default: Off" title="Adds a one-sentence description to notifications and the Events list, and makes events searchable. Alerts only: events that notify. All events: every event with a snapshot, described in the background (uses more GPU time). Default: Off" tabindex="0" aria-label="Help: Adds a one-sentence description to notifications and the Events list, and makes events searchable. Alerts only: events that notify. All events: every event with a snapshot, described in the background (uses more GPU time). Default: Off"></span></span>
+          <select name="describe_events">
+            <option value="off">Off</option>
+            <option value="alerts">Alerts only</option>
+            <option value="all">All events</option>
+          </select></label>
         <fieldset class="ai-verification-cameras">
           <legend>Cameras <span class="info-tip" data-tip="Cameras whose alerts are verified. None ticked = all cameras." title="Cameras whose alerts are verified. None ticked = all cameras." tabindex="0" aria-label="Help: Cameras whose alerts are verified. None ticked = all cameras."></span></legend>
           <div id="aiVerificationCameras" class="ai-verification-camera-list"><span class="muted">Loading cameras…</span></div>
         </fieldset>
       </form>
       <p id="aiVerificationTestResult" class="muted" aria-live="polite"></p>
+      <div class="ai-backfill-row">
+        <label class="ai-backfill-hours">
+          <span>Describe past events from the last</span>
+          <select id="aiBackfillHours">
+            <option value="24">24 hours</option>
+            <option value="72">3 days</option>
+            <option value="168">7 days</option>
+            <option value="720">30 days</option>
+          </select>
+        </label>
+        <button id="aiBackfillBtn" class="secondary" type="button">Describe Past Events</button>
+        <span id="aiBackfillStatus" class="muted" aria-live="polite"></span>
+      </div>
       <div class="button-row">
         <button id="testAiVerificationBtn" class="btn-info" type="button">Test on Latest Event</button>
         <button type="submit" form="aiVerificationForm">Save AI Verification Settings</button>

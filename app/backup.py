@@ -45,6 +45,7 @@ from app.config_facades import (
     effective_storage_config,
 )
 from app.database import AUDIT_LOG_IMMUTABLE_TRIGGERS
+from app.db.descriptions import EVENT_DESCRIPTION_FTS_DDL, EVENT_DESCRIPTION_TRIGGERS
 from app.label_groups import refresh_label_groups
 from app.recording_files import delete_recording_files, delete_snapshot_files
 from app.media_utils import safe_storage_path
@@ -71,6 +72,7 @@ def _normalize_ddl(sql: str | None) -> str:
     """
     collapsed = ' '.join((sql or '').split())
     collapsed = collapsed.replace('CREATE TRIGGER IF NOT EXISTS', 'CREATE TRIGGER')
+    collapsed = collapsed.replace('CREATE VIRTUAL TABLE IF NOT EXISTS', 'CREATE VIRTUAL TABLE')
     return collapsed.rstrip(' ;').lower()
 
 
@@ -79,7 +81,14 @@ def _normalize_ddl(sql: str | None) -> str:
 # its normalised body match an entry here; every other trigger and all views
 # are rejected by ``overwrite_database_from_file``.
 _ALLOWED_TRIGGER_DDL: dict[str, str] = {
-    name: _normalize_ddl(sql) for name, sql in AUDIT_LOG_IMMUTABLE_TRIGGERS.items()
+    name: _normalize_ddl(sql)
+    for name, sql in {**AUDIT_LOG_IMMUTABLE_TRIGGERS, **EVENT_DESCRIPTION_TRIGGERS}.items()
+}
+# The only virtual table the application creates: the full-text index over AI
+# event descriptions. Any other virtual table in an uploaded backup is
+# rejected, like an unknown trigger (a virtual table runs module code on use).
+_ALLOWED_VIRTUAL_TABLE_DDL: dict[str, str] = {
+    'event_description_fts': _normalize_ddl(EVENT_DESCRIPTION_FTS_DDL),
 }
 
 
@@ -613,15 +622,16 @@ def overwrite_database_from_file(restore_source: Path) -> None:
             pass
         rows = source.execute(
             "SELECT type, name, sql FROM sqlite_master "
-            "WHERE type IN ('view', 'trigger') "
+            "WHERE (type IN ('view', 'trigger') "
+            "OR (type = 'table' AND UPPER(sql) LIKE 'CREATE VIRTUAL TABLE%')) "
             "AND sql IS NOT NULL AND sql <> ''"
         ).fetchall()
         offending = [
-            (row[0], row[1])
+            (row[0] if row[0] != 'table' else 'virtual table', row[1])
             for row in rows
             if not (
-                row[0] == 'trigger'
-                and _ALLOWED_TRIGGER_DDL.get(row[1]) == _normalize_ddl(row[2])
+                (row[0] == 'trigger' and _ALLOWED_TRIGGER_DDL.get(row[1]) == _normalize_ddl(row[2]))
+                or (row[0] == 'table' and _ALLOWED_VIRTUAL_TABLE_DDL.get(row[1]) == _normalize_ddl(row[2]))
             )
         ]
         if offending:

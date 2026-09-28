@@ -1,4 +1,4 @@
-# AI alert verification
+# AI alert verification, descriptions and search
 
 AI alert verification reduces false alarms. Before an object alert's email or
 push notification is sent, a local vision-language model looks at the event
@@ -79,6 +79,115 @@ Go to **Settings → Notifications → AI Alert Verification**.
 model, using the unsaved form values, and shows the verdict and how long it
 took. Use it to check the server, the model name and the speed before you
 enable the feature.
+
+## Event descriptions
+
+With **Describe Events** set, the same model writes one factual sentence about
+each event's snapshot, for example *"A courier in a hi-vis vest leaves a
+parcel at the front door."*
+
+- **Alerts only**: events that send a notification. The sentence is the first
+  line of the email and the push notification, replacing "Alert triggered:
+  person detected (87%)"; the confidence and other details stay below it.
+- **All events**: also every event that does not alert, described in the
+  background behind alert work. This makes all footage searchable, but uses
+  more GPU time: one model call per event.
+- The description appears under the detections in the Events list and is
+  stored in the event's metadata (`ai_description`: text, model, time).
+- Verification runs first. An alert the model rejects is not described in
+  *Alerts only* mode.
+- If describing fails or times out, the notification is sent without the
+  sentence. Descriptions are never a reason for an alert to be late or lost.
+- Uses the same server, model and camera selection as verification.
+
+### AI tags
+
+With each description the model also lists up to 8 notable objects it can see,
+such as `ladder`, `hi-vis vest`, `parcel` or `wheelie bin`. These are often
+things the object detector has no class for.
+
+- **Where they appear:** tags show as dashed **🤖** chips under the
+  description in the Events list, and on the event's recordings (the list and
+  the clip details).
+- **Recording filter:** the recordings label filter lists them as
+  "Ladder (AI tag, 3)".
+- **Search:** tags are searchable, even when the sentence doesn't use the word.
+- **Tags are not detections.** They have no box or confidence and never
+  trigger alerts or recordings. A tag that repeats a detected label is
+  dropped.
+- **Detections win.** If a real detection of the same label arrives later, it
+  takes over from the tag.
+- **Where they are stored:** in `ai_description.tags` on the event, and as
+  `recording_labels` rows with `source = 'ai'`. The recordings API reports
+  them as `ai_labels`, apart from `labels`.
+- **Model support:** the model is asked for JSON. A model that ignores the
+  format still produces a description, just without tags.
+
+### AI tag alerts
+
+An **AI tag alert** notifies you when the model names something in an area,
+such as a ladder, a parcel or a hi-vis vest, even when object detection has no
+class for it. Set it up per area:
+
+1. **Zones page:** turn on **AI tag alert** for the area and add what to watch
+   for, e.g. `ladder` or `parcel`, pressing Enter after each.
+2. **Choose where it must appear (Match in):**
+   - **Tags only:** in the model's tag list;
+   - **Description only:** in its sentence (whole words; plurals match);
+   - **Tags or description:** either.
+3. **Set a cooldown**, which is 300 seconds by default.
+4. **Alerts page:** choose **Alert Type: AI Tag**, then set email, push,
+   recipients and a notify window, as for loitering.
+
+How it behaves:
+
+- **Every event on that camera is described**, whatever the Describe Events
+  setting. A rule can only see described events.
+- **An event counts as in the area** when one of its detections (object or
+  motion) was in the zone, or when the zone covers the whole frame.
+- **What a firing does:** it adds an alert to that event, marks it as alerted,
+  and sends a notification. The notification starts with
+  *"AI tag alert (unconfirmed): Ladder on Front (Gate)."*, followed by the
+  description.
+- **Unconfirmed:** only the language model saw the object. Start with areas
+  where an occasional false alert is harmless.
+- **Timing:** these alerts arrive a few seconds after the event, once the
+  description is ready. If the model server is down, they don't fire.
+- **Cooldown:** it is only used up by an alert that is actually sent. A rule
+  with no channel on, or outside its notify window, never blocks a later alert.
+- **Past events:** Describe Past Events never fires alerts on old events.
+
+**Describe Past Events** (Settings) describes events from the last 24 hours to
+30 days that have no description yet, up to 500 at a time, so they become
+searchable. It runs in the background, one event at a time, pauses whenever an
+alert needs the model, and stops if descriptions are switched off.
+
+## Plain-English search
+
+The search box on the **Events** page searches the descriptions. Ask it
+questions such as:
+
+- `red car in the driveway yesterday afternoon`
+- `anyone carrying a ladder`
+- `delivery at the front door this morning`
+
+The model turns the question into a query:
+
+- the things that must appear, each with synonyms ("car" also matches
+  "vehicle", "ute", "sedan");
+- a camera, when you name one;
+- a time window ("yesterday afternoon" is 12:00-18:00 yesterday in the admin
+  time zone).
+
+The line under the search box shows how the question was understood. The
+search runs against a full-text index that matches word forms ("carrying"
+finds "carries"). If nothing mentions every concept, it shows events that
+match any of them and says so.
+
+Without a reachable model, search still works on keywords, camera names and
+simple times (today, yesterday, this morning, this afternoon, last night).
+Only events that have a description are searchable. Non-admin users see the
+same events in search as in the Events list.
 
 ## Behaviour details
 

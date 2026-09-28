@@ -138,6 +138,12 @@ class RecordingsMixin:
             INSERT INTO recording_labels (recording_id, label, source, created_at, confidence)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(recording_id, label) DO UPDATE SET
+                -- A real detection promotes a label first seen as an AI tag;
+                -- an AI tag never downgrades a detected label.
+                source = CASE
+                    WHEN recording_labels.source = 'ai' AND excluded.source != 'ai' THEN excluded.source
+                    ELSE recording_labels.source
+                END,
                 confidence = CASE
                     WHEN excluded.confidence IS NOT NULL
                          AND (recording_labels.confidence IS NULL OR excluded.confidence > recording_labels.confidence)
@@ -611,7 +617,9 @@ class RecordingsMixin:
             "SELECT label, source, confidence FROM recording_labels WHERE recording_id = ? ORDER BY label ASC",
             (recording["id"],),
         ).fetchall()
-        recording["labels"] = [str(label_row["label"]) for label_row in label_rows]
+        # AI tags (app.ai_verification) are reported apart from detected labels.
+        recording["labels"] = [str(label_row["label"]) for label_row in label_rows if label_row["source"] != 'ai']
+        recording["ai_labels"] = [str(label_row["label"]) for label_row in label_rows if label_row["source"] == 'ai']
         recording["label_confidences"] = {
             str(label_row["label"]): float(label_row["confidence"])
             for label_row in label_rows
@@ -638,7 +646,7 @@ class RecordingsMixin:
         recordings = [self._recording_row(row) for row in rows]
         recording_ids = [int(r['id']) for r in recordings]
 
-        labels_map, confidences_map = self._fetch_labels_for_recordings(db, recording_ids)
+        labels_map, confidences_map, ai_labels_map = self._fetch_labels_for_recordings(db, recording_ids)
         events_by_recording = self._events_for_recordings(db, recording_ids)
 
         event_ids = [int(r['event_id']) for r in recordings if r.get('event_id') is not None]
@@ -664,6 +672,7 @@ class RecordingsMixin:
 
         for recording in recordings:
             recording['labels'] = labels_map.get(int(recording['id']), [])
+            recording['ai_labels'] = ai_labels_map.get(int(recording['id']), [])
             recording['label_confidences'] = confidences_map.get(int(recording['id']), {})
             recording['event'] = None
             recording['detections'] = []
@@ -712,19 +721,24 @@ class RecordingsMixin:
     @staticmethod
     def _fetch_labels_for_recordings(
         db: sqlite3.Connection, recording_ids: list[int]
-    ) -> tuple[dict[int, list[str]], dict[int, dict[str, float]]]:
+    ) -> tuple[dict[int, list[str]], dict[int, dict[str, float]], dict[int, list[str]]]:
+        """Detected labels, their confidences, and AI tags, per recording."""
         if not recording_ids:
-            return {}, {}
+            return {}, {}, {}
         placeholders = ','.join('?' * len(recording_ids))
         rows = db.execute(
-            f"SELECT recording_id, label, confidence FROM recording_labels WHERE recording_id IN ({placeholders}) ORDER BY label ASC",
+            f"SELECT recording_id, label, source, confidence FROM recording_labels WHERE recording_id IN ({placeholders}) ORDER BY label ASC",
             [int(rid) for rid in recording_ids],
         ).fetchall()
         grouped: dict[int, list[str]] = {int(rid): [] for rid in recording_ids}
         confidences: dict[int, dict[str, float]] = {int(rid): {} for rid in recording_ids}
+        ai_tags: dict[int, list[str]] = {int(rid): [] for rid in recording_ids}
         for row in rows:
             rid = int(row['recording_id'])
+            if row['source'] == 'ai':
+                ai_tags[rid].append(str(row['label']))
+                continue
             grouped[rid].append(str(row['label']))
             if row['confidence'] is not None:
                 confidences[rid][str(row['label'])] = float(row['confidence'])
-        return grouped, confidences
+        return grouped, confidences, ai_tags

@@ -59,6 +59,14 @@
         </div>
       </div>
 
+      <form id="eventSearchForm" class="event-search" role="search" autocomplete="off">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="eventSearchInput" type="search" maxlength="300" aria-label="Search events in plain English" placeholder="Search footage, e.g. red car in the driveway yesterday afternoon" />
+        <button type="submit">Search</button>
+        <button id="eventSearchClear" class="secondary" type="button" hidden>Clear</button>
+      </form>
+      <p id="eventSearchSummary" class="muted event-search-summary" aria-live="polite" hidden></p>
+
       <div class="activity-filter-row">
         <div class="activity-filter-group" role="tablist" aria-label="Filter events">
           <button class="activity-filter-pill active" data-filter="all" type="button" role="tab" aria-selected="true">

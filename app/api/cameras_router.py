@@ -367,7 +367,7 @@ async def camera_ptz(camera_id: str, request: Request):
             timeout_seconds=step_duration,
         )
     except OSError as exc:
-        raise HTTPException(status_code=502, detail=f'PTZ connection failed: {exc}') from exc
+        raise HTTPException(status_code=500, detail=f'PTZ connection failed: {exc}') from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

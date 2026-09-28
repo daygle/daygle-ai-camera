@@ -9,6 +9,7 @@ from typing import Callable, Iterator
 
 from app.db.alerts import AlertsMixin
 from app.db.audit import AuditLogMixin
+from app.db.descriptions import EventDescriptionsMixin
 from app.db.diagnostics import CameraDiagnosticsMixin
 from app.db.events import EventsMixin
 from app.db.persons import PersonsMixin
@@ -72,6 +73,7 @@ class EventDatabase(
     CameraDiagnosticsMixin,
     PersonsMixin,
     UnknownFacesMixin,
+    EventDescriptionsMixin,
 ):
     def __init__(self, database_path: str) -> None:
         self.database_path = Path(database_path)
@@ -486,6 +488,8 @@ class EventDatabase(
             # expungement) if ever needed. Without this carve-out, the only way
             # to ever delete a row would be to drop the trigger first.
             db.executescript('\n'.join(AUDIT_LOG_IMMUTABLE_TRIGGERS.values()))
+            # Full-text index over AI event descriptions (app.db.descriptions).
+            self.ensure_event_description_index(db)
 
         # Run checkpoint/optimize on a fresh autocommit connection. Doing this
         # inside the schema/backfill transaction can make a passive checkpoint

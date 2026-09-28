@@ -305,6 +305,96 @@ function ensureTripwire(zone) {
 // config (min dwell, sensitivity, which objects, record) lives on the Zones
 // card; email/push/quiet-hours are configured on the Alerts page, like the
 // tripwire and object/sound rules.
+// ─── AI tag alert (local vision model) ─────────────────────────────────────
+// A zone's optional AI tag alert, stored on ``zone.ai_tags``: fires when the
+// local AI model's description of an event in this zone names one of the
+// tags (app/ai_tag_alerts.py). Tags + match mode live on the Zones card;
+// email/push/quiet-hours on the Alerts page, like the behaviour rules.
+const AI_TAG_MATCH_OPTIONS = [
+  ['both', 'Tags or description'],
+  ['tags', 'Tags only'],
+  ['description', 'Description only'],
+];
+
+function aiTagsOf(zone) {
+  return zone && zone.ai_tags && typeof zone.ai_tags === 'object' ? zone.ai_tags : null;
+}
+
+function ensureAiTags(zone) {
+  const existing = aiTagsOf(zone);
+  if (existing) {
+    existing.enabled = true;
+    return existing;
+  }
+  zone.ai_tags = {
+    enabled: true,
+    name: 'AI tag alert',
+    tags: [],
+    match: 'both',
+    cooldown_seconds: 300,
+    email_enabled: false,
+    email_recipients: [],
+    push_enabled: false,
+    notify_start: null,
+    notify_end: null,
+  };
+  return zone.ai_tags;
+}
+
+function normalizeAiTagInput(value) {
+  return String(value || '').toLowerCase().replace(/_/g, ' ').split(/\s+/).filter(Boolean).join(' ');
+}
+
+function aiTagChips(rule, zoneIndex) {
+  const tags = rule && Array.isArray(rule.tags) ? rule.tags : [];
+  if (!tags.length) return '<span class="tripwire-any">No tags yet - add what to watch for</span>';
+  return tags.map((tag, tagIndex) => (
+    `<span class="zone-object-chip tripwire-chip">${escapeHtml(tag)}<button type="button" class="tripwire-chip-remove" data-ai-tags-remove="${zoneIndex}:${tagIndex}" title="Stop watching for ${escapeHtml(tag)}" aria-label="Stop watching for ${escapeHtml(tag)}">×</button></span>`
+  )).join('');
+}
+
+function aiTagsBody(rule, zoneIndex) {
+  const match = rule.match || 'both';
+  return `
+    <div class="zone-tripwire-body">
+      <label class="sound-rule-field tripwire-name-field">
+        <span>Name</span>
+        <input type="text" data-ai-tags-name="${zoneIndex}" value="${escapeHtml(rule.name || 'AI tag alert')}" maxlength="60" placeholder="AI tag alert" />
+      </label>
+      <div class="sound-rule-field tripwire-labels-field">
+        <span>Watch for</span>
+        <div class="tripwire-labels" data-ai-tags-list="${zoneIndex}">${aiTagChips(rule, zoneIndex)}</div>
+        <input type="text" class="ai-tags-add" data-ai-tags-add="${zoneIndex}" maxlength="30" placeholder="Add a thing, e.g. ladder, then Enter" aria-label="Add something for the AI to watch for" />
+      </div>
+      <div class="tripwire-toggles">
+        <label class="sound-rule-field">
+          <span>Match in</span>
+          <select data-ai-tags-match="${zoneIndex}" title="Where the AI must name it: its tag list, its description sentence, or either.">
+            ${AI_TAG_MATCH_OPTIONS.map(([value, label]) => `<option value="${value}"${value === match ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="sound-rule-field">
+          <span>Cooldown (s)</span>
+          <input type="number" data-ai-tags-cooldown="${zoneIndex}" min="0" max="86400" step="30" value="${escapeHtml(rule.cooldown_seconds ?? 300)}" title="Minimum time between AI tag alerts for this area." />
+        </label>
+      </div>
+      <p class="muted tripwire-hint">Alerts when the local AI model's description of an event in this area names one of these. Unconfirmed: only the AI saw it, and alerts arrive a few seconds after the event. Every event on this camera is described while this is on. <a class="zone-assigned-link" href="/alerts">Set email / push alerts</a></p>
+    </div>`;
+}
+
+function renderAiTagsCard(zone, zoneIndex) {
+  const rule = aiTagsOf(zone);
+  const enabled = Boolean(rule && rule.enabled !== false);
+  return `
+    <div class="zone-tripwire-card zone-ai-tags-card${enabled ? ' is-enabled' : ''}" data-zone-ai-tags-for="${zoneIndex}">
+      <div class="zone-tripwire-head">
+        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">🤖</span><strong>AI tag alert</strong><span class="muted zone-tripwire-sub">Alert when the AI model sees something, e.g. a ladder</span></div>
+        ${ruleToggleCell(`data-ai-tags-enabled="${zoneIndex}"`, enabled, 'Enable AI tag alerts for this area', false)}
+      </div>
+      ${enabled ? aiTagsBody(rule, zoneIndex) : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to be alerted when the local AI model names something here that object detection has no class for, like a ladder, parcel or hi-vis vest.</p>'}
+    </div>`;
+}
+
 function loiterOf(zone) {
   return zone && zone.loiter && typeof zone.loiter === 'object' ? zone.loiter : null;
 }
@@ -1090,6 +1180,7 @@ function renderObjectDetectionRules() {
         ${renderLoiterCard(zone, zoneIndex)}
         ${renderTimeCard(zone, zoneIndex)}
         ${renderActivityCard(zone, zoneIndex)}
+        ${renderAiTagsCard(zone, zoneIndex)}
       </div>`;
   }).join('');
   bindObjectRuleControls();
@@ -1115,6 +1206,7 @@ function bindObjectRuleControls() {
   bindLoiterControls();
   bindTimeControls();
   bindActivityControls();
+  bindAiTagsControls();
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
@@ -1349,6 +1441,93 @@ function bindTripwireControls() {
 // Loitering card bindings. Like the tripwire card, the enable toggle and label
 // edits re-render (so the card body updates) while the text/number inputs
 // mutate in place to keep focus; delivery lives on the Alerts page.
+// AI tag alert card bindings, mirroring the loiter card: enable and tag
+// edits re-render; name/match/cooldown mutate in place; delivery on Alerts.
+function bindAiTagsControls() {
+  const zoneAt = (index) => cameraDetection().zones[Number(index)];
+
+  document.querySelectorAll('[data-ai-tags-enabled]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const zone = zoneAt(cb.dataset.aiTagsEnabled);
+      if (!zone) return;
+      selectedZoneIndex = Number(cb.dataset.aiTagsEnabled);
+      if (cb.checked) {
+        ensureAiTags(zone);
+        liveEls.status.textContent = 'AI tag alert enabled - add what to watch for, then Save Zones and set email / push on the Alerts page.';
+      } else if (aiTagsOf(zone)) {
+        zone.ai_tags.enabled = false;
+      }
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-ai-tags-add]').forEach((inp) => {
+    const add = () => {
+      const rule = aiTagsOf(zoneAt(inp.dataset.aiTagsAdd));
+      if (!rule) return;
+      rule.tags = Array.isArray(rule.tags) ? rule.tags : [];
+      let added = false;
+      inp.value.split(',').map(normalizeAiTagInput).forEach((tag) => {
+        if (tag && tag.length <= 30 && tag.split(' ').length <= 3 && /^[a-z][a-z0-9\- ]+$/.test(tag) && !rule.tags.includes(tag)) {
+          rule.tags.push(tag);
+          added = true;
+        }
+      });
+      if (!added) return;
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    };
+    inp.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        add();
+      }
+    });
+    inp.addEventListener('change', add);
+  });
+
+  document.querySelectorAll('[data-ai-tags-remove]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [zoneIndex, tagIndex] = String(button.dataset.aiTagsRemove).split(':').map(Number);
+      const rule = aiTagsOf(zoneAt(zoneIndex));
+      if (!rule || !Array.isArray(rule.tags)) return;
+      rule.tags.splice(tagIndex, 1);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-ai-tags-name]').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const rule = aiTagsOf(zoneAt(inp.dataset.aiTagsName));
+      if (!rule) return;
+      rule.name = inp.value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-ai-tags-match]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const rule = aiTagsOf(zoneAt(select.dataset.aiTagsMatch));
+      if (!rule) return;
+      rule.match = select.value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-ai-tags-cooldown]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const rule = aiTagsOf(zoneAt(inp.dataset.aiTagsCooldown));
+      if (!rule) return;
+      const value = Math.max(0, Math.min(86400, Number.parseInt(inp.value, 10) || 0));
+      rule.cooldown_seconds = value;
+      inp.value = value;
+      markZoneUnsaved();
+    });
+  });
+}
+
 function bindLoiterControls() {
   const zoneAt = (index) => cameraDetection().zones[Number(index)];
 

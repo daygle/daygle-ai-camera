@@ -200,6 +200,17 @@ function aiVerificationBadge(event) {
   return `<span class="detection ${filtered ? 'detection-ai-filtered' : 'detection-ai-verified'}" title="${escapeHtml(title)}">🤖 ${filtered ? 'Filtered' : 'Verified'}</span>`;
 }
 
+// Plain-English description written by the local AI model (see
+// app/ai_verification.py), when event descriptions are enabled.
+function eventDescription(event) {
+  const record = (event.metadata || {}).ai_description || {};
+  const text = record.text
+    ? `<p class="activity-item-description" title="Described by the local AI model">${escapeHtml(record.text)}</p>`
+    : '';
+  const tags = aiTagPills(record.tags);
+  return `${text}${tags ? `<div class="activity-item-badges activity-item-ai-tags">${tags}</div>` : ''}`;
+}
+
 function renderEventRow(event) {
   const created = event.created_at || '';
   const camera = eventCameraLabel(event);
@@ -231,7 +242,7 @@ function renderEventRow(event) {
     <tr class="activity-table-row ${typeClass}" data-event-row="${escapeHtml(String(event.id))}">
       <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}${aiBadge}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
       <td class="activity-cell-camera">${escapeHtml(camera)}</td>
-      <td class="activity-cell-detections"><div class="activity-item-badges">${eventPills(event)}</div></td>
+      <td class="activity-cell-detections"><div class="activity-item-badges">${eventPills(event)}</div>${eventDescription(event)}</td>
       <td class="activity-cell-when">
         <div class="activity-item-when">
           <div class="activity-item-when-relative">
@@ -385,7 +396,68 @@ function renderList() {
   wireLoadMore();
 }
 
+// ─── Plain-English search ───────────────────────────────────────────────────
+// Searches the AI event descriptions (GET /api/event-search). Results replace
+// the feed until Clear or a time-range pill reloads the normal list.
+let searchActive = false;
+
+function describeInterpretation(interp, count) {
+  if (!interp) return '';
+  const parts = [];
+  if (interp.terms && interp.terms.length) {
+    parts.push(interp.terms.map((group) => group.join(' / ')).join(' + '));
+  }
+  if (interp.camera) parts.push(`on ${interp.camera}`);
+  const fmt = (iso) => (iso ? formatDate(iso) : '');
+  if (interp.since || interp.until) {
+    parts.push(interp.since && interp.until ? `${fmt(interp.since)} – ${fmt(interp.until)}`
+      : interp.since ? `since ${fmt(interp.since)}` : `until ${fmt(interp.until)}`);
+  }
+  const how = interp.interpreted_by === 'model' ? 'AI-interpreted' : 'keyword';
+  const relaxed = interp.relaxed ? ' No event matched everything, so these match any of the terms.' : '';
+  return `${count} result${count === 1 ? '' : 's'} (${how} search: ${parts.join(', ') || 'any described event'}).${relaxed}`;
+}
+
+function setSearchUi(active, summary = '') {
+  searchActive = active;
+  const clearBtn = document.getElementById('eventSearchClear');
+  const summaryEl = document.getElementById('eventSearchSummary');
+  if (clearBtn) clearBtn.hidden = !active;
+  if (summaryEl) {
+    summaryEl.hidden = !summary;
+    summaryEl.textContent = summary;
+  }
+}
+
+async function runEventSearch(query) {
+  if (!els.eventFeed) return;
+  eventsLoadSession += 1;
+  const session = eventsLoadSession;
+  els.eventFeed.innerHTML = '<p class="muted">Searching…</p>';
+  setSearchUi(true, 'Searching event descriptions…');
+  setLoadMoreSentinel('events', null, loadMoreEvents);
+  eventsPager = null;
+  try {
+    const result = await api(`/api/event-search?q=${encodeURIComponent(query)}`);
+    if (session !== eventsLoadSession) return;
+    allEvents = result.items || [];
+    setSearchUi(true, describeInterpretation(result.interpretation, allEvents.length));
+  } catch (error) {
+    if (session !== eventsLoadSession) return;
+    allEvents = [];
+    setSearchUi(true, `Search failed: ${error.message}`);
+  }
+  renderStats();
+  if (!allEvents.length) {
+    els.eventFeed.innerHTML = '<p class="muted empty-state">No described events matched. Only events described by the AI model are searchable; turn on Describe Events in Settings, or describe past events there.</p>';
+    updateEventListStatus();
+    return;
+  }
+  renderList();
+}
+
 async function loadEvents() {
+  setSearchUi(false);
   if (els.eventFeed) els.eventFeed.innerHTML = '<p class="muted">Loading events…</p>';
   eventsLoadSession += 1;
   const session = eventsLoadSession;
@@ -415,7 +487,23 @@ async function loadEvents() {
   renderList();
 }
 
+function wireSearch() {
+  const form = document.getElementById('eventSearchForm');
+  const input = document.getElementById('eventSearchInput');
+  form?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const query = (input?.value || '').trim();
+    if (query) runEventSearch(query);
+    else if (searchActive) loadEvents();
+  });
+  document.getElementById('eventSearchClear')?.addEventListener('click', () => {
+    if (input) input.value = '';
+    loadEvents();
+  });
+}
+
 function wireControls() {
+  wireSearch();
   els.filterPills.forEach((pill) => {
     pill.addEventListener('click', () => {
       activeFilter = pill.dataset.filter || 'all';

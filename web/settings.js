@@ -285,6 +285,7 @@ const FORM_DEFAULTS = {
     skip_above_confidence: 1,
     labels: '',
     focus_crop: 'true',
+    describe_events: 'off',
   },
 };
 
@@ -420,6 +421,7 @@ async function loadAiVerification() {
     ]);
     renderAiVerification(settings);
     renderAiVerificationCameras(cameraPayload?.cameras || []);
+    api('/api/settings/ai-verification/describe-backfill').then(renderAiBackfill).catch(() => {});
   } catch (_error) {
     if (window.daygleAuth?.redirecting) return;
     // Admin-only endpoint: hide the card rather than show a broken form.
@@ -439,6 +441,48 @@ function describeAiVerificationTest(result) {
   const summary = String(answers.join('; ') || verification.reason || verification.status).replace(/[.\s]+$/, '');
   return `Event #${result.event_id}${seconds}: ${summary}.${listed}`;
 }
+
+// "Describe Past Events": starts the server-side backfill, then polls its
+// progress until it finishes (the server paces it behind live alerts).
+const aiBackfillBtn = document.getElementById('aiBackfillBtn');
+let aiBackfillTimer = null;
+
+function renderAiBackfill(status) {
+  const el = document.getElementById('aiBackfillStatus');
+  if (!el || !status) return;
+  if (status.running) {
+    el.textContent = `Describing… ${status.done + status.failed} of ${status.total} done.`;
+  } else if (status.finished_at && status.total) {
+    el.textContent = `Finished: ${status.done} described${status.failed ? `, ${status.failed} failed` : ''}.`;
+  } else if (status.finished_at) {
+    el.textContent = 'Nothing to describe in that period.';
+  }
+  if (aiBackfillBtn) aiBackfillBtn.disabled = Boolean(status.running);
+  if (status.running && !aiBackfillTimer) {
+    aiBackfillTimer = setInterval(async () => {
+      try {
+        const next = await api('/api/settings/ai-verification/describe-backfill');
+        if (!next.running) { clearInterval(aiBackfillTimer); aiBackfillTimer = null; }
+        renderAiBackfill(next);
+      } catch (_error) {
+        clearInterval(aiBackfillTimer); aiBackfillTimer = null;
+      }
+    }, 3000);
+  }
+}
+
+aiBackfillBtn?.addEventListener('click', guard(async () => {
+  const hours = Number.parseInt(document.getElementById('aiBackfillHours')?.value || '24', 10);
+  aiBackfillBtn.disabled = true;
+  try {
+    renderAiBackfill(await api('/api/settings/ai-verification/describe-backfill', {
+      method: 'POST',
+      body: JSON.stringify({ hours }),
+    }));
+  } finally {
+    if (!aiBackfillTimer) aiBackfillBtn.disabled = false;
+  }
+}));
 
 aiVerificationForm?.addEventListener('submit', guard(async (event) => {
   event.preventDefault();

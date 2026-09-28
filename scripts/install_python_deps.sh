@@ -134,6 +134,41 @@ _is_pascal_gpu() {
   (( ${cap%%.*} < 7 ))
 }
 
+# torch is only used to export models (Ultralytics), never for detection, and
+# current CUDA torch wheels no longer run on Pascal at all. Their CUDA 13
+# dependencies are what overwrite the pinned cuDNN, so on Pascal hosts swap
+# torch/torchvision for the CPU-only build of the same versions: no NVIDIA
+# wheels, ~200 MB instead of ~3 GB, and exports run on the CPU. A later
+# ``pip install -r requirements.txt`` keeps the +cpu build because it already
+# satisfies ultralytics' torch requirement. Failures only warn: detection does
+# not depend on torch.
+TORCH_CPU_INDEX="${DAYGLE_TORCH_CPU_INDEX:-https://download.pytorch.org/whl/cpu}"
+
+_use_cpu_torch() {
+  local versions torch_version vision_version
+  versions="$("${VENV_BIN}" -c '
+from importlib import metadata
+out = []
+for name in ("torch", "torchvision"):
+    try:
+        out.append(metadata.version(name))
+    except metadata.PackageNotFoundError:
+        out.append("")
+print(" ".join(v or "-" for v in out))
+' 2>/dev/null)" || return 0
+  read -r torch_version vision_version <<< "${versions}"
+  [[ -n "${torch_version}" && "${torch_version}" != '-' ]] || return 0
+  [[ "${torch_version}" == *+cpu ]] && return 0
+  local specs=("torch==${torch_version%%+*}+cpu")
+  if [[ -n "${vision_version}" && "${vision_version}" != '-' ]]; then
+    specs+=("torchvision==${vision_version%%+*}+cpu")
+  fi
+  echo "Switching PyTorch to its CPU-only build (${specs[*]}) so CUDA 13 wheels cannot replace the Pascal libraries."
+  if ! "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" --no-cache-dir --no-deps --index-url "${TORCH_CPU_INDEX}" "${specs[@]}"; then
+    echo "WARNING: could not install the CPU-only PyTorch build; model export may need it (detection is unaffected)." >&2
+  fi
+}
+
 _repair_pascal_cuda_stack() {
   local mode="${DAYGLE_PASCAL_CUDA_REPAIR:-auto}"
   [[ "${VARIANT}" == 'gpu' && -f "${PASCAL_REQUIREMENTS}" ]] || return 0
@@ -145,6 +180,8 @@ _repair_pascal_cuda_stack() {
   local pins
   pins="$(awk 'tolower($0) ~ /^[[:space:]]*nvidia-[a-z0-9-]+-cu12==[^[:space:]]+/ { print $1 }' "${PASCAL_REQUIREMENTS}")"
   [[ -n "${pins}" ]] || return 0
+
+  _use_cpu_torch
 
   local conflict
   for conflict in "${PASCAL_CUDA13_CONFLICTS[@]}"; do
