@@ -297,6 +297,57 @@
       </div>
     </section>
 
+    <section class="card" id="aiVerificationCard">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🤖</div>
+        <div>
+          <h2>AI Alert Verification</h2>
+          <p class="settings-section-subtitle">Before an object alert's email or push notification is sent, a local vision model looks at the snapshot and confirms the object is really there. Alerts it rejects (shadows, reflections, bushes) are not notified, but the event and recording are kept and marked in the Events list. If the model is unreachable or slow, alerts are sent as normal. Works with any OpenAI-compatible server, such as Ollama.</p>
+        </div>
+      </div>
+      <form id="aiVerificationForm" class="form-grid">
+        <label>
+          <span>AI Verification <span class="info-tip" data-tip="Master toggle. When disabled, notifications are sent exactly as before. Default: Disabled" title="Master toggle. When disabled, notifications are sent exactly as before. Default: Disabled" tabindex="0" aria-label="Help: Master toggle. When disabled, notifications are sent exactly as before. Default: Disabled"></span></span>
+          <select name="enabled">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </select></label>
+        <label>
+          <span>Server URL <span class="info-tip" data-tip="OpenAI-compatible API base URL. For Ollama on this server: http://127.0.0.1:11434/v1. Default: http://127.0.0.1:11434/v1" title="OpenAI-compatible API base URL. For Ollama on this server: http://127.0.0.1:11434/v1. Default: http://127.0.0.1:11434/v1" tabindex="0" aria-label="Help: OpenAI-compatible API base URL. For Ollama on this server: http://127.0.0.1:11434/v1. Default: http://127.0.0.1:11434/v1"></span></span>
+          <input name="server_url" placeholder="http://127.0.0.1:11434/v1" autocomplete="off" /></label>
+        <label>
+          <span>Model <span class="info-tip" data-tip="A vision-capable model on that server, e.g. gemma3:4b or qwen2.5vl:3b. Default: gemma3:4b" title="A vision-capable model on that server, e.g. gemma3:4b or qwen2.5vl:3b. Default: gemma3:4b" tabindex="0" aria-label="Help: A vision-capable model on that server, e.g. gemma3:4b or qwen2.5vl:3b. Default: gemma3:4b"></span></span>
+          <input name="model" placeholder="gemma3:4b" autocomplete="off" /></label>
+        <label>
+          <span>API Key <span class="info-tip" data-tip="Only needed if the model server requires one. Ollama does not. Default: (none)" title="Only needed if the model server requires one. Ollama does not. Default: (none)" tabindex="0" aria-label="Help: Only needed if the model server requires one. Ollama does not. Default: (none)"></span></span>
+          <input name="api_key" type="password" placeholder="Optional" autocomplete="new-password" /></label>
+        <label>
+          <span>Timeout (seconds) <span class="info-tip" data-tip="How long to wait for the model per question. On timeout the alert is sent unverified. Default: 20" title="How long to wait for the model per question. On timeout the alert is sent unverified. Default: 20" tabindex="0" aria-label="Help: How long to wait for the model per question. On timeout the alert is sent unverified. Default: 20"></span></span>
+          <input name="timeout_seconds" type="number" min="3" max="120" step="1" placeholder="20" /></label>
+        <label>
+          <span>Skip Above Confidence <span class="info-tip" data-tip="Alerts whose detector confidence is at or above this are sent without asking the model, so it only checks borderline ones. 1 = verify every alert. Default: 1" title="Alerts whose detector confidence is at or above this are sent without asking the model, so it only checks borderline ones. 1 = verify every alert. Default: 1" tabindex="0" aria-label="Help: Alerts whose detector confidence is at or above this are sent without asking the model, so it only checks borderline ones. 1 = verify every alert. Default: 1"></span></span>
+          <input name="skip_above_confidence" type="number" min="0" max="1" step="0.01" placeholder="1" /></label>
+        <label>
+          <span>Object Labels <span class="info-tip" data-tip="Comma-separated labels to verify, e.g. person, car. Empty = every object label. Face, motion and sound alerts are never verified. Default: (all)" title="Comma-separated labels to verify, e.g. person, car. Empty = every object label. Face, motion and sound alerts are never verified. Default: (all)" tabindex="0" aria-label="Help: Comma-separated labels to verify, e.g. person, car. Empty = every object label. Face, motion and sound alerts are never verified. Default: (all)"></span></span>
+          <input name="labels" placeholder="All object labels" autocomplete="off" /></label>
+        <label>
+          <span>Focus on Object <span class="info-tip" data-tip="Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled" title="Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled" tabindex="0" aria-label="Help: Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled"></span></span>
+          <select name="focus_crop">
+            <option value="true">Enabled</option>
+            <option value="false">Disabled</option>
+          </select></label>
+        <fieldset class="ai-verification-cameras">
+          <legend>Cameras <span class="info-tip" data-tip="Cameras whose alerts are verified. None ticked = all cameras." title="Cameras whose alerts are verified. None ticked = all cameras." tabindex="0" aria-label="Help: Cameras whose alerts are verified. None ticked = all cameras."></span></legend>
+          <div id="aiVerificationCameras" class="ai-verification-camera-list"><span class="muted">Loading cameras…</span></div>
+        </fieldset>
+      </form>
+      <p id="aiVerificationTestResult" class="muted" aria-live="polite"></p>
+      <div class="button-row">
+        <button id="testAiVerificationBtn" class="btn-info" type="button">Test on Latest Event</button>
+        <button type="submit" form="aiVerificationForm">Save AI Verification Settings</button>
+      </div>
+    </section>
+
     <section class="card">
       <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">📡</div>

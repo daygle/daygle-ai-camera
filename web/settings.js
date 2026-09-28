@@ -276,6 +276,16 @@ const FORM_DEFAULTS = {
     enabled: 'false',
     offline_delay_minutes: 1,
   },
+  aiVerification: {
+    enabled: 'false',
+    server_url: 'http://127.0.0.1:11434/v1',
+    model: 'gemma3:4b',
+    api_key: '',
+    timeout_seconds: 20,
+    skip_above_confidence: 1,
+    labels: '',
+    focus_crop: 'true',
+  },
 };
 
 function fillForm(form, values, defaults = {}) {
@@ -300,7 +310,7 @@ const FIELD_TYPES = {
     'enabled', 'continuous', 'auto_purge_enabled', 'background_detection_enabled',
     'always_run_object_detection', 'object_detection_region_boost', 'motion_denoise',
     'adaptive_detection_enabled',
-    'use_tls', 'use_ssl', 'autostart', 'tunnel_loopback_only',
+    'use_tls', 'use_ssl', 'autostart', 'tunnel_loopback_only', 'focus_crop',
   ]),
   integer: new Set([
     'width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds',
@@ -310,15 +320,15 @@ const FIELD_TYPES = {
     'periodic_scan_interval_seconds', 'motion_frame_width', 'motion_frame_height',
     'ingest_frame_fps', 'snapshot_quality', 'offline_delay_minutes',
     'detection_confirm_frames', 'detection_confirm_window',
-    'gpu_temp_warn_c', 'gpu_temp_critical_c',
+    'gpu_temp_warn_c', 'gpu_temp_critical_c', 'timeout_seconds',
   ]),
   number: new Set([
     'detection_interval_seconds', 'face_detection_interval_seconds', 'event_debounce_seconds', 'detection_history_minutes',
     'motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha',
     'detection_confirm_iou',
-    'session_timeout_hours',
+    'session_timeout_hours', 'skip_above_confidence',
   ]),
-  csv: new Set(['vehicle_labels', 'trusted_proxies']),
+  csv: new Set(['vehicle_labels', 'trusted_proxies', 'labels']),
   triState: new Set(['motion_shadow_suppression']),
 };
 
@@ -359,6 +369,104 @@ function renderPush(settings) {
   if (!pushForm) return;
   fillForm(pushForm, settings, FORM_DEFAULTS.push);
 }
+
+// ─── AI alert verification ──────────────────────────────────────────────────
+const aiVerificationForm = document.getElementById('aiVerificationForm');
+const testAiVerificationBtn = document.getElementById('testAiVerificationBtn');
+let aiVerificationCameraIds = [];
+
+function renderAiVerificationCameras(cameras) {
+  const container = document.getElementById('aiVerificationCameras');
+  if (!container) return;
+  if (!cameras.length) {
+    container.innerHTML = '<span class="muted">No cameras configured.</span>';
+    return;
+  }
+  const selected = new Set(aiVerificationCameraIds);
+  container.innerHTML = cameras.map((camera) => {
+    const id = String(camera.id || '');
+    const name = camera.name || id;
+    return `<label><input type="checkbox" name="camera_id_choice" value="${escapeHtml(id)}"${selected.has(id) ? ' checked' : ''} /> ${escapeHtml(name)}</label>`;
+  }).join('');
+}
+
+function renderAiVerification(settings) {
+  if (!aiVerificationForm) return;
+  aiVerificationCameraIds = Array.isArray(settings?.camera_ids) ? settings.camera_ids.map(String) : [];
+  fillForm(aiVerificationForm, {
+    ...settings,
+    labels: Array.isArray(settings?.labels) ? settings.labels.join(', ') : '',
+  }, FORM_DEFAULTS.aiVerification);
+  aiVerificationForm.querySelectorAll('input[name="camera_id_choice"]').forEach((box) => {
+    box.checked = aiVerificationCameraIds.includes(box.value);
+  });
+}
+
+function aiVerificationPayload(form) {
+  const data = payloadFor(form);
+  delete data.camera_id_choice;
+  data.camera_ids = [...form.querySelectorAll('input[name="camera_id_choice"]:checked')].map((box) => box.value);
+  if (!Array.isArray(data.labels)) data.labels = [];
+  return data;
+}
+
+async function loadAiVerification() {
+  const card = document.getElementById('aiVerificationCard');
+  if (!aiVerificationForm) return;
+  try {
+    const [settings, cameraPayload] = await Promise.all([
+      api('/api/settings/ai-verification'),
+      api('/api/cameras').catch(() => ({ cameras: [] })),
+    ]);
+    renderAiVerification(settings);
+    renderAiVerificationCameras(cameraPayload?.cameras || []);
+  } catch (_error) {
+    if (window.daygleAuth?.redirecting) return;
+    // Admin-only endpoint: hide the card rather than show a broken form.
+    if (card) card.hidden = true;
+  }
+}
+
+function describeAiVerificationTest(result) {
+  const verification = result?.verification;
+  const seconds = typeof result?.latency_ms === 'number' ? ` in ${(result.latency_ms / 1000).toFixed(1)}s` : '';
+  const listed = result?.model_listed === false ? ' Warning: the server did not list this model; check the name.' : '';
+  if (!verification) return `The model answered${seconds}. ${result?.message || ''}${listed}`.trim();
+  const answers = Object.entries(verification.labels || {}).map(([label, value]) => {
+    if (value.error) return `${label}: error (${value.error})`;
+    return `${label}: ${value.present ? 'confirmed' : 'NOT present'}${value.reason ? ` - ${value.reason}` : ''}`;
+  });
+  return `Event #${result.event_id}${seconds}: ${answers.join('; ') || verification.reason || verification.status}.${listed}`;
+}
+
+aiVerificationForm?.addEventListener('submit', guard(async (event) => {
+  event.preventDefault();
+  renderAiVerification(await api('/api/settings/ai-verification', {
+    method: 'PUT',
+    body: JSON.stringify(aiVerificationPayload(aiVerificationForm)),
+  }));
+  setMessage('AI verification settings saved.');
+}));
+
+testAiVerificationBtn?.addEventListener('click', guard(async () => {
+  const resultEl = document.getElementById('aiVerificationTestResult');
+  testAiVerificationBtn.disabled = true;
+  if (resultEl) resultEl.textContent = 'Asking the model about the latest object event…';
+  try {
+    const result = await api('/api/settings/ai-verification/test', {
+      method: 'POST',
+      body: JSON.stringify({ settings: aiVerificationPayload(aiVerificationForm) }),
+    });
+    const text = describeAiVerificationTest(result);
+    if (resultEl) resultEl.textContent = text;
+    setMessage('AI verification test finished.');
+  } catch (error) {
+    if (resultEl) resultEl.textContent = error.message;
+    throw error;
+  } finally {
+    testAiVerificationBtn.disabled = false;
+  }
+}));
 
 function renderCameraOffline(settings) {
   const form = document.getElementById('cameraOfflineForm');
@@ -402,6 +510,7 @@ async function loadSettings() {
   renderEmail(emailSettings);
   renderPush(pushSettings);
   renderCameraOffline(cameraOfflineSettings);
+  loadAiVerification();
   renderCloudflareTunnel(settings.cloudflare_tunnel);
   enhanceFormFieldLabels();
   messageEl.textContent = '';

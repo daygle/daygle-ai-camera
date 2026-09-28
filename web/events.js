@@ -185,6 +185,21 @@ function eventCameraLabel(event) {
   return cameraLabel(meta.camera_name, meta.camera_id) || event.source || 'unknown';
 }
 
+// AI alert verification verdict (see app/ai_verification.py): "Filtered"
+// when the vision model found no real object and the notification was not
+// sent; "Verified" when it confirmed every checked label. Errors and skips
+// show nothing - those alerts were delivered as normal.
+function aiVerificationBadge(event) {
+  const record = (event.metadata || {}).ai_verification;
+  if (!record || (record.status !== 'filtered' && record.status !== 'confirmed')) return '';
+  const details = Object.entries(record.labels || {})
+    .map(([label, value]) => `${label}: ${value.present === false ? 'not present' : value.present ? 'confirmed' : 'unchecked'}${value.reason ? ` (${value.reason})` : ''}`)
+    .join('; ');
+  const filtered = record.status === 'filtered';
+  const title = `${filtered ? 'Notification not sent: the AI model judged this a false alarm.' : 'The AI model confirmed this alert.'} ${details}`.trim();
+  return `<span class="detection ${filtered ? 'detection-ai-filtered' : 'detection-ai-verified'}" title="${escapeHtml(title)}">🤖 ${filtered ? 'Filtered' : 'Verified'}</span>`;
+}
+
 function renderEventRow(event) {
   const created = event.created_at || '';
   const camera = eventCameraLabel(event);
@@ -199,6 +214,7 @@ function renderEventRow(event) {
   const alertBadge = alerted
     ? '<span class="detection detection-alert" title="An alert notification was fired for this event">🔔 Alert</span>'
     : '';
+  const aiBadge = aiVerificationBadge(event);
   // Two per-event actions: open the annotated snapshot (green detection
   // boxes, as in alert emails) and/or open the recording the event belongs to.
   // Distinct colours (green = snapshot, violet = recording) keep the two
@@ -213,7 +229,7 @@ function renderEventRow(event) {
   const recordingAction = actions.length ? actions.join('') : '<span class="muted">-</span>';
   return `
     <tr class="activity-table-row ${typeClass}" data-event-row="${escapeHtml(String(event.id))}">
-      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
+      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}${aiBadge}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
       <td class="activity-cell-camera">${escapeHtml(camera)}</td>
       <td class="activity-cell-detections"><div class="activity-item-badges">${eventPills(event)}</div></td>
       <td class="activity-cell-when">
