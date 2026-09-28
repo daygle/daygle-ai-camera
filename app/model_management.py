@@ -292,7 +292,14 @@ def _read_installed_models() -> dict[str, Any]:
 def _write_installed_models(data: dict[str, Any]) -> None:
     p = _installed_models_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2), encoding='utf-8')
+    # Atomic replace: a crash mid-write would otherwise leave truncated JSON,
+    # which ``_read_installed_models`` treats as "no models installed".
+    tmp = p.with_name(f'.{p.name}.{os.getpid()}.tmp')
+    try:
+        tmp.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        os.replace(tmp, p)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _sha256_file(path: Path) -> str:
@@ -347,7 +354,13 @@ def _fetch_models_manifest() -> dict[str, Any]:
     return {'updated_at': None, 'source': 'pypi:ultralytics', 'models': {model_id: {'version': effective_version} for model_id in YOLO_MODELS}}
 
 
-def _download_weights(url: str, destination: Path, *, max_bytes: int = 512 * 1024 * 1024) -> None:
+def _download_weights(
+    url: str,
+    destination: Path,
+    *,
+    expected_sha256: str | None = None,
+    max_bytes: int = 512 * 1024 * 1024,
+) -> None:
     """Fetch a source ``.pt`` weight file from an explicit ``weights_url``.
 
     Ultralytics auto-resolves its own catalog names (``yolo11n.pt`` etc.) from
@@ -360,9 +373,15 @@ def _download_weights(url: str, destination: Path, *, max_bytes: int = 512 * 102
     fetches), the download is size-capped, and the file is written atomically to
     a sibling temp path so a partial transfer can never masquerade as a cached
     weight.
+
+    ``expected_sha256`` is mandatory: a ``.pt`` file is a pickle that the export
+    step loads (executes), so a replaced or tampered upstream asset must be
+    rejected before it is ever cached.
     """
     if not str(url).lower().startswith('https://'):
         raise RuntimeError(f'weights_url must be an https URL, got: {url!r}')
+    if not expected_sha256:
+        raise RuntimeError(f'weights_url {url} has no pinned weights_sha256; refusing to download it.')
     destination.parent.mkdir(parents=True, exist_ok=True)
     request = urllib.request.Request(url, headers={'User-Agent': 'daygle-ai-camera-updater/1.0'})
     tmp = destination.with_suffix(destination.suffix + f'.download-{os.getpid()}')
@@ -382,6 +401,12 @@ def _download_weights(url: str, destination: Path, *, max_bytes: int = 512 * 102
                     handle.write(chunk)
         if tmp.stat().st_size <= 0:
             raise RuntimeError(f'weights download from {url} was empty.')
+        actual = _sha256_file(tmp)
+        if actual != str(expected_sha256).lower():
+            raise RuntimeError(
+                f'weights download from {url} failed its integrity check '
+                f'(sha256 {actual}, expected {expected_sha256}).'
+            )
         tmp.replace(destination)
     finally:
         tmp.unlink(missing_ok=True)
@@ -402,8 +427,14 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
     weights_url = info.get('weights_url')
     if weights_url:
         cached_source = MODELS_DIR / pt_name
+        expected_sha256 = info.get('weights_sha256')
+        if cached_source.is_file() and expected_sha256 and _sha256_file(cached_source) != expected_sha256:
+            # A cached copy from before the hash was pinned (or one altered on
+            # disk) is not trusted: discard it and fetch a verified one.
+            logger.warning('Cached weights %s failed their integrity check; re-downloading.', cached_source.name)
+            cached_source.unlink(missing_ok=True)
         if not cached_source.is_file():
-            _download_weights(str(weights_url), cached_source)
+            _download_weights(str(weights_url), cached_source, expected_sha256=expected_sha256)
     # Pass the weights name and image size as argv rather than interpolating
     # into the ``python -c`` source.  Defence-in-depth against injection.
     #

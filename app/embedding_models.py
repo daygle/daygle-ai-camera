@@ -6,6 +6,9 @@ fetched directly from a **fixed, trusted URL** baked into this catalog. The URL
 is never operator-supplied -- callers select a model by its catalog id, so there
 is no server-side-request-forgery surface.
 
+Each entry also pins the file's ``sha256``; a download that does not match is
+rejected, so a changed or tampered upstream file is never activated.
+
 Every entry declares the embedding ``dim`` and ``input_size`` the model emits so
 the recognition service and the ``person_faces`` rows stay consistent, and the
 ``model_id`` that tags stored embeddings (vectors are only ever matched against
@@ -31,6 +34,7 @@ EMBEDDING_MODELS: dict[str, dict[str, Any]] = {
         'model_id': 'arcface-r100',
         'onnx': 'arcface-r100.onnx',
         'url': f'{_ONNX_ZOO_ARCFACE}/arcfaceresnet100-8.onnx',
+        'sha256': 'f3a6bc281e72f88862f5748b53be3d76b3b48f8f1ab1f4a537941bdc4e1b01da',
         'label': 'ArcFace R100 · Apache-2.0',
         'dim': 512,
         'input_size': 112,
@@ -46,6 +50,7 @@ EMBEDDING_MODELS: dict[str, dict[str, Any]] = {
         'model_id': 'arcface-r100',
         'onnx': 'arcface-r100-int8.onnx',
         'url': f'{_ONNX_ZOO_ARCFACE}/arcfaceresnet100-11-int8.onnx',
+        'sha256': 'c625ca68a422418c48aa84f73341337e0a92b111f327909005d1eec07c95f936',
         'label': 'ArcFace R100 · INT8 · Apache-2.0',
         'dim': 512,
         'input_size': 112,

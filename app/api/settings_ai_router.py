@@ -52,7 +52,9 @@ async def update_ai_settings(
     payload = await request.json()
     new_settings = validate_ai_settings(payload)
     db.set_setting('ai', new_settings, utc_now())
-    reloaded, error = reload_detector(new_settings)
+    # Building a detector loads an ONNX session (and may INT8-quantize it and
+    # run a warm-up inference); keep that off the event loop.
+    reloaded, error = await run_in_threadpool(reload_detector, new_settings)
     response = detector_status(new_settings)
     response['reload_succeeded'] = reloaded
     response['reload_error'] = error

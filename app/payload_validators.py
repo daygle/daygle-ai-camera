@@ -102,8 +102,10 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
@@ -243,6 +245,17 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
         raise HTTPException(
             status_code=400,
             detail=f"priority must be one of: {', '.join(sorted(valid_priorities))}.",
+        )
+    parsed_server = urlsplit(updated['server_url'])
+    if parsed_server.scheme not in ('http', 'https') or not parsed_server.hostname:
+        raise HTTPException(status_code=400, detail='Server URL must be an http:// or https:// URL.')
+    # ntfy only accepts ``[-_A-Za-z0-9]{1,64}`` topics. Anything else never
+    # delivered, and ``/``, ``?`` or ``#`` would silently rewrite the request
+    # URL (the topic is appended to the server URL).
+    if updated['topic'] and not re.fullmatch(r'[-_A-Za-z0-9]{1,64}', updated['topic']):
+        raise HTTPException(
+            status_code=400,
+            detail='Topic may only contain letters, numbers, "-" and "_" (up to 64 characters).',
         )
     if updated['enabled'] and (not updated['topic']):
         raise HTTPException(status_code=400, detail='Topic is required when push notifications are enabled.')

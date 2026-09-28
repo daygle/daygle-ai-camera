@@ -21,6 +21,7 @@ Cluster membership:
 """
 from __future__ import annotations
 
+import ipaddress
 import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -132,6 +133,15 @@ def build_stream_url(settings: dict[str, Any]) -> str:
         port = 554
     path = _non_empty_setting(settings, 'path') or 'stream1'
     path = path.lstrip('/')
+    if ':' in host and not host.startswith('['):
+        # A bare IPv6 literal must be bracketed in a URL authority, or its
+        # colons are read as the port separator.
+        try:
+            if ipaddress.ip_address(host.split('%', 1)[0]).version == 6:
+                host = f'[{host}]'
+        except ValueError:
+            pass
+
     credentials = ''
     if username:
         credentials = quote(username, safe='')

@@ -334,6 +334,38 @@ def _check_cameras_health() -> None:
         camera_online = not (retry_after and now < retry_after)
         _update_camera_health(cam_id, camera_online)
         if _camera_offline_notification_eligible(cam_id):
-            _deliver_camera_offline_notification(cam_id, cam_name, 'offline')
+            _submit_camera_notification(cam_id, cam_name, 'offline')
         elif _camera_recovery_notification_eligible(cam_id):
-            _deliver_camera_offline_notification(cam_id, cam_name, 'recovery')
+            _submit_camera_notification(cam_id, cam_name, 'recovery')
+
+
+def _submit_camera_notification(camera_id: str, camera_name: str, event_type: str) -> None:
+    """Queue an offline/recovery notification without blocking the caller.
+
+    ``_check_cameras_health`` runs on the live-alert monitor thread, which
+    schedules detection for every camera. Delivering inline meant an SMTP
+    connect/login/send plus an ntfy POST (10s timeouts each) stalled detection
+    on all cameras -- typically during a network problem, which is exactly
+    when a camera goes offline and the mail server is slow to answer.
+
+    The notified flag is claimed before queueing so the next monitor cycle
+    (every ~0.5s) does not queue the same notification again. While alerts
+    are disabled nothing is claimed, so enabling them during an outage still
+    notifies, exactly as before.
+    """
+    if not effective_camera_offline_alert_settings().get('enabled'):
+        return
+    if event_type == 'offline':
+        _mark_camera_offline_notified(camera_id)
+    else:
+        _mark_camera_recovery_notified(camera_id)
+    from app.postprocess_pool import notification_pool
+
+    if not notification_pool().submit(
+        _deliver_camera_offline_notification, camera_id, camera_name, event_type,
+        block=False, label=f'camera-{event_type}-{camera_id}',
+    ):
+        logger.warning(
+            'Notification queue full; dropped the %s notification for camera %s.',
+            event_type, camera_id,
+        )

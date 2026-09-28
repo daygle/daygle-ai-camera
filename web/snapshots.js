@@ -531,14 +531,23 @@ function populateFaceOptions() {
 // filter state, i.e. today by default). Only ever called with a bound that is
 // wider than what is already loaded, so `loadedSinceMs` keeps tracking the
 // widest window fetched so far.
+// Bumped per loadSnapshots call so a slow, older range request that finishes
+// last cannot overwrite the gallery (and the loaded-range bound) of a newer one.
+let snapshotsLoadSession = 0;
+
 async function loadSnapshots(sinceMs = null) {
+  snapshotsLoadSession += 1;
+  const session = snapshotsLoadSession;
   const since = sinceMs ?? snapshotsRequestSinceMs(currentFilterValues());
   if (els.gallery) els.gallery.innerHTML = '<p class="muted">Loading snapshots…</p>';
   try {
     const params = new URLSearchParams({ since: new Date(since).toISOString() });
-    allSnapshots = await fetchAllCursorPages(`/api/snapshots?${params}`, 500);
+    const items = await fetchAllCursorPages(`/api/snapshots?${params}`, 500);
+    if (session !== snapshotsLoadSession) return;
+    allSnapshots = items;
     loadedSinceMs = since;
   } catch (_err) {
+    if (session !== snapshotsLoadSession) return;
     allSnapshots = [];
     // Drop the bound so the next attempt re-requests instead of trusting it.
     loadedSinceMs = null;

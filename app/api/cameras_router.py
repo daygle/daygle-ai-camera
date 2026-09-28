@@ -93,6 +93,19 @@ async def update_cameras(
 ):
     require_admin(request)
     settings = validate_cameras_settings(await request.json())
+    # Stopping ingest workers, migrating state and restarting cameras is
+    # blocking work (thread joins, ffmpeg teardown); keep it off the event loop.
+    await run_in_threadpool(_persist_and_apply_cameras, settings, db, apply_cameras_settings)
+    write_audit_log(request, db, 'update', 'settings.cameras', details={'count': len(settings)})
+    return {
+        'cameras': [
+            {**_redact_camera(camera), 'profile_status': profile_status(str(camera.get('id') or ''))}
+            for camera in settings
+        ],
+    }
+
+
+def _persist_and_apply_cameras(settings, db, apply_cameras_settings) -> None:
     old_configs = list(effective_cameras_config())
     # Only migrate state/dirs for unambiguous single renames. See
     # ``camera_id_renames``: pairing the two lists positionally would migrate a
@@ -121,13 +134,6 @@ async def update_cameras(
     with _state._cameras_config_write_lock:
         db.set_setting('cameras', settings, utc_now())
         apply_cameras_settings(settings)
-    write_audit_log(request, db, 'update', 'settings.cameras', details={'count': len(settings)})
-    return {
-        'cameras': [
-            {**_redact_camera(camera), 'profile_status': profile_status(str(camera.get('id') or ''))}
-            for camera in settings
-        ],
-    }
 
 
 @router.put('/api/cameras/{camera_id}')
@@ -140,6 +146,14 @@ async def update_camera(
     require_admin(request)
     normalized = normalize_camera_id(camera_id)
     payload = await read_json_object(request)
+    # Applying camera settings restarts workers (blocking); run the locked
+    # read-validate-persist-apply section in the threadpool.
+    return await run_in_threadpool(
+        _upsert_camera, normalized, payload, request, db, apply_cameras_settings,
+    )
+
+
+def _upsert_camera(normalized, payload, request, db, apply_cameras_settings):
     # Serialize the read-validate-persist section against the other writers
     # (bulk settings API and the profile monitor's persist): a concurrent
     # monitor persist must not overwrite this request's edit with a stale

@@ -272,6 +272,7 @@ async function refreshFrame() {
   }
   if (liveEls.frame.dataset.loading === 'true') return;
   liveEls.frame.dataset.loading = 'true';
+  const requestedCamera = selectedCamera;
   try {
     const response = await fetch(snapshotUrl(), {
       cache: 'no-store',
@@ -283,7 +284,14 @@ async function refreshFrame() {
     liveEls.frame.dataset.frameTimestamp = Number.isFinite(frameTimestamp) && frameTimestamp > 0
       ? String(frameTimestamp)
       : '';
-    const nextObjectUrl = URL.createObjectURL(await response.blob());
+    const blob = await response.blob();
+    if (selectedCamera?.id !== requestedCamera?.id) {
+      // Switched cameras mid-request: drop the old camera's frame rather than
+      // flash it under the new camera's name. The next tick fetches the new one.
+      liveEls.frame.dataset.loading = 'false';
+      return;
+    }
+    const nextObjectUrl = URL.createObjectURL(blob);
     liveFramePreviousObjectUrl = liveFrameObjectUrl;
     liveFrameObjectUrl = nextObjectUrl;
     liveEls.frame.src = nextObjectUrl;
@@ -851,8 +859,12 @@ async function refreshDetectionStatus() {
     return;
   }
   if (!selectedCamera) return;
+  // The camera can change while these requests are in flight; a response for
+  // the previous camera must not be rendered (its boxes drawn, its FPS stored)
+  // against the newly selected one.
+  const requestedCamera = selectedCamera;
   try {
-    const cameraId = encodeURIComponent(selectedCamera.id);
+    const cameraId = encodeURIComponent(requestedCamera.id);
     // Check camera-level sound detection enabled state
     const soundEnabled = selectedCamera.detection?.sound?.enabled === true;
     // The sound status endpoint now carries its own diagnostics/reason (heard,
@@ -862,9 +874,10 @@ async function refreshDetectionStatus() {
       api(`/api/sound/status?camera_id=${cameraId}`).catch(() => null),
       api(`/api/status?camera_id=${cameraId}`).catch(() => null),
     ]);
+    if (selectedCamera?.id !== requestedCamera?.id || isAllCameraMode()) return;
     if (streamStatus?.fps) {
-      cameraRuntimeFps[selectedCamera.id] = streamStatus.fps;
-      updateFrameHeader(selectedCamera);
+      cameraRuntimeFps[requestedCamera.id] = streamStatus.fps;
+      updateFrameHeader(requestedCamera);
     }
     ingestServerTrackDetections(payload);
     renderInferenceTiming(payload);
@@ -872,6 +885,7 @@ async function refreshDetectionStatus() {
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
+    if (selectedCamera?.id !== requestedCamera?.id) return;
     renderDetectionStatus({
       state: 'error',
       stateLabel: 'Error',
@@ -957,14 +971,22 @@ function renderCameraOptions() {
   setSelectedCamera(liveEls.cameraSelect.value || cameras[0]?.id);
 }
 
-liveEls.frame.addEventListener('load', () => {
-  liveEls.frame.dataset.loading = 'false';
-  liveAiTrackFrameTimestamp = Number(liveEls.frame.dataset.frameTimestamp) || 0;
-  liveAiTrackFramePerformanceMs = performance.now();
+// Release the frame blob the <img> no longer shows. Called on BOTH load and
+// error: refreshFrame() overwrites liveFramePreviousObjectUrl on every tick, so
+// a frame that failed to decode (no 'load') used to leak its blob - one JPEG
+// per failed tick for as long as a camera kept sending bad frames.
+function revokePreviousLiveFrameUrl() {
   if (liveFramePreviousObjectUrl && liveFramePreviousObjectUrl !== liveFrameObjectUrl) {
     URL.revokeObjectURL(liveFramePreviousObjectUrl);
     liveFramePreviousObjectUrl = '';
   }
+}
+
+liveEls.frame.addEventListener('load', () => {
+  liveEls.frame.dataset.loading = 'false';
+  liveAiTrackFrameTimestamp = Number(liveEls.frame.dataset.frameTimestamp) || 0;
+  liveAiTrackFramePerformanceMs = performance.now();
+  revokePreviousLiveFrameUrl();
   if (isZonesPage) syncZoneOverlayToImage(); // syncZoneOverlayToImage defined in zones.js
   liveEls.status.textContent = selectedCamera?.name || 'Camera';
   liveEls.status.classList.add('live-status-online');
@@ -982,6 +1004,7 @@ liveEls.frame.addEventListener('load', () => {
 
 liveEls.frame.addEventListener('error', () => {
   liveEls.frame.dataset.loading = 'false';
+  revokePreviousLiveFrameUrl();
   clearLiveOverlay();
   // The stream is gone, so any measured-FPS pulse is stale: hide the Live
   // indicator and drop the pulsing class until the next good status poll.
