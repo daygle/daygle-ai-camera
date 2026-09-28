@@ -31,6 +31,9 @@ def _encode_ntfy_header(value: str) -> str:
     as literal ``=?utf-8?q?...?=`` blobs rather than decoding them.
     Pure-ASCII values pass through unchanged.
     """
+    # A CR/LF from a camera or rule name would be rejected by http.client as
+    # an invalid header value (failing the push), so fold line breaks first.
+    value = ' '.join(str(value).splitlines())
     if any(ord(c) > 127 for c in value):
         return urllib.parse.quote(value, safe=" ,.:;-_/!?()[]@#$&*+=")
     return value

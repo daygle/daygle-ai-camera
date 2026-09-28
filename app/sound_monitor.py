@@ -89,7 +89,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
     }] if alert_active else []
     event_id = _state.database.add_event_with_alerts(
         created_at=now_iso, source='sound', snapshot_path=None,
-        detections=[], alerts=alerts, alert_triggered=notify_enabled,
+        detections=[], alerts=alerts, alert_triggered=alert_active,
         metadata={
             'source': 'sound-detection', 'sound_source': 'rtsp',
             'camera_id': camera_id,
@@ -110,7 +110,10 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
                 logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, camera_id)
     alert_payload = {'rule_name': rule_name, 'label': class_id, 'confidence': confidence, 'message': message}
     notify_rule = {'name': rule_name, 'email_enabled': email_enabled, 'push_enabled': push_enabled, 'email_recipients': email_recipients, 'notify_start': str(fired_rule.get('notify_start') or '').strip() or None, 'notify_end': str(fired_rule.get('notify_end') or '').strip() or None}
-    if notify_enabled:
+    # Outside the rule's notify window no alert row was written and delivery
+    # would drop the alert anyway, so the event is not flagged as an alert and
+    # nothing is queued (matching the object-detection path).
+    if alert_active:
         submit_sound_alert_notification(_deliver_sound_alert_notifications, [alert_payload], event_id, notify_rule)
 
 

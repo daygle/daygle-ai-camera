@@ -58,17 +58,6 @@ def _alert_datetime_prefs() -> tuple[str, str, str]:
         return value
 
 
-def _clear_datetime_prefs_cache() -> None:
-    """Drop the cached admin datetime prefs. Exposed for test teardown so
-    per-test timezones (mutated via ``monkeypatch.setattr`` on
-    ``_state.auth.list_users``) are picked up on the next call without
-    waiting for the 30s TTL to expire.
-    """
-    global _alert_datetime_prefs_cache
-    with _alert_datetime_prefs_lock:
-        _alert_datetime_prefs_cache = None
-
-
 def _now_hm_in_admin_tz() -> str:
     """Return ``HH:MM`` for the current time evaluated in the admin's timezone.
 

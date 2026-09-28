@@ -28,7 +28,7 @@ from app.model_management import (
     _read_installed_models,
     delete_model,
 )
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 from app.media_utils import ONE_PIXEL_PNG
 
 logger = logging.getLogger('daygle.ai')
@@ -49,10 +49,12 @@ async def update_ai_settings(
     reload_detector=Depends(get_reload_detector),
 ):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     new_settings = validate_ai_settings(payload)
     db.set_setting('ai', new_settings, utc_now())
-    reloaded, error = reload_detector(new_settings)
+    # Building a detector loads an ONNX session (and may INT8-quantize it and
+    # run a warm-up inference); keep that off the event loop.
+    reloaded, error = await run_in_threadpool(reload_detector, new_settings)
     response = detector_status(new_settings)
     response['reload_succeeded'] = reloaded
     response['reload_error'] = error
@@ -185,7 +187,7 @@ def list_ai_models():
 @router.post('/api/settings/ai/download-model')
 async def download_ai_model(request: Request, db=Depends(get_database)):
     require_admin(request)
-    body = await request.json()
+    body = await read_json_object(request)
     model_name = str(body.get('model') or '').strip().lower()
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
@@ -287,7 +289,7 @@ def check_model_updates(request: Request):
 @router.post('/api/settings/ai/update-model')
 async def update_ai_model(request: Request, db=Depends(get_database)):
     require_admin(request)
-    body = await request.json()
+    body = await read_json_object(request)
     model_name = str(body.get('model') or '').strip().lower()
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")

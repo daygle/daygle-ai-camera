@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
@@ -1641,7 +1642,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         if rule and not rule.get('enabled', True):
             continue
         alert_rows.append({'created_at': datetime.now(timezone.utc).isoformat(), 'rule_name': alert['rule_name'], 'label': alert['label'], 'confidence': alert['confidence'], 'message': alert['message']})
-    event_id = _state.database.add_event_with_alerts(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, thumbnail_path=thumbnail_path, detections=recording_detections, alerts=alert_rows, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream', **face_identity_metadata(recording_detections)})
+    try:
+        event_id = _state.database.add_event_with_alerts(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, thumbnail_path=thumbnail_path, detections=recording_detections, alerts=alert_rows, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream', **face_identity_metadata(recording_detections)})
+    except Exception:
+        # The event row never landed, so nothing references the images just
+        # written: remove them rather than leak one pair per failed cycle.
+        for _orphan in (snapshot_path, thumbnail_path):
+            if _orphan:
+                Path(_orphan).unlink(missing_ok=True)
+        raise
     recording_id = attach_event_recording(event_id, event_time, 'rtsp', recording_detections, camera_id=camera_id, recording_config=camera_recording_config)
     _cycle_timer.add(STAGE_EVENT, (time.perf_counter() - _event_started) * 1000.0)
     # Remember the event even when no recording attached: the debounce state

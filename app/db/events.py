@@ -254,9 +254,22 @@ class EventsMixin:
             db.execute("DELETE FROM events WHERE id = ?", (event_id,))
             return event
 
-    def delete_all_events(self) -> int:
+    def delete_all_events(self, *, media_paths: list[str] | None = None) -> int:
+        """Delete every event (and its detections / alert rows).
+
+        When ``media_paths`` is given it is filled, inside the same
+        transaction, with each deleted event's stored snapshot and thumbnail
+        paths so the caller can remove those files; otherwise a bulk delete
+        would orphan every image on disk.
+        """
         with self.write_slot(), self.connect() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
+            if media_paths is not None:
+                for row in db.execute(
+                    "SELECT snapshot_path, thumbnail_path FROM events "
+                    "WHERE snapshot_path IS NOT NULL OR thumbnail_path IS NOT NULL"
+                ):
+                    media_paths.extend(value for value in (row["snapshot_path"], row["thumbnail_path"]) if value)
             # Mirror the declared CASCADE / SET NULL (foreign_keys is off): every
             # detection and alert_history row references an event, so clear them,
             # and detach any recordings that pointed at a now-deleted event.
@@ -353,11 +366,6 @@ class EventsMixin:
                 else None
             )
             return self._events_with_detections(db, visible_rows), next_cursor
-
-    def list_snapshots(self, limit: int = 10000, since: str | None = None) -> list[dict[str, Any]]:
-        """Return one snapshot page using the historical list-only contract."""
-        items, _next = self.list_snapshots_page(limit=limit, since=since)
-        return items
 
     def list_snapshots_page(
         self,
@@ -613,8 +621,13 @@ class EventsMixin:
                 f"""
                 SELECT COUNT(*) AS count
                 FROM alert_history ah
-                WHERE ah.event_id IS NULL
-                   OR ah.event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
+                -- Parenthesised so the trailing ``AND created_at >= ?`` binds to
+                -- both branches (``event_id`` is NOT NULL today, but the OR
+                -- must not silently bypass the date filter if that changes).
+                WHERE (
+                    ah.event_id IS NULL
+                    OR ah.event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
+                )
                 {since_clause_ah}
                 """,
                 _params(),

@@ -42,6 +42,11 @@ def _encode_subject(subject: str) -> str:
     can transport them. ``Header(subject, 'utf-8').encode()`` returns a
     ``str`` of ASCII bytes, so both branches return ``str``.
     """
+    # Camera / rule / zone names flow into the Subject. A CR or LF in one is a
+    # header-injection attempt that current Pythons refuse to serialise --
+    # which would make every alert for that name fail to send -- so fold all
+    # line breaks to spaces first.
+    subject = ' '.join(str(subject).splitlines())
     if any(ord(c) > 127 for c in subject):
         return Header(subject, 'utf-8').encode()
     return subject

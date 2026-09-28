@@ -159,18 +159,25 @@ def delete_event(event_id: int, request: Request, db=Depends(get_database)):
     event = db.delete_event(event_id)
     if event is None:
         raise HTTPException(status_code=404, detail='Event not found')
-    for artifact_value in (event.get('snapshot_path'), event.get('thumbnail_path')):
+    _unlink_event_media((event.get('snapshot_path'), event.get('thumbnail_path')))
+    write_audit_log(request, db, 'delete', 'event', event_id)
+    return {'ok': True}
+
+
+def _unlink_event_media(paths) -> None:
+    """Remove stored event images that resolve inside the snapshots root."""
+    for artifact_value in paths:
         artifact = safe_storage_path(artifact_value, roots=('snapshots_dir',))
         if artifact is not None and artifact.exists() and artifact.is_file():
             artifact.unlink(missing_ok=True)
-    write_audit_log(request, db, 'delete', 'event', event_id)
-    return {'ok': True}
 
 
 @router.delete('/api/events')
 def delete_all_events(request: Request, db=Depends(get_database)):
     require_admin(request)
-    deleted = db.delete_all_events()
+    media_paths: list[str] = []
+    deleted = db.delete_all_events(media_paths=media_paths)
+    _unlink_event_media(media_paths)
     write_audit_log(request, db, 'delete_all', 'events', details={'count': deleted})
     return {'ok': True, 'deleted': deleted}
 

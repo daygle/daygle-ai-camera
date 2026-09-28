@@ -105,8 +105,12 @@ def reset_behavioural_state(camera_id: str) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.debug('Loiter presence reset failed for %s: %s', key, exc)
     try:
+        # ``_time_today`` is keyed ``camera|zone|label`` (like
+        # ``_activity_today``), so a bare camera-id pop never matched.
+        prefix = f'{key}|'
         with _time_lock:
-            _time_today.pop(key, None)
+            for stale in [k for k in _time_today if k.startswith(prefix)]:
+                _time_today.pop(stale, None)
     except Exception as exc:  # noqa: BLE001
         logger.debug('Time-of-day state reset failed for %s: %s', key, exc)
     try:
@@ -254,7 +258,7 @@ def _emit_one(camera_id: str, settings: dict[str, Any], crossing: dict[str, Any]
     }] if alert_active else []
     event_id = _state.database.add_event_with_alerts(
         created_at=now_iso, source='behaviour', snapshot_path=None,
-        detections=[], alerts=alerts, alert_triggered=notify_enabled,
+        detections=[], alerts=alerts, alert_triggered=alert_active,
         metadata=metadata,
     )
 
@@ -465,7 +469,7 @@ def _emit_loiter(camera_id: str, settings: dict[str, Any], fire: dict[str, Any],
     }] if alert_active else []
     event_id = _state.database.add_event_with_alerts(
         created_at=now_iso, source='behaviour', snapshot_path=None,
-        detections=[], alerts=alerts, alert_triggered=notify_enabled,
+        detections=[], alerts=alerts, alert_triggered=alert_active,
         metadata=metadata,
     )
 
@@ -667,7 +671,7 @@ def _emit_time(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], r
     }] if alert_active else []
     event_id = _state.database.add_event_with_alerts(
         created_at=now_iso, source='behaviour', snapshot_path=None,
-        detections=[], alerts=alerts, alert_triggered=notify_enabled,
+        detections=[], alerts=alerts, alert_triggered=alert_active,
         metadata=metadata,
     )
 
@@ -877,7 +881,7 @@ def _emit_activity(camera_id: str, settings: dict[str, Any], fire: dict[str, Any
     }] if alert_active else []
     event_id = _state.database.add_event_with_alerts(
         created_at=now_iso, source='behaviour', snapshot_path=None,
-        detections=[], alerts=alerts, alert_triggered=notify_enabled,
+        detections=[], alerts=alerts, alert_triggered=alert_active,
         metadata=metadata,
     )
 

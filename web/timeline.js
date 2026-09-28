@@ -1286,7 +1286,13 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
   replaceUrl(state.activeRecordingId);
 }
 
+// Bumped per loadTimeline call; a response that returns after a newer request
+// started (camera/day switched quickly) is dropped instead of overwriting it.
+let timelineLoadSession = 0;
+
 async function loadTimeline({ preserveSelection = true } = {}) {
+  timelineLoadSession += 1;
+  const session = timelineLoadSession;
   const { cameraId, day } = timelineParams();
   TIMELINE_CARDS.forEach((card) => {
     if (card.status) card.status.textContent = 'Loading timeline…';
@@ -1299,6 +1305,7 @@ async function loadTimeline({ preserveSelection = true } = {}) {
       `/api/recordings/timeline?camera_id=${encodeURIComponent(cameraId)}&day=${encodeURIComponent(day)}&tz_offset_minutes=${timezoneOffsetMinutes}`,
     );
   } catch (err) {
+    if (session !== timelineLoadSession) return;
     // Special-cases benign 'No cameras configured' inline; re-throws to outer guarded .catch().
     if (err.message === 'No cameras configured') {
       const msg = 'No cameras configured. Add a camera in Settings to use the timeline.';
@@ -1310,6 +1317,7 @@ async function loadTimeline({ preserveSelection = true } = {}) {
     }
     throw err;
   }
+  if (session !== timelineLoadSession) return;
   state.payload = payload;
   populateControls(payload);
   populateFilterOptions(payload.recordings || []);

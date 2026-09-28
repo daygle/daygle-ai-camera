@@ -68,7 +68,13 @@ class CloudflareTunnelSecretStore:
         # Use a replacement file so an existing token is never briefly exposed
         # with a permissive mode on umask configurations such as 000.
         temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(normalized + "\n", encoding="utf-8")
+        temporary.unlink(missing_ok=True)
+        # Create the file 0600 from the first byte: ``write_text`` would create
+        # it with the process umask (typically 0644, world-readable) and only
+        # the later chmod would narrow it, briefly exposing the token.
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(normalized + "\n")
         try:
             os.chmod(temporary, 0o600)
             temporary.replace(self.path)

@@ -32,7 +32,7 @@ from app.deps import (
     get_database,
     get_recording_service,
 )
-from app.payload_validators import validate_camera_settings, validate_cameras_settings
+from app.payload_validators import validate_camera_settings, validate_camera_stream_source, validate_cameras_settings
 from app.ptz import send_ptz_command, VALID_COMMANDS as PTZ_VALID_COMMANDS
 from app.detection_state import clear_camera_motion, mark_camera_motion
 from app.profile_automation import (
@@ -46,7 +46,7 @@ from app.profile_presets import (
     list_presets,
     normalize_preset,
 )
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_body, read_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -92,7 +92,20 @@ async def update_cameras(
     apply_cameras_settings=Depends(get_apply_cameras_settings),
 ):
     require_admin(request)
-    settings = validate_cameras_settings(await request.json())
+    settings = validate_cameras_settings(await read_json_body(request))
+    # Stopping ingest workers, migrating state and restarting cameras is
+    # blocking work (thread joins, ffmpeg teardown); keep it off the event loop.
+    await run_in_threadpool(_persist_and_apply_cameras, settings, db, apply_cameras_settings)
+    write_audit_log(request, db, 'update', 'settings.cameras', details={'count': len(settings)})
+    return {
+        'cameras': [
+            {**_redact_camera(camera), 'profile_status': profile_status(str(camera.get('id') or ''))}
+            for camera in settings
+        ],
+    }
+
+
+def _persist_and_apply_cameras(settings, db, apply_cameras_settings) -> None:
     old_configs = list(effective_cameras_config())
     # Only migrate state/dirs for unambiguous single renames. See
     # ``camera_id_renames``: pairing the two lists positionally would migrate a
@@ -121,13 +134,6 @@ async def update_cameras(
     with _state._cameras_config_write_lock:
         db.set_setting('cameras', settings, utc_now())
         apply_cameras_settings(settings)
-    write_audit_log(request, db, 'update', 'settings.cameras', details={'count': len(settings)})
-    return {
-        'cameras': [
-            {**_redact_camera(camera), 'profile_status': profile_status(str(camera.get('id') or ''))}
-            for camera in settings
-        ],
-    }
 
 
 @router.put('/api/cameras/{camera_id}')
@@ -139,7 +145,15 @@ async def update_camera(
 ):
     require_admin(request)
     normalized = normalize_camera_id(camera_id)
-    payload = await request.json()
+    payload = await read_json_object(request)
+    # Applying camera settings restarts workers (blocking); run the locked
+    # read-validate-persist-apply section in the threadpool.
+    return await run_in_threadpool(
+        _upsert_camera, normalized, payload, request, db, apply_cameras_settings,
+    )
+
+
+def _upsert_camera(normalized, payload, request, db, apply_cameras_settings):
     # Serialize the read-validate-persist section against the other writers
     # (bulk settings API and the profile monitor's persist): a concurrent
     # monitor persist must not overwrite this request's edit with a stale
@@ -178,7 +192,7 @@ def list_camera_profile_presets(request: Request, db=Depends(get_database)):
 @router.post('/api/camera-profile-presets')
 async def create_camera_profile_preset(request: Request, db=Depends(get_database)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     existing = list_presets(db.get_setting('camera_profile_presets'))
     try:
         preset = create_preset(payload, existing)
@@ -197,7 +211,7 @@ async def update_camera_profile_preset(preset_id: str, request: Request, db=Depe
         raise HTTPException(status_code=404, detail='Profile preset not found.')
     if current['builtin']:
         raise HTTPException(status_code=400, detail='Built-in profile presets cannot be modified.')
-    payload = await request.json()
+    payload = await read_json_object(request)
     try:
         updated = normalize_preset({**current, **(payload if isinstance(payload, dict) else {})}, preset_id=preset_id)
     except ValueError as exc:
@@ -257,7 +271,10 @@ def camera_profile_schedule_suggestion(
 @router.post('/api/cameras/test-connection')
 async def test_camera_connection(request: Request, recording_service=Depends(get_recording_service)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
+    # The connection test hands this straight to ffprobe; apply the same
+    # network-scheme / host rules a saved camera must pass.
+    validate_camera_stream_source(payload)
     stream_url = build_stream_url(payload)
     if not stream_url:
         raise HTTPException(status_code=400, detail='Provide a stream_url or host to test.')
@@ -309,7 +326,7 @@ async def test_camera_connection(request: Request, recording_service=Depends(get
 @router.post('/api/cameras/{camera_id}/ptz')
 async def camera_ptz(camera_id: str, request: Request):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     command = str(payload.get('command', '')).strip().lower()
     if command not in PTZ_VALID_COMMANDS:
         raise HTTPException(status_code=400, detail=f'Invalid PTZ command. Valid: {sorted(PTZ_VALID_COMMANDS)}')

@@ -54,7 +54,14 @@ def test_validate_malformed_rule_payloads_does_not_crash():
     # an internal server error or persist non-finite confidence thresholds.
     from app.face_detection_rules import validate_face_detection_rules
 
-    assert validate_face_detection_rules([]) == {'rules': []}
+    # A body without a ``rules`` list is a client error (400), never silently
+    # normalised to "no rules": the route persists the result, so that would
+    # wipe every configured face rule.
+    for malformed in ([], {}, 'x', {'rules': 'nope'}):
+        with pytest.raises(HTTPException) as caught:
+            validate_face_detection_rules(malformed)
+        assert caught.value.status_code == 400
+    assert validate_face_detection_rules({'rules': []}) == {'rules': []}
     result = validate_face_detection_rules({
         'rules': [None, 'not-a-rule', {'id': 'x', 'name': 'Alex', 'cooldown_minutes': 'bad', 'min_confidence': float('nan')}],
     })

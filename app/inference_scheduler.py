@@ -265,10 +265,6 @@ class LiveInferenceScheduler:
         with self._condition:
             return {key: dict(value) for key, value in self._timings.items()}
 
-    def clear_timings(self) -> None:
-        with self._condition:
-            self._timings.clear()
-
     # ─── Selection ────────────────────────────────────────────────────────
 
     def _priority(self, job: InferenceJob) -> int:
@@ -303,10 +299,26 @@ class LiveInferenceScheduler:
 
     # ─── Worker ───────────────────────────────────────────────────────────
 
+    def _retire_if_surplus_locked(self) -> bool:
+        """Drop the calling worker when the pool exceeds ``max_workers``.
+
+        ``set_max_workers`` never interrupts a running job; a lowered limit is
+        applied here, between jobs, by letting surplus workers exit.
+        """
+        alive = [t for t in self._threads if t.is_alive()]
+        if len(alive) <= self._max_workers:
+            return False
+        current = threading.current_thread()
+        if current in self._threads:
+            self._threads.remove(current)
+        return True
+
     def _worker_loop(self) -> None:
         while True:
             with self._condition:
                 if self._stopping.is_set() or not self._started:
+                    return
+                if self._retire_if_surplus_locked():
                     return
             taken = self._take_next()
             if taken is None:

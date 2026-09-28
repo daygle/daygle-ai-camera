@@ -102,8 +102,10 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
@@ -217,7 +219,9 @@ def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='SMTP host is required when email alerts are enabled.')
     if updated['enabled'] and (not updated['from_address']):
         raise HTTPException(status_code=400, detail='From address is required when email alerts are enabled.')
-    if updated['from_address'] and '@' not in updated['from_address']:
+    # A single address with no whitespace: a line break here would make every
+    # alert email fail to serialise (it is used as the From header).
+    if updated['from_address'] and not re.fullmatch(r'[^@\s]+@[^@\s]+', updated['from_address']):
         raise HTTPException(status_code=400, detail='From address must be a valid email address.')
     if updated['use_ssl']:
         updated['use_tls'] = False
@@ -244,9 +248,54 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
             status_code=400,
             detail=f"priority must be one of: {', '.join(sorted(valid_priorities))}.",
         )
+    parsed_server = urlsplit(updated['server_url'])
+    if parsed_server.scheme not in ('http', 'https') or not parsed_server.hostname:
+        raise HTTPException(status_code=400, detail='Server URL must be an http:// or https:// URL.')
+    # ntfy only accepts ``[-_A-Za-z0-9]{1,64}`` topics. Anything else never
+    # delivered, and ``/``, ``?`` or ``#`` would silently rewrite the request
+    # URL (the topic is appended to the server URL).
+    if updated['topic'] and not re.fullmatch(r'[-_A-Za-z0-9]{1,64}', updated['topic']):
+        raise HTTPException(
+            status_code=400,
+            detail='Topic may only contain letters, numbers, "-" and "_" (up to 64 characters).',
+        )
     if updated['enabled'] and (not updated['topic']):
         raise HTTPException(status_code=400, detail='Topic is required when push notifications are enabled.')
     return updated
+
+
+# Network protocols a camera stream can legitimately use. ``stream_url`` is
+# handed to ffmpeg/ffprobe, which also understand LOCAL protocols (``file:``,
+# ``concat:``, ``subfile:``, ...): a camera URL of ``file:///etc/shadow`` would
+# record a host file -- as root on installer-based deployments -- and make it
+# downloadable through the UI.
+ALLOWED_STREAM_URL_SCHEMES = frozenset({
+    'rtsp', 'rtsps', 'rtmp', 'rtmps', 'http', 'https', 'srt', 'udp', 'rtp', 'tcp',
+})
+# ``host`` is spliced into ``rtsp://[user:pass@]host:port/path``; any of these
+# would rewrite the URL's authority, path, query or fragment.
+_HOST_FORBIDDEN_CHARACTERS = frozenset('/\\@?#') | frozenset(' \t\r\n')
+
+
+def validate_camera_stream_source(settings: dict[str, Any]) -> None:
+    """Reject a camera ``stream_url`` / ``host`` ffmpeg must not be given."""
+    stream_url = str(settings.get('stream_url') or '').strip()
+    if stream_url:
+        parsed = urlsplit(stream_url)
+        if parsed.scheme.lower() not in ALLOWED_STREAM_URL_SCHEMES or not parsed.netloc:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    'stream_url must be a network stream URL such as rtsp://camera/stream '
+                    f'(allowed schemes: {", ".join(sorted(ALLOWED_STREAM_URL_SCHEMES))}).'
+                ),
+            )
+    host = str(settings.get('host') or '').strip()
+    if host and any(character in _HOST_FORBIDDEN_CHARACTERS for character in host):
+        raise HTTPException(
+            status_code=400,
+            detail='host must be a hostname or IP address (put a full URL in stream_url instead).',
+        )
 
 
 def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None=None, index: int=1) -> dict[str, Any]:
@@ -328,6 +377,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
             updated[key] = str(updated.get(key) or '').strip()
     if not updated.get('password') and current.get('password'):
         updated['password'] = current['password']
+    validate_camera_stream_source(updated)
     if backend in {'onvif', 'rtsp'} and (not build_stream_url(updated)):
         raise HTTPException(status_code=400, detail='stream_url is required for ONVIF/RTSP cameras, or provide host plus optional username, password, port, and path.')
     flip = str(updated.get('flip', 'none')).lower()
@@ -564,10 +614,27 @@ def _resolve_within_data_envelope(value: str, *, key: str) -> str:
     # resolved location is within the captured envelope.
     data_dir = str(_STARTUP_DATA_DIR)
     if normalized == data_dir or normalized.startswith(data_dir + os.sep):
+        # A media directory must be a SUBdirectory: snapshots_dir / events_dir
+        # are wiped recursively by the "delete runtime data" action, and the
+        # data directory itself holds the SQLite database.
+        if key != 'data_dir' and normalized == data_dir:
+            raise HTTPException(
+                status_code=400,
+                detail=f'{key} must be a subdirectory of the data directory, not the data directory itself.',
+            )
         return normalized
     if _STARTUP_DATA_PARENT is not None:
         parent = str(_STARTUP_DATA_PARENT)
-        if normalized == parent or normalized.startswith(parent + os.sep):
+        app_root = str(_APP_ROOT)
+        # Siblings of the data directory are allowed (relocating the data
+        # root), but never the parent itself nor anything in the application
+        # tree: on the default layout the parent IS the application directory,
+        # so a media dir there would let the runtime-data wipe delete the code,
+        # virtualenv and database.
+        if (
+            normalized.startswith(parent + os.sep)
+            and not (normalized == app_root or normalized.startswith(app_root + os.sep))
+        ):
             return normalized
     raise HTTPException(
         status_code=400,
@@ -582,6 +649,10 @@ def _resolve_within_data_envelope(value: str, *, key: str) -> str:
 _STARTUP_DATA_DIR: Path = Path(
     str(_state.config.get('storage', {}).get('data_dir') or 'data')
 ).expanduser().resolve()
+# The application checkout (code, virtualenv, models). Media directories may
+# never point into it -- see ``_resolve_within_data_envelope``.
+_APP_ROOT: Path = Path(__file__).resolve().parent.parent
+
 _STARTUP_DATA_PARENT: Path | None = (
     _STARTUP_DATA_DIR.parent
     if _STARTUP_DATA_DIR.parent != _STARTUP_DATA_DIR
@@ -639,20 +710,29 @@ def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
         session_timeout_hours = float(merged.get('session_timeout_hours', 12))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='session_timeout_hours must be a number.') from exc
-    if session_timeout_hours < 0.25 or session_timeout_hours > 720:
+    # ``not <= / >=`` also rejects NaN, which slips past plain ``<``/``>``
+    # comparisons and would crash AuthService (timedelta) on every restart.
+    if not 0.25 <= session_timeout_hours <= 720:
         raise HTTPException(status_code=400, detail='session_timeout_hours must be between 0.25 and 720.')
     try:
         rate_limit_base_delay = float(merged.get('rate_limit_base_delay', 2.0))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='rate_limit_base_delay must be a number.') from exc
-    if rate_limit_base_delay < 0.5 or rate_limit_base_delay > 60.0:
+    if not 0.5 <= rate_limit_base_delay <= 60.0:
         raise HTTPException(status_code=400, detail='rate_limit_base_delay must be between 0.5 and 60.')
     try:
         rate_limit_max_delay = float(merged.get('rate_limit_max_delay', 300.0))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='rate_limit_max_delay must be a number.') from exc
-    if rate_limit_max_delay < 5 or rate_limit_max_delay > 3600:
+    if not 5 <= rate_limit_max_delay <= 3600:
         raise HTTPException(status_code=400, detail='rate_limit_max_delay must be between 5 and 3600.')
+    # The login limiter rejects max < base; persisting such a pair failed the
+    # request after saving it and then crashed AuthService on every restart.
+    if rate_limit_max_delay < rate_limit_base_delay:
+        raise HTTPException(
+            status_code=400,
+            detail='rate_limit_max_delay must be greater than or equal to rate_limit_base_delay.',
+        )
     return {
         'session_timeout_hours': session_timeout_hours,
         'max_login_attempts': _int_field(merged, 'max_login_attempts', 5, 1, 100),

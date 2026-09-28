@@ -87,6 +87,19 @@ _validate_lock() {
   fi
 }
 
+# onnxruntime and onnxruntime-gpu install the same ``onnxruntime`` module, so the
+# OTHER variant must go before installing this one. The selected variant is
+# left in place: pip upgrades it in place, whereas uninstalling it first meant
+# a failed or interrupted install (network drop, the web updater's timeout)
+# left the application with no ONNX Runtime at all.
+_remove_conflicting_runtime() {
+  if [[ "${VARIANT}" == 'gpu' ]]; then
+    "${VENV_BIN}" -m pip uninstall -y onnxruntime >/dev/null 2>&1 || true
+  else
+    "${VENV_BIN}" -m pip uninstall -y onnxruntime-gpu >/dev/null 2>&1 || true
+  fi
+}
+
 _verify_runtime() {
   # This confirms provider registration after installation. The first actual
   # model session will still be the definitive CUDA initialization test.
@@ -109,7 +122,7 @@ if [[ -f "${LOCK_FILE}" ]]; then
   _validate_lock "${LOCK_FILE}"
   echo "Installing from ${LOCK_FILE}."
   # Do not remove the existing ORT wheel until the lock has been validated.
-  "${VENV_BIN}" -m pip uninstall -y onnxruntime onnxruntime-gpu >/dev/null 2>&1 || true
+  _remove_conflicting_runtime
   # ai-edge-litert currently declares backports-strenum unconditionally,
   # although that backport's metadata incorrectly excludes Python 3.11+.
   # LiteRT itself imports and runs on Python 3.13; ignore only this stale
@@ -133,7 +146,7 @@ fi
 # No lock is available. Remove the old ORT wheel before resolving the
 # replacement; the runtime verification below prevents a silent CPU install
 # on a requested GPU deployment.
-"${VENV_BIN}" -m pip uninstall -y onnxruntime onnxruntime-gpu >/dev/null 2>&1 || true
+_remove_conflicting_runtime
 
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "${WORK_DIR}"' EXIT

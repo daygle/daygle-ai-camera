@@ -927,7 +927,10 @@ def test_download_weights_writes_atomically(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mm.urllib.request, 'urlopen', lambda *_a, **_k: _FakeResponse(b'weights-bytes'))
     dest = tmp_path / 'sub' / 'weights.pt'
-    mm._download_weights('https://example.invalid/weights.pt', dest)
+    mm._download_weights(
+        'https://example.invalid/weights.pt', dest,
+        expected_sha256='47c46a5fa409889c23e4d12bdc28a077a7ccc8a92c8dd2bfbe3d7d9c6c227e67',  # sha256(b'weights-bytes')
+    )
     assert dest.read_bytes() == b'weights-bytes'
     # No partial .download temp file is left behind on success.
     assert not any(p.name.startswith('weights.pt.download') for p in dest.parent.iterdir())
@@ -955,10 +958,59 @@ def test_download_weights_enforces_size_cap(tmp_path, monkeypatch):
     monkeypatch.setattr(mm.urllib.request, 'urlopen', lambda *_a, **_k: _FakeResponse())
     dest = tmp_path / 'weights.pt'
     with pytest.raises(RuntimeError):
-        mm._download_weights('https://example.invalid/weights.pt', dest, max_bytes=100)
+        mm._download_weights('https://example.invalid/weights.pt', dest, expected_sha256='0' * 64, max_bytes=100)
     # Failed download leaves no cached weight and no temp file behind.
     assert not dest.exists()
     assert not any(p.name.startswith('weights.pt.download') for p in tmp_path.iterdir())
+
+
+def _weights_response(payload):
+    class _FakeResponse:
+        def __init__(self):
+            self._chunks = [payload]
+
+        def read(self, _n):
+            return self._chunks.pop(0) if self._chunks else b''
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    return _FakeResponse()
+
+
+def test_download_weights_rejects_a_hash_mismatch(tmp_path, monkeypatch):
+    """A ``.pt`` is a pickle: a download that is not the pinned file must never
+    be cached (the export step would execute it)."""
+    import app.model_management as mm
+
+    monkeypatch.setattr(mm.urllib.request, 'urlopen', lambda *_a, **_k: _weights_response(b'tampered'))
+    dest = tmp_path / 'weights.pt'
+    with pytest.raises(RuntimeError, match='integrity'):
+        mm._download_weights('https://example.invalid/weights.pt', dest, expected_sha256='0' * 64)
+    assert not dest.exists()
+    assert not any(p.name.startswith('weights.pt.download') for p in tmp_path.iterdir())
+
+
+def test_download_weights_requires_a_pinned_hash(tmp_path, monkeypatch):
+    import app.model_management as mm
+
+    monkeypatch.setattr(mm.urllib.request, 'urlopen', lambda *_a, **_k: _weights_response(b'x'))
+    with pytest.raises(RuntimeError, match='pinned'):
+        mm._download_weights('https://example.invalid/weights.pt', tmp_path / 'weights.pt')
+
+
+def test_every_downloadable_catalog_entry_pins_a_sha256():
+    from app.ai_settings import YOLO_MODELS
+    from app.embedding_models import EMBEDDING_MODELS
+
+    for name, info in YOLO_MODELS.items():
+        if info.get('weights_url'):
+            assert len(str(info.get('weights_sha256') or '')) == 64, name
+    for name, info in EMBEDDING_MODELS.items():
+        assert len(str(info.get('sha256') or '')) == 64, name
 
 
 def test_download_model_installs_without_switching_the_default(tmp_path, monkeypatch):

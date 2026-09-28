@@ -40,17 +40,11 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 
-from app.auth import SESSION_COOKIE
-from app.auth_helpers import csrf_token_response
+from app.auth_helpers import _session_cookie_name, csrf_token_response
 from app.auth_gates import require_admin
-from app.config_facades import effective_auth_config
 from app.deps import get_auth, get_auth_enabled, get_web_dir
 
 router = APIRouter()
-
-def _session_cookie_name() -> str:
-    return str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
-
 
 # Paths that must never be honoured as a ``returnTo`` target, even when the
 # caller forwards them via ``?returnTo=...``. Centralised so /login, /setup,
@@ -96,6 +90,14 @@ def root(web_dir: Path = Depends(get_web_dir)):
     if index_path.exists():
         return FileResponse(index_path)
     return {'application': 'Daygle AI Camera', 'status': 'running'}
+
+
+def _page(web_dir: Path, filename: str):
+    """Serve ``web/<filename>``, falling back to the dashboard shell."""
+    page_path = web_dir / filename
+    if page_path.exists():
+        return FileResponse(page_path)
+    return root(web_dir=web_dir)
 
 
 @router.get('/favicon.ico')
@@ -202,55 +204,37 @@ def _setup_page_route(
 
 @router.get('/live')
 def live_page(web_dir: Path = Depends(get_web_dir)):
-    live_path = web_dir / 'live.html'
-    if live_path.exists():
-        return FileResponse(live_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'live.html')
 
 
 @router.get('/zones')
 def zones_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    zones_path = web_dir / 'zones.html'
-    if zones_path.exists():
-        return FileResponse(zones_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'zones.html')
 
 
 @router.get('/alerts')
 def alerts_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    alerts_path = web_dir / 'alerts.html'
-    if alerts_path.exists():
-        return FileResponse(alerts_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'alerts.html')
 
 
 @router.get('/sounds')
 def sounds_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    sounds_path = web_dir / 'sounds.html'
-    if sounds_path.exists():
-        return FileResponse(sounds_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'sounds.html')
 
 
 @router.get('/objects')
 def objects_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    objects_path = web_dir / 'objects.html'
-    if objects_path.exists():
-        return FileResponse(objects_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'objects.html')
 
 
 @router.get('/cameras')
 def cameras_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    cameras_path = web_dir / 'cameras.html'
-    if cameras_path.exists():
-        return FileResponse(cameras_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'cameras.html')
 
 
 @router.get('/events')
@@ -260,10 +244,7 @@ def events_page(web_dir: Path = Depends(get_web_dir)):
     # the row), so there is no separate alerts page. Served to any
     # authenticated user like /recordings; the middleware enforces the session
     # and /api/events applies per-user recording scoping.
-    events_path = web_dir / 'events.html'
-    if events_path.exists():
-        return FileResponse(events_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'events.html')
 
 
 @router.get('/search')
@@ -273,10 +254,7 @@ def dashboard_aliases(web_dir: Path = Depends(get_web_dir)):
 
 @router.get('/recordings')
 def recordings_page(web_dir: Path = Depends(get_web_dir)):
-    recordings_path = web_dir / 'recordings.html'
-    if recordings_path.exists():
-        return FileResponse(recordings_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'recordings.html')
 
 
 @router.get('/snapshots')
@@ -284,18 +262,12 @@ def snapshots_page(web_dir: Path = Depends(get_web_dir)):
     # The Snapshots library: every event that captured a frame, served to any
     # authenticated user like /recordings and /events. The middleware enforces
     # the session and /api/snapshots applies per-user recording scoping.
-    snapshots_path = web_dir / 'snapshots.html'
-    if snapshots_path.exists():
-        return FileResponse(snapshots_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'snapshots.html')
 
 
 @router.get('/recordings/timeline')
 def recordings_timeline_page(web_dir: Path = Depends(get_web_dir)):
-    timeline_path = web_dir / 'timeline.html'
-    if timeline_path.exists():
-        return FileResponse(timeline_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'timeline.html')
 
 
 @router.get('/recordings/{recording_id}')
@@ -311,28 +283,19 @@ def recording_playback_page(recording_id: str, web_dir: Path = Depends(get_web_d
     # require_admin) so viewers can watch. The client reads the id from the URL.
     if not recording_id.isdigit():
         raise HTTPException(status_code=404, detail='Not found')
-    recordings_path = web_dir / 'recordings.html'
-    if recordings_path.exists():
-        return FileResponse(recordings_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'recordings.html')
 
 
 @router.get('/onnx')
 def onnx_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    ai_path = web_dir / 'onnx.html'
-    if ai_path.exists():
-        return FileResponse(ai_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'onnx.html')
 
 
 @router.get('/camera-models')
 def camera_models_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    page_path = web_dir / 'camera-models.html'
-    if page_path.exists():
-        return FileResponse(page_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'camera-models.html')
 
 
 @router.get('/ai')
@@ -343,19 +306,13 @@ def ai_settings_page():
 @router.get('/face-recognition')
 def face_recognition_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    page_path = web_dir / 'face-recognition.html'
-    if page_path.exists():
-        return FileResponse(page_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'face-recognition.html')
 
 
 @router.get('/arcface')
 def arcface_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    page_path = web_dir / 'arcface.html'
-    if page_path.exists():
-        return FileResponse(page_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'arcface.html')
 
 
 @router.get('/people')
@@ -369,10 +326,7 @@ def people_page(request: Request, web_dir: Path = Depends(get_web_dir)):
 @router.get('/yamnet-tflite')
 def yamnet_tflite_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    yamnet_path = web_dir / 'yamnet-tflite.html'
-    if yamnet_path.exists():
-        return FileResponse(yamnet_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'yamnet-tflite.html')
 
 
 @router.get('/yamnet')
@@ -382,28 +336,19 @@ def yamnet_page():
 
 @router.get('/profile')
 def profile_page(web_dir: Path = Depends(get_web_dir)):
-    profile_path = web_dir / 'profile.html'
-    if profile_path.exists():
-        return FileResponse(profile_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'profile.html')
 
 
 @router.get('/settings')
 def system_settings_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    settings_path = web_dir / 'settings.html'
-    if settings_path.exists():
-        return FileResponse(settings_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'settings.html')
 
 
 @router.get('/users')
 def users_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    users_path = web_dir / 'users.html'
-    if users_path.exists():
-        return FileResponse(users_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'users.html')
 
 
 @router.get('/audit')
@@ -413,25 +358,16 @@ def audit_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     # future refactor that accidentally drops /audit from ADMIN_PATHS does
     # not silently expose the audit log.
     require_admin(request)
-    audit_path = web_dir / 'audit.html'
-    if audit_path.exists():
-        return FileResponse(audit_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'audit.html')
 
 
 @router.get('/camera-log')
 def camera_log_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    page_path = web_dir / 'camera-log.html'
-    if page_path.exists():
-        return FileResponse(page_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'camera-log.html')
 
 
 @router.get('/application-log')
 def application_log_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    page_path = web_dir / 'application-log.html'
-    if page_path.exists():
-        return FileResponse(page_path)
-    return root(web_dir=web_dir)
+    return _page(web_dir, 'application-log.html')

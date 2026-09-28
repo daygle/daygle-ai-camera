@@ -11,7 +11,7 @@ from app.auth_gates import require_admin
 from app.deps import get_database, get_redacted_push_notification_settings
 from app.payload_validators import validate_push_notification_settings
 from app.push_notifications import PushNotificationError, PushNotificationService
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -28,7 +28,7 @@ def get_push_notification_settings(settings=Depends(get_redacted_push_notificati
 @router.put('/api/settings/alert-push')
 async def update_push_notification_settings(request: Request, db=Depends(get_database)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     settings = validate_push_notification_settings(payload)
     result = db.set_setting('alert_push', settings, utc_now())
     write_audit_log(request, db, 'update', 'settings.alert_push')
@@ -38,7 +38,7 @@ async def update_push_notification_settings(request: Request, db=Depends(get_dat
 @router.post('/api/settings/alert-push/test')
 async def test_push_notification_settings(request: Request):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     settings = validate_push_notification_settings(
         payload.get('settings') if isinstance(payload.get('settings'), dict) else payload
     )

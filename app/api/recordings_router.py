@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import mimetypes
 import re
+import threading
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
@@ -32,6 +35,62 @@ from app.utils import camera_default_name
 from app.backup import purge_recordings_by_policy
 
 router = APIRouter()
+
+# ``(source path, mtime_ns, size) -> (stream path, mtime_ns, size)`` for clips
+# already proven playable. A browser plays a clip through a long run of HTTP
+# Range requests (initial load, every seek, the tail probe), and each one used
+# to re-run up to three ffprobe subprocesses (video codec, audio codec, video
+# stream presence) on an unchanged file. Only positive results are cached, and
+# an entry is used only while both files still carry the recorded stat
+# signature, so a re-encoded clip or a rebuilt playback sidecar is re-probed.
+_PLAYABLE_STREAM_CACHE: OrderedDict[tuple[str, int, int], tuple[Path, int, int]] = OrderedDict()
+_PLAYABLE_STREAM_CACHE_MAX = 256
+_PLAYABLE_STREAM_CACHE_LOCK = threading.Lock()
+
+
+def _playable_stream_path(file_path: Path) -> Path | None:
+    """Return the browser-playable copy of ``file_path``, or ``None``."""
+    source_stat = file_path.stat()
+    key = (str(file_path), source_stat.st_mtime_ns, source_stat.st_size)
+    with _PLAYABLE_STREAM_CACHE_LOCK:
+        cached = _PLAYABLE_STREAM_CACHE.get(key)
+    if cached is not None:
+        stream_path, mtime_ns, size = cached
+        try:
+            stream_stat = stream_path.stat()
+        except OSError:
+            stream_stat = None
+        if stream_stat is not None and (stream_stat.st_mtime_ns, stream_stat.st_size) == (mtime_ns, size):
+            with _PLAYABLE_STREAM_CACHE_LOCK:
+                _PLAYABLE_STREAM_CACHE.move_to_end(key)
+            return stream_path
+    stream_path = recording_stream_path(file_path)
+    if not stream_path.exists() or not mp4_has_video_stream(stream_path):
+        return None
+    stream_stat = stream_path.stat()
+    with _PLAYABLE_STREAM_CACHE_LOCK:
+        _PLAYABLE_STREAM_CACHE[key] = (stream_path, stream_stat.st_mtime_ns, stream_stat.st_size)
+        _PLAYABLE_STREAM_CACHE.move_to_end(key)
+        while len(_PLAYABLE_STREAM_CACHE) > _PLAYABLE_STREAM_CACHE_MAX:
+            _PLAYABLE_STREAM_CACHE.popitem(last=False)
+    return stream_path
+
+
+def _visible_recording(user: dict, db, recording_id: int) -> dict:
+    """Fetch a recording the signed-in user may see, else raise 404.
+
+    Viewers cannot retrieve another user's recording. The answer is 404 (NOT
+    403) so the existence of someone else's recording is not leaked via the
+    status code.
+    """
+    recording = db.get_recording(recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail='Recording not found')
+    if str(user.get('role') or '').strip().lower() != 'admin':
+        owner_id = recording.get('owner_user_id')
+        if owner_id is not None and int(owner_id) != int(user.get('id') or 0):
+            raise HTTPException(status_code=404, detail='Recording not found')
+    return recording
 
 
 @router.get('/api/recordings')
@@ -166,20 +225,7 @@ def purge_recordings(request: Request):
 
 @router.get('/api/recordings/{recording_id}')
 def recording_detail(request: Request, recording_id: int, db=Depends(get_database)):
-    require_user(request)
-    recording = db.get_recording(recording_id)
-    if recording is None:
-        raise HTTPException(status_code=404, detail='Recording not found')
-    # round-5 finish / M2: viewer cannot retrieve another user's recording --
-    # returning 404 (NOT 403) so the existence of someone-else's recording is
-    # not leaked via the response status code. Lookup is route-local via
-    # ``request.state.user`` (set by authentication_middleware) so this
-    # block has no dependency on locals captured in OTHER handlers.
-    request_user = getattr(request.state, 'user', None) or {}
-    if str(request_user.get('role') or '').strip().lower() != 'admin':
-        owner_id = recording.get('owner_user_id')
-        if owner_id is not None and int(owner_id) != int(request_user.get('id') or 0):
-            raise HTTPException(status_code=404, detail='Recording not found')
+    recording = _visible_recording(require_user(request), db, recording_id)
     file_path = safe_storage_path(recording.get('file_path'), roots=('recordings_dir',))
     recording['track'] = load_recording_detection_track(file_path) if file_path is not None else None
     if (
@@ -198,26 +244,13 @@ def recording_detail(request: Request, recording_id: int, db=Depends(get_databas
 
 @router.get('/api/recordings/{recording_id}/stream')
 def stream_recording(recording_id: int, request: Request, db=Depends(get_database)):
-    require_user(request)
-    recording = db.get_recording(recording_id)
-    if recording is None:
-        raise HTTPException(status_code=404, detail='Recording not found')
-    # round-5 finish / M2: viewer cannot retrieve another user's recording --
-    # returning 404 (NOT 403) so the existence of someone-else's recording is
-    # not leaked via the response status code. Lookup is route-local via
-    # ``request.state.user`` (set by authentication_middleware) so this
-    # block has no dependency on locals captured in OTHER handlers.
-    request_user = getattr(request.state, 'user', None) or {}
-    if str(request_user.get('role') or '').strip().lower() != 'admin':
-        owner_id = recording.get('owner_user_id')
-        if owner_id is not None and int(owner_id) != int(request_user.get('id') or 0):
-            raise HTTPException(status_code=404, detail='Recording not found')
+    recording = _visible_recording(require_user(request), db, recording_id)
     file_path = safe_storage_path(recording.get('file_path'), roots=('recordings_dir',))
     if file_path is None or not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail='Recording media file not found')
 
-    stream_path = recording_stream_path(file_path)
-    if not stream_path.exists() or not mp4_has_video_stream(stream_path):
+    stream_path = _playable_stream_path(file_path)
+    if stream_path is None:
         raise HTTPException(
             status_code=415,
             detail='Recording file is not a playable video stream. Generate a new recording to rebuild media.',
@@ -284,25 +317,12 @@ def stream_recording(recording_id: int, request: Request, db=Depends(get_databas
 
 @router.get('/api/recordings/{recording_id}/download')
 def download_recording(request: Request, recording_id: int, db=Depends(get_database)):
-    require_user(request)
-    recording = db.get_recording(recording_id)
-    if recording is None:
-        raise HTTPException(status_code=404, detail='Recording not found')
-    # round-5 finish / M2: viewer cannot retrieve another user's recording --
-    # returning 404 (NOT 403) so the existence of someone-else's recording is
-    # not leaked via the response status code. Lookup is route-local via
-    # ``request.state.user`` (set by authentication_middleware) so this
-    # block has no dependency on locals captured in OTHER handlers.
-    request_user = getattr(request.state, 'user', None) or {}
-    if str(request_user.get('role') or '').strip().lower() != 'admin':
-        owner_id = recording.get('owner_user_id')
-        if owner_id is not None and int(owner_id) != int(request_user.get('id') or 0):
-            raise HTTPException(status_code=404, detail='Recording not found')
+    recording = _visible_recording(require_user(request), db, recording_id)
     file_path = safe_storage_path(recording.get('file_path'), roots=('recordings_dir',))
     if file_path is None or not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail='Recording media file not found')
-    stream_path = recording_stream_path(file_path)
-    if not stream_path.exists() or not mp4_has_video_stream(stream_path):
+    stream_path = _playable_stream_path(file_path)
+    if stream_path is None:
         raise HTTPException(status_code=415, detail='Recording file is not a playable video stream.')
     started_at = str(recording.get('started_at') or '')
     safe_ts = re.sub(r'[^\w\-]', '_', started_at)[:19]

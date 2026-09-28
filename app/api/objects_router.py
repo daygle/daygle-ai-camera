@@ -22,7 +22,7 @@ from app.object_settings import (
     effective_object_settings,
     normalize_object_settings,
 )
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 
 logger = logging.getLogger('daygle.ai')
 
@@ -43,7 +43,7 @@ def get_object_settings(request: Request):
 @router.put('/api/settings/objects')
 async def update_object_settings(request: Request, db=Depends(get_database)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Payload must be a JSON object.')
 

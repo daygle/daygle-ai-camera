@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from app.auth import AuthError
 from app.auth_gates import require_admin, require_user
 from app.deps import get_auth, get_database
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -18,7 +18,7 @@ router = APIRouter()
 @router.put('/api/profile')
 async def update_profile(request: Request, auth=Depends(get_auth)):
     user = require_user(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     try:
         updated = auth.update_profile(
             int(user['id']),
@@ -45,12 +45,14 @@ async def update_profile(request: Request, auth=Depends(get_auth)):
 @router.post('/api/profile/password')
 async def change_profile_password(request: Request, auth=Depends(get_auth)):
     user = require_user(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
+    session = getattr(request.state, 'session', None) or {}
     try:
         auth.change_password(
             int(user['id']),
             str(payload.get('current_password') or ''),
             str(payload.get('new_password') or ''),
+            keep_session_token=session.get('session_token'),
         )
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -71,7 +73,7 @@ def list_users(request: Request, auth=Depends(get_auth)):
 @router.post('/api/users')
 async def create_user(request: Request, db=Depends(get_database), auth=Depends(get_auth)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     try:
         user = auth.create_user(
             payload.get('username', ''),
@@ -90,7 +92,7 @@ async def create_user(request: Request, db=Depends(get_database), auth=Depends(g
 @router.patch('/api/users/{user_id}')
 async def update_user(user_id: int, request: Request, db=Depends(get_database), auth=Depends(get_auth)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     changes: dict[str, Any] = {}
     if 'username' in payload:
         changes['username'] = payload['username']

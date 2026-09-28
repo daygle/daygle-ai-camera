@@ -21,7 +21,7 @@ from app.deps import get_database, get_face_recognition_service, get_reload_face
 from app.embedding_models import EMBEDDING_MODELS, embedding_model_catalog
 from app.face_recognition_settings import face_recognition_status, validate_face_recognition_settings
 from app.model_management import _download_weights, _relative_model_path, _safe_within_models_dir
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 
 logger = logging.getLogger('daygle.ai')
 
@@ -45,10 +45,10 @@ async def update_face_recognition_settings(
     reload_service=Depends(get_reload_face_recognition),
 ):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     new_settings = validate_face_recognition_settings(payload)
     db.set_setting('face_recognition', new_settings, utc_now())
-    available, reason = reload_service(new_settings)
+    available, reason = await run_in_threadpool(reload_service, new_settings)
     from app.face_recognition_service import get_face_recognition_service as _get_service
 
     response = face_recognition_status(new_settings, _get_service(), db)
@@ -161,11 +161,13 @@ async def download_embedding_model(
         raise HTTPException(status_code=404, detail='Unknown embedding model.')
     destination = _safe_within_models_dir(info['onnx'])
     try:
-        await run_in_threadpool(_download_weights, info['url'], destination)
+        await run_in_threadpool(
+            _download_weights, info['url'], destination, expected_sha256=info.get('sha256'),
+        )
     except RuntimeError as exc:
         logger.warning('Embedding model download failed for %s: %s', catalog_id, exc)
         raise HTTPException(status_code=502, detail='Embedding model download failed.') from exc
-    rel_path, available, reason = _activate_embedding_model(info, db, reload_service)
+    rel_path, available, reason = await run_in_threadpool(_activate_embedding_model, info, db, reload_service)
     write_audit_log(request, db, 'download', 'settings.face_recognition.embedding_model', details={
         'catalog_id': catalog_id,
         'model_path': rel_path,
@@ -224,14 +226,16 @@ async def update_embedding_model(
         raise HTTPException(status_code=400, detail='Model is not installed. Download it first.')
     destination = _safe_within_models_dir(info['onnx'])
     try:
-        await run_in_threadpool(_download_weights, info['url'], destination)
+        await run_in_threadpool(
+            _download_weights, info['url'], destination, expected_sha256=info.get('sha256'),
+        )
     except RuntimeError as exc:
         logger.warning('Embedding model update failed for %s: %s', catalog_id, exc)
         raise HTTPException(status_code=502, detail='Embedding model update failed.') from exc
     available = reason = None
     if _relative_model_path(destination) == str(effective_face_recognition_config().get('model_path') or ''):
         # Refreshed the active model -> reload so the new bytes are used.
-        available, reason = reload_service(None)
+        available, reason = await run_in_threadpool(reload_service, None)
     write_audit_log(request, db, 'update', 'settings.face_recognition.embedding_model', details={
         'catalog_id': catalog_id,
         'action': 'update',

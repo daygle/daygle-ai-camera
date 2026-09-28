@@ -88,6 +88,30 @@ class UpdateScriptOriginGuardTests(TestCase):
         combined = ((result.stdout or '') + (result.stderr or '')).lower()
         self.assertIn('non-allowlisted origin remote', combined)
 
+    def test_update_sh_rejects_lookalike_origins(self):
+        """The allowlist is anchored: a host that merely CONTAINS the canonical
+        path (or a lookalike github domain) must be refused."""
+        for index, url in enumerate((
+            'https://evil.example/github.com/daygle/daygle-ai-camera.git',
+            'https://github.com.evil.io/daygle/daygle-ai-camera',
+            'http://github.com/daygle/daygle-ai-camera',
+        )):
+            repo = self._make_git_repo(url) if index == 0 else None
+            if repo is None:
+                subprocess.run(
+                    ['git', '-C', str(Path(self.tmpdir) / 'repo'), 'remote', 'set-url', 'origin', url],
+                    check=True,
+                )
+                repo = str(Path(self.tmpdir) / 'repo')
+            result = subprocess.run(
+                [BASH, REPO_DIR + '/scripts/update.sh'],
+                cwd=repo, capture_output=True, text=True, check=False,
+                env=_hermetic_git_env(),
+            )
+            self.assertNotEqual(result.returncode, 0, url)
+            combined = ((result.stdout or '') + (result.stderr or '')).lower()
+            self.assertIn('non-allowlisted origin remote', combined, url)
+
     def test_update_sh_accepts_canonical_origin(self):
         good_repo = self._make_git_repo('https://github.com/daygle/daygle-ai-camera.git')
         # Run a *copy* of update.sh from inside the controlled repo so its
@@ -122,7 +146,7 @@ class UpdateScriptOriginGuardTests(TestCase):
         script = Path(REPO_DIR) / 'scripts' / 'install_debian.sh'
         text = script.read_text()
         self.assertIn(
-            "EXPECTED_REMOTE_REGEX='github\\.com[:/]daygle/daygle-ai-camera(\\.git)?$'",
+            "EXPECTED_REMOTE_REGEX='^(https://([^/@]+@)?github\\.com/|ssh://git@github\\.com/|git@github\\.com:)daygle/daygle-ai-camera(\\.git)?/?$'",
             text,
         )
         self.assertIn('refusing to install from non-allowlisted source repo', text)

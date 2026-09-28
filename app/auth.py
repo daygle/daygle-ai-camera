@@ -506,6 +506,19 @@ class AuthService:
         existing = self.get_user(user_id)
         if not existing:
             raise AuthError('User not found.')
+        for field_name, field_value in (
+            ('username', username),
+            ('first name', first_name),
+            ('last name', last_name),
+            ('email', email),
+            ('timezone', timezone_name),
+            ('date format', date_format),
+            ('time format', time_format),
+            ('theme', theme),
+            ('current password', current_password),
+        ):
+            if field_value is not None and not isinstance(field_value, str):
+                raise AuthError(f'{field_name.capitalize()} must be text.')
         username_changed = (
             username is not None and username.strip() != str(existing.get('username') or '')
         )
@@ -591,7 +604,22 @@ class AuthService:
             raise AuthError("Username already exists.") from exc
         return self.get_user(user_id)  # type: ignore[return-value]
 
-    def change_password(self, user_id: int, current_password: str, new_password: str) -> None:
+    def change_password(
+        self,
+        user_id: int,
+        current_password: str,
+        new_password: str,
+        *,
+        keep_session_token: str | None = None,
+    ) -> None:
+        """Change a user's own password after verifying the current one.
+
+        Every OTHER session for the user is revoked, so a stolen cookie stops
+        working as soon as the owner changes their password (matching the
+        admin ``update_user`` path, which revokes all sessions). The caller's
+        own session (``keep_session_token``) survives so the user is not
+        signed out of the tab they changed the password from.
+        """
         errors = self.validate_password_complexity(new_password)
         if errors:
             raise AuthError(" ".join(errors))
@@ -607,6 +635,10 @@ class AuthService:
             db.execute(
                 "UPDATE users SET password_hash = ?, failed_attempts = 0, locked_until = NULL, updated_at = ? WHERE id = ?",
                 (self.hash_password(new_password), utc_now(), user_id),
+            )
+            db.execute(
+                "DELETE FROM user_sessions WHERE user_id = ? AND session_token IS NOT ?",
+                (user_id, keep_session_token),
             )
 
     def too_many_recent_failures(self, db: sqlite3.Connection, username: str, ip_address: str, now: datetime) -> bool:

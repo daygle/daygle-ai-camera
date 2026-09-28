@@ -20,6 +20,8 @@ import math
 import threading
 from typing import Any
 
+from fastapi import HTTPException
+
 import app.state as _state
 from app.config_facades import effective_face_recognition_config
 from app.runtime_config import cached_snapshot
@@ -163,12 +165,15 @@ def rule_scope_matches(
 
 
 def validate_face_detection_rules(payload: dict[str, Any]) -> dict[str, Any]:
-    """Validate a face-detection-rules payload."""
-    if not isinstance(payload, dict):
-        return {'rules': []}
-    raw_rules = payload.get('rules')
-    if not isinstance(raw_rules, list):
-        return {'rules': []}
+    """Validate a face-detection-rules payload.
+
+    A payload without a ``rules`` list is rejected rather than normalised to an
+    empty rule set: the route persists the result, so a malformed request used
+    to silently delete every face rule.
+    """
+    if not isinstance(payload, dict) or not isinstance(payload.get('rules'), list):
+        raise HTTPException(status_code=400, detail='Face detection rules must be an object with a "rules" list.')
+    raw_rules = payload['rules']
     validated = []
     seen_ids: set[str] = set()
     for raw in raw_rules:
@@ -248,23 +253,36 @@ def heal_legacy_unknown_alert_config() -> bool:
 
 
 def enabled_rules_for_label(
-    label: str, camera_id: str = '', zone_id: str = ''
+    label: str, camera_id: str = '', zone_id: str = '', *, person_id: Any = None,
 ) -> dict[str, Any] | None:
-    """Return the first enabled rule matching *label* (case-insensitive).
+    """Return the first enabled rule matching this recognised person.
 
-    ``label`` is the ``person_name`` annotation stamped by
-    ``annotate_face_identities`` (e.g. ``"Alice"``). ``camera_id`` /
-    ``zone_id`` scope the lookup: rules carrying a camera/zone value only
-    match detections stamped with that same camera/zone (legacy unscoped
-    rules match everywhere). Returns ``None`` when no enabled rule matches.
+    A rule that names a ``person_id`` matches that enrolled person only, so
+    renaming someone keeps their rule working and two people who share a name
+    never trigger each other's rules. A legacy rule without a ``person_id``
+    falls back to a case-insensitive match of *label*, the ``person_name``
+    annotation stamped by ``annotate_face_identities`` (e.g. ``"Alice"``).
+    Unknown-person system rules never match a recognised face.
+
+    ``camera_id`` / ``zone_id`` scope the lookup: rules carrying a camera/zone
+    value only match detections stamped with that same camera/zone (legacy
+    unscoped rules match everywhere). Returns ``None`` when no enabled rule
+    matches.
     """
     rules = effective_face_detection_rules().get('rules') or []
     label_lower = label.strip().lower()
+    wanted_person = str(person_id).strip() if person_id not in (None, '') else ''
     for rule in rules:
         if not _coerce_bool(rule.get('enabled'), False):
             continue
-        rule_name = str(rule.get('name') or '').strip().lower()
-        if rule_name != label_lower:
+        if is_unknown_rule(rule):
+            continue
+        rule_person = rule.get('person_id')
+        rule_person = str(rule_person).strip() if rule_person not in (None, '') else ''
+        if rule_person:
+            if rule_person != wanted_person:
+                continue
+        elif str(rule.get('name') or '').strip().lower() != label_lower:
             continue
         if not rule_scope_matches(rule, camera_id, zone_id):
             continue
@@ -320,6 +338,7 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
         # stamps face detections with their containing zone before calling.
         rule = enabled_rules_for_label(
             person_name,
+            person_id=detection.get('person_id'),
             camera_id=camera_id,
             zone_id=str(detection.get('zone_id') or ''),
         )

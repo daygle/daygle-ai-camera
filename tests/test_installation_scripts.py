@@ -39,6 +39,9 @@ if [[ "${1:-}" == "-c" ]]; then
   exit 0
 fi
 if [[ "$*" == *" uninstall "* ]]; then
+  if [[ -n "${DAYGLE_TEST_UNINSTALL_LOG:-}" ]]; then
+    printf '%s\n' "$*" >> "${DAYGLE_TEST_UNINSTALL_LOG}"
+  fi
   exit 0
 fi
 printf '%s\n' "$@" > "${DAYGLE_TEST_CAPTURE_ARGS}"
@@ -78,6 +81,7 @@ fi
         env["DAYGLE_TEST_CAPTURE_ARGS"] = str(self.capture_args)
         env["DAYGLE_TEST_PROVIDER_FAIL"] = "1" if provider_fail else "0"
         env["DAYGLE_TEST_NO_GPU"] = "0"
+        env["DAYGLE_TEST_UNINSTALL_LOG"] = str(self.tmpdir / "uninstalled.txt")
         result = subprocess.run(
             [BASH, str(INSTALL_SCRIPT), str(self.fake_python), str(REPO_DIR / "requirements.txt")],
             cwd=str(REPO_DIR),
@@ -96,6 +100,25 @@ fi
             for line in requirements.splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         ]
+
+    def _uninstalled(self) -> list[str]:
+        log = self.tmpdir / "uninstalled.txt"
+        return log.read_text(encoding="utf-8").split() if log.exists() else []
+
+    def test_update_keeps_the_selected_runtime_installed(self):
+        """Only the conflicting variant is removed before installing. Removing
+        the selected one too left the app with no ONNX Runtime whenever the
+        following install failed or was interrupted."""
+        self._run("cpu")
+        uninstalled = self._uninstalled()
+        self.assertIn("onnxruntime-gpu", uninstalled)
+        self.assertNotIn("onnxruntime", uninstalled)
+
+        (self.tmpdir / "uninstalled.txt").unlink()
+        self._run("gpu")
+        uninstalled = self._uninstalled()
+        self.assertIn("onnxruntime", uninstalled)
+        self.assertNotIn("onnxruntime-gpu", uninstalled)
 
     def test_gpu_variant_replaces_cpu_onnxruntime(self):
         lines = self._package_lines(self._run("gpu"))

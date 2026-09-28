@@ -79,6 +79,11 @@ class RecordingService:
     # camera stays down: log the first failure in a streak, then at most once
     # per this interval, then a single recovery line when it comes back.
     PREBUFFER_FAILURE_LOG_INTERVAL_SECONDS = 60.0
+    # Continuous chunk recorder: an ffmpeg whose output has not grown for this
+    # long is stalled (camera stopped sending data, half-open TCP connection)
+    # and is restarted, mirroring the prebuffer worker's dead-stream check.
+    CONTINUOUS_STALL_SECONDS = 60.0
+    CONTINUOUS_POLL_SECONDS = 1.0
     # Floor for sidecar audio retention. The worker actually retains audio for
     # the full prebuffer window (pre + max_clip) so long event clips get audio
     # for their whole length; this is just the minimum when that window is tiny.
@@ -691,6 +696,7 @@ class RecordingService:
         output_pattern = chunks_dir / f'continuous_{camera_key}_%Y%m%dT%H%M%S.mp4'
         list_file = chunks_dir / '.segment_list.txt'
 
+        consecutive_failures = 0
         while not stop_event.is_set():
             list_file.unlink(missing_ok=True)
             command = [
@@ -728,10 +734,37 @@ class RecordingService:
                 stop_event.wait(5)
                 continue
             seen_count = 0
+            started_at = time.monotonic()
+            last_progress_at = started_at
+            last_output_signature: tuple[int, float] | None = None
+            stalled = False
+            tick = 0
             try:
                 while process.poll() is None and not stop_event.is_set():
                     seen_count = self._drain_chunk_list(camera_key, chunks_dir, list_file, seen_count, on_chunk_complete)
-                    time.sleep(1)
+                    tick += 1
+                    if tick % 5:
+                        stop_event.wait(self.CONTINUOUS_POLL_SECONDS)
+                        continue
+                    # Dead-stream detection: without it a camera that stops
+                    # sending data leaves ffmpeg blocked forever and continuous
+                    # recording silently ends. Progress is any change in the
+                    # newest chunk's size or mtime. Checked every 5th tick:
+                    # finished chunks stay in this directory until retention,
+                    # so the scan is not free, and the stall window is 60s.
+                    signature = self._newest_chunk_signature(chunks_dir, camera_key)
+                    now = time.monotonic()
+                    if signature is not None and signature != last_output_signature:
+                        last_output_signature = signature
+                        last_progress_at = now
+                    elif now - last_progress_at > self.CONTINUOUS_STALL_SECONDS:
+                        stalled = True
+                        logger.warning(
+                            'Continuous recorder for %s stalled (no output in %.0fs); restarting ffmpeg.',
+                            camera_key, self.CONTINUOUS_STALL_SECONDS,
+                        )
+                        break
+                    stop_event.wait(self.CONTINUOUS_POLL_SECONDS)
             finally:
                 if process.poll() is None:
                     process.terminate()
@@ -739,6 +772,12 @@ class RecordingService:
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         process.kill()
+                        # Reap the killed process so it does not linger as a
+                        # zombie until the next restart.
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            pass
                 # Bug 3 fix: drain any chunk ffmpeg finalised during graceful
                 # shutdown (SIGTERM). The inner polling loop bailed out the
                 # instant ``stop_event`` fired, so the chunk that was open at
@@ -747,8 +786,37 @@ class RecordingService:
                 # reach ``on_chunk_complete`` and would sit orphaned on disk.
                 seen_count = self._drain_chunk_list(camera_key, chunks_dir, list_file, seen_count, on_chunk_complete)
             if not stop_event.is_set():
-                logger.info('Continuous recorder for %s restarting after ffmpeg exit.', camera_key)
-                time.sleep(2)
+                # Back off exponentially while the camera keeps failing (an
+                # unreachable camera used to respawn ffmpeg every 2s forever);
+                # a run that stayed healthy resets the failure count.
+                if not stalled and time.monotonic() - started_at >= self.PREBUFFER_HEALTHY_RUN_SECONDS:
+                    consecutive_failures = 0
+                consecutive_failures += 1
+                backoff = min(
+                    self.PREBUFFER_RECONNECT_BACKOFF_MAX_SECONDS,
+                    self.PREBUFFER_RECONNECT_BACKOFF_BASE_SECONDS * (2 ** (consecutive_failures - 1)),
+                )
+                logger.info(
+                    'Continuous recorder for %s restarting after ffmpeg exit in %.0fs (attempt %d).',
+                    camera_key, backoff, consecutive_failures,
+                )
+                stop_event.wait(backoff)
+
+    @staticmethod
+    def _newest_chunk_signature(chunks_dir: Path, camera_key: str) -> tuple[int, float] | None:
+        """``(size, mtime)`` of the newest continuous chunk, or ``None``."""
+        newest: tuple[float, int] | None = None
+        try:
+            for path in chunks_dir.glob(f'continuous_{camera_key}_*.mp4'):
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                if newest is None or stat.st_mtime > newest[0]:
+                    newest = (stat.st_mtime, stat.st_size)
+        except OSError:
+            return None
+        return None if newest is None else (newest[1], newest[0])
 
     def prebuffer_window_seconds(self, recording_config: dict[str, Any] | None = None) -> int:
         """Rolling prebuffer span. Must cover the longest possible event clip
@@ -1030,7 +1098,13 @@ class RecordingService:
             )
 
         effective_seconds = rendered_seconds if rendered_seconds is not None else content_seconds
-        self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, effective_seconds, camera_id=camera_id)
+        try:
+            self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, effective_seconds, camera_id=camera_id)
+        except Exception as exc:
+            # Audio is best-effort: an unexpected mux failure must not discard
+            # the video that already rendered (the caller would replace the
+            # whole clip with a generated placeholder) or orphan ``tmp_path``.
+            logger.warning('Audio mux failed for %s; keeping silent video clip: %s', camera_key, exc)
         tmp_path.replace(file_path)
         # Report the clip's real duration, not the requested window - keyframe
         # alignment and short source footage make them differ, and a mismatch
@@ -1418,6 +1492,10 @@ class RecordingService:
                         process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
                         process.kill()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            pass
                     return_code = process.poll()
                 try:
                     stderr_content = stderr_path.read_text(encoding='utf-8', errors='replace')

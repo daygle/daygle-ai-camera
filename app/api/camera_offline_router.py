@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.request_helpers import read_json_object
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.camera_health import effective_camera_offline_alert_settings
@@ -22,7 +23,7 @@ def get_camera_offline_alert_settings():
 @router.put('/api/settings/camera-offline')
 async def update_camera_offline_alert_settings(request: Request, db=Depends(get_database)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Invalid settings payload')
     validated = {'enabled': normalize_bool_setting(payload.get('enabled', False), False)}

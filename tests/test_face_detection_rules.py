@@ -240,10 +240,12 @@ def _known_rule(name='Alice', **overrides):
     return rule
 
 
-def _known_face(track_id, confidence, name='Alice'):
+def _known_face(track_id, confidence, name='Alice', person_id=1):
+    # Mirrors ``face_identity._apply``: a recognised face always carries both
+    # the matched person's id and name.
     return {
         'label': 'face', 'recognized': True, 'track_id': track_id,
-        'person_name': name, 'confidence': confidence,
+        'person_id': person_id, 'person_name': name, 'confidence': confidence,
     }
 
 

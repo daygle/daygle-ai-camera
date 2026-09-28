@@ -119,6 +119,7 @@ class OnnxYoloDetector:
     # sampled with a plain ``getattr(detector, 'last_timing', None)`` without a
     # hasattr dance at every call site.
     last_timing: dict[str, float] = {}
+    _head_mismatch_logged = False
 
     def __init__(
         self,
@@ -826,7 +827,10 @@ class OnnxYoloDetector:
         if shape_nms_free is None:
             use_nms_free = self._nms_free
         else:
-            if shape_nms_free != self._nms_free:
+            if shape_nms_free != self._nms_free and not self._head_mismatch_logged:
+                # Once per detector: the mismatch is a property of the loaded
+                # model, so logging it on every frame only floods the log.
+                self._head_mismatch_logged = True
                 logger.warning(
                     'ONNX output shape %s indicates a %s head, but nms_free=%s was configured; '
                     'using the format implied by the output shape.',
@@ -1170,7 +1174,10 @@ def create_face_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector | None:
         face_confidence = float(confidence) if confidence not in (None, '') else float(ai_config.get('confidence', 0.45))
     except (TypeError, ValueError):
         face_confidence = 0.45
-    nms_free = bool(ai_config.get('nms_free')) or _detect_model_type(raw_model_path)
+    # Only the face model's own filename decides its head format here; the
+    # primary detector's ``nms_free`` flag describes a different model (the
+    # output shape remains the decisive check at inference time).
+    nms_free = _detect_model_type(raw_model_path)
     keypoint_count_setting = _optional_int('face_keypoint_count')
     return OnnxYoloDetector(
         model_path=raw_model_path,
@@ -1211,6 +1218,10 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
     nms_free = ai_config.get("nms_free")
     if nms_free is None:
         nms_free = _detect_model_type(model_path)
+    else:
+        # A YAML/env value can arrive as the string "false", which ``bool()``
+        # would read as True.
+        nms_free = normalize_bool_setting(nms_free, False)
 
     return OnnxYoloDetector(
         model_path=model_path,

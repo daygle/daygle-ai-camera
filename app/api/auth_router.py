@@ -19,11 +19,10 @@ from html import escape
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from app.auth import CSRF_COOKIE, CSRF_HEADER, AuthError, SESSION_COOKIE, utc_now
+from app.auth import CSRF_COOKIE, CSRF_HEADER, AuthError, utc_now
 from app.auth_gates import _request_ip, require_session
-from app.auth_helpers import clear_auth_cookies, set_session_cookie
+from app.auth_helpers import _session_cookie_name, clear_auth_cookies, delete_csrf_cookie, set_session_cookie
 from app.rate_limiter import login_limiter, setup_limiter
-from app.config_facades import effective_auth_config
 from app.deps import get_auth, get_auth_enabled, get_database, get_logger
 from app.request_helpers import form_data
 from app.api.web_router import _safe_return_to, login_page, setup_page
@@ -31,10 +30,6 @@ from app.api.web_router import _safe_return_to, login_page, setup_page
 logger = logging.getLogger('daygle.auth')
 
 router = APIRouter()
-
-
-def _session_cookie_name() -> str:
-    return str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
 
 
 def _csrf_double_submit_ok(data: dict, request: Request) -> bool:
@@ -144,7 +139,7 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
     safe_return = _safe_return_to(data.get('return_to'))
     response = RedirectResponse(safe_return or '/', status_code=303)
     set_session_cookie(response, request, token, expires_at)
-    response.delete_cookie(CSRF_COOKIE)
+    delete_csrf_cookie(response)
     return response
 
 
