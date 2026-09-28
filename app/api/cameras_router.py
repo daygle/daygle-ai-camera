@@ -46,7 +46,7 @@ from app.profile_presets import (
     list_presets,
     normalize_preset,
 )
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -139,7 +139,7 @@ async def update_camera(
 ):
     require_admin(request)
     normalized = normalize_camera_id(camera_id)
-    payload = await request.json()
+    payload = await read_json_object(request)
     # Serialize the read-validate-persist section against the other writers
     # (bulk settings API and the profile monitor's persist): a concurrent
     # monitor persist must not overwrite this request's edit with a stale
@@ -257,7 +257,7 @@ def camera_profile_schedule_suggestion(
 @router.post('/api/cameras/test-connection')
 async def test_camera_connection(request: Request, recording_service=Depends(get_recording_service)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     stream_url = build_stream_url(payload)
     if not stream_url:
         raise HTTPException(status_code=400, detail='Provide a stream_url or host to test.')
@@ -309,7 +309,7 @@ async def test_camera_connection(request: Request, recording_service=Depends(get
 @router.post('/api/cameras/{camera_id}/ptz')
 async def camera_ptz(camera_id: str, request: Request):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     command = str(payload.get('command', '')).strip().lower()
     if command not in PTZ_VALID_COMMANDS:
         raise HTTPException(status_code=400, detail=f'Invalid PTZ command. Valid: {sorted(PTZ_VALID_COMMANDS)}')

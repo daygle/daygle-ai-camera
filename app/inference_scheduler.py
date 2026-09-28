@@ -265,10 +265,6 @@ class LiveInferenceScheduler:
         with self._condition:
             return {key: dict(value) for key, value in self._timings.items()}
 
-    def clear_timings(self) -> None:
-        with self._condition:
-            self._timings.clear()
-
     # ─── Selection ────────────────────────────────────────────────────────
 
     def _priority(self, job: InferenceJob) -> int:

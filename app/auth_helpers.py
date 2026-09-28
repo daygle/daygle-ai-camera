@@ -137,7 +137,18 @@ def set_session_cookie(
     )
 
 
+def delete_csrf_cookie(response: Response) -> None:
+    """Delete the pre-auth CSRF cookie on *response*.
+
+    The deletion must carry the same ``Domain`` the cookie was set with
+    (``auth.cookie_domain``); a browser only removes a cookie whose name,
+    domain and path all match, so a domain-less delete left a domain-scoped
+    cookie behind.
+    """
+    response.delete_cookie(CSRF_COOKIE, domain=_get_cookie_domain())
+
+
 def clear_auth_cookies(response: Response) -> None:
     """Delete both the CSRF and session cookies on *response*."""
-    response.delete_cookie(_session_cookie_name())
-    response.delete_cookie(CSRF_COOKIE)
+    response.delete_cookie(_session_cookie_name(), domain=_get_cookie_domain())
+    delete_csrf_cookie(response)

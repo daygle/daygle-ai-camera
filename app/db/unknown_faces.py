@@ -138,17 +138,6 @@ class UnknownFacesMixin:
         blob = row['thumbnail']
         return bytes(blob) if blob is not None else None
 
-    def get_unknown_face_embedding(self, face_id: int) -> dict[str, Any] | None:
-        """Return the embedding bytes + dim + model for a capture, or None."""
-        with self.connect() as db:
-            row = db.execute(
-                "SELECT embedding, dim, model FROM unknown_faces WHERE id = ?",
-                (face_id,),
-            ).fetchone()
-        if row is None:
-            return None
-        return {'embedding': bytes(row['embedding']), 'dim': int(row['dim']), 'model': str(row['model'])}
-
     def assign_unknown_face_with_embedding(
         self,
         face_id: int,

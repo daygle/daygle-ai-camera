@@ -28,7 +28,7 @@ from app.model_management import (
     _read_installed_models,
     delete_model,
 )
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 from app.media_utils import ONE_PIXEL_PNG
 
 logger = logging.getLogger('daygle.ai')
@@ -185,7 +185,7 @@ def list_ai_models():
 @router.post('/api/settings/ai/download-model')
 async def download_ai_model(request: Request, db=Depends(get_database)):
     require_admin(request)
-    body = await request.json()
+    body = await read_json_object(request)
     model_name = str(body.get('model') or '').strip().lower()
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
@@ -287,7 +287,7 @@ def check_model_updates(request: Request):
 @router.post('/api/settings/ai/update-model')
 async def update_ai_model(request: Request, db=Depends(get_database)):
     require_admin(request)
-    body = await request.json()
+    body = await read_json_object(request)
     model_name = str(body.get('model') or '').strip().lower()
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")

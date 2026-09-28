@@ -284,10 +284,3 @@ def get_adaptive_cadence() -> AdaptiveCadenceTracker:
         if _tracker is None:
             _tracker = AdaptiveCadenceTracker()
         return _tracker
-
-
-def reset_adaptive_cadence() -> None:
-    """Drop all per-camera cadence state (tests, and a full service reload)."""
-    global _tracker
-    with _tracker_lock:
-        _tracker = None

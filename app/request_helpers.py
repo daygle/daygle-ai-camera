@@ -76,6 +76,22 @@ def _redact_audit_details(details: Any) -> Any:
 logger = logging.getLogger('daygle.ai')
 
 
+async def read_json_object(request: Request) -> dict[str, Any]:
+    """Parse the request body as a JSON object, or raise ``HTTPException(400)``.
+
+    Routes that read fields with ``payload.get(...)`` would otherwise surface
+    malformed JSON (``JSONDecodeError``) or a non-object body (a list, string
+    or number has no ``.get``) as an HTTP 500.
+    """
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='Request body must be valid JSON.') from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Request body must be a JSON object.')
+    return payload
+
+
 async def form_data(request: Request) -> dict[str, str]:
     """Parse an application/x-www-form-urlencoded (or plain text) body into a dict."""
     body = (await request.body()).decode('utf-8')

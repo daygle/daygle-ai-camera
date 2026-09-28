@@ -102,7 +102,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.responses import Response
 
 import app.state as _state
-from app.auth import CSRF_HEADER
+from app.auth import CSRF_HEADER, SESSION_COOKIE
 from app.auth_helpers import set_session_cookie
 from app.config_facades import effective_auth_config
 from app.deps import get_web_dir
@@ -217,7 +217,10 @@ async def authentication_middleware(request: Request, call_next):
                 status_code=403,
             )
         return RedirectResponse('/setup', status_code=303)
-    _cookie_name = str(auth_config.get('cookie_name', 'session'))
+    # Same default as every cookie writer (``SESSION_COOKIE``): the previous
+    # ``'session'`` fallback read a different cookie than the one login set
+    # whenever ``cookie_name`` was absent from the effective auth config.
+    _cookie_name = str(auth_config.get('cookie_name', SESSION_COOKIE))
     session = _state.auth.get_session(request.cookies.get(_cookie_name))
     if session is None:
         if path.startswith('/api/'):
@@ -422,11 +425,6 @@ def _version_static_refs(web_dir: Path | None, html: str) -> str:
         return f'{match.group("attr")}{quote}/static/{asset}?v={version}{quote}'
 
     return _STATIC_REF_RE.sub(_replace, html)
-
-
-def version_static_asset_urls(request: Request, html: str) -> str:
-    """Append ``?v=<content hash>`` to every unversioned ``/static/...`` ref."""
-    return _version_static_refs(_web_dir_or_none(request), html)
 
 
 async def _versioned_html_body(request: Request, body: bytes, *, inject_nav: bool) -> bytes:

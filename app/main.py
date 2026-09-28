@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import logging
 import logging.handlers
 import subprocess  # noqa: F401 -- tests monkeypatch via main.subprocess
@@ -8,6 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from app.alerts import AlertEngine
 from app.auth import AuthService, utc_now  # noqa: F401 -- utc_now used as main.utc_now() in tests
@@ -243,6 +245,16 @@ async def app_lifespan(_app: FastAPI):
 
 
 app = FastAPI(title='Daygle AI Camera', lifespan=app_lifespan)
+
+
+@app.exception_handler(json.JSONDecodeError)
+async def _malformed_json_body(_request, _exc: json.JSONDecodeError):
+    # ``await request.json()`` raises JSONDecodeError on a malformed body;
+    # without this handler every JSON route answered that client error with
+    # an HTTP 500 (and an error-level traceback in the application log).
+    return JSONResponse({'detail': 'Request body must be valid JSON.'}, status_code=400)
+
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 static_dir = BASE_DIR / 'web'
 if static_dir.exists():

@@ -15,7 +15,6 @@ from app.config_facades import (
 )
 from app.camera_lifecycle import (
     apply_cameras_settings,
-    apply_storage_and_recording_settings,
     reload_detector,
 )
 
@@ -26,10 +25,6 @@ def get_database(request: Request):
 
 def get_auth(request: Request):
     return _state.auth
-
-
-def get_config(request: Request) -> dict:
-    return _state.config
 
 
 def get_cameras_config(request: Request) -> list:
@@ -85,17 +80,6 @@ def get_apply_cameras_settings(request: Request):
     OpenAPI tooling.
     """
     return apply_cameras_settings
-
-
-def get_apply_storage_and_recording_settings(request: Request):
-    """Routers-injectable storage + recording settings mutator.
-
-    Pushes the latest on-disk + database-override storage and recording
-    config into the running services (recording service, snapshot
-    directory, retention policy). Routers consume it via ``Depends(...)``
-    to keep the write path explicit and test-mockable.
-    """
-    return apply_storage_and_recording_settings
 
 
 def get_reload_detector(request: Request):

@@ -11,7 +11,7 @@ from app.auth_gates import require_admin
 from app.deps import get_database, get_redacted_email_alert_settings
 from app.email_alerts import EmailAlertError, EmailAlertService
 from app.payload_validators import validate_alert_email_settings
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -39,7 +39,7 @@ async def update_alert_email_settings(request: Request, db=Depends(get_database)
 @router.post('/api/settings/alert-email/test')
 async def test_alert_email_settings(request: Request):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     settings = validate_alert_email_settings(
         payload.get('settings') if isinstance(payload.get('settings'), dict) else payload
     )
