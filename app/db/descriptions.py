@@ -88,6 +88,11 @@ class EventDescriptionsMixin:
                 self._insert_recording_labels(db, int(row['id']), tags, source='ai')
             return len(rows)
 
+    def mark_event_alert_triggered(self, event_id: int) -> bool:
+        """Flag an existing event as alerted (an AI tag alert fired on it)."""
+        with self.connect() as db:
+            return db.execute("UPDATE events SET alert_triggered = 1 WHERE id = ?", (int(event_id),)).rowcount > 0
+
     def events_without_description(self, *, since: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         """Newest object events with a snapshot and no description yet (for backfill)."""
         clauses = ["e.snapshot_path IS NOT NULL", "e.snapshot_path != ''",

@@ -35,6 +35,10 @@ const currentRules = () => {
     const rule = currentZone()?.activity_spike;
     return rule ? [rule] : [];
   }
+  if (alertType === 'ai_tags') {
+    const rule = currentZone()?.ai_tags;
+    return rule ? [rule] : [];
+  }
   return currentZone()?.object_rules || [];
 };
 
@@ -188,7 +192,8 @@ function allPolicies() {
   const tripwirePolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.tripwire).filter(Boolean));
   const loiterPolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.loiter).filter(Boolean));
   const timePolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.time_of_day).filter(Boolean));
-  return [...objectPolicies, ...soundPolicies, ...tripwirePolicies, ...loiterPolicies, ...timePolicies, ...(faceRulesPayload.rules || [])].filter((rule) => (
+  const aiTagPolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.ai_tags).filter(Boolean));
+  return [...objectPolicies, ...soundPolicies, ...tripwirePolicies, ...loiterPolicies, ...timePolicies, ...aiTagPolicies, ...(faceRulesPayload.rules || [])].filter((rule) => (
     Array.isArray(rule.alert_schedules) && rule.alert_schedules.length
       ? rule.alert_schedules.some((schedule) => schedule.email_enabled || schedule.push_enabled)
       : rule.email_enabled || rule.push_enabled
@@ -227,7 +232,9 @@ function renderSelectors() {
               ? 'Unusual time-of-day is enabled - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
               : alertType === 'activity'
                 ? 'Activity spike is enabled - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
-                : 'Add recognized-person and stranger alerts here. Enrol people on the Face Recognition page.';
+                : alertType === 'ai_tags'
+                  ? 'AI tag alerts (what the local AI model names, e.g. "ladder") are set up per area on the Zones page. Here you choose how each one notifies you.'
+                  : 'Add recognized-person and stranger alerts here. Enrol people on the Face Recognition page.';
   }
 }
 
@@ -238,6 +245,7 @@ function ruleLabel(rule) {
   if (alertType === 'loiter') return titleCase(rule.name || 'Loitering');
   if (alertType === 'time') return titleCase(rule.name || 'Unusual time');
   if (alertType === 'activity') return titleCase(rule.name || 'Activity spike');
+  if (alertType === 'ai_tags') return `${rule.name || 'AI tag alert'}${(rule.tags || []).length ? ` (${rule.tags.join(', ')})` : ''}`;
   return String(rule.label || '').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
@@ -300,7 +308,9 @@ function renderPolicies() {
               ? 'No unusual time-of-day rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Unusual time, then set its alerts here.'
               : alertType === 'activity'
                 ? 'No activity-spike rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Activity spike, then set its alerts here.'
-                : 'No recognized-person alert policies yet. Add one below to get started.';
+                : alertType === 'ai_tags'
+                  ? 'No AI tag alert is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on AI tag alert and add the things to watch for, then set its alerts here.'
+                  : 'No recognized-person alert policies yet. Add one below to get started.';
     $('alertsList').innerHTML = `<div class="empty">${emptyMessage}</div>`;
     return;
   }
@@ -312,11 +322,12 @@ function renderPolicies() {
     const loiter = alertType === 'loiter';
     const time = alertType === 'time';
     const activity = alertType === 'activity';
+    const aiTags = alertType === 'ai_tags';
     // Tripwire, loiter, unusual-time and activity-spike are single per-zone
     // behaviour rules: no confidence axis, and detection runs whenever enabled,
     // so they show only a Notify window (no Detect-from/until) - just how each
     // one notifies you.
-    const behaviour = tripwire || loiter || time || activity;
+    const behaviour = tripwire || loiter || time || activity || aiTags;
     const confidence = people ? rule.min_confidence : sound ? rule.confidence_threshold : rule.min_confidence;
     const cooldown = people ? rule.cooldown_minutes : rule.cooldown_seconds;
     const confidenceLabel = people ? 'Minimum Recognition Confidence' : sound ? 'Confidence Threshold' : 'Minimum Confidence';
@@ -337,7 +348,9 @@ function renderPolicies() {
               ? 'Enabled on the Zones page. Removing here turns unusual-time off for the area.'
               : activity
                 ? 'Enabled on the Zones page. Removing here turns activity-spike off for the area.'
-                : 'Assigned on the Zones page. Removing here unassigns this item from the area.';
+                : aiTags
+                  ? 'Set up on the Zones page. Alerts are unconfirmed: only the AI model saw the object. Removing here turns the AI tag alert off for the area.'
+                  : 'Assigned on the Zones page. Removing here unassigns this item from the area.';
     return `
     <tr class="alerts-policy-row ${status.className}" data-rule-index="${index}" title="${escapeHtml(status.title)}">
       <td class="alerts-policy-name" data-label="Policy"><strong>${escapeHtml(ruleLabel(rule))}</strong><span>Policy ${index + 1}</span><span class="alerts-policy-state">${escapeHtml(status.label)}</span></td>
@@ -482,6 +495,9 @@ function renderPolicies() {
       } else if (alertType === 'activity') {
         const zone = currentZone();
         if (zone) delete zone.activity_spike;
+      } else if (alertType === 'ai_tags') {
+        const zone = currentZone();
+        if (zone) delete zone.ai_tags;
       } else {
         const allRules = alertType === 'sound' ? currentCamera().detection.sound.rules : currentZone().object_rules;
         const actualIndex = allRules.indexOf(rule);

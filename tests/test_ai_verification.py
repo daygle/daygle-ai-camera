@@ -288,6 +288,9 @@ def test_missing_snapshot_fails_open(av, flow, monkeypatch):
 def submit_env(av, monkeypatch):
     dispatch = importlib.import_module('app.alert_dispatch')
     pools = importlib.import_module('app.postprocess_pool')
+    # Routing here is about verification; no camera has an AI tag rule (a
+    # tag-rule camera is always described - see test_ai_tag_alerts).
+    monkeypatch.setattr(importlib.import_module('app.ai_tag_alerts'), 'camera_has_rules', lambda _cid: False)
     direct: list[int] = []
     queued: list[int] = []
     monkeypatch.setattr(dispatch, 'submit_alert_notification',

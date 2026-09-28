@@ -233,6 +233,7 @@ def test_describe_only_jobs(av, flow):
 def test_submit_routes_by_mode_and_camera(av, monkeypatch):
     pools = importlib.import_module('app.postprocess_pool')
     dispatch = importlib.import_module('app.alert_dispatch')
+    monkeypatch.setattr(importlib.import_module('app.ai_tag_alerts'), 'camera_has_rules', lambda _cid: False)
     queued, direct = [], []
 
     class _Pool:

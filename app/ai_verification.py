@@ -278,9 +278,24 @@ def describe_mode(settings: dict[str, Any]) -> str:
     return mode if mode in DESCRIBE_MODES else 'off'
 
 
+def camera_describe_mode(camera_id: Any, settings: dict[str, Any]) -> str:
+    """The describe mode that applies to one camera.
+
+    A camera with an enabled AI tag alert rule (app.ai_tag_alerts) needs every
+    event described, or the rule could never see anything, so it gets 'all'
+    whatever the global mode and camera scope. Otherwise the global mode
+    applies to in-scope cameras.
+    """
+    from app.ai_tag_alerts import camera_has_rules
+
+    if camera_id is not None and camera_has_rules(camera_id):
+        return 'all'
+    return describe_mode(settings) if _camera_in_scope(camera_id, settings) else 'off'
+
+
 def describes_camera(camera_id: Any, settings: dict[str, Any] | None = None) -> bool:
     settings = settings if settings is not None else effective_ai_verification_settings()
-    return describe_mode(settings) != 'off' and _camera_in_scope(camera_id, settings)
+    return camera_describe_mode(camera_id, settings) != 'off'
 
 
 def _is_verifiable(alert: dict[str, Any], settings: dict[str, Any]) -> bool:
@@ -617,8 +632,15 @@ def describe_event(
     }
 
 
-def _describe_and_store(event: dict[str, Any], event_id: int, settings: dict[str, Any], camera_name: str) -> str | None:
-    """Describe and persist; returns the text, or None (logged) on failure."""
+def _describe_and_store(
+    event: dict[str, Any], event_id: int, settings: dict[str, Any], camera_name: str,
+    *, evaluate_rules: bool = True,
+) -> str | None:
+    """Describe and persist; returns the text, or None (logged) on failure.
+
+    ``evaluate_rules`` runs the zone AI tag alert rules on the result; the
+    backfill of past events turns it off so old events never alert.
+    """
     try:
         record = describe_event(event, settings, camera_name=camera_name)
     except VerificationError as exc:
@@ -633,6 +655,10 @@ def _describe_and_store(event: dict[str, Any], event_id: int, settings: dict[str
             _state.database.add_ai_recording_tags(event_id, record['tags'])
     except Exception as exc:  # noqa: BLE001
         logger.warning('Could not store AI description for event %s: %s', event_id, exc)
+    if evaluate_rules:
+        from app.ai_tag_alerts import evaluate_event
+
+        evaluate_event(event_id, {**event, 'id': event_id}, record)
     return record['text']
 
 
@@ -642,6 +668,7 @@ def verify_and_forward(
     rules: list[dict[str, Any]] | None,
     camera_name: str = '',
     submitted_at: float | None = None,
+    camera_id: Any = None,
 ) -> None:
     """AI-pool job: verify the alerts, describe the event, queue what survives.
 
@@ -651,7 +678,7 @@ def verify_and_forward(
     """
     settings = effective_ai_verification_settings()
     labels = labels_to_verify(triggered, settings) if settings.get('enabled') else []
-    mode = describe_mode(settings)
+    mode = camera_describe_mode(camera_id, settings) if camera_id is not None else describe_mode(settings)
     if not labels and mode == 'off':
         _forward(triggered, event_id, rules)
         return
@@ -691,10 +718,11 @@ def verify_and_forward(
     _forward(kept, event_id, rules)
 
 
-def describe_only(event_id: int, camera_name: str = '') -> None:
-    """AI-pool job for an event that notifies nobody (``describe_events=all``)."""
+def describe_only(event_id: int, camera_name: str = '', camera_id: Any = None) -> None:
+    """AI-pool job for an event that notifies nobody (``all`` mode for its camera)."""
     settings = effective_ai_verification_settings()
-    if describe_mode(settings) != 'all':
+    mode = camera_describe_mode(camera_id, settings) if camera_id is not None else describe_mode(settings)
+    if mode != 'all':
         return
     try:
         event = _state.database.get_event(event_id)
@@ -712,12 +740,12 @@ def submit_event_description(event_id: int, *, camera_id: Any = None, camera_nam
     rather than queued when the AI pool is busy.
     """
     settings = effective_ai_verification_settings()
-    if describe_mode(settings) != 'all' or not _camera_in_scope(camera_id, settings):
+    if camera_describe_mode(camera_id, settings) != 'all':
         return False
     from app.postprocess_pool import PRIORITY_BACKGROUND, verification_pool
 
     return verification_pool().submit(
-        describe_only, event_id, camera_name,
+        describe_only, event_id, camera_name, camera_id,
         priority=PRIORITY_BACKGROUND, block=False, label=f'describe-event-{event_id}',
     )
 
@@ -745,7 +773,7 @@ def submit_alert_notification_with_verification(
 
         # Alert jobs run ahead of background describe-only jobs.
         accepted = verification_pool().submit(
-            verify_and_forward, list(triggered), event_id, rules, camera_name, time.monotonic(),
+            verify_and_forward, list(triggered), event_id, rules, camera_name, time.monotonic(), camera_id,
             priority=PRIORITY_CLIP, block=False, label=f'verify-event-{event_id}',
         )
         if accepted:
@@ -872,7 +900,7 @@ def _run_backfill(events: list[dict[str, Any]]) -> None:
             if describe_mode(settings) == 'off':
                 break
             camera_name = str((event.get('metadata') or {}).get('camera_name') or '')
-            text = _describe_and_store(event, int(event['id']), settings, camera_name)
+            text = _describe_and_store(event, int(event['id']), settings, camera_name, evaluate_rules=False)
             with _backfill_lock:
                 _backfill_state['done' if text else 'failed'] += 1
     finally:

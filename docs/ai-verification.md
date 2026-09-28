@@ -123,6 +123,40 @@ things the object detector has no class for.
 - **Model support:** the model is asked for JSON. A model that ignores the
   format still produces a description, just without tags.
 
+### AI tag alerts
+
+An **AI tag alert** notifies you when the model names something in an area,
+such as a ladder, a parcel or a hi-vis vest, even when object detection has no
+class for it. Set it up per area:
+
+1. **Zones page:** turn on **AI tag alert** for the area and add what to watch
+   for, e.g. `ladder` or `parcel`, pressing Enter after each.
+2. **Choose where it must appear (Match in):**
+   - **Tags only:** in the model's tag list;
+   - **Description only:** in its sentence (whole words; plurals match);
+   - **Tags or description:** either.
+3. **Set a cooldown**, which is 300 seconds by default.
+4. **Alerts page:** choose **Alert Type: AI Tag**, then set email, push,
+   recipients and a notify window, as for loitering.
+
+How it behaves:
+
+- **Every event on that camera is described**, whatever the Describe Events
+  setting. A rule can only see described events.
+- **An event counts as in the area** when one of its detections (object or
+  motion) was in the zone, or when the zone covers the whole frame.
+- **What a firing does:** it adds an alert to that event, marks it as alerted,
+  and sends a notification. The notification starts with
+  *"AI tag alert (unconfirmed): Ladder on Front (Gate)."*, followed by the
+  description.
+- **Unconfirmed:** only the language model saw the object. Start with areas
+  where an occasional false alert is harmless.
+- **Timing:** these alerts arrive a few seconds after the event, once the
+  description is ready. If the model server is down, they don't fire.
+- **Cooldown:** it is only used up by an alert that is actually sent. A rule
+  with no channel on, or outside its notify window, never blocks a later alert.
+- **Past events:** Describe Past Events never fires alerts on old events.
+
 **Describe Past Events** (Settings) describes events from the last 24 hours to
 30 days that have no description yet, up to 500 at a time, so they become
 searchable. It runs in the background, one event at a time, pauses whenever an
