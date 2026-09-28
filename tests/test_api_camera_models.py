@@ -352,3 +352,16 @@ def test_camera_model_assignment_api_validation(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+@pytest.mark.parametrize(('model_path', 'expected'), [
+    ('models/yolo26s-640.onnx', 640),  # variant size wins over the catalog's 768
+    ('models/yolo26s_416.onnx', 416),
+    ('models/yolo11n-1280.onnx', 1280),
+    ('models/yolo26s.onnx', 768),      # no suffix: catalog default
+    ('models/yolo11n.onnx', 640),
+    ('models/custom.onnx', 640),       # unknown model: 640
+])
+def test_camera_model_input_size_prefers_the_exported_resolution(model_path, expected):
+    from app.camera_models import _model_input_size
+    assert _model_input_size(model_path) == expected
