@@ -61,7 +61,7 @@ nvidia-smi   # after the first request, an ollama process uses the GPU
 
 ## Settings
 
-Go to **Settings → Notifications → AI Alert Verification**.
+Go to **Intelligence → AI** (admin only). The page has four sections: Model Server, Alert Verification, Descriptions & Search, and a pointer to AI Tag Alerts. One **Save AI Settings** button saves them all.
 
 | Setting | Default | Notes |
 |---|---|---|
@@ -157,7 +157,7 @@ How it behaves:
   with no channel on, or outside its notify window, never blocks a later alert.
 - **Past events:** Describe Past Events never fires alerts on old events.
 
-**Describe Past Events** (Settings) describes events from the last 24 hours to
+**Describe Past Events** (Intelligence → AI) describes events from the last 24 hours to
 30 days that have no description yet, up to 500 at a time, so they become
 searchable. It runs in the background, one event at a time, pauses whenever an
 alert needs the model, and stops if descriptions are switched off.
