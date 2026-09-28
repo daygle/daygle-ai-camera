@@ -299,8 +299,11 @@ def camera_models_page(request: Request, web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/ai')
-def ai_settings_page():
-    return RedirectResponse('/onnx', status_code=308)
+def ai_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    # Intelligence > AI: the local vision model (verification, descriptions,
+    # search, tag alerts). Previously a legacy redirect to /onnx.
+    require_admin(request)
+    return _page(web_dir, 'ai.html')
 
 
 @router.get('/face-recognition')

@@ -449,7 +449,7 @@ async function runEventSearch(query) {
   }
   renderStats();
   if (!allEvents.length) {
-    els.eventFeed.innerHTML = '<p class="muted empty-state">No described events matched. Only events described by the AI model are searchable; turn on Describe Events in Settings, or describe past events there.</p>';
+    els.eventFeed.innerHTML = '<p class="muted empty-state">No described events matched. Only events described by the AI model are searchable; turn on Describe Events under Intelligence → AI, or describe past events there.</p>';
     updateEventListStatus();
     return;
   }

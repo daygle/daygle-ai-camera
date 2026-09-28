@@ -271,6 +271,7 @@ window.daygleAuthReady = (async () => {
       label: 'Intelligence',
       admin: true,
       links: [
+        { href: '/ai', match: '/ai', label: 'AI' },
         { href: '/onnx', match: '/onnx', label: 'ONNX' },
         { href: '/camera-models', match: '/camera-models', label: 'Camera Models' },
         { href: '/yamnet-tflite', match: '/yamnet-tflite', label: 'YAMNet TFLite' },

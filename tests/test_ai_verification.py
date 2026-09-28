@@ -430,3 +430,22 @@ def test_settings_api_round_trip_and_test_endpoint(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_ai_page_is_admin_only_and_served(tmp_path, monkeypatch):
+    """Intelligence > AI (/ai) hosts the AI settings; it used to redirect to /onnx."""
+    app, _db = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        status, _h, body = client.request('/ai')
+        assert status == 200
+        assert 'id="aiSettingsForm"' in body and '/static/ai.js' in body
+        settings_status, _h, settings_body = client.request('/settings')
+        assert settings_status == 200
+        assert 'aiVerificationForm' not in settings_body and 'href="/ai"' in settings_body
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

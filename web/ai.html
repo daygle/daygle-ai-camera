@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<script>(function(){var t=localStorage.getItem("daygle.theme");if(t!=="dark")document.documentElement.classList.add("light");})()</script>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    /* Same phone collapse as arcface.html / onnx.html. */
+    @media (max-width: 900px) {
+      .ai-hero { gap: 16px; min-height: 0; }
+      .ai-hero-copy { flex: 0 0 auto; }
+      .ai-hero-mark { margin: 0 auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero ai-hero">
+      <div class="ai-hero-copy">
+        <p class="eyebrow">Local vision model</p>
+        <h1>AI</h1>
+        <p class="muted">A vision-language model on your own server looks at event snapshots. It double-checks object alerts before they notify you, describes events in plain English, tags what it sees, and makes your footage searchable. Snapshots never leave your network when the model runs locally. Works with any OpenAI-compatible server, such as Ollama.</p>
+      </div>
+      <div class="onnx-hero-mark ai-hero-mark" aria-hidden="true">
+        <span class="onnx-hero-ring onnx-hero-ring-back"></span>
+        <span class="onnx-hero-ring onnx-hero-ring-front"></span>
+        <span class="onnx-hero-core">🤖</span>
+      </div>
+    </header>
+
+    <form id="aiSettingsForm" class="page-stack ai-settings-form" autocomplete="off">
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🖥️</div>
+        <div>
+          <h2>Model Server</h2>
+          <p class="settings-section-subtitle">Where the model runs. Every AI feature on this page uses it. If it is unreachable or slow, alerts are sent as normal. See the setup guide in <code>docs/ai-verification.md</code>.</p>
+        </div>
+      </div>
+      <div class="form-grid">
+        <label>
+          <span>Server URL <span class="info-tip" data-tip="OpenAI-compatible API base URL. For Ollama on this server: http://127.0.0.1:11434/v1. Default: http://127.0.0.1:11434/v1" title="OpenAI-compatible API base URL. For Ollama on this server: http://127.0.0.1:11434/v1. Default: http://127.0.0.1:11434/v1" tabindex="0" aria-label="Help: OpenAI-compatible API base URL. For Ollama on this server: http://127.0.0.1:11434/v1. Default: http://127.0.0.1:11434/v1"></span></span>
+          <input name="server_url" placeholder="http://127.0.0.1:11434/v1" autocomplete="off" /></label>
+        <label>
+          <span>Model <span class="info-tip" data-tip="A vision-capable model on that server, e.g. gemma3:4b or qwen2.5vl:3b. Default: gemma3:4b" title="A vision-capable model on that server, e.g. gemma3:4b or qwen2.5vl:3b. Default: gemma3:4b" tabindex="0" aria-label="Help: A vision-capable model on that server, e.g. gemma3:4b or qwen2.5vl:3b. Default: gemma3:4b"></span></span>
+          <input name="model" placeholder="gemma3:4b" autocomplete="off" /></label>
+        <label>
+          <span>API Key <span class="info-tip" data-tip="Only needed if the model server requires one. Ollama does not. Default: (none)" title="Only needed if the model server requires one. Ollama does not. Default: (none)" tabindex="0" aria-label="Help: Only needed if the model server requires one. Ollama does not. Default: (none)"></span></span>
+          <input name="api_key" type="password" placeholder="Optional" autocomplete="new-password" /></label>
+        <label>
+          <span>Timeout (seconds) <span class="info-tip" data-tip="How long to wait for the model per question. On timeout the alert is sent without the AI step. Default: 20" title="How long to wait for the model per question. On timeout the alert is sent without the AI step. Default: 20" tabindex="0" aria-label="Help: How long to wait for the model per question. On timeout the alert is sent without the AI step. Default: 20"></span></span>
+          <input name="timeout_seconds" type="number" min="3" max="120" step="1" placeholder="20" /></label>
+      </div>
+      <p id="aiTestResult" class="muted" aria-live="polite"></p>
+      <div class="button-row">
+        <button id="aiTestBtn" class="btn-info" type="button">Test on Latest Event</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">✅</div>
+        <div>
+          <h2>Alert Verification</h2>
+          <p class="settings-section-subtitle">Before an object alert's email or push notification is sent, the model confirms the object is really there. Alerts it rejects (shadows, reflections, bushes) are not notified, but the event and recording are kept and marked <strong>🤖 Filtered</strong> in the Events list. Face, motion and sound alerts are never verified.</p>
+        </div>
+      </div>
+      <div class="form-grid">
+        <label>
+          <span>AI Verification <span class="info-tip" data-tip="Master toggle. When disabled, notifications are sent exactly as before. Default: Disabled" title="Master toggle. When disabled, notifications are sent exactly as before. Default: Disabled" tabindex="0" aria-label="Help: Master toggle. When disabled, notifications are sent exactly as before. Default: Disabled"></span></span>
+          <select name="enabled">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </select></label>
+        <label>
+          <span>Skip Above Confidence <span class="info-tip" data-tip="Alerts whose detector confidence is at or above this are sent without asking the model, so it only checks borderline ones. 1 = verify every alert. Default: 1" title="Alerts whose detector confidence is at or above this are sent without asking the model, so it only checks borderline ones. 1 = verify every alert. Default: 1" tabindex="0" aria-label="Help: Alerts whose detector confidence is at or above this are sent without asking the model, so it only checks borderline ones. 1 = verify every alert. Default: 1"></span></span>
+          <input name="skip_above_confidence" type="number" min="0" max="1" step="0.01" placeholder="1" /></label>
+        <label>
+          <span>Object Labels <span class="info-tip" data-tip="Comma-separated labels to verify, e.g. person, car. Empty = every object label. Default: (all)" title="Comma-separated labels to verify, e.g. person, car. Empty = every object label. Default: (all)" tabindex="0" aria-label="Help: Comma-separated labels to verify, e.g. person, car. Empty = every object label. Default: (all)"></span></span>
+          <input name="labels" placeholder="All object labels" autocomplete="off" /></label>
+        <label>
+          <span>Focus on Object <span class="info-tip" data-tip="Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled" title="Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled" tabindex="0" aria-label="Help: Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled"></span></span>
+          <select name="focus_crop">
+            <option value="true">Enabled</option>
+            <option value="false">Disabled</option>
+          </select></label>
+        <fieldset class="ai-verification-cameras">
+          <legend>Cameras <span class="info-tip" data-tip="Cameras whose alerts are verified and (per Describe Events) described. None ticked = all cameras. Cameras with an AI tag alert are always described." title="Cameras whose alerts are verified and (per Describe Events) described. None ticked = all cameras. Cameras with an AI tag alert are always described." tabindex="0" aria-label="Help: Cameras whose alerts are verified and (per Describe Events) described. None ticked = all cameras. Cameras with an AI tag alert are always described."></span></legend>
+          <div id="aiCameras" class="ai-verification-camera-list"><span class="muted">Loading cameras…</span></div>
+        </fieldset>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">💬</div>
+        <div>
+          <h2>Descriptions &amp; Search</h2>
+          <p class="settings-section-subtitle">The model writes a one-sentence description of each event and tags notable objects (e.g. ladder, parcel). Descriptions lead your email and push notifications, show in the Events list, and make footage searchable in plain English on the <a href="/events">Events</a> page.</p>
+        </div>
+      </div>
+      <div class="form-grid">
+        <label>
+          <span>Describe Events <span class="info-tip" data-tip="Alerts only: events that notify. All events: every event with a snapshot, described in the background (more GPU time, and everything becomes searchable). Default: Off" title="Alerts only: events that notify. All events: every event with a snapshot, described in the background (more GPU time, and everything becomes searchable). Default: Off" tabindex="0" aria-label="Help: Alerts only: events that notify. All events: every event with a snapshot, described in the background (more GPU time, and everything becomes searchable). Default: Off"></span></span>
+          <select name="describe_events">
+            <option value="off">Off</option>
+            <option value="alerts">Alerts only</option>
+            <option value="all">All events</option>
+          </select></label>
+      </div>
+      <div class="ai-backfill-row">
+        <label class="ai-backfill-hours">
+          <span>Describe past events from the last</span>
+          <select id="aiBackfillHours">
+            <option value="24">24 hours</option>
+            <option value="72">3 days</option>
+            <option value="168">7 days</option>
+            <option value="720">30 days</option>
+          </select>
+        </label>
+        <button id="aiBackfillBtn" class="secondary" type="button">Describe Past Events</button>
+        <span id="aiBackfillStatus" class="muted" aria-live="polite"></span>
+      </div>
+      <p class="muted ai-page-note">Save <strong>Describe Events</strong> first; past events use the saved settings.</p>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🏷️</div>
+        <div>
+          <h2>AI Tag Alerts</h2>
+          <p class="settings-section-subtitle">Get alerted when the model names something in an area, such as a ladder or a parcel, even when object detection has no class for it. Turn on <strong>AI tag alert</strong> per area on the <a href="/zones">Zones</a> page, then choose email or push under <strong>AI Tag</strong> on the <a href="/alerts">Alerts</a> page.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="button-row ai-save-row">
+      <button type="submit">Save AI Settings</button>
+    </div>
+    </form>
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/ai.js"></script>
+</body>
+</html>

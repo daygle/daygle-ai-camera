@@ -773,6 +773,10 @@ textarea {
 }
 .ai-verification-cameras legend { padding: 0 6px; font-weight: 500; }
 .ai-tags-add { width: 100%; margin-top: 6px; }
+.ai-settings-form { gap: inherit; }
+.ai-save-row { justify-content: flex-end; }
+.ai-page-note { margin: 8px 0 0; }
+.settings-moved-note { margin: 4px 2px 0; }
 .ai-backfill-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 12px; }
 .ai-backfill-hours { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .ai-backfill-hours select { width: auto; }
