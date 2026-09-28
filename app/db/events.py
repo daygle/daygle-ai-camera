@@ -528,6 +528,19 @@ class EventsMixin:
                 return None
             return self._event_with_detections(db, row)
 
+    def merge_event_metadata(self, event_id: int, patch: dict[str, Any]) -> bool:
+        """Merge top-level keys into an event's metadata JSON (RFC 7396 patch).
+
+        Used by work that finishes after the event row is written, such as AI
+        alert verification. Returns False when the event no longer exists.
+        """
+        with self.connect() as db:
+            cursor = db.execute(
+                "UPDATE events SET metadata = json_patch(COALESCE(NULLIF(metadata, ''), '{}'), ?) WHERE id = ?",
+                (json.dumps(patch), int(event_id)),
+            )
+            return cursor.rowcount > 0
+
     def stats(self, since: str | None = None) -> dict[str, Any]:
         # Same normalisation as ``search_events`` / ``alerts``: the frontend
         # sends local-day-start bounds (``Date.toISOString()`` ``Z`` suffix)

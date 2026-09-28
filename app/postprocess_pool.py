@@ -230,6 +230,7 @@ class PostProcessPool:
 _clip_pool: Optional[PostProcessPool] = None
 _enrichment_pool: Optional[PostProcessPool] = None
 _notification_pool: Optional[PostProcessPool] = None
+_verification_pool: Optional[PostProcessPool] = None
 _pool_lock = threading.Lock()
 
 CLIP_POOL_WORKERS = 2
@@ -238,6 +239,11 @@ ENRICHMENT_POOL_WORKERS = 2
 ENRICHMENT_POOL_MAX_PENDING = 64
 NOTIFICATION_POOL_WORKERS = 2
 NOTIFICATION_POOL_MAX_PENDING = 128
+# AI alert verification calls a local vision model that serialises on the GPU
+# anyway, so one worker; a short backlog so a slow model sheds load (callers
+# then deliver unverified) instead of delaying alerts by minutes.
+VERIFICATION_POOL_WORKERS = 1
+VERIFICATION_POOL_MAX_PENDING = 16
 
 
 def clip_pool() -> PostProcessPool:
@@ -282,14 +288,32 @@ def notification_pool() -> PostProcessPool:
         return _notification_pool
 
 
+def verification_pool() -> PostProcessPool:
+    """The pool that runs AI alert verification before notifications."""
+    global _verification_pool
+    with _pool_lock:
+        if _verification_pool is None or _verification_pool.stats()['shutdown']:
+            _verification_pool = PostProcessPool(
+                'alert-verification',
+                max_workers=VERIFICATION_POOL_WORKERS,
+                max_pending=VERIFICATION_POOL_MAX_PENDING,
+            )
+            _verification_pool.start()
+        return _verification_pool
+
+
 def shutdown_pools(timeout: float = 5.0) -> None:
     """Stop all pools at service shutdown, abandoning remaining queued work."""
-    global _clip_pool, _enrichment_pool, _notification_pool
+    global _clip_pool, _enrichment_pool, _notification_pool, _verification_pool
     with _pool_lock:
-        pools = [pool for pool in (_clip_pool, _enrichment_pool, _notification_pool) if pool is not None]
+        pools = [
+            pool for pool in (_clip_pool, _enrichment_pool, _notification_pool, _verification_pool)
+            if pool is not None
+        ]
         _clip_pool = None
         _enrichment_pool = None
         _notification_pool = None
+        _verification_pool = None
     for pool in pools:
         pool.shutdown(timeout=timeout)
 
@@ -297,5 +321,8 @@ def shutdown_pools(timeout: float = 5.0) -> None:
 def pool_stats() -> dict[str, Any]:
     """All created pools' stats, for diagnostics and the status endpoints."""
     with _pool_lock:
-        pools = [pool for pool in (_clip_pool, _enrichment_pool, _notification_pool) if pool is not None]
+        pools = [
+            pool for pool in (_clip_pool, _enrichment_pool, _notification_pool, _verification_pool)
+            if pool is not None
+        ]
     return {pool.stats()['name']: pool.stats() for pool in pools}

@@ -15,11 +15,10 @@ from typing import Any
 
 import app.state as _state
 from app.ai_settings import ai_status_payload
+from app.ai_verification import submit_alert_notification_with_verification
 from app.alert_dispatch import (
     _rule_notify_active_now,
     compute_minimum_rule_confidence,
-    deliver_alert_notifications as _deliver_alert_notifications,
-    submit_alert_notification,
 )
 from app.camera_health import _check_cameras_health
 from app.camera_instance import read_ingest_frame
@@ -1666,7 +1665,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # recording link is applied afterwards because clip creation is asynchronous
     # with respect to event persistence.
     if triggered:
-        submit_alert_notification(_deliver_alert_notifications, triggered, event_id, zone_rules)
+        # Routed through AI verification when enabled for this camera; that
+        # path fails open to the direct delivery below.
+        submit_alert_notification_with_verification(
+            triggered, event_id, zone_rules,
+            camera_id=camera_id, camera_name=str(settings.get('name') or ''),
+        )
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     email_rules = [
         rule for rule in zone_rules
