@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 import os
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,11 @@ class Storage:
         suffix = Path(original_filename or '').suffix.lower()
         if suffix not in {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}:
             suffix = '.jpg'
-        filename = created.strftime('%Y%m%d_%H%M%S_%f') + suffix
+        # The random tail keeps two writers that land on the same microsecond
+        # (parallel inference workers, or an event's snapshot + thumbnail)
+        # from overwriting each other's file; the timestamp prefix still
+        # sorts chronologically.
+        filename = f"{created.strftime('%Y%m%d_%H%M%S_%f')}_{secrets.token_hex(4)}{suffix}"
         path = self.snapshots_dir / filename
         # Write to a temp sibling then rename atomically so a concurrent
         # download can never observe a half-written snapshot (mirrors how the

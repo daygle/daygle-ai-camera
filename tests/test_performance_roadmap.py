@@ -239,6 +239,18 @@ def test_size_retention_streams_compact_rows_and_skips_age_expired_file_stats(tm
             statted.append(self.name)
             return SimpleNamespace(st_size=file_sizes[self.name])
 
+        def with_name(self, name: str):
+            # Playback-sidecar lookup: no transcoded copy exists here.
+            class _MissingPath:
+                def stat(self):
+                    raise FileNotFoundError(name)
+
+            return _MissingPath()
+
+        @property
+        def stem(self) -> str:
+            return self.name.rsplit('.', 1)[0]
+
     monkeypatch.setattr(
         recordings_repo,
         'safe_storage_path',

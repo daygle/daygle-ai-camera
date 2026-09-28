@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.detection_status import GENERIC_TRIGGER_LABELS
-from app.media_utils import safe_storage_path
+from app.media_utils import recording_playback_sidecar_path, safe_storage_path
 from app.utils import _normalize_iso_to_utc
 
 _SQLITE_BATCH_SIZE = 400
@@ -538,6 +538,13 @@ class RecordingsMixin:
                         if not is_within_grace:
                             purge_ids.add(recording_id)
                         continue
+                    # A browser-playback transcode (HEVC/incompatible-audio
+                    # cameras) is a second full copy of the clip; leaving it out
+                    # let real disk use reach ~2x the configured cap.
+                    try:
+                        size += recording_playback_sidecar_path(path).stat().st_size
+                    except OSError:
+                        pass
                     retained_bytes += size
                     if retained_bytes > max_storage_bytes:
                         purge_ids.add(recording_id)

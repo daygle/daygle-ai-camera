@@ -130,6 +130,11 @@ logger = logging.getLogger('daygle.ai')
 # event, its detections and its alert history are already committed - instead
 # of stalling detection.
 CLIP_SUBMIT_TIMEOUT_SECONDS = 2.0
+# How long past its hard ``max_capture_deadline_ts`` an active capture session
+# may linger before ``extend_active_rtsp_recording`` treats it as abandoned. A
+# healthy capture retires its session once its clip is rendered, which can run
+# a little past the deadline (queue wait, render, audio mux).
+STALE_CAPTURE_SESSION_GRACE_SECONDS = 120.0
 
 
 def extend_active_rtsp_recording(
@@ -157,6 +162,15 @@ def extend_active_rtsp_recording(
             return None
         current_deadline = float(session.get('capture_deadline_ts') or 0)
         max_deadline = float(session.get('max_capture_deadline_ts') or current_deadline)
+        if time.time() > max_deadline + STALE_CAPTURE_SESSION_GRACE_SECONDS:
+            # Defence in depth: a session long past its hard deadline belongs
+            # to a capture that never ran or never cleaned up (the capture
+            # retires its own session when it finishes). Extending it would
+            # attach this event to a clip that can no longer grow and block
+            # every new recording for the camera, so retire it and let the
+            # caller start a fresh capture.
+            _state.active_rtsp_recordings.pop(camera_id, None)
+            return None
         new_deadline = min(max_deadline, max(current_deadline, extend_until))
         if new_deadline <= current_deadline:
             return int(session.get('recording_id'))
@@ -780,3 +794,18 @@ def start_rtsp_recording_capture(
             'the alert is recorded but this event has no clip.',
             event_id,
         )
+        # ``capture`` will never run, so its ``finally`` cannot retire the
+        # session registered above. Left in place, every later event on this
+        # camera would be "extended" into this clip-less recording and no new
+        # recording could start until a restart.
+        if camera_id:
+            with _state.active_rtsp_recordings_lock:
+                session = _state.active_rtsp_recordings.get(camera_id)
+                if session and int(session.get('recording_id', -1)) == int(recording_id):
+                    _state.active_rtsp_recordings.pop(camera_id, None)
+        # Drop the row too: it would never receive media and would list as a
+        # permanently unplayable recording.
+        try:
+            _state.database.delete_recording(recording_id)
+        except Exception as exc:  # pragma: no cover - best-effort cleanup
+            logger.debug('Could not remove unqueued recording %s: %s', recording_id, exc)
