@@ -82,18 +82,66 @@ SYSTEM_PROMPT = (
 
 DESCRIBE_SYSTEM_PROMPT = (
     'You write short, factual captions for home security camera snapshots. '
-    'Reply with the caption only.'
+    'Answer only with a JSON object and nothing else.'
 )
+MAX_AI_TAGS = 8
+_TAG_RE = re.compile(r'^[a-z][a-z0-9\- ]{1,29}$')
+# Words that say nothing a detection label or the caption does not already.
+_TAG_NOISE = frozenset({
+    'image', 'photo', 'picture', 'camera', 'security camera', 'scene', 'view', 'frame', 'snapshot',
+    'daytime', 'nighttime', 'night', 'day', 'outdoor', 'outdoors', 'indoor', 'background', 'nothing',
+})
 
 
 def build_describe_prompt(camera_name: str = '') -> str:
     where = f' from the camera "{camera_name}"' if camera_name else ''
     return (
-        f'Describe what is happening in this security camera image{where} in one sentence of at most '
-        '25 words, for a notification. Mention the people, vehicles and animals, what they are doing, '
-        'and notable colours, clothing or objects they carry. Do not guess who anyone is. '
-        'If nothing notable is visible, say so briefly.'
+        f'Describe what is happening in this security camera image{where}. '
+        'Reply with JSON exactly like {"description": "A courier in a hi-vis vest leaves a parcel at the '
+        'front door.", "tags": ["courier", "hi-vis vest", "parcel"]}. '
+        '"description": one sentence of at most 25 words for a notification, mentioning the people, '
+        'vehicles and animals, what they are doing, and notable colours, clothing or objects they carry. '
+        'Do not guess who anyone is. If nothing notable is visible, say so briefly. '
+        '"tags": up to 8 short lowercase nouns (1-3 words) for the notable objects clearly visible, '
+        'including things like tools, bags, parcels, bins or clothing; an empty list if none.'
     )
+
+
+def clean_tags(raw: Any, exclude: set[str] | frozenset[str] = frozenset()) -> list[str]:
+    """Keep short, plain, de-duplicated object tags; drop ones in ``exclude``."""
+    tags: list[str] = []
+    if not isinstance(raw, list):
+        return tags
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        tag = ' '.join(item.strip().lower().replace('_', ' ').split())
+        if (not _TAG_RE.match(tag) or len(tag.split()) > 3 or tag in _TAG_NOISE
+                or tag in exclude or tag in tags):
+            continue
+        tags.append(tag)
+        if len(tags) >= MAX_AI_TAGS:
+            break
+    return tags
+
+
+def parse_description_reply(text: str) -> tuple[str, list[str]]:
+    """``(description, tags)`` from the model reply.
+
+    Accepts the requested JSON (also fenced or wrapped in prose); a reply that
+    is not JSON is taken as a bare caption with no tags, so a model that
+    ignores the format still produces a description.
+    """
+    content = str(text or '')
+    start, end = content.find('{'), content.rfind('}')
+    if 0 <= start < end:
+        try:
+            data = json.loads(content[start:end + 1])
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and isinstance(data.get('description'), str):
+            return clean_description(data['description']), clean_tags(data.get('tags'))
+    return clean_description(content), []
 
 
 def clean_description(text: str) -> str:
@@ -396,15 +444,15 @@ class VisionVerifier:
         ])
         return parse_verdict(reply)
 
-    def describe(self, image_bytes: bytes, camera_name: str = '') -> str:
+    def describe(self, image_bytes: bytes, camera_name: str = '') -> tuple[str, list[str]]:
         reply = self.chat([
             {'role': 'system', 'content': DESCRIBE_SYSTEM_PROMPT},
             {'role': 'user', 'content': [
                 {'type': 'text', 'text': build_describe_prompt(camera_name)},
                 self._image_part(image_bytes),
             ]},
-        ], max_tokens=120)
-        return clean_description(reply)
+        ], max_tokens=200)
+        return parse_description_reply(reply)
 
 
 # ---------------------------------------------------------------------------
@@ -556,9 +604,13 @@ def describe_event(
     if image is None:
         raise VerificationError('no snapshot to describe')
     started = time.monotonic()
-    text = (verifier or VisionVerifier(settings)).describe(image, camera_name)
+    text, tags = (verifier or VisionVerifier(settings)).describe(image, camera_name)
+    # A tag that repeats a real detection label adds nothing: the detection
+    # already shows it (and is the authoritative source for that object).
+    detected = {str(d.get('label') or '').strip().lower() for d in event.get('detections') or []}
     return {
         'text': text,
+        'tags': [tag for tag in tags if tag not in detected],
         'model': settings.get('model'),
         'created_at': datetime.now(timezone.utc).isoformat(),
         'latency_ms': int((time.monotonic() - started) * 1000),
@@ -577,6 +629,8 @@ def _describe_and_store(event: dict[str, Any], event_id: int, settings: dict[str
         return None
     try:
         _state.database.set_event_description(event_id, record)
+        if record.get('tags'):
+            _state.database.add_ai_recording_tags(event_id, record['tags'])
     except Exception as exc:  # noqa: BLE001
         logger.warning('Could not store AI description for event %s: %s', event_id, exc)
     return record['text']

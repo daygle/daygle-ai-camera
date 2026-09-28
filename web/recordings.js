@@ -627,7 +627,7 @@ function recordingRowHtml(recording) {
     <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
       <td class="activity-cell-type"><span class="activity-item-type">${typeLabel}</span><span class="activity-cell-ref">Recording #${recording.id}</span></td>
       <td class="activity-cell-camera">${escapeHtml(recordingCameraName(recording))}</td>
-      <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}</div></td>
+      <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}${aiTagPills(recording.ai_labels)}</div></td>
       <td class="activity-cell-zone">${zoneCell}</td>
       <td class="activity-cell-when">
         <div class="activity-item-when">
@@ -693,6 +693,9 @@ function renderRecordingDetails(recording) {
     safeHtml`<div><span>Camera</span><strong>${recordingCameraName(recording)}</strong></div>`,
     zoneRow,
     safeHtml`<div><span>Trigger</span><strong>${recordingDisplayTrigger(recording)}</strong></div>`,
+    (recording.ai_labels || []).length
+      ? safeHtml`<div><span>AI Tags</span><strong>${recording.ai_labels.map((tag) => titleCase(tag)).join(' · ')}</strong></div>`
+      : '',
     safeHtml`<div><span>Started</span><strong>${formatDateTime(recording.started_at)}</strong></div>`,
     safeHtml`<div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>`,
   ].filter(Boolean);
@@ -1437,6 +1440,18 @@ function populateLabelFilterOptions(recordings) {
     recordingDetectionLabels(recording).forEach(addOption);
   });
   if (recordings.length) addOption('motion');
+  // AI tags filter through the same label query; mark them so they are not
+  // mistaken for detections.
+  const aiCounts = {};
+  recordings.forEach((recording) => {
+    (recording.ai_labels || []).forEach((tag) => { aiCounts[tag] = (aiCounts[tag] || 0) + 1; });
+  });
+  Object.keys(aiCounts).forEach((tag) => {
+    const normalized = String(tag || '').trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    options.push({ value: normalized, label: `${titleCase(normalized)} (AI tag, ${aiCounts[tag]})` });
+  });
 
   const ordered = [options[0], ...options.slice(1).sort((left, right) => {
     if (left.value === 'motion') return -1;

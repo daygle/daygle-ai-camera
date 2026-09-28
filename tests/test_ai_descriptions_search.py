@@ -154,6 +154,11 @@ class _Db:
         self.descriptions[event_id] = record
         return True
 
+    def add_ai_recording_tags(self, event_id, tags):
+        self.recording_tags = getattr(self, 'recording_tags', {})
+        self.recording_tags[event_id] = list(tags)
+        return 1
+
 
 @pytest.fixture
 def flow(av, monkeypatch):
@@ -163,7 +168,7 @@ def flow(av, monkeypatch):
                         lambda _fn, triggered, _event_id, _rules: forwarded.append(list(triggered)) or True)
     monkeypatch.setattr(av, '_read_snapshot', lambda _event: b'jpeg')
 
-    def configure(*, verdict=(True, 'ok'), caption='A red car parks in the driveway.', **settings):
+    def configure(*, verdict=(True, 'ok'), caption='A red car parks in the driveway.', tags=(), **settings):
         db = _Db(_settings(av, **settings))
         monkeypatch.setattr(av._state, 'database', db)
         monkeypatch.setattr(av.VisionVerifier, 'ask', lambda _s, _img, _label, _cam='': verdict)
@@ -171,7 +176,7 @@ def flow(av, monkeypatch):
         def describe(_self, _img, _cam=''):
             if isinstance(caption, Exception):
                 raise caption
-            return caption
+            return caption, list(tags)
 
         monkeypatch.setattr(av.VisionVerifier, 'describe', describe)
         return db
@@ -251,10 +256,33 @@ def test_submit_routes_by_mode_and_camera(av, monkeypatch):
 
 
 def test_client_describe_round_trip(av):
-    with _SmartModelServer(caption='  "Two cats sit on the fence."  ') as server:
+    reply = '```json\n{"description": "Two cats sit on the fence.", "tags": ["fence", "Cat Bowl"]}\n```'
+    with _SmartModelServer(caption=reply) as server:
         verifier = av.VisionVerifier(_settings(av, server_url=server.url, timeout_seconds=5))
-        assert verifier.describe(b'jpeg', 'Pergola') == 'Two cats sit on the fence.'
+        assert verifier.describe(b'jpeg', 'Pergola') == ('Two cats sit on the fence.', ['fence', 'cat bowl'])
     assert server.kinds == ['describe']
+
+
+def test_plain_text_reply_still_describes(av):
+    assert av.parse_description_reply('  "Two cats sit on the fence."  ') == ('Two cats sit on the fence.', [])
+
+
+def test_tags_are_sanitised(av):
+    raw = ['Ladder', 'ladder', 'hi-vis vest', 'a very long multi word tag here', 'image', 7, '<script>',
+           'x', 'parcel', 'bin', 'rake', 'hose', 'bike', 'pram', 'dog lead']
+    assert av.clean_tags(raw) == ['ladder', 'hi-vis vest', 'parcel', 'bin', 'rake', 'hose', 'bike', 'pram']
+    assert av.clean_tags(['person', 'ladder'], exclude={'person'}) == ['ladder']
+    assert av.clean_tags('ladder') == []
+
+
+def test_tags_skip_detected_labels_and_reach_recordings(av, flow):
+    configure, forwarded = flow
+    db = configure(describe_events='alerts', tags=['person', 'ladder', 'hi-vis vest'])
+    db.event['detections'] = [{'label': 'person', 'confidence': 0.9}]
+    av.verify_and_forward([{'label': 'person', 'confidence': 0.9}], 12, [], '')
+    assert db.descriptions[12]['tags'] == ['ladder', 'hi-vis vest']
+    assert db.recording_tags[12] == ['ladder', 'hi-vis vest']
+    assert forwarded and forwarded[0][0]['ai_description'] == 'A red car parks in the driveway.'
 
 
 # ---------------------------------------------------------------------------
@@ -464,3 +492,47 @@ def test_restore_accepts_a_genuine_database_with_the_index(tmp_path, monkeypatch
     source = EventDatabase(str(genuine))
     _event(source, 'drive', '2026-09-28T01:00:00+00:00', 'A red car parks.')
     backup.overwrite_database_from_file(genuine)  # no exception
+
+
+
+# ---------------------------------------------------------------------------
+# AI tags on recordings
+# ---------------------------------------------------------------------------
+
+def _recording_for(db, event_id, camera_id='drive'):
+    return db.add_recording(
+        event_id=event_id, camera_id=camera_id, started_at='2026-09-28T01:00:00+00:00',
+        ended_at='2026-09-28T01:00:10+00:00', duration_seconds=10, file_path='clip.mp4',
+        thumbnail_path=None, source='camera', created_at='2026-09-28T01:00:00+00:00',
+    )
+
+
+def test_ai_tags_are_searchable_and_marked_on_recordings(tmp_path):
+    db = EventDatabase(str(tmp_path / 'tags.sqlite3'))
+    event_id = _event(db, 'drive', '2026-09-28T01:00:00+00:00')
+    recording_id = _recording_for(db, event_id)
+    db.add_recording_labels(recording_id, ['person'])
+    db.set_event_description(event_id, {'text': 'A man walks past with tools.', 'tags': ['ladder'], 'model': 'm'})
+    assert db.add_ai_recording_tags(event_id, ['ladder', 'person']) == 1
+
+    # The tag is searchable even though the sentence never says "ladder".
+    assert [e['id'] for e in db.search_event_descriptions(groups=[['ladder']])] == [event_id]
+    recording = db.get_recording(recording_id)
+    assert recording['labels'] == ['person']          # the detected label stays a detection
+    assert recording['ai_labels'] == ['ladder']
+    listed = db.list_recordings(label='ladder')       # the label filter matches AI tags
+    assert [r['id'] for r in listed] == [recording_id]
+    assert listed[0]['ai_labels'] == ['ladder'] and listed[0]['labels'] == ['person']
+    event = db.get_event(event_id)
+    assert event['recordings'][0]['ai_labels'] == ['ladder']
+
+
+def test_detection_promotes_a_label_first_seen_as_an_ai_tag(tmp_path):
+    db = EventDatabase(str(tmp_path / 'promote.sqlite3'))
+    event_id = _event(db, 'drive', '2026-09-28T01:00:00+00:00')
+    recording_id = _recording_for(db, event_id)
+    db.add_ai_recording_tags(event_id, ['dog'])
+    assert db.get_recording(recording_id)['ai_labels'] == ['dog']
+    db.add_recording_labels(recording_id, ['dog'])
+    recording = db.get_recording(recording_id)
+    assert recording['labels'] == ['dog'] and recording['ai_labels'] == []

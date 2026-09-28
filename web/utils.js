@@ -967,6 +967,19 @@ function isGenericTriggerLabel(label) {
 // Render a single detection pill (eye icon for objects, speaker for sounds).
 // Each label decides its own icon independently of `isSound` so a sound class
 // that sneaks into an object list still renders with the speaker icon.
+// AI tags: objects the local vision model named (app/ai_verification.py),
+// shown apart from real detections - marked, uncoloured by confidence - since
+// the model can occasionally imagine things.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function aiTagPills(tags) {
+  if (!Array.isArray(tags) || !tags.length) return '';
+  return tags
+    .map((tag) => String(tag || '').trim())
+    .filter(Boolean)
+    .map((tag) => `<span class="detection detection-ai-tag" title="Tagged by the local AI model - not a detection">🤖 ${escapeHtml(titleCase(tag))}</span>`)
+    .join('');
+}
+
 function detectionPill(label, confidence, isSound = false, count = 1) {
   const labelIsSound = isSound || isSoundLabel(label);
   const display = labelIsSound

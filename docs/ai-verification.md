@@ -100,6 +100,29 @@ parcel at the front door."*
   sentence. Descriptions are never a reason for an alert to be late or lost.
 - Uses the same server, model and camera selection as verification.
 
+### AI tags
+
+With each description the model also lists up to 8 notable objects it can see,
+such as `ladder`, `hi-vis vest`, `parcel` or `wheelie bin`. These are often
+things the object detector has no class for.
+
+- **Where they appear:** tags show as dashed **🤖** chips under the
+  description in the Events list, and on the event's recordings (the list and
+  the clip details).
+- **Recording filter:** the recordings label filter lists them as
+  "Ladder (AI tag, 3)".
+- **Search:** tags are searchable, even when the sentence doesn't use the word.
+- **Tags are not detections.** They have no box or confidence and never
+  trigger alerts or recordings. A tag that repeats a detected label is
+  dropped.
+- **Detections win.** If a real detection of the same label arrives later, it
+  takes over from the tag.
+- **Where they are stored:** in `ai_description.tags` on the event, and as
+  `recording_labels` rows with `source = 'ai'`. The recordings API reports
+  them as `ai_labels`, apart from `labels`.
+- **Model support:** the model is asked for JSON. A model that ignores the
+  format still produces a description, just without tags.
+
 **Describe Past Events** (Settings) describes events from the last 24 hours to
 30 days that have no description yet, up to 500 at a time, so they become
 searchable. It runs in the background, one event at a time, pauses whenever an

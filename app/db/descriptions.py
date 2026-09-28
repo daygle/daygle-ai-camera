@@ -47,6 +47,10 @@ class EventDescriptionsMixin:
     def set_event_description(self, event_id: int, record: dict[str, Any]) -> bool:
         """Store the description record in the event metadata and index its text."""
         text = str(record.get('text') or '').strip()
+        # Tags are indexed with the sentence so "ladder" finds an event whose
+        # caption only said "tools" but whose tags named the ladder.
+        tags = [str(tag) for tag in record.get('tags') or [] if str(tag).strip()]
+        indexed = ' '.join([text, *tags]).strip()
         with self.connect() as db:
             cursor = db.execute(
                 "UPDATE events SET metadata = json_patch(COALESCE(NULLIF(metadata, ''), '{}'), ?) WHERE id = ?",
@@ -56,9 +60,33 @@ class EventDescriptionsMixin:
                 return False
             if self._description_fts:
                 db.execute(f"DELETE FROM {_FTS_TABLE} WHERE rowid = ?", (int(event_id),))
-                if text:
-                    db.execute(f"INSERT INTO {_FTS_TABLE}(rowid, description) VALUES (?, ?)", (int(event_id), text))
+                if indexed:
+                    db.execute(f"INSERT INTO {_FTS_TABLE}(rowid, description) VALUES (?, ?)", (int(event_id), indexed))
             return True
+
+    def add_ai_recording_tags(self, event_id: int, tags: list[str]) -> int:
+        """Attach AI tags to the event's recordings as ``source='ai'`` labels.
+
+        They show in the recordings list (marked as AI) and match the label
+        filter. A real detection of the same label always wins: see
+        RecordingsMixin._insert_recording_labels. Returns recordings touched.
+        """
+        tags = [str(tag).strip().lower() for tag in tags if str(tag).strip()]
+        if not tags:
+            return 0
+        with self.write_slot(), self.connect() as db:
+            rows = db.execute(
+                """
+                SELECT r.id FROM recordings r
+                WHERE r.event_id = ?
+                   OR r.id = (SELECT recording_id FROM events WHERE id = ?)
+                   OR EXISTS (SELECT 1 FROM alert_history ah WHERE ah.event_id = ? AND ah.recording_id = r.id)
+                """,
+                (int(event_id), int(event_id), int(event_id)),
+            ).fetchall()
+            for row in rows:
+                self._insert_recording_labels(db, int(row['id']), tags, source='ai')
+            return len(rows)
 
     def events_without_description(self, *, since: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         """Newest object events with a snapshot and no description yet (for backfill)."""

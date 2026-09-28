@@ -203,8 +203,12 @@ function aiVerificationBadge(event) {
 // Plain-English description written by the local AI model (see
 // app/ai_verification.py), when event descriptions are enabled.
 function eventDescription(event) {
-  const text = ((event.metadata || {}).ai_description || {}).text;
-  return text ? `<p class="activity-item-description" title="Described by the local AI model">${escapeHtml(text)}</p>` : '';
+  const record = (event.metadata || {}).ai_description || {};
+  const text = record.text
+    ? `<p class="activity-item-description" title="Described by the local AI model">${escapeHtml(record.text)}</p>`
+    : '';
+  const tags = aiTagPills(record.tags);
+  return `${text}${tags ? `<div class="activity-item-badges activity-item-ai-tags">${tags}</div>` : ''}`;
 }
 
 function renderEventRow(event) {

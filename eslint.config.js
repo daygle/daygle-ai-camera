@@ -79,6 +79,7 @@ const WEB_SHARED_GLOBALS = {
   DETECTION_EYE_ICON: 'readonly',
   DETECTION_MOTION_ICON: 'readonly',
   detectionPill: 'readonly',
+  aiTagPills: 'readonly',
   escapeHtml: 'readonly',
   eventFaceIdentities: 'readonly',
   faceIdentityPills: 'readonly',
