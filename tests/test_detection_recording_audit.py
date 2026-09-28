@@ -17,7 +17,7 @@ from __future__ import annotations
 import importlib
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.inference_scheduler import LiveInferenceScheduler
@@ -130,12 +130,50 @@ def test_unqueued_clip_releases_capture_session_and_row(tmp_path, monkeypatch):
         [],
         recording_id=7,
         camera_id='cam',
-        event_time=datetime.now(timezone.utc).isoformat(),
+        # In the past, so the capture deadline has already elapsed.
+        event_time=(datetime.now(timezone.utc) - timedelta(seconds=100)).isoformat(),
         recording_config={'pre_event_seconds': 0, 'post_event_seconds': 5, 'max_clip_seconds': 60},
     )
 
+    assert _wait_for(lambda: database.deleted == [7])
     assert 'cam' not in state.active_rtsp_recordings
-    assert database.deleted == [7]
+
+
+def test_waiting_clip_does_not_hold_a_render_worker(tmp_path, monkeypatch):
+    """A clip still inside its post-event window must not occupy a pool worker.
+
+    Only the render is submitted to the bounded clip pool, and only once the
+    capture deadline has passed.
+    """
+    recording_extension = importlib.import_module('app.recording_extension')
+    postprocess_pool = importlib.import_module('app.postprocess_pool')
+    state = importlib.import_module('app.state')
+
+    submitted: list[str] = []
+
+    class _RecordingPool:
+        def submit(self, _fn, *_args, label='', **_kwargs):
+            submitted.append(label)
+            return True
+
+    monkeypatch.setattr(postprocess_pool, 'clip_pool', lambda: _RecordingPool())
+    monkeypatch.setattr(state, 'active_rtsp_recordings', {})
+    monkeypatch.setattr(state, 'last_rtsp_capture_end', {})
+
+    recording_extension.start_rtsp_recording_capture(
+        'rtsp://example/stream',
+        {'file_path': str(tmp_path / 'clip.mp4'), 'duration_seconds': 5},
+        12,
+        [],
+        recording_id=8,
+        camera_id='cam',
+        event_time=datetime.now(timezone.utc).isoformat(),
+        recording_config={'pre_event_seconds': 0, 'post_event_seconds': 1, 'max_clip_seconds': 60},
+    )
+
+    time.sleep(0.3)
+    assert submitted == []  # still inside the post-event window
+    assert _wait_for(lambda: submitted == ['rtsp-recording-12'], timeout=5)
 
 
 def test_extend_retires_a_capture_session_long_past_its_deadline(monkeypatch):

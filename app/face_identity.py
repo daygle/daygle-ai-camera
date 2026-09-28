@@ -121,7 +121,9 @@ def _maybe_enrich_person(
 
     enrichment_pool().submit(
         _store_enriched_embedding,
-        person_id, camera_id, track_id, detection, crop_bgr, service,
+        # Copy the crop: a view would pin the whole frame in memory while the
+        # job waits and read whatever the frame buffer holds when it runs.
+        person_id, camera_id, track_id, dict(detection), _detached(crop_bgr), service,
         priority=PRIORITY_BACKGROUND,
         label=f'enriched-embedding-{camera_id}',
         block=False,
@@ -164,6 +166,12 @@ def _store_enriched_embedding(
         logger.debug('Enriched person %s with new face embedding from track %s', person_id, track_id)
     except Exception as exc:
         logger.debug('Failed to enrich face for person %s: %s', person_id, exc)
+
+
+def _detached(crop_bgr: Any) -> Any:
+    """Own copy of a crop that is handed to a background worker."""
+    copy = getattr(crop_bgr, 'copy', None)
+    return copy() if callable(copy) else crop_bgr
 
 
 def _is_face(detection: dict[str, Any]) -> bool:
@@ -242,7 +250,7 @@ def _maybe_capture_unknown(
 
     enrichment_pool().submit(
         _store_unknown_face,
-        camera_id, track_id, detection, crop_bgr, service,
+        camera_id, track_id, dict(detection), _detached(crop_bgr), service,
         priority=PRIORITY_BACKGROUND,
         label=f'unknown-face-{camera_id}',
         block=False,

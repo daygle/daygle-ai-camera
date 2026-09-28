@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -43,6 +44,9 @@ _ONVIF_VELOCITY: dict[str, tuple[float, float, float]] = {
 _PROFILE_TOKEN_TTL = 300.0
 _profile_token_cache: dict[tuple[str, int], tuple[str, float]] = {}
 _video_source_token_cache: dict[tuple[str, int], tuple[str, float]] = {}
+# PTZ commands arrive on API threadpool workers while the profile monitor probes
+# day/night concurrently; the caches are read, pruned and written under this.
+_token_cache_lock = threading.Lock()
 
 
 def _wssec_header(username: str, password: str) -> str:
@@ -207,14 +211,15 @@ def _soap_soap11(url: str, body: str, username: str, password: str) -> str:
 def _get_profile_token(host: str, http_port: int, username: str, password: str) -> str:
     key = (host, http_port)
     now = time.monotonic()
-    cached = _profile_token_cache.get(key)
-    if cached is not None:
-        token, cached_at = cached
-        if now - cached_at < _PROFILE_TOKEN_TTL:
-            return token
-    expired = [k for k, (_, t) in _profile_token_cache.items() if now - t >= _PROFILE_TOKEN_TTL]
-    for k in expired:
-        del _profile_token_cache[k]
+    with _token_cache_lock:
+        cached = _profile_token_cache.get(key)
+        if cached is not None:
+            token, cached_at = cached
+            if now - cached_at < _PROFILE_TOKEN_TTL:
+                return token
+        expired = [k for k, (_, t) in _profile_token_cache.items() if now - t >= _PROFILE_TOKEN_TTL]
+        for k in expired:
+            del _profile_token_cache[k]
     url = f'http://{host}:{http_port}/onvif/media_service'
     response = _soap(url, '<trt:GetProfiles/>', username, password)
     match = re.search(r'<[^>]*Profiles[^>]+token=["\']([^"\']+)["\']', response)
@@ -224,7 +229,8 @@ def _get_profile_token(host: str, http_port: int, username: str, password: str) 
         raise OSError('Could not find ONVIF media profile token. Check credentials.')
     token = match.group(1)
     logger.debug('ONVIF profile token for %s:%d → %s', host, http_port, token)
-    _profile_token_cache[key] = (token, time.monotonic())
+    with _token_cache_lock:
+        _profile_token_cache[key] = (token, time.monotonic())
     return token
 
 
@@ -232,7 +238,8 @@ def _get_video_source_token(host: str, http_port: int, username: str, password: 
     """Get and cache the ONVIF video-source token used by ImagingService."""
     key = (host, http_port)
     now = time.monotonic()
-    cached = _video_source_token_cache.get(key)
+    with _token_cache_lock:
+        cached = _video_source_token_cache.get(key)
     if cached is not None and now - cached[1] < _PROFILE_TOKEN_TTL:
         return cached[0]
     response = _soap(
@@ -245,7 +252,8 @@ def _get_video_source_token(host: str, http_port: int, username: str, password: 
     if match is None:
         raise OSError('Could not find ONVIF video source token.')
     token = match.group(1)
-    _video_source_token_cache[key] = (token, now)
+    with _token_cache_lock:
+        _video_source_token_cache[key] = (token, now)
     return token
 
 
@@ -302,7 +310,7 @@ def send_ptz_command_onvif(
     if command == 'stop':
         body = (
             '<tptz:Stop>'
-            f'<tptz:ProfileToken>{token}</tptz:ProfileToken>'
+            f'<tptz:ProfileToken>{_xml_escape(token)}</tptz:ProfileToken>'
             '<tptz:PanTilt>true</tptz:PanTilt>'
             '<tptz:Zoom>true</tptz:Zoom>'
             '</tptz:Stop>'
@@ -311,7 +319,7 @@ def send_ptz_command_onvif(
         pan, tilt, zoom = _ONVIF_VELOCITY.get(command, (0.0, 0.0, 0.0))
         body = (
             '<tptz:ContinuousMove>'
-            f'<tptz:ProfileToken>{token}</tptz:ProfileToken>'
+            f'<tptz:ProfileToken>{_xml_escape(token)}</tptz:ProfileToken>'
             f'<tptz:Timeout>{timeout_iso}</tptz:Timeout>'
             '<tptz:Velocity>'
             f'<tt:PanTilt x="{pan * speed_factor:.3f}" y="{tilt * speed_factor:.3f}"/>'

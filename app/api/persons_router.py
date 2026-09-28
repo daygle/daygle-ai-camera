@@ -11,6 +11,7 @@ all of their embeddings.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from starlette.concurrency import run_in_threadpool
 
 from app.auth_gates import require_admin
 from app.deps import get_database, get_face_recognition_service
@@ -25,7 +26,7 @@ from app.request_helpers import _read_uploaded_image, read_json_object, write_au
 
 router = APIRouter()
 
-_MAX_NAME_LEN = 200
+MAX_PERSON_NAME_LEN = 200
 _MAX_NOTES_LEN = 2000
 
 
@@ -33,8 +34,8 @@ def _clean_name(value: object) -> str:
     name = str(value or '').strip()
     if not name:
         raise HTTPException(status_code=400, detail='A person name is required.')
-    if len(name) > _MAX_NAME_LEN:
-        raise HTTPException(status_code=400, detail=f'Name must be at most {_MAX_NAME_LEN} characters.')
+    if len(name) > MAX_PERSON_NAME_LEN:
+        raise HTTPException(status_code=400, detail=f'Name must be at most {MAX_PERSON_NAME_LEN} characters.')
     return name
 
 
@@ -83,6 +84,10 @@ async def update_person(person_id: int, request: Request, db=Depends(get_databas
     name = _clean_name(payload.get('name')) if 'name' in payload else None
     notes = _clean_notes(payload.get('notes')) if 'notes' in payload else None
     db.update_person(person_id, name=name, notes=notes)
+    if name is not None:
+        # The live matcher caches each person's name alongside their vectors;
+        # without a rebuild, recognitions and alerts keep the old name.
+        refresh_face_recognition_matcher()
     write_audit_log(request, db, 'update', 'person', resource_id=str(person_id))
     return db.get_person(person_id)
 
@@ -123,16 +128,20 @@ async def enroll_face(
             detail='Face recognition is not ready. Enable it and select an embedding model first.',
         )
     image_bytes, _filename, _content_type = await _read_uploaded_image(request)
+    box = None
+    if None not in (x, y, width, height):
+        box = {'x': x, 'y': y, 'width': width, 'height': height}
+
+    def _embed() -> tuple[object, object]:
+        crop = crop_face_region(decode_bgr_image(image_bytes), box)
+        return crop, service.embed_face(crop)
+
     try:
-        image = decode_bgr_image(image_bytes)
-        box = None
-        if None not in (x, y, width, height):
-            box = {'x': x, 'y': y, 'width': width, 'height': height}
-        crop = crop_face_region(image, box)
+        # Decode + ONNX embedding are CPU-bound; run them in the threadpool so
+        # an enrolment never stalls the event loop (and every live stream).
+        crop, vector = await run_in_threadpool(_embed)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    vector = service.embed_face(crop)
     if vector is None:
         raise HTTPException(
             status_code=400,

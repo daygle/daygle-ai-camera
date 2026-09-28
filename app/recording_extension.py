@@ -105,6 +105,7 @@ import os
 
 import json
 import logging
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -679,22 +680,30 @@ def start_rtsp_recording_capture(
     # ``finally`` under the recordings lock.
     captured_end_ts_holder: dict[str, float] = {}
 
+    # The capture deadline found by ``wait_for_deadline``, handed to ``render``.
+    deadline_holder: dict[str, float] = {}
+
+    def wait_for_deadline() -> float:
+        """Sleep until the (possibly extended) capture deadline passes."""
+        final_deadline_ts = min(max_deadline_ts, initial_deadline_ts)
+        if camera_id:
+            while True:
+                with _state.active_rtsp_recordings_lock:
+                    session = _state.active_rtsp_recordings.get(camera_id)
+                    if not session or int(session.get('recording_id', -1)) != int(recording_id):
+                        break
+                    final_deadline_ts = float(
+                        session.get('capture_deadline_ts') or final_deadline_ts
+                    )
+                remaining = final_deadline_ts - time.time()
+                if remaining <= 0:
+                    break
+                time.sleep(min(0.5, max(0.05, remaining)))
+        return final_deadline_ts
+
     def capture() -> None:
         try:
-            final_deadline_ts = min(max_deadline_ts, initial_deadline_ts)
-            if camera_id:
-                while True:
-                    with _state.active_rtsp_recordings_lock:
-                        session = _state.active_rtsp_recordings.get(camera_id)
-                        if not session or int(session.get('recording_id', -1)) != int(recording_id):
-                            break
-                        final_deadline_ts = float(
-                            session.get('capture_deadline_ts') or final_deadline_ts
-                        )
-                    remaining = final_deadline_ts - time.time()
-                    if remaining <= 0:
-                        break
-                    time.sleep(min(0.5, max(0.05, remaining)))
+            final_deadline_ts = deadline_holder.get('ts', min(max_deadline_ts, initial_deadline_ts))
             final_deadline_ts = min(final_deadline_ts, max_deadline_ts)
             actual_end_ts = min(max(time.time(), final_deadline_ts), max_deadline_ts)
             final_duration_seconds = max(1.0, actual_end_ts - start_capture_ts)
@@ -766,29 +775,8 @@ def start_rtsp_recording_capture(
                     captured_end_ts = captured_end_ts_holder.get('ts')
                     if captured_end_ts is not None:
                         _state.last_rtsp_capture_end[camera_id] = captured_end_ts
-    # Bounded pool rather than a thread per event (Item 12). This capture runs
-    # ffmpeg - clip render, audio mux, sidecar and thumbnail writes - and a
-    # thread-per-event design had no ceiling: a burst of overlapping events
-    # started one render each, all competing for the same cores and disk the
-    # detection and continuous-recording workers were already using. The pool
-    # applies a fixed concurrency limit, absorbs the burst in a bounded
-    # backlog, and gives clips their own queue so identity work can never
-    # delay a clip the user is waiting on.
-    #
-    # Bounded submit with a short timeout: the caller is the detection thread,
-    # so it must not park for long. A clip that cannot be queued within the
-    # timeout is dropped here rather than growing the backlog without limit -
-    # the event, its detections and its alert history are already committed by
-    # this point, so dropping costs the footage, not the alert.
-    from app.postprocess_pool import PRIORITY_CLIP, clip_pool
-
-    if not clip_pool().submit(
-        capture,
-        priority=PRIORITY_CLIP,
-        label=f'rtsp-recording-{event_id}',
-        block=True,
-        timeout=CLIP_SUBMIT_TIMEOUT_SECONDS,
-    ):
+    def release_unqueued_capture() -> None:
+        """Undo the capture registration for a clip that will never render."""
         logger.warning(
             'Event clip render for %s was not queued (post-process backlog full); '
             'the alert is recorded but this event has no clip.',
@@ -809,3 +797,43 @@ def start_rtsp_recording_capture(
             _state.database.delete_recording(recording_id)
         except Exception as exc:  # pragma: no cover - best-effort cleanup
             logger.debug('Could not remove unqueued recording %s: %s', recording_id, exc)
+
+    # Bounded pool rather than a thread per render (Item 12): the render runs
+    # ffmpeg - clip render, audio mux, sidecar and thumbnail writes - and a
+    # burst of overlapping events would otherwise start one render each, all
+    # competing for the same cores and disk the detection and
+    # continuous-recording workers use. The pool applies a fixed concurrency
+    # limit, absorbs the burst in a bounded backlog, and gives clips their own
+    # queue so identity work can never delay a clip the user is waiting on.
+    #
+    # Only the RENDER goes through the pool. The wait for the capture deadline
+    # (post-event time plus any extensions, up to max_clip_seconds) runs in a
+    # sleeping waiter thread first: when that wait also held a pool worker,
+    # two recording cameras occupied both clip workers for their whole clip
+    # duration, and a third camera's clip queued so long that the rolling
+    # prebuffer had pruned its pre-roll by the time it rendered.
+    from app.postprocess_pool import PRIORITY_CLIP, clip_pool
+
+    def wait_then_render() -> None:
+        try:
+            deadline_holder['ts'] = wait_for_deadline()
+        except Exception as exc:  # pragma: no cover - defensive: still render
+            logger.debug('Capture deadline wait failed for event %s: %s', event_id, exc)
+        # Bounded submit with a short timeout: a clip that cannot be queued is
+        # dropped rather than growing the backlog without limit - the event,
+        # its detections and its alert history are already committed by this
+        # point, so dropping costs the footage, not the alert.
+        if not clip_pool().submit(
+            capture,
+            priority=PRIORITY_CLIP,
+            label=f'rtsp-recording-{event_id}',
+            block=True,
+            timeout=CLIP_SUBMIT_TIMEOUT_SECONDS,
+        ):
+            release_unqueued_capture()
+
+    threading.Thread(
+        target=wait_then_render,
+        name=f'rtsp-capture-wait-{event_id}',
+        daemon=True,
+    ).start()

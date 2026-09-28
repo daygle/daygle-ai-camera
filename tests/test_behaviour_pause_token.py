@@ -55,8 +55,9 @@ def _seed(camera_id: str = 'cam-a', other: str = 'cam-b') -> None:
     bm._loiter_presence[other] = {'cam-b|zone|1': {'first_seen': 2.0}}
     bm._loiter_baselines['cam-a|zone|person'] = {'count': 5.0, 'mean': 30.0, 'm2': 4.0}
     bm._loiter_cooldowns['cam-a|zone|person'] = 100.0
-    bm._time_today[camera_id] = {('cam-a', 'zone', 'person'): 3}
-    bm._time_today[other] = {('cam-b', 'zone', 'person'): 4}
+    # Real shape written by ``time_of_day_step``: ``camera|zone|label`` keys.
+    bm._time_today[f'{camera_id}|zone|person'] = {'day': 1, 'hours': {3}}
+    bm._time_today[f'{other}|zone|person'] = {'day': 1, 'hours': {4}}
     bm._time_baselines['cam-a|zone|person'] = [[3, 0.2], [4, 0.3]]
     bm._tripwire_last_fired[f'{camera_id}|zone|in|1'] = 10.0
     bm._tripwire_last_fired[f'{camera_id}|zone|out|1'] = 11.0
@@ -79,7 +80,7 @@ def test_onset_drops_transitional_state_but_keeps_learned_baselines():
 
     # Transitional: an in-progress visit and today's observation tally.
     assert 'cam-a' not in bm._loiter_presence
-    assert 'cam-a' not in bm._time_today
+    assert not [k for k in bm._time_today if k.startswith('cam-a|')]
     # Cooldowns are per-camera too and would suppress a real post-pan crossing.
     assert not [k for k in bm._tripwire_last_fired if k.startswith('cam-a|')]
     # Learned distributions survive: a 0.4s nudge must not erase an hour of it.
@@ -106,7 +107,7 @@ def test_reset_is_scoped_to_one_camera():
     bm.sync_behaviour_pause('cam-a', True)
 
     assert bm._loiter_presence['cam-b'] == {'cam-b|zone|1': {'first_seen': 2.0}}
-    assert bm._time_today['cam-b'] == {('cam-b', 'zone', 'person'): 4}
+    assert bm._time_today['cam-b|zone|person'] == {'day': 1, 'hours': {4}}
     assert bm._tripwire_last_fired['cam-b|zone|in|1'] == 12.0
 
 

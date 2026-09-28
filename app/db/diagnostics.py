@@ -52,12 +52,15 @@ class CameraDiagnosticsMixin:
                 (created_at, camera_id, camera_name, event_type, severity, message, json.dumps(details or {})),
             )
             # Trim oldest rows so a flapping camera can't grow the table without
-            # bound. Cheap because the table stays small and id is the PK.
+            # bound. Keep the newest MAX_ROWS ids by deleting everything at or
+            # below the first id past the cap: a PK seek plus a range delete
+            # (normally zero or one row), instead of materialising a
+            # ``NOT IN`` set of MAX_ROWS ids and scanning the table per insert.
             db.execute(
                 """
                 DELETE FROM camera_diagnostics
-                WHERE id NOT IN (
-                    SELECT id FROM camera_diagnostics ORDER BY id DESC LIMIT ?
+                WHERE id <= (
+                    SELECT id FROM camera_diagnostics ORDER BY id DESC LIMIT 1 OFFSET ?
                 )
                 """,
                 (self.CAMERA_DIAGNOSTICS_MAX_ROWS,),

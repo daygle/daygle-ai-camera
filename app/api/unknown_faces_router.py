@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
+from app.api.persons_router import MAX_PERSON_NAME_LEN
 from app.auth_gates import require_admin
 from app.db.unknown_faces import UnknownFaceAssignmentError
 from app.deps import get_database
@@ -83,6 +84,11 @@ async def assign_unknown_face(
         name = str(new_name).strip()
         if not name:
             raise HTTPException(status_code=400, detail='A person name is required.')
+        if len(name) > MAX_PERSON_NAME_LEN:
+            raise HTTPException(
+                status_code=400,
+                detail=f'Name must be at most {MAX_PERSON_NAME_LEN} characters.',
+            )
         # The atomic DB operation creates this person inside the same
         # transaction as the face enrolment and status transition.
         new_name = name

@@ -1098,7 +1098,13 @@ class RecordingService:
             )
 
         effective_seconds = rendered_seconds if rendered_seconds is not None else content_seconds
-        self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, effective_seconds, camera_id=camera_id)
+        try:
+            self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, effective_seconds, camera_id=camera_id)
+        except Exception as exc:
+            # Audio is best-effort: an unexpected mux failure must not discard
+            # the video that already rendered (the caller would replace the
+            # whole clip with a generated placeholder) or orphan ``tmp_path``.
+            logger.warning('Audio mux failed for %s; keeping silent video clip: %s', camera_key, exc)
         tmp_path.replace(file_path)
         # Report the clip's real duration, not the requested window - keyframe
         # alignment and short source footage make them differ, and a mismatch

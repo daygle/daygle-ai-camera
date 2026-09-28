@@ -53,8 +53,11 @@ class AuditLogMixin:
             conditions.append("username = ?")
             params.append(username)
         if resource:
-            conditions.append("resource LIKE ?")
-            params.append(f"{resource}%")
+            # Prefix match with LIKE's own wildcards escaped, so a literal
+            # ``_`` or ``%`` in the filter matches only itself.
+            escaped = resource.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            conditions.append("resource LIKE ? ESCAPE '\\'")
+            params.append(f"{escaped}%")
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         return where, params
 

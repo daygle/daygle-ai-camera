@@ -87,9 +87,16 @@ class PersonsMixin:
             return cursor.rowcount > 0
 
     def delete_person(self, person_id: int) -> bool:
-        """Delete a person and all of their enrolled face embeddings."""
+        """Delete a person and all of their enrolled face embeddings.
+
+        Reviewed unknown-face captures that were assigned to this person hold
+        the same biometric data (embedding + face thumbnail); they go too, or
+        deleting a person would leave their face data behind indefinitely
+        under the default keep-forever retention.
+        """
         with self.write_slot(), self.connect() as db:
             db.execute("DELETE FROM person_faces WHERE person_id = ?", (person_id,))
+            db.execute("DELETE FROM unknown_faces WHERE assigned_person_id = ?", (person_id,))
             cursor = db.execute("DELETE FROM persons WHERE id = ?", (person_id,))
             return cursor.rowcount > 0
 

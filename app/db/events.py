@@ -621,8 +621,13 @@ class EventsMixin:
                 f"""
                 SELECT COUNT(*) AS count
                 FROM alert_history ah
-                WHERE ah.event_id IS NULL
-                   OR ah.event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
+                -- Parenthesised so the trailing ``AND created_at >= ?`` binds to
+                -- both branches (``event_id`` is NOT NULL today, but the OR
+                -- must not silently bypass the date filter if that changes).
+                WHERE (
+                    ah.event_id IS NULL
+                    OR ah.event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
+                )
                 {since_clause_ah}
                 """,
                 _params(),
