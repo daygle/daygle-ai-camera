@@ -328,7 +328,7 @@ function ensureAiTags(zone) {
   }
   zone.ai_tags = {
     enabled: true,
-    name: 'AI tag alert',
+    name: 'AI Tag Alert',
     tags: [],
     match: 'both',
     cooldown_seconds: 300,
@@ -359,7 +359,7 @@ function aiTagsBody(rule, zoneIndex) {
     <div class="zone-tripwire-body">
       <label class="sound-rule-field tripwire-name-field">
         <span>Name</span>
-        <input type="text" data-ai-tags-name="${zoneIndex}" value="${escapeHtml(rule.name || 'AI tag alert')}" maxlength="60" placeholder="AI tag alert" />
+        <input type="text" data-ai-tags-name="${zoneIndex}" value="${escapeHtml(rule.name || 'AI Tag Alert')}" maxlength="60" placeholder="AI Tag Alert" />
       </label>
       <div class="sound-rule-field tripwire-labels-field">
         <span>Watch for</span>
@@ -375,7 +375,7 @@ function aiTagsBody(rule, zoneIndex) {
         </label>
         <label class="sound-rule-field">
           <span>Cooldown (s)</span>
-          <input type="number" data-ai-tags-cooldown="${zoneIndex}" min="0" max="86400" step="30" value="${escapeHtml(rule.cooldown_seconds ?? 300)}" title="Minimum time between AI tag alerts for this area." />
+          <input type="number" data-ai-tags-cooldown="${zoneIndex}" min="0" max="86400" step="30" value="${escapeHtml(rule.cooldown_seconds ?? 300)}" title="Minimum time between AI Tag Alerts for this area." />
         </label>
       </div>
       <p class="muted tripwire-hint">Alerts when the local AI model's description of an event in this area names one of these. Unconfirmed: only the AI saw it, and alerts arrive a few seconds after the event. Every event on this camera is described while this is on. <a class="zone-assigned-link" href="/alerts">Set email / push alerts</a></p>
@@ -388,8 +388,8 @@ function renderAiTagsCard(zone, zoneIndex) {
   return `
     <div class="zone-tripwire-card zone-ai-tags-card${enabled ? ' is-enabled' : ''}" data-zone-ai-tags-for="${zoneIndex}">
       <div class="zone-tripwire-head">
-        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">🤖</span><strong>AI tag alert</strong><span class="muted zone-tripwire-sub">Alert when the AI model sees something, e.g. a ladder</span></div>
-        ${ruleToggleCell(`data-ai-tags-enabled="${zoneIndex}"`, enabled, 'Enable AI tag alerts for this area', false)}
+        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">🤖</span><strong>AI Tag Alert</strong><span class="muted zone-tripwire-sub">Alert when the AI model sees something, e.g. a ladder</span></div>
+        ${ruleToggleCell(`data-ai-tags-enabled="${zoneIndex}"`, enabled, 'Enable AI Tag Alerts for this area', false)}
       </div>
       ${enabled ? aiTagsBody(rule, zoneIndex) : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to be alerted when the local AI model names something here that object detection has no class for, like a ladder, parcel or hi-vis vest.</p>'}
     </div>`;
@@ -1453,7 +1453,7 @@ function bindAiTagsControls() {
       selectedZoneIndex = Number(cb.dataset.aiTagsEnabled);
       if (cb.checked) {
         ensureAiTags(zone);
-        liveEls.status.textContent = 'AI tag alert enabled - add what to watch for, then Save Zones and set email / push on the Alerts page.';
+        liveEls.status.textContent = 'AI Tag Alert enabled - add what to watch for, then Save Zones and set email / push on the Alerts page.';
       } else if (aiTagsOf(zone)) {
         zone.ai_tags.enabled = false;
       }
