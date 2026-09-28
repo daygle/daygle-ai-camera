@@ -717,10 +717,15 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             height = max(0.01, min(1.0 - y, float(zone.get('height') or 0)))
         except (TypeError, ValueError):
             height = 0.01
+        raw_points = zone.get('points')
+        if not isinstance(raw_points, (list, tuple)):
+            # A malformed ``points`` value falls back to the rectangle below,
+            # like any other unusable geometry, instead of raising a 500.
+            raw_points = []
         points = [
             point
             for point in (
-                normalize_zone_point(point) for point in zone.get('points') or []
+                normalize_zone_point(point) for point in raw_points
             )
             if point is not None
         ]

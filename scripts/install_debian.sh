@@ -53,7 +53,9 @@ bash "${REPO_DIR}/scripts/install_cloudflared.sh"
 # against a REPO_DIR with a poisoned ``.git/config`` fails FAST instead of
 # rsyncing attacker-controlled source into /opt. SSH and HTTPS forms both
 # supported, optional ``.git`` suffix tolerated.
-EXPECTED_REMOTE_REGEX='github\.com[:/]daygle/daygle-ai-camera(\.git)?$'
+# Anchored at BOTH ends: an unanchored start also accepted look-alikes such as
+# ``https://evil.example/github.com/daygle/daygle-ai-camera``.
+EXPECTED_REMOTE_REGEX='^(https://([^/@]+@)?github\.com/|ssh://git@github\.com/|git@github\.com:)daygle/daygle-ai-camera(\.git)?/?$'
 REPO_REMOTE="$(git -C "${REPO_DIR}" remote get-url origin 2>/dev/null || true)"
 if [[ -n "${REPO_REMOTE}" ]] && ! printf '%s' "${REPO_REMOTE}" | grep -Eq "${EXPECTED_REMOTE_REGEX}"; then
   echo "ERROR: refusing to install from non-allowlisted source repo." >&2

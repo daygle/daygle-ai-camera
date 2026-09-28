@@ -63,6 +63,8 @@ top-level (Phase-15 verified ``HTTPException`` is reachable from
 
 from __future__ import annotations
 
+import ipaddress
+from functools import lru_cache
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -103,6 +105,33 @@ def _trusted_proxies() -> frozenset[str]:
         parsed = frozenset(str(item).strip() for item in trusted if item)
         return parsed or _DEFAULT_TRUSTED_PROXIES
     return _DEFAULT_TRUSTED_PROXIES
+
+
+@lru_cache(maxsize=32)
+def _trusted_networks(entries: frozenset[str]) -> tuple[Any, ...]:
+    networks = []
+    for entry in entries:
+        try:
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            continue
+    return tuple(networks)
+
+
+def is_trusted_proxy(peer: str | None) -> bool:
+    """True when the direct peer is a configured trusted proxy.
+
+    ``trusted_proxies`` accepts IPs *and* CIDR ranges (the settings validator
+    allows both), so membership is a network match, not a string comparison:
+    a ``192.168.1.0/24`` entry previously never matched any peer.
+    """
+    if not peer:
+        return False
+    try:
+        address = ipaddress.ip_address(str(peer).split('%', 1)[0])
+    except ValueError:
+        return peer in _trusted_proxies()
+    return any(address in network for network in _trusted_networks(_trusted_proxies()))
 
 
 def _auth_enabled() -> bool:
@@ -152,7 +181,7 @@ def _request_ip(request: Request) -> str:
     # explicitly whitelist the upstream-proxy IP. This defends against
     # client-side IP spoofing when the app is exposed beyond the loopback
     # interface (CSRF protection / rate-limit / audit-log poisoning).
-    if direct in _trusted_proxies():
+    if is_trusted_proxy(direct):
         forwarded = request.headers.get('x-forwarded-for')
         if forwarded:
             # X-Forwarded-For per RFC 7239 convention (and the XFF de-facto

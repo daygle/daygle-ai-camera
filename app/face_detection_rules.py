@@ -20,6 +20,8 @@ import math
 import threading
 from typing import Any
 
+from fastapi import HTTPException
+
 import app.state as _state
 from app.config_facades import effective_face_recognition_config
 from app.runtime_config import cached_snapshot
@@ -163,12 +165,15 @@ def rule_scope_matches(
 
 
 def validate_face_detection_rules(payload: dict[str, Any]) -> dict[str, Any]:
-    """Validate a face-detection-rules payload."""
-    if not isinstance(payload, dict):
-        return {'rules': []}
-    raw_rules = payload.get('rules')
-    if not isinstance(raw_rules, list):
-        return {'rules': []}
+    """Validate a face-detection-rules payload.
+
+    A payload without a ``rules`` list is rejected rather than normalised to an
+    empty rule set: the route persists the result, so a malformed request used
+    to silently delete every face rule.
+    """
+    if not isinstance(payload, dict) or not isinstance(payload.get('rules'), list):
+        raise HTTPException(status_code=400, detail='Face detection rules must be an object with a "rules" list.')
+    raw_rules = payload['rules']
     validated = []
     seen_ids: set[str] = set()
     for raw in raw_rules:

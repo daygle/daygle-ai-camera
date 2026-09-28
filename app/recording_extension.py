@@ -399,12 +399,34 @@ def _safe_rmtree_no_follow(target: Path) -> int:
     return count
 
 
+def _protected_runtime_paths() -> list[Path]:
+    """Paths a media-directory wipe must never contain (or be)."""
+    protected = [Path(__file__).resolve().parent.parent]  # application checkout
+    database = getattr(getattr(_state, 'database', None), 'database_path', None)
+    if database:
+        protected.append(Path(str(database)).resolve())
+    return protected
+
+
 def clear_runtime_media_directory(path_value: str | None) -> int:
     if not path_value:
         return 0
     path = Path(str(path_value))
     if not path.exists() or not path.is_dir():
         return 0
+    # Never wipe a directory that holds the database or the application itself
+    # (a storage path saved before the envelope was tightened could point at
+    # the data root or the app directory). Symlinked roots are handled below.
+    if not path.is_symlink():
+        resolved = path.resolve()
+        for protected in _protected_runtime_paths():
+            if protected == resolved or resolved in protected.parents:
+                logger.warning(
+                    'Refusing to clear %s: it contains %s. Point the media directory at '
+                    'a dedicated subdirectory of the data directory.',
+                    resolved, protected,
+                )
+                return 0
     # Refuse to descend into a symlinked storage root itself - an admin
     # setting ``snapshots_dir = /var/lib/foo`` where /var/lib/foo is a
     # planted symlink to /etc would otherwise let the M2 two-step delete

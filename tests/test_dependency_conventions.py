@@ -27,7 +27,11 @@ def test_dependency_variants_keep_cpu_and_gpu_onnx_runtime_exclusive():
     """The installer must select one ONNX Runtime wheel, never both."""
     installer = _read("scripts/install_python_deps.sh")
 
-    assert "pip uninstall -y onnxruntime onnxruntime-gpu" in installer
+    # The OTHER variant is removed before installing the selected one (the
+    # selected one is upgraded in place, so a failed install cannot leave the
+    # app without any ONNX Runtime).
+    assert "pip uninstall -y onnxruntime >" in installer
+    assert "pip uninstall -y onnxruntime-gpu >" in installer
     assert "DAYGLE_ONNXRUNTIME_VARIANT" in installer
     assert "onnxruntime-gpu" in installer
     assert "onnxruntime>=1.20.1,<1.21" in _read("requirements.txt")

@@ -28,7 +28,7 @@ def get_push_notification_settings(settings=Depends(get_redacted_push_notificati
 @router.put('/api/settings/alert-push')
 async def update_push_notification_settings(request: Request, db=Depends(get_database)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     settings = validate_push_notification_settings(payload)
     result = db.set_setting('alert_push', settings, utc_now())
     write_audit_log(request, db, 'update', 'settings.alert_push')

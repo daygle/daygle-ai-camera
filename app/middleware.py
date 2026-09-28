@@ -160,9 +160,9 @@ def _is_same_origin(request: Request) -> tuple[bool, str]:
     expected_scheme = request.url.scheme
     expected_host = request.url.hostname
     expected_port = request.url.port
-    from app.auth_gates import _trusted_proxies
+    from app.auth_gates import is_trusted_proxy
     direct_peer = request.client.host if getattr(request, 'client', None) else ''
-    if direct_peer in _trusted_proxies():
+    if is_trusted_proxy(direct_peer):
         forwarded_proto = request.headers.get('x-forwarded-proto')
         if forwarded_proto:
             expected_scheme = forwarded_proto.split(',')[0].strip() or expected_scheme

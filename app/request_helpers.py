@@ -8,6 +8,7 @@ The functions do NOT import app.main - they use direct imports only.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import date, datetime
@@ -76,6 +77,25 @@ def _redact_audit_details(details: Any) -> Any:
 logger = logging.getLogger('daygle.ai')
 
 
+def _reject_non_finite(constant: str) -> Any:
+    raise ValueError(f'{constant} is not valid JSON')
+
+
+async def read_json_body(request: Request) -> Any:
+    """Parse the request body as strict JSON, or raise ``HTTPException(400)``.
+
+    Python's ``json`` (and therefore ``request.json()``) accepts the
+    non-standard ``NaN`` / ``Infinity`` / ``-Infinity`` literals. Those pass
+    ``<``/``>`` range checks (every comparison with NaN is False) and crash
+    ``int()`` with OverflowError, so they are rejected here, once, for every
+    settings payload.
+    """
+    try:
+        return json.loads(await request.body(), parse_constant=_reject_non_finite)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail='Request body must be valid JSON.') from exc
+
+
 async def read_json_object(request: Request) -> dict[str, Any]:
     """Parse the request body as a JSON object, or raise ``HTTPException(400)``.
 
@@ -83,10 +103,7 @@ async def read_json_object(request: Request) -> dict[str, Any]:
     malformed JSON (``JSONDecodeError``) or a non-object body (a list, string
     or number has no ``.get``) as an HTTP 500.
     """
-    try:
-        payload = await request.json()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail='Request body must be valid JSON.') from exc
+    payload = await read_json_body(request)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Request body must be a JSON object.')
     return payload

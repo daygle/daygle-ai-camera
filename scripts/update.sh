@@ -37,7 +37,9 @@ run_privileged() {
 #       canonical repo, regardless of how dangerous the invoking cwd is.
 #   (2) The APP_DIR itself (after the cd) - the original round-4 H1 guard,
 #       catches a tampered APP_DIR .git/config from a service-side breach.
-EXPECTED_REMOTE_REGEX='github\.com[:/]daygle/daygle-ai-camera(\.git)?$'
+# Anchored at BOTH ends: an unanchored start also accepted look-alikes such as
+# ``https://evil.example/github.com/daygle/daygle-ai-camera``.
+EXPECTED_REMOTE_REGEX='^(https://([^/@]+@)?github\.com/|ssh://git@github\.com/|git@github\.com:)daygle/daygle-ai-camera(\.git)?/?$'
 if [[ -d "${PWD}/.git" ]]; then
   CALLER_REMOTE="$(git -C "${PWD}" remote get-url origin 2>/dev/null || true)"
   if [[ -n "${CALLER_REMOTE}" ]] && ! printf '%s' "${CALLER_REMOTE}" | grep -Eq "${EXPECTED_REMOTE_REGEX}"; then
@@ -91,7 +93,9 @@ if [[ "${POST_PULL}" != "--post-pull" ]]; then
   git fetch origin
 
   echo "Pulling latest changes on ${CURRENT_BRANCH}..."
-  git pull origin "${CURRENT_BRANCH}"
+  # Fast-forward only: an updater must never create a merge commit or leave
+  # the checkout mid-merge. Local commits or edits make this fail cleanly.
+  git pull --ff-only origin "${CURRENT_BRANCH}"
 
   # The currently running script may be the pre-update version. Re-enter the
   # freshly pulled script so its complete post-update migration path executes.

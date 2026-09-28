@@ -29,7 +29,7 @@ def get_alert_email_settings(settings=Depends(get_redacted_email_alert_settings)
 @router.put('/api/settings/alert-email')
 async def update_alert_email_settings(request: Request, db=Depends(get_database)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     settings = validate_alert_email_settings(payload)
     result = db.set_setting('alert_email', settings, utc_now())
     write_audit_log(request, db, 'update', 'settings.alert_email')

@@ -37,7 +37,7 @@ from app.payload_validators import (
     validate_storage_settings,
     validate_system_settings,
 )
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 from app.backup import (
     DATABASE_RESTORE_LOCK,
     create_database_backup,
@@ -198,7 +198,7 @@ def get_cloudflare_tunnel_settings(request: Request, db=Depends(get_database)):
 @router.put('/api/settings/system/cloudflare-tunnel')
 async def update_cloudflare_tunnel_settings(request: Request, db=Depends(get_database)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Cloudflare Tunnel settings must be an object.')
     raw_token = payload.get('token')
@@ -276,7 +276,7 @@ def restart_cloudflare_tunnel(request: Request):
 async def update_gpu_health_settings(request: Request, db=Depends(get_database)):
     """GPU health card thermal thresholds (warn / critical temperature)."""
     require_admin(request)
-    settings = validate_system_settings(await request.json())
+    settings = validate_system_settings(await read_json_object(request))
     db.set_setting('system', settings, utc_now())
     write_audit_log(request, db, 'update', 'settings.system.gpu')
     return settings
@@ -285,7 +285,7 @@ async def update_gpu_health_settings(request: Request, db=Depends(get_database))
 @router.put('/api/settings/system/live')
 async def update_live_settings(request: Request, db=Depends(get_database)):
     require_admin(request)
-    settings = validate_live_settings(await request.json())
+    settings = validate_live_settings(await read_json_object(request))
     db.set_setting('live', settings, utc_now())
     write_audit_log(request, db, 'update', 'settings.live')
     return settings
@@ -297,7 +297,7 @@ async def update_recording_settings(
     db=Depends(get_database),
 ):
     require_admin(request)
-    settings = validate_recording_settings(await request.json())
+    settings = validate_recording_settings(await read_json_object(request))
     db.set_setting('recording', settings, utc_now())
     write_audit_log(request, db, 'update', 'settings.recording')
     # Defer the expensive service restart to a background thread so the
@@ -313,7 +313,7 @@ async def update_storage_settings(
     db=Depends(get_database),
 ):
     require_admin(request)
-    settings = validate_storage_settings(await request.json())
+    settings = validate_storage_settings(await read_json_object(request))
     # Create directories synchronously so callers (including the test)
     # can rely on them existing immediately after the PUT returns.
     # The full service restart (stopping old ffmpegs, starting new ones)
@@ -343,7 +343,7 @@ async def update_network_settings(request: Request, db=Depends(get_database), au
     setting -- and this endpoint never touches the stored tunnel token.
     """
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Network settings must be an object.')
     current_persisted = db.get_setting('cloudflare_tunnel') or {}
@@ -377,7 +377,7 @@ async def update_network_settings(request: Request, db=Depends(get_database), au
 @router.put('/api/settings/system/auth')
 async def update_auth_settings(request: Request, db=Depends(get_database), auth=Depends(get_auth)):
     require_admin(request)
-    settings = validate_auth_settings(await request.json())
+    settings = validate_auth_settings(await read_json_object(request))
     db.set_setting('auth', settings, utc_now())
     auth.apply_config(settings)
     write_audit_log(request, db, 'update', 'settings.auth')

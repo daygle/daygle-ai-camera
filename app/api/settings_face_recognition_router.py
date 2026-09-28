@@ -21,7 +21,7 @@ from app.deps import get_database, get_face_recognition_service, get_reload_face
 from app.embedding_models import EMBEDDING_MODELS, embedding_model_catalog
 from app.face_recognition_settings import face_recognition_status, validate_face_recognition_settings
 from app.model_management import _download_weights, _relative_model_path, _safe_within_models_dir
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 
 logger = logging.getLogger('daygle.ai')
 
@@ -45,7 +45,7 @@ async def update_face_recognition_settings(
     reload_service=Depends(get_reload_face_recognition),
 ):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     new_settings = validate_face_recognition_settings(payload)
     db.set_setting('face_recognition', new_settings, utc_now())
     available, reason = await run_in_threadpool(reload_service, new_settings)

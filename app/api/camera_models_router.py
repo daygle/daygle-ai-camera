@@ -31,7 +31,7 @@ from app.camera_models import (
 from app.config_facades import effective_ai_config, effective_cameras_config
 from app.deps import get_apply_cameras_settings, get_database
 from app.payload_validators import validate_camera_settings
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -128,7 +128,7 @@ async def assign_camera_model(
     """
     require_admin(request)
     normalized = normalize_camera_id(camera_id)
-    payload = await request.json()
+    payload = await read_json_object(request)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Expected a JSON object.')
     raw_model = payload.get('model_path')

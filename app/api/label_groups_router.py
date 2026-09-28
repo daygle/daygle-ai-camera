@@ -26,7 +26,7 @@ from app.label_groups import (
     normalize_label_groups,
     refresh_label_groups,
 )
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 
 logger = logging.getLogger('daygle.ai')
 
@@ -56,7 +56,7 @@ def get_label_groups(request: Request):
 @router.put('/api/settings/label_groups')
 async def update_label_groups(request: Request, db=Depends(get_database)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Payload must be a JSON object.')
 

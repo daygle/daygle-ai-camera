@@ -49,7 +49,7 @@ async def update_ai_settings(
     reload_detector=Depends(get_reload_detector),
 ):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     new_settings = validate_ai_settings(payload)
     db.set_setting('ai', new_settings, utc_now())
     # Building a detector loads an ONNX session (and may INT8-quantize it and

@@ -32,7 +32,7 @@ from app.deps import (
     get_database,
     get_recording_service,
 )
-from app.payload_validators import validate_camera_settings, validate_cameras_settings
+from app.payload_validators import validate_camera_settings, validate_camera_stream_source, validate_cameras_settings
 from app.ptz import send_ptz_command, VALID_COMMANDS as PTZ_VALID_COMMANDS
 from app.detection_state import clear_camera_motion, mark_camera_motion
 from app.profile_automation import (
@@ -46,7 +46,7 @@ from app.profile_presets import (
     list_presets,
     normalize_preset,
 )
-from app.request_helpers import read_json_object, write_audit_log
+from app.request_helpers import read_json_body, read_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -92,7 +92,7 @@ async def update_cameras(
     apply_cameras_settings=Depends(get_apply_cameras_settings),
 ):
     require_admin(request)
-    settings = validate_cameras_settings(await request.json())
+    settings = validate_cameras_settings(await read_json_body(request))
     # Stopping ingest workers, migrating state and restarting cameras is
     # blocking work (thread joins, ffmpeg teardown); keep it off the event loop.
     await run_in_threadpool(_persist_and_apply_cameras, settings, db, apply_cameras_settings)
@@ -192,7 +192,7 @@ def list_camera_profile_presets(request: Request, db=Depends(get_database)):
 @router.post('/api/camera-profile-presets')
 async def create_camera_profile_preset(request: Request, db=Depends(get_database)):
     require_admin(request)
-    payload = await request.json()
+    payload = await read_json_object(request)
     existing = list_presets(db.get_setting('camera_profile_presets'))
     try:
         preset = create_preset(payload, existing)
@@ -211,7 +211,7 @@ async def update_camera_profile_preset(preset_id: str, request: Request, db=Depe
         raise HTTPException(status_code=404, detail='Profile preset not found.')
     if current['builtin']:
         raise HTTPException(status_code=400, detail='Built-in profile presets cannot be modified.')
-    payload = await request.json()
+    payload = await read_json_object(request)
     try:
         updated = normalize_preset({**current, **(payload if isinstance(payload, dict) else {})}, preset_id=preset_id)
     except ValueError as exc:
@@ -272,6 +272,9 @@ def camera_profile_schedule_suggestion(
 async def test_camera_connection(request: Request, recording_service=Depends(get_recording_service)):
     require_admin(request)
     payload = await read_json_object(request)
+    # The connection test hands this straight to ffprobe; apply the same
+    # network-scheme / host rules a saved camera must pass.
+    validate_camera_stream_source(payload)
     stream_url = build_stream_url(payload)
     if not stream_url:
         raise HTTPException(status_code=400, detail='Provide a stream_url or host to test.')

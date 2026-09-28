@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import sys
 import types
 from pathlib import Path
@@ -78,6 +79,10 @@ class _FakeRequest:
 
     async def json(self):
         return self._payload
+
+    async def body(self):
+        # The routes parse bodies strictly via ``read_json_body`` (raw bytes).
+        return json.dumps(self._payload).encode('utf-8')
 
 
 class _FakeDB:

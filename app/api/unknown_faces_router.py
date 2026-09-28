@@ -14,7 +14,7 @@ from app.auth_gates import require_admin
 from app.db.unknown_faces import UnknownFaceAssignmentError
 from app.deps import get_database
 from app.face_recognition_service import refresh_face_recognition_matcher
-from app.request_helpers import write_audit_log
+from app.request_helpers import read_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -61,12 +61,7 @@ async def assign_unknown_face(
       {"name": "New Person"}        - create new person + assign
     """
     require_admin(request)
-    try:
-        payload = await request.json()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail='Request body must be valid JSON.') from exc
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail='Request body must be a JSON object.')
+    payload = await read_json_object(request)
 
     raw_person_id = payload.get('person_id')
     new_name = payload.get('name')
