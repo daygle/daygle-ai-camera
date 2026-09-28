@@ -246,8 +246,11 @@ the forced reinstall then writes clean Pascal copies.
 If the log shows this and the detector falls back to CPU, `pip list` still
 shows `nvidia-cudnn-cu12 9.1.0.70` but `nvidia/cudnn/lib` holds only
 `__init__.py`. The cu13 wheel was removed and the cu12 reinstall never ran.
-Older versions of the in-app updater stopped `update.sh` after 5 minutes,
-which could land between those two steps. The updater now allows 30 minutes,
+Two bugs in older versions caused this. The in-app updater stopped
+`update.sh` after 5 minutes, which could land between those two steps. And on
+Python 3.12 and later, the RECORD check could not see *missing* library files
+(`importlib.metadata` leaves them out of `dist.files`), so later updates never
+noticed. Now the updater allows 30 minutes, the check reads RECORD directly,
 and the cu12 wheel is downloaded before cu13 is removed. Re-run the update, or
 restore it by hand:
 
