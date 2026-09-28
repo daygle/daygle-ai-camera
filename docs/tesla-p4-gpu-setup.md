@@ -183,6 +183,47 @@ complete first (`"$V" -m pip list | grep cu12` should show all six from
 "$V" -m pip uninstall -y nvidia-cudnn-cu13 nvidia-cusparselt-cu13 nvidia-nccl-cu13 nvidia-nvshmem-cu13
 ```
 
+### Kernel-launch failures after an update: cuDNN overwritten in place
+
+A different symptom with the same root cause. The GPU is still used, but every
+detection fails with:
+
+```
+CUDNN_STATUS_EXECUTION_FAILED_CUDART ... CUDNN_FE failure 11: CUDNN_BACKEND_API_FAILED
+Live detection skipped for camera ...: Non-zero status code returned while running Conv node
+```
+
+`nvidia-cudnn-cu13` (pulled in by a torch upgrade via ultralytics) installs
+`libcudnn.so.9` into the **same** `nvidia/cudnn/lib` directory as the pinned
+`nvidia-cudnn-cu12`. It overwrites the Pascal build, but pip still reports
+`nvidia-cudnn-cu12 9.1.0.70` as installed, so
+`pip install -r requirements-gpu-pascal.txt` answers "already satisfied" and
+changes nothing. `pip show -f nvidia-cudnn-cu13 | grep libcudnn.so` listing
+`nvidia/cudnn/lib/libcudnn.so.9` confirms it.
+
+`scripts/install_python_deps.sh`, which every in-app update and
+`scripts/update.sh` run, now repairs this automatically on Pascal GPUs
+(compute capability below 7.0) that already have the pinned stack. It does
+three things:
+
+- removes the four colliding `*-cu13` wheels listed above;
+- checks each pinned wheel's shared libraries against pip's own RECORD hashes,
+  and force-reinstalls (`--no-deps`) only the wheels whose files changed;
+- rewrites `/etc/ld.so.conf.d/daygle-cuda.conf` with the cu13 exclusion.
+
+Set `DAYGLE_PASCAL_CUDA_REPAIR=0` to disable the repair, or `=1` to force it.
+To repair by hand:
+
+```bash
+"$V" -m pip uninstall -y nvidia-cudnn-cu13 nvidia-cusparselt-cu13 nvidia-nccl-cu13 nvidia-nvshmem-cu13
+"$V" -m pip install --no-cache-dir --force-reinstall --no-deps -r requirements-gpu-pascal.txt
+ldconfig && systemctl restart daygle-ai-camera
+```
+
+Uninstall the cu13 wheels **before** reinstalling. Uninstalling
+`nvidia-cudnn-cu13` deletes the shared `libcudnn*.so.9` files it claims, and
+the forced reinstall then writes clean Pascal copies.
+
 Ruling out the other causes, in the order worth checking:
 
 - `cuInit(0)` returning non-zero, or a device count of 0, means the driver

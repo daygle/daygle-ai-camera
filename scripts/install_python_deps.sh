@@ -110,6 +110,116 @@ _verify_runtime() {
   fi
 }
 
+# Pascal (e.g. Tesla P4) hosts run on the pinned CUDA 12.4 / cuDNN 9.1 wheels in
+# requirements-gpu-pascal.txt (see docs/tesla-p4-gpu-setup.md). A dependency
+# update can silently break them: torch (pulled in by ultralytics) brings CUDA 13
+# wheels, and nvidia-cudnn-cu13 installs libcudnn.so.9 into the SAME
+# nvidia/cudnn/lib directory as nvidia-cudnn-cu12, overwriting the Pascal build
+# while pip still reports 9.1.0.70 installed. Detection then fails on every
+# frame with CUDNN_STATUS_EXECUTION_FAILED_CUDART. After each install this:
+#   1. removes the CUDA 13 wheels the runbook lists as colliding;
+#   2. checks every pinned wheel's shared libraries against pip's own RECORD
+#      hashes and force-reinstalls (--no-deps) only the ones that changed;
+#   3. rewrites the ld.so.conf entry with the cu13 exclusion and runs ldconfig.
+# Runs only for GPU installs on a compute-capability < 7.0 card that already
+# has the pinned stack. DAYGLE_PASCAL_CUDA_REPAIR=1 forces it, =0 disables it.
+PASCAL_REQUIREMENTS="${APP_DIR}/requirements-gpu-pascal.txt"
+PASCAL_CUDA13_CONFLICTS=(nvidia-cudnn-cu13 nvidia-cusparselt-cu13 nvidia-nccl-cu13 nvidia-nvshmem-cu13)
+CUDA_LDCONF="${DAYGLE_CUDA_LDCONF:-/etc/ld.so.conf.d/daygle-cuda.conf}"
+
+_is_pascal_gpu() {
+  local cap
+  cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 | tr -d '[:space:]')" || return 1
+  [[ "${cap}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || return 1
+  (( ${cap%%.*} < 7 ))
+}
+
+_repair_pascal_cuda_stack() {
+  local mode="${DAYGLE_PASCAL_CUDA_REPAIR:-auto}"
+  [[ "${VARIANT}" == 'gpu' && -f "${PASCAL_REQUIREMENTS}" ]] || return 0
+  case "${mode}" in
+    0|false|no|off) return 0 ;;
+    1|true|yes|on) ;;
+    *) _is_pascal_gpu || return 0 ;;
+  esac
+  local pins
+  pins="$(awk 'tolower($0) ~ /^[[:space:]]*nvidia-[a-z0-9-]+-cu12==[^[:space:]]+/ { print $1 }' "${PASCAL_REQUIREMENTS}")"
+  [[ -n "${pins}" ]] || return 0
+
+  local conflict
+  for conflict in "${PASCAL_CUDA13_CONFLICTS[@]}"; do
+    if "${VENV_BIN}" -m pip show "${conflict}" >/dev/null 2>&1; then
+      echo "Removing ${conflict}: it overwrites the Pascal CUDA 12 libraries."
+      "${VENV_BIN}" -m pip uninstall -y "${conflict}" >/dev/null 2>&1 || true
+    fi
+  done
+
+  # Prints the pins whose installed version or library files no longer match
+  # pip's RECORD. Prints nothing when none of the pins is installed (the
+  # Pascal runbook was never applied here), so nothing is downloaded.
+  local broken
+  # shellcheck disable=SC2086
+  broken="$("${VENV_BIN}" -c '
+import base64, hashlib, sys
+from importlib import metadata
+from pathlib import Path
+installed, broken = 0, []
+for pin in sys.argv[1:]:
+    name, _, version = pin.partition("==")
+    try:
+        dist = metadata.distribution(name)
+    except metadata.PackageNotFoundError:
+        broken.append(pin)
+        continue
+    installed += 1
+    if dist.version != version:
+        broken.append(pin)
+        continue
+    for entry in dist.files or []:
+        text = str(entry)
+        if not entry.hash or entry.hash.mode != "sha256" or ".so" not in Path(text).name:
+            continue
+        path = Path(dist.locate_file(entry))
+        try:
+            if entry.size is not None and path.stat().st_size != int(entry.size):
+                raise ValueError
+            digest = hashlib.sha256(path.read_bytes()).digest()
+        except (OSError, ValueError):
+            broken.append(pin)
+            break
+        if base64.urlsafe_b64encode(digest).rstrip(b"=").decode() != entry.hash.value:
+            broken.append(pin)
+            break
+if installed:
+    print("\n".join(broken))
+' ${pins})" || broken=''
+  if [[ -n "${broken}" ]]; then
+    echo "Restoring Pascal CUDA 12 wheels overwritten by the update:" ${broken}
+    # shellcheck disable=SC2086
+    "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" --no-cache-dir --no-deps --force-reinstall ${broken}
+  fi
+
+  if [[ -f "${CUDA_LDCONF}" && -w "${CUDA_LDCONF}" ]]; then
+    local site_packages dir name entries=''
+    site_packages="$("${VENV_BIN}" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])" 2>/dev/null)" || site_packages=''
+    if [[ -n "${site_packages}" ]]; then
+      for dir in "${site_packages}"/nvidia/*/lib; do
+        [[ -d "${dir}" ]] || continue
+        # Match the nvidia/<name> component only, not the whole install path.
+        name="${dir#"${site_packages}/nvidia/"}"
+        case "${name%%/*}" in *cu13*) continue ;; esac
+        entries+="${dir}"$'\n'
+      done
+      if [[ -n "${entries}" ]]; then
+        printf '%s' "${entries}" > "${CUDA_LDCONF}"
+        if [[ "${CUDA_LDCONF}" == /etc/* ]] && command -v ldconfig >/dev/null 2>&1; then
+          ldconfig || true
+        fi
+      fi
+    fi
+  fi
+}
+
 # A lock is variant-specific. Never install a generic CPU lock for a GPU
 # deployment: that was the source of clean installs silently receiving the
 # CPU-only onnxruntime wheel. A legacy generic lock remains usable only for
@@ -139,6 +249,7 @@ if [[ -f "${LOCK_FILE}" ]]; then
     echo "WARNING: ${LOCK_FILE} has no hashes; installing its pinned constraints without --require-hashes." >&2
     "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" "${PIP_PYTHON_COMPAT_OPTS[@]}" --no-cache-dir -r "${LOCK_FILE}"
   fi
+  _repair_pascal_cuda_stack
   _verify_runtime
   exit 0
 fi
@@ -179,4 +290,5 @@ if grep -q '^ai-edge-litert' "${REQUIREMENTS_VARIANT}"; then
 fi
 
 "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" "${PIP_PYTHON_COMPAT_OPTS[@]}" --no-cache-dir -r "${REQUIREMENTS_VARIANT}"
+_repair_pascal_cuda_stack
 _verify_runtime
