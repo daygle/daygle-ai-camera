@@ -436,7 +436,8 @@ function describeAiVerificationTest(result) {
     if (value.error) return `${label}: error (${value.error})`;
     return `${label}: ${value.present ? 'confirmed' : 'NOT present'}${value.reason ? ` - ${value.reason}` : ''}`;
   });
-  return `Event #${result.event_id}${seconds}: ${answers.join('; ') || verification.reason || verification.status}.${listed}`;
+  const summary = String(answers.join('; ') || verification.reason || verification.status).replace(/[.\s]+$/, '');
+  return `Event #${result.event_id}${seconds}: ${summary}.${listed}`;
 }
 
 aiVerificationForm?.addEventListener('submit', guard(async (event) => {
