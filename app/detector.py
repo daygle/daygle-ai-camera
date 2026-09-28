@@ -411,8 +411,12 @@ class OnnxYoloDetector:
                     'GPU acceleration was requested (device=%s) but the model is '
                     'running on CPU (active_providers=%s). ONNX Runtime could not '
                     'initialize CUDA -- verify the NVIDIA driver is loaded '
-                    '(nvidia-smi) and built for the running kernel. Inference '
-                    'will fall back to CPU and run slowly until this is resolved.',
+                    '(nvidia-smi) and built for the running kernel, and that '
+                    'the CUDA/cuDNN libraries it names above are installed '
+                    '(on a Pascal GPU such as the Tesla P4, re-running '
+                    'scripts/update.sh repairs them; see '
+                    'docs/tesla-p4-gpu-setup.md). Inference will fall back to '
+                    'CPU and run slowly until this is resolved.',
                     self._device,
                     self.active_providers,
                 )

@@ -206,6 +206,9 @@ changes nothing. `pip show -f nvidia-cudnn-cu13 | grep libcudnn.so` listing
 (compute capability below 7.0) that already have the pinned stack. It does
 three things:
 
+- downloads the pinned `nvidia-cudnn-cu12` wheel first when `nvidia-cudnn-cu13`
+  is installed (if that download fails, it leaves cu13 in place and the next
+  update retries);
 - removes the four colliding `*-cu13` wheels listed above;
 - checks each pinned wheel's shared libraries against pip's own RECORD hashes,
   and force-reinstalls (`--no-deps`) only the wheels whose files changed;
@@ -237,6 +240,21 @@ ldconfig && systemctl restart daygle-ai-camera
 Uninstall the cu13 wheels **before** reinstalling. Uninstalling
 `nvidia-cudnn-cu13` deletes the shared `libcudnn*.so.9` files it claims, and
 the forced reinstall then writes clean Pascal copies.
+
+### `libcudnn.so.9: cannot open shared object file`
+
+If the log shows this and the detector falls back to CPU, `pip list` still
+shows `nvidia-cudnn-cu12 9.1.0.70` but `nvidia/cudnn/lib` holds only
+`__init__.py`. The cu13 wheel was removed and the cu12 reinstall never ran.
+Older versions of the in-app updater stopped `update.sh` after 5 minutes,
+which could land between those two steps. The updater now allows 30 minutes,
+and the cu12 wheel is downloaded before cu13 is removed. Re-run the update, or
+restore it by hand:
+
+```bash
+"$V" -m pip install --no-cache-dir --no-deps --force-reinstall nvidia-cudnn-cu12==9.1.0.70
+ldconfig && systemctl restart daygle-ai-camera
+```
 
 Ruling out the other causes, in the order worth checking:
 
