@@ -4,7 +4,16 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+import os
+import subprocess
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+from tests.support import _load_app, _m
 
 
 def test_detection_backoff_keeps_prebuffer_warm(tmp_path, monkeypatch):

@@ -16,10 +16,11 @@ duration from the container itself via ffprobe, anchoring ``ended_at`` to
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+from tests.support import _load_app
 
 from app.recording_extension import _parse_chunk_start_time
 

@@ -19,7 +19,7 @@ from app.config_facades import (
     effective_storage_config,
     get_camera_config,
 )
-from app.deps import get_auth, get_auth_enabled, get_database, get_detector
+from app.deps import get_auth_enabled, get_database, get_detector
 from app.detector import DetectorUnavailableError
 from app.request_helpers import write_audit_log, _read_uploaded_image
 from app.alert_dispatch import compute_minimum_rule_confidence
@@ -58,7 +58,7 @@ def list_audit_log(
 
 
 @router.get('/api/auth/me')
-def me(request: Request, auth=Depends(get_auth)):
+def me(request: Request):
     session = require_session(request)
     # NOTE: this endpoint deliberately does NOT rotate the CSRF token.
     # An earlier version rotated on every poll, which silently invalidated

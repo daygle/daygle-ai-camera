@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
 
 
 def test_objects_settings_defaults_and_page_route(tmp_path, monkeypatch):

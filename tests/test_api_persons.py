@@ -4,7 +4,9 @@ Exercises person CRUD, the admin gate, and the enroll-guard when recognition
 is not configured. Successful face embedding is covered at the service level
 (test_face_recognition_service.py) since it needs a loaded model.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+import json
+
+from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
 
 
 def _json(csrf, body):

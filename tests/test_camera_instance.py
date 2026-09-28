@@ -18,7 +18,7 @@ if str(REPO_ROOT) not in sys.path:
 
 # Preload app.main to avoid the Phase-18 circular-import gate.
 # codeql[py/unused-import] -- preload is intentional; subsequent imports use it
-import app.main  # noqa: E402  -- must precede the import below
+import app.main  # noqa: E402,F401  -- must precede the import below (preload is intentional)
 from app.camera_instance import create_camera  # noqa: E402
 
 

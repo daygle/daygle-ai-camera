@@ -178,7 +178,7 @@ def nvidia_smi_devices() -> list[dict] | None:
         if len(parts) != len(_NVIDIA_SMI_FIELDS):
             continue
         device: dict = {}
-        for field, raw in zip(_NVIDIA_SMI_FIELDS, parts):
+        for field, raw in zip(_NVIDIA_SMI_FIELDS, parts, strict=True):
             if field == 'name':
                 device[field] = raw or None
             else:

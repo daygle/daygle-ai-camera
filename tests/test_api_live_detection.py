@@ -4,7 +4,10 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+import threading
+import time
+
+from tests.support import _load_app, _m
 
 
 def test_live_status_preserves_best_object_confidence_for_vision_card(tmp_path, monkeypatch):

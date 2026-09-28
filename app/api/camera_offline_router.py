@@ -34,5 +34,4 @@ async def update_camera_offline_alert_settings(request: Request, db=Depends(get_
         r for r in (payload.get('recipients') or [])
         if isinstance(r, str) and '@' in r
     ]
-    result = db.set_setting('camera_offline_alert', validated, utc_now())
-    return result
+    return db.set_setting('camera_offline_alert', validated, utc_now())

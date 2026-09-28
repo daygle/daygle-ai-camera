@@ -624,24 +624,23 @@ def filter_detections_for_camera_zones(
         return any(_detection_matches_compiled_zone(detection, zone) for zone in face_scope_zones)
 
     if not compiled_zones:
-        if not require_zones:
-            if face_scope_zones:
-                # Every zone is face-only: the object axis has no zones, but
-                # face scoping must still bite while non-face detections keep
-                # the legacy camera-label / accept-all fallbacks.
-                kept: list[dict[str, Any]] = []
-                for detection in detections:
-                    verdict = _face_allowed(detection)
-                    if verdict is False:
-                        continue
-                    if (
-                        verdict is None
-                        and camera_labels
-                        and not detection_label_in_allowed(detection.get('label'), camera_labels)
-                    ):
-                        continue
-                    kept.append(detection)
-                return kept
+        if not require_zones and face_scope_zones:
+            # Every zone is face-only: the object axis has no zones, but
+            # face scoping must still bite while non-face detections keep
+            # the legacy camera-label / accept-all fallbacks.
+            kept: list[dict[str, Any]] = []
+            for detection in detections:
+                verdict = _face_allowed(detection)
+                if verdict is False:
+                    continue
+                if (
+                    verdict is None
+                    and camera_labels
+                    and not detection_label_in_allowed(detection.get('label'), camera_labels)
+                ):
+                    continue
+                kept.append(detection)
+            return kept
         if zone_monitor_key == 'monitor_objects' and camera_labels and (not require_zones):
             # Canonicalise the detection label through ``_LABEL_ALIASES`` exactly
             # like ``detection_label_allowed_for_zone`` does on the zones path.

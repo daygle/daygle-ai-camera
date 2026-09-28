@@ -4,11 +4,20 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+import os
+import subprocess
+import time
+from pathlib import Path
+
+import pytest
+
+from tests.support import _m
 
 
 def test_sound_detector_diagnostics_and_reason():
-    import app.main as main
+    # Load-bearing side-effect import: this test never calls _load_app, so
+    # importing app.main is what populates sys.modules for _m() below.
+    import app.main  # noqa: F401
     from app.sound_detector import SoundDetector
     mods = _m()
 

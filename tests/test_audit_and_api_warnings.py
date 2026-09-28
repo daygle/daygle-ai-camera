@@ -67,7 +67,6 @@ class AuthRouterLoggerTests(unittest.TestCase):
 
     def test_audit_write_happy_path_no_warning(self) -> None:
         """Sanity check: the success path is silent (no warning)."""
-        from app.api.auth_router import logger  # noqa: WPS433
         # assertNoLogs raises if anything at WARNING+ is emitted on the
         # named logger while the with-block runs. We add a record handler
         # so assertNoLogs has something to inspect.
@@ -155,8 +154,6 @@ class SettingsAiRouterNarrowExceptTests(unittest.TestCase):
     def test_url_error_logs_and_returns_sanitized(self) -> None:
         import urllib.error
 
-        from app.api.settings_ai_router import logger  # noqa: WPS433
-
         exc = urllib.error.URLError('Name or service not known')
         with self.assertLogs('daygle.ai', level='WARNING') as caplog:
             result = self._invoke(exc)
@@ -174,8 +171,6 @@ class SettingsAiRouterNarrowExceptTests(unittest.TestCase):
         self.assertIn('check_model_updates manifest fetch failed', joined)
 
     def test_os_error_logs_and_returns_sanitized(self) -> None:
-        from app.api.settings_ai_router import logger  # noqa: WPS433
-
         with self.assertLogs('daygle.ai', level='WARNING') as caplog:
             result = self._invoke(OSError('Connection refused'))
         self.assertEqual(set(result.keys()), self.EXPECTED_KEYS)
@@ -184,8 +179,6 @@ class SettingsAiRouterNarrowExceptTests(unittest.TestCase):
         self.assertIn('OSError', '\n'.join(caplog.output))
 
     def test_json_decode_error_logs_and_returns_sanitized(self) -> None:
-        from app.api.settings_ai_router import logger  # noqa: WPS433
-
         # ``json.JSONDecodeError`` requires (msg, doc, pos).
         bad_payload = b'not json at all'
         exc = json.JSONDecodeError('Expecting value', bad_payload.decode(), 0)
@@ -200,8 +193,6 @@ class SettingsAiRouterNarrowExceptTests(unittest.TestCase):
         self.assertIn('Expecting value', joined)
 
     def test_value_error_logs_and_returns_sanitized(self) -> None:
-        from app.api.settings_ai_router import logger  # noqa: WPS433
-
         with self.assertLogs('daygle.ai', level='WARNING') as caplog:
             result = self._invoke(ValueError('manifest schema mismatch'))
         self.assertEqual(set(result.keys()), self.EXPECTED_KEYS)

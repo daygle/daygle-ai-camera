@@ -184,7 +184,7 @@ def _summarize(values: list[float]) -> dict[str, float]:
 class _StageContext:
     """Context manager returned by :meth:`StageTimer.stage`."""
 
-    __slots__ = ('_timer', '_stage', '_started')
+    __slots__ = ('_stage', '_started', '_timer')
 
     def __init__(self, timer: 'StageTimer', stage: str) -> None:
         self._timer = timer
@@ -215,7 +215,7 @@ class StageTimer:
     is the unaccounted overhead the budget is evaluated against.
     """
 
-    __slots__ = ('_stages', '_total_ms', '_started')
+    __slots__ = ('_stages', '_started', '_total_ms')
 
     def __init__(self) -> None:
         self._stages: dict[str, float] = {}

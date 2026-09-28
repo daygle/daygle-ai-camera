@@ -488,7 +488,7 @@ def _average_precision(
         ]
         best = regular[0] if regular else (candidates[0] if candidates else None)
         if best is not None and best[0] >= threshold:
-            iou, truth_index = best
+            _iou, truth_index = best
             if frame_truth[truth_index]["difficult"]:
                 # Difficult matches are removed from evaluation, not scored.
                 continue

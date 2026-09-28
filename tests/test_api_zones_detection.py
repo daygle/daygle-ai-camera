@@ -4,7 +4,19 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+import time
+
+import pytest
+
+from tests.support import (
+    LocalClient,
+    _load_app,
+    _login,
+    _m,
+    _server,
+    _setup_admin,
+    _zone_camera_settings,
+)
 
 
 def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypatch):

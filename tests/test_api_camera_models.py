@@ -5,9 +5,9 @@ storage contract (persists through camera saves), and the assign / switch /
 unassign endpoints. The shared harness (LocalClient, _load_app, _server,
 _login, _setup_admin, …) lives in tests/support.py.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
-
 import uuid
+
+from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
 
 import pytest
 from fastapi import HTTPException

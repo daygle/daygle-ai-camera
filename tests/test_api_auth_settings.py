@@ -4,7 +4,24 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+import json
+import os
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+from tests.support import (
+    TEST_IMAGE_PNG,
+    LocalClient,
+    _load_app,
+    _login,
+    _m,
+    _multipart_file,
+    _post_frame_detection,
+    _server,
+    _setup_admin,
+)
 
 
 def test_favicon_is_served_publicly(tmp_path, monkeypatch):
@@ -672,7 +689,6 @@ def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path,
 
 def test_onvif_camera_settings_build_rtsp_url(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
     mods = _m()
 
     settings = mods.payload_validators.validate_camera_settings({
@@ -696,7 +712,6 @@ def test_onvif_camera_settings_build_rtsp_url(tmp_path, monkeypatch):
 
 def test_onvif_stream_url_uses_form_credentials_when_url_is_bare(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
     mods = _m()
 
     settings = mods.payload_validators.validate_camera_settings({
@@ -897,7 +912,6 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
 
 def test_onvif_camera_settings_require_stream_source(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
     mods = _m()
 
     try:

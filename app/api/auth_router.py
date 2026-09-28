@@ -212,7 +212,7 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
 
 
 @router.get('/logout')
-def logout_get(request: Request):
+def logout_get():
     return RedirectResponse('/login', status_code=303)
 
 

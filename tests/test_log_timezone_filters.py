@@ -10,7 +10,7 @@ the ``/api/recordings/timeline`` endpoint.
 """
 from datetime import datetime, timezone
 
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+from tests.support import _load_app
 
 from app.utils import local_day_bounds_to_utc
 

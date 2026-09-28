@@ -3,7 +3,9 @@
 Exercises the router wiring end to end (registration in app.main, admin gate,
 validation, persistence) through the shared HTTP harness.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+import json
+
+from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
 
 
 def test_get_face_recognition_settings_defaults(tmp_path, monkeypatch):

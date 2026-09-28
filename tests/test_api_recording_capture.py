@@ -4,7 +4,18 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+import json
+import shutil
+import sqlite3
+import subprocess
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from tests.support import _load_app, _m, _run_capture_with_previous_end
 
 
 def test_camera_diagnostics_log_crud_and_retention(tmp_path, monkeypatch):
@@ -511,7 +522,6 @@ def test_write_rtsp_clip_explicitly_records_optional_audio_as_aac(tmp_path, monk
 
 def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
     mods = _m()
 
     commands = []
@@ -544,7 +554,6 @@ def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatc
 
 def test_h264_mp4_with_browser_playable_audio_streams_directly(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
     mods = _m()
 
     import app.media_utils as _media_utils
@@ -563,7 +572,6 @@ def test_h264_mp4_with_browser_playable_audio_streams_directly(tmp_path, monkeyp
 
 def test_h264_mp4_without_audio_streams_directly(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
     mods = _m()
     import app.media_utils as _media_utils
 
@@ -586,7 +594,6 @@ def test_h264_mp4_without_audio_streams_directly(tmp_path, monkeypatch):
 )
 def test_h264_mp4_with_unsupported_audio_is_transcoded_for_playback(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
     import app.media_utils as _media_utils
 
     source_path = tmp_path / 'source.mp4'

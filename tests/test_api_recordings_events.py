@@ -4,7 +4,24 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+import contextlib
+import sqlite3
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import urlencode
+
+import pytest
+
+from tests.support import (
+    TEST_IMAGE_PNG,
+    LocalClient,
+    _load_app,
+    _login,
+    _server,
+    _setup_admin,
+    _zone_camera_settings,
+)
 
 
 def test_event_and_recording_cursor_pages_use_stable_tie_breaking(tmp_path):

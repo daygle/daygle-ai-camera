@@ -4,7 +4,20 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+import json
+import sys
+
+import pytest
+
+from tests.support import (
+    LocalClient,
+    _email_alert_capture,
+    _load_app,
+    _login,
+    _server,
+    _setup_admin,
+    _zone_camera_settings_with_email,
+)
 
 
 def test_admin_can_send_test_alert_email(tmp_path, monkeypatch):

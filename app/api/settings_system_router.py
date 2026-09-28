@@ -124,15 +124,24 @@ async def restore_database(request: Request, file: UploadFile=File(...), db=Depe
         raise HTTPException(status_code=409, detail='Another database restore is already in progress.')
     restore_temp = db.database_path.parent / f'.restore-{secrets.token_hex(8)}.sqlite3'
     try:
+        # The upload can be a full backup (database + media + models), so every
+        # blocking file call is pushed to the threadpool: writing chunks inline
+        # would stall the event loop -- and every concurrent live stream -- for
+        # the whole upload. ``file.read`` stays on the loop (bounded 1 MiB
+        # chunks) and hands each chunk to the pool for the disk write.
         with restore_temp.open('wb') as handle:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
-                handle.write(chunk)
-        if restore_temp.stat().st_size == 0:
+                await run_in_threadpool(handle.write, chunk)
+
+        def _upload_info(path: Path) -> tuple[int, bool]:
+            return path.stat().st_size, zipfile.is_zipfile(path)
+
+        upload_size, is_full_backup = await run_in_threadpool(_upload_info, restore_temp)
+        if upload_size == 0:
             raise HTTPException(status_code=400, detail='Uploaded backup is empty.')
-        is_full_backup = zipfile.is_zipfile(restore_temp)
         if is_full_backup:
             await run_in_threadpool(validate_full_backup, restore_temp)
             safety_backup = await run_in_threadpool(create_full_backup, 'pre-restore-daygle-full')

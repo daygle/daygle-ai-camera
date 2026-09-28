@@ -4,7 +4,15 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+import json
+import sqlite3
+import subprocess
+import sys
+import time
+
+import pytest
+
+from tests.support import LocalClient, _load_app, _login, _m, _server, _setup_admin
 
 
 def test_clean_install_does_not_download_a_model(tmp_path, monkeypatch):

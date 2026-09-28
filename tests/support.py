@@ -7,41 +7,19 @@ test_middleware / test_web_auth_router_integration. Not collected by pytest
 """
 from __future__ import annotations
 
-import importlib
-
-import json
-
-import os
-
-import shutil
-
-import socket
-
-import sqlite3
-
-import subprocess
-
 import contextlib
-
+import importlib
+import json
+import socket
 import sys
-
 import threading
-
 import time
-
 from datetime import datetime, timedelta, timezone
-
 from http.cookiejar import CookieJar
-
 from pathlib import Path
-
 from urllib.error import HTTPError
-
 from urllib.parse import urlencode
-
 from urllib.request import HTTPCookieProcessor, HTTPRedirectHandler, Request, build_opener
-
-import pytest
 
 import uvicorn
 
@@ -368,7 +346,7 @@ def _zone_camera_settings(zone_rules: list) -> dict:
 def _email_alert_capture(main, monkeypatch):
     """Configure global SMTP settings and capture every message the mailer would deliver.
 
-    Returns the list that receives one dict per delivered message ({'To', 'Subject', 'Body'}).
+    Returns the list that receives one dict per delivered message ({'To', 'Subject'}).
     SMTP transport is stubbed so no network connection is attempted.
     """
     main.database.set_setting(
@@ -386,11 +364,6 @@ def _email_alert_capture(main, monkeypatch):
         main.utc_now(),
     )
     sent: list[dict[str, str]] = []
-
-    @staticmethod
-    @contextlib.contextmanager
-    def _create_smtp_session():
-        yield "fake-smtp-session"
 
     def fake_deliver(self, message, **kwargs):
         sent.append({
@@ -420,15 +393,9 @@ def _zone_camera_settings_with_email(label: str):
     ])
 
 __all__ = [
-    'CookieJar',
-    'HTTPCookieProcessor',
-    'HTTPError',
-    'HTTPRedirectHandler',
     'LocalClient',
     'NoRedirect',
-    'Path',
     'REPO_ROOT',
-    'Request',
     'TEST_IMAGE_PNG',
     '_PreRollCaptureService',
     '_body',
@@ -445,22 +412,4 @@ __all__ = [
     '_setup_admin',
     '_zone_camera_settings',
     '_zone_camera_settings_with_email',
-    'build_opener',
-    'contextlib',
-    'datetime',
-    'importlib',
-    'json',
-    'os',
-    'pytest',
-    'shutil',
-    'socket',
-    'sqlite3',
-    'subprocess',
-    'sys',
-    'threading',
-    'time',
-    'timedelta',
-    'timezone',
-    'urlencode',
-    'uvicorn',
 ]

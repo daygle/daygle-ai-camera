@@ -12,10 +12,18 @@ lives in tests/support.py.
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
+from tests.support import (
+    TEST_IMAGE_PNG,
+    LocalClient,
+    _load_app,
+    _login,
+    _server,
+    _setup_admin,
+)
 
 
 def test_list_snapshots_returns_only_framed_events(tmp_path, monkeypatch):

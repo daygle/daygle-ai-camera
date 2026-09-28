@@ -28,7 +28,7 @@ DEFAULT_MAX_PENDING = 64
 class _Job:
     """One queued unit of post-processing work."""
 
-    __slots__ = ('fn', 'args', 'kwargs', 'priority', 'sequence', 'label', 'submitted_at')
+    __slots__ = ('args', 'fn', 'kwargs', 'label', 'priority', 'sequence', 'submitted_at')
 
     def __init__(
         self,

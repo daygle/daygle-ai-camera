@@ -129,7 +129,7 @@ def _sound_rules_fingerprint(enabled_rules: list[dict[str, Any]], detection_inte
     Stored on each detector as ``sound_rules_fingerprint``.
     """
     normalized = sorted(
-        ({key: value for key, value in rule.items()} for rule in enabled_rules),
+        (dict(rule) for rule in enabled_rules),
         key=lambda item: str(item.get('class') or ''),
     )
     return json.dumps(
