@@ -13,8 +13,16 @@
 #   V=/opt/daygle-ai-camera/.venv/bin/python
 #   "$V" -m pip install --no-cache-dir -r requirements-gpu-pascal.txt   # ~2.5 GB
 #   SP=$("$V" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
-#   printf '%s\n' "$SP"/nvidia/*/lib > /etc/ld.so.conf.d/daygle-cuda.conf
+#   for d in "$SP"/nvidia/*/lib; do case "$d" in *cu13*) continue ;; esac; printf '%s\n' "$d"; done > /etc/ld.so.conf.d/daygle-cuda.conf
 #   ldconfig
+#
+# The cu13 skip above is required, not optional. A bare nvidia/*/lib glob also
+# matches nvidia/cu13/lib, the layout used by the CUDA 13 wheels. CUDA 13 drops
+# Pascal outright, so registering that directory makes the GPU invisible to the
+# CUDA runtime: the detector logs "CUDA failure 100: no CUDA-capable device is
+# detected" and falls back to CPU while nvidia-smi and cuInit() both still
+# report a healthy card. See "Troubleshooting: silent CPU fallback" in
+# docs/tesla-p4-gpu-setup.md.
 #
 # See docs/tesla-p4-gpu-setup.md for the full runbook, verification, and the
 # reasoning behind every pin.

@@ -60,6 +60,13 @@ WORKDIR /app
 # requirements files go to /app (so APP_DIR == /app finds the lock next to
 # them); the installer script itself must live at /app/scripts/ for that same
 # APP_DIR derivation (dirname of the script + ..).
+#
+# The GPU registration below deliberately skips any "cu13" lib dir. A plain
+# nvidia/*/lib glob also matches the CUDA 13 wheel layout (nvidia/cu13/lib),
+# and CUDA 13 drops Pascal (sm_61) outright -- registering it makes the GPU
+# invisible to the CUDA runtime, so the detector silently falls back to CPU
+# while nvidia-smi and cuInit() still report a perfectly healthy card. See
+# docs/tesla-p4-gpu-setup.md for the full failure signature.
 COPY requirements.txt requirements-gpu-pascal.txt requirements.cpu.lock.txt /app/
 COPY scripts/install_python_deps.sh /app/scripts/
 RUN python -m venv /opt/venv \
@@ -68,7 +75,10 @@ RUN python -m venv /opt/venv \
     && if [ "${ORT_VARIANT}" = "gpu" ]; then \
         /opt/venv/bin/pip install --no-cache-dir -r /app/requirements-gpu-pascal.txt \
         && SP="$(/opt/venv/bin/python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")" \
-        && printf '%s\n' "${SP}"/nvidia/*/lib > /etc/ld.so.conf.d/daygle-cuda.conf \
+        && for d in "${SP}"/nvidia/*/lib; do \
+               case "$d" in *cu13*) continue ;; esac; \
+               printf '%s\n' "$d"; \
+           done > /etc/ld.so.conf.d/daygle-cuda.conf \
         && ldconfig; \
     fi \
     && rm -f /app/requirements.txt /app/requirements-gpu-pascal.txt /app/requirements.cpu.lock.txt /app/scripts/install_python_deps.sh

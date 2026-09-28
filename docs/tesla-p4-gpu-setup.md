@@ -79,9 +79,17 @@ Daygle runs as a systemd service, an `ld.so.conf.d` entry is more robust than
 
 ```bash
 SP=$("$V" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
-printf '%s\n' "$SP"/nvidia/*/lib > /etc/ld.so.conf.d/daygle-cuda.conf
+for d in "$SP"/nvidia/*/lib; do case "$d" in *cu13*) continue ;; esac; printf '%s\n' "$d"; done > /etc/ld.so.conf.d/daygle-cuda.conf
 ldconfig
 ```
+
+**The `cu13` exclusion is load-bearing, not defensive tidying.** A bare
+`nvidia/*/lib` glob also matches the CUDA 13 wheel layout
+(`nvidia/cu13/lib`). CUDA 13 removes Pascal outright, so once that directory is
+on the loader path any process on the box can resolve `libcudart.so.13` in
+preference to the pinned 12.4 one, and the P4 then reports as no CUDA-capable
+device. This fails with a perfectly healthy card - see
+"Troubleshooting: silent CPU fallback" below.
 
 ## 3. Verify
 
@@ -128,7 +136,62 @@ than any log line.
   30+ seconds is this, not a failure.
 - **If it still falls back to CPU**, grab the ONNX Runtime warning that starts
   `Failed to create CUDAExecutionProvider` from the journal - it names the exact
-  library or capability that failed.
+  library or capability that failed. If instead it names `cudaGetDeviceCount`,
+  go to the troubleshooting section below: that is a different failure with a
+  healthy-looking GPU.
+
+## Troubleshooting: silent CPU fallback with a healthy GPU
+
+The variant that wastes the most time, because every obvious check passes.
+`nvidia-smi` enumerates the P4, `cuInit(0)` returns 0 with one device, the
+driver version is correct, and yet the detector logs:
+
+```
+CUDA failure 100: no CUDA-capable device is detected ; GPU=-1
+GPU acceleration was requested (device=auto) but the model is running on CPU
+```
+
+`100` - and `999: unknown error` before a reboot - with `GPU=-1` is what a CUDA
+13 runtime reports when asked about an `sm_61` card. Nothing is wrong with the
+card, the driver, or the wheels in `requirements-gpu-pascal.txt`. The cause is a
+`*-cu13` wheel (`nvidia-cudnn-cu13`, `nvidia-nccl-cu13`,
+`nvidia-cusparselt-cu13`, `nvidia-nvshmem-cu13`) that landed in the venv, whose
+`nvidia/cu13/lib` directory then got registered with `ld.so`.
+
+Confirm in one line - `libcudart.so.13` must not appear:
+
+```bash
+ldconfig -p | grep -E 'libcudart|libcuda'
+```
+
+If it does, drop the cu13 directory from the loader path and refresh:
+
+```bash
+SP=$("$V" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+for d in "$SP"/nvidia/*/lib; do case "$d" in *cu13*) continue ;; esac; printf '%s\n' "$d"; done > /etc/ld.so.conf.d/daygle-cuda.conf
+ldconfig
+systemctl restart daygle-ai-camera
+```
+
+Restarting alone is not enough - the running process keeps whatever it already
+resolved, and the stale `ld.so.cache` entry outlives the restart. Then remove
+the orphan wheels so they cannot re-register. Check the pinned cu12 stack is
+complete first (`"$V" -m pip list | grep cu12` should show all six from
+`requirements-gpu-pascal.txt`):
+
+```bash
+"$V" -m pip uninstall -y nvidia-cudnn-cu13 nvidia-cusparselt-cu13 nvidia-nccl-cu13 nvidia-nvshmem-cu13
+```
+
+Ruling out the other causes, in the order worth checking:
+
+- `cuInit(0)` returning non-zero, or a device count of 0, means the driver
+  layer genuinely is broken - reinstall per sections 1 and 4.
+- `dmesg -T | grep -i xid` showing `Xid 79` (fell off the PCIe bus) or `Xid 48`
+  (double-bit ECC) is hardware. A driver reinstall will not help; reseat the
+  card and check power cabling, or replace it.
+- A warning naming a missing `.so` is the plain unmet-dependency case covered by
+  section 3, not this one.
 
 ## Version ceilings to hold
 
