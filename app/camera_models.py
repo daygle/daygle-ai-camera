@@ -167,6 +167,13 @@ def _model_label(model_path: str) -> str:
 
 
 def _model_input_size(model_path: str) -> int:
+    # A resolution-variant export (``yolo26s-640.onnx``) runs at the size in
+    # its name; the catalog size is only the default export resolution (768
+    # for YOLO26), so preferring it mislabelled the model and made the
+    # detector warn and fall back to the ONNX shape on every load.
+    match = _VARIANT_SUFFIX_RE.search(Path(str(model_path or '')).stem)
+    if match:
+        return int(match.group(1))
     info = _catalog_entry_for(model_path)
     try:
         return int(info.get('input_size')) if info else 640
