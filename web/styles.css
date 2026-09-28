@@ -770,6 +770,9 @@ textarea {
   color: var(--muted);
 }
 .ai-verification-cameras legend { padding: 0 6px; font-weight: 500; }
+.ai-backfill-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 12px; }
+.ai-backfill-hours { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+.ai-backfill-hours select { width: auto; }
 .ai-verification-camera-list { display: flex; flex-wrap: wrap; gap: 8px 18px; }
 .form-grid .ai-verification-camera-list label {
   display: inline-flex;
@@ -3922,6 +3925,12 @@ tr.drag-over {
   max-width: 100%;
   line-height: 1.3;
 }
+.event-search { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0 6px; }
+.event-search > svg { color: var(--muted); flex: none; }
+.event-search input[type="search"] { flex: 1 1 260px; min-width: 0; }
+.event-search button { flex: none; }
+.event-search-summary { margin: 4px 0 10px; }
+.activity-item-description { margin: 6px 0 0; color: var(--text); font-size: 13px; line-height: 1.4; max-width: 60ch; }
 .activity-item-badges {
   display: flex;
   flex-wrap: wrap;

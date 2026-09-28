@@ -1,0 +1,466 @@
+"""AI event descriptions and plain-English search.
+
+* Descriptions are written by the local model on the AI pool, stored in the
+  event metadata and a full-text index, attached to surviving alerts so email
+  and push lead with them, and never block or break delivery.
+* Search interprets a question into concept groups + camera + time window
+  (model first, keyword fallback) and queries the index, honouring the same
+  owner scoping as the Events list.
+"""
+from __future__ import annotations
+
+import importlib
+import json
+import threading
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import pytest
+
+from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
+
+from app.database import EventDatabase
+
+
+# ---------------------------------------------------------------------------
+# Fake OpenAI-compatible server that answers each prompt type
+# ---------------------------------------------------------------------------
+
+class _SmartModelServer:
+    def __init__(self, *, caption='A courier in a hi-vis vest leaves a parcel at the front door.',
+                 verdict='{"present": true, "reason": "person visible"}', search=None):
+        self.caption, self.verdict = caption, verdict
+        self.search = search or {'terms': [['red'], ['car', 'vehicle']], 'camera': 'Driveway',
+                                 'start': None, 'end': None}
+        self.kinds: list[str] = []
+        owner = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def _send(self, payload):
+                body = json.dumps(payload).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):  # noqa: N802
+                self._send({'data': [{'id': 'gemma3:4b'}]})
+
+            def do_POST(self):  # noqa: N802
+                body = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)))
+                system = body['messages'][0]['content']
+                if 'captions' in system:
+                    kind, reply = 'describe', owner.caption
+                elif 'search request' in system:
+                    kind, reply = 'search', json.dumps(owner.search)
+                else:
+                    kind, reply = 'verify', owner.verdict
+                owner.kinds.append(kind)
+                self._send({'choices': [{'message': {'content': reply}}]})
+
+        self.httpd = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.url = f'http://127.0.0.1:{self.httpd.server_address[1]}/v1'
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+@pytest.fixture
+def av():
+    return importlib.import_module('app.ai_verification')
+
+
+def _settings(av, **overrides):
+    return {**av.DEFAULT_AI_VERIFICATION_SETTINGS, **overrides}
+
+
+# ---------------------------------------------------------------------------
+# Caption cleaning and settings
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(('raw', 'clean'), [
+    ('"A man walks a dog."', 'A man walks a dog.'),
+    ('**Caption:** A red car parks.\n', 'A red car parks.'),
+    ('  Two   people\nchat  ', 'Two people chat'),
+])
+def test_clean_description(av, raw, clean):
+    assert av.clean_description(raw) == clean
+
+
+def test_clean_description_bounds_length_and_rejects_empty(av):
+    long = av.clean_description('word ' * 200)
+    assert len(long) <= av.MAX_DESCRIPTION_CHARS + 1 and long.endswith('…')
+    with pytest.raises(av.VerificationError):
+        av.clean_description('  "" ')
+
+
+def test_describe_events_setting_is_validated(av, monkeypatch):
+    monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: dict(av.DEFAULT_AI_VERIFICATION_SETTINGS))
+    assert av.validate_ai_verification_settings({'describe_events': 'ALL'})['describe_events'] == 'all'
+    with pytest.raises(Exception) as exc:
+        av.validate_ai_verification_settings({'describe_events': 'sometimes'})
+    assert getattr(exc.value, 'status_code', None) == 400
+
+
+# ---------------------------------------------------------------------------
+# Notification formatting
+# ---------------------------------------------------------------------------
+
+def test_notifications_lead_with_the_ai_description():
+    from app.alert_formatting import build_alert_content
+
+    alert = {'label': 'person', 'confidence': 0.87, 'rule_name': 'Front / Door / person',
+             'message': 'Alert triggered: person detected (87.00%)',
+             'ai_description': 'A courier in a hi-vis vest leaves a parcel at the front door.'}
+    content = build_alert_content(alert, event_id=5, camera_name='Front')
+    assert content.alert_message == 'A courier in a hi-vis vest leaves a parcel at the front door.'
+    assert content.plain_text.startswith('A courier in a hi-vis vest')
+    assert 'Confidence: 87.00%' in content.plain_text
+    plain = build_alert_content({**alert, 'ai_description': ''}, event_id=5, camera_name='Front')
+    assert plain.alert_message.startswith('Alert Triggered')
+
+
+# ---------------------------------------------------------------------------
+# Description flow on the AI pool
+# ---------------------------------------------------------------------------
+
+class _Db:
+    def __init__(self, settings, event=None):
+        self.settings = settings
+        self.event = event or {'id': 1, 'snapshot_path': 'x.jpg', 'detections': [], 'metadata': {}}
+        self.descriptions: dict[int, dict] = {}
+        self.metadata: dict[int, dict] = {}
+
+    def get_setting(self, key):
+        return self.settings if key == 'ai_verification' else None
+
+    def get_event(self, event_id):
+        return {**self.event, 'id': event_id}
+
+    def merge_event_metadata(self, event_id, patch):
+        self.metadata.setdefault(event_id, {}).update(patch)
+        return True
+
+    def set_event_description(self, event_id, record):
+        self.descriptions[event_id] = record
+        return True
+
+
+@pytest.fixture
+def flow(av, monkeypatch):
+    dispatch = importlib.import_module('app.alert_dispatch')
+    forwarded: list[list[dict]] = []
+    monkeypatch.setattr(dispatch, 'submit_alert_notification',
+                        lambda _fn, triggered, _event_id, _rules: forwarded.append(list(triggered)) or True)
+    monkeypatch.setattr(av, '_read_snapshot', lambda _event: b'jpeg')
+
+    def configure(*, verdict=(True, 'ok'), caption='A red car parks in the driveway.', **settings):
+        db = _Db(_settings(av, **settings))
+        monkeypatch.setattr(av._state, 'database', db)
+        monkeypatch.setattr(av.VisionVerifier, 'ask', lambda _s, _img, _label, _cam='': verdict)
+
+        def describe(_self, _img, _cam=''):
+            if isinstance(caption, Exception):
+                raise caption
+            return caption
+
+        monkeypatch.setattr(av.VisionVerifier, 'describe', describe)
+        return db
+
+    return configure, forwarded
+
+
+def test_alert_description_is_stored_and_attached(av, flow):
+    configure, forwarded = flow
+    db = configure(describe_events='alerts')
+    av.verify_and_forward([{'label': 'car', 'confidence': 0.7}], 3, [], 'Driveway')
+    assert forwarded == [[{'label': 'car', 'confidence': 0.7, 'ai_description': 'A red car parks in the driveway.'}]]
+    assert db.descriptions[3]['text'] == 'A red car parks in the driveway.'
+    assert db.descriptions[3]['model'] == 'gemma3:4b'
+
+
+def test_filtered_alert_is_not_described_in_alerts_mode(av, flow):
+    configure, forwarded = flow
+    db = configure(enabled=True, describe_events='alerts', verdict=(False, 'shadow'))
+    av.verify_and_forward([{'label': 'person', 'confidence': 0.6}], 4, [], '')
+    assert forwarded == [] and db.descriptions == {}
+
+
+def test_all_mode_describes_even_filtered_events(av, flow):
+    configure, forwarded = flow
+    db = configure(enabled=True, describe_events='all', verdict=(False, 'shadow'))
+    av.verify_and_forward([{'label': 'person', 'confidence': 0.6}], 5, [], '')
+    assert forwarded == [] and 5 in db.descriptions
+
+
+def test_description_failure_still_delivers(av, flow):
+    configure, forwarded = flow
+    db = configure(describe_events='alerts', caption=av.VerificationError('timed out'))
+    triggered = [{'label': 'car', 'confidence': 0.7}]
+    av.verify_and_forward(triggered, 6, [], '')
+    assert forwarded == [triggered] and db.descriptions == {}
+
+
+def test_describe_only_jobs(av, flow):
+    configure, _forwarded = flow
+    db = configure(describe_events='all')
+    av.describe_only(7, 'Gate')
+    assert 7 in db.descriptions
+    db.event['metadata'] = {'ai_description': {'text': 'done'}}
+    db.descriptions.clear()
+    av.describe_only(8, 'Gate')  # already described: no second model call
+    assert db.descriptions == {}
+    db.settings['describe_events'] = 'alerts'
+    db.event['metadata'] = {}
+    av.describe_only(9, 'Gate')
+    assert db.descriptions == {}
+
+
+def test_submit_routes_by_mode_and_camera(av, monkeypatch):
+    pools = importlib.import_module('app.postprocess_pool')
+    dispatch = importlib.import_module('app.alert_dispatch')
+    queued, direct = [], []
+
+    class _Pool:
+        def submit(self, fn, *args, **kwargs):
+            queued.append((fn.__name__, kwargs.get('priority')))
+            return True
+
+    monkeypatch.setattr(pools, 'verification_pool', lambda: _Pool())
+    monkeypatch.setattr(dispatch, 'submit_alert_notification', lambda *_a: direct.append(1) or True)
+    settings = _settings(av, describe_events='alerts', camera_ids=['cam-1'])
+    monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: settings)
+
+    av.submit_alert_notification_with_verification([{'label': 'car', 'confidence': 0.5}], 1, [], camera_id='cam-1')
+    av.submit_alert_notification_with_verification([{'label': 'car', 'confidence': 0.5}], 2, [], camera_id='cam-2')
+    assert queued == [('verify_and_forward', pools.PRIORITY_CLIP)] and direct == [1]
+
+    assert av.submit_event_description(3, camera_id='cam-1') is False  # alerts mode: background off
+    settings['describe_events'] = 'all'
+    assert av.submit_event_description(3, camera_id='cam-1') is True
+    assert queued[-1] == ('describe_only', pools.PRIORITY_BACKGROUND)
+
+
+def test_client_describe_round_trip(av):
+    with _SmartModelServer(caption='  "Two cats sit on the fence."  ') as server:
+        verifier = av.VisionVerifier(_settings(av, server_url=server.url, timeout_seconds=5))
+        assert verifier.describe(b'jpeg', 'Pergola') == 'Two cats sit on the fence.'
+    assert server.kinds == ['describe']
+
+
+# ---------------------------------------------------------------------------
+# Full-text index and search
+# ---------------------------------------------------------------------------
+
+def _event(db, camera_id, created_at, text=None, name=None):
+    event_id = db.add_event(created_at=created_at, source='rtsp', snapshot_path='snap.jpg', detections=[],
+                            metadata={'camera_id': camera_id, 'camera_name': name or camera_id})
+    if text is not None:
+        db.set_event_description(event_id, {'text': text, 'model': 'm'})
+    return event_id
+
+
+@pytest.fixture
+def described_db(tmp_path):
+    db = EventDatabase(str(tmp_path / 'search.sqlite3'))
+    ids = {
+        'red_car': _event(db, 'drive', '2026-09-27T03:00:00+00:00', 'A red car parks in the driveway.'),
+        'blue_ute': _event(db, 'drive', '2026-09-27T04:00:00+00:00', 'A blue ute reverses out.'),
+        'ladder': _event(db, 'yard', '2026-09-28T01:00:00+00:00', 'A man carrying a ladder walks past the gate.'),
+        'plain': _event(db, 'yard', '2026-09-28T02:00:00+00:00'),
+    }
+    return db, ids
+
+
+def test_index_matches_groups_with_stemming(described_db):
+    db, ids = described_db
+    found = [e['id'] for e in db.search_event_descriptions(groups=[['red'], ['car', 'vehicle']])]
+    assert found == [ids['red_car']]
+    found = [e['id'] for e in db.search_event_descriptions(groups=[['carries'], ['ladders']])]
+    assert found == [ids['ladder']]  # porter stemming
+    found = {e['id'] for e in db.search_event_descriptions(groups=[['car', 'ute']])}
+    assert found == {ids['red_car'], ids['blue_ute']}  # "car" must not match "carrying"
+    found = [e['id'] for e in db.search_event_descriptions(groups=[['cars']])]
+    assert found == [ids['red_car']]
+
+
+def test_index_filters_camera_time_and_any_described(described_db):
+    db, ids = described_db
+    found = [e['id'] for e in db.search_event_descriptions(groups=[['car', 'ute', 'ladder']], camera_ids=['yard'])]
+    assert found == [ids['ladder']]
+    found = [e['id'] for e in db.search_event_descriptions(
+        groups=None, since='2026-09-27T00:00:00Z', until='2026-09-27T23:59:59Z')]
+    assert sorted(found) == sorted([ids['red_car'], ids['blue_ute']])
+    assert ids['plain'] not in [e['id'] for e in db.search_event_descriptions(groups=None)]
+
+
+def test_index_is_injection_safe_and_follows_deletes(described_db):
+    db, ids = described_db
+    # Quotes/operators in a term are neutralised: it is a phrase, not FTS syntax.
+    assert db.search_event_descriptions(groups=[['red" OR "blue']]) == []
+    assert db.search_event_descriptions(groups=[['NEAR(']]) == []
+    db.delete_event(ids['red_car'])
+    assert db.search_event_descriptions(groups=[['red']]) == []
+
+
+def test_fts_expression_quotes_terms():
+    from app.db.descriptions import fts_match_expression
+
+    assert fts_match_expression([['red'], ['car', 'hi-vis vest']]) == '("red") AND ("car" OR "hi vis vest")'
+    assert fts_match_expression([['"; DROP']]) == '("drop")'
+
+
+def test_like_fallback_without_fts(described_db):
+    db, ids = described_db
+    db._description_fts = False
+    found = [e['id'] for e in db.search_event_descriptions(groups=[['red'], ['car']])]
+    assert found == [ids['red_car']]
+
+
+def test_backfill_candidates(described_db):
+    db, ids = described_db
+    assert [e['id'] for e in db.events_without_description()] == [ids['plain']]
+
+
+# ---------------------------------------------------------------------------
+# Query interpretation
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def search_env(monkeypatch, described_db):
+    search = importlib.import_module('app.ai_search')
+    db, ids = described_db
+    monkeypatch.setattr(search._state, 'database', db)
+    monkeypatch.setattr(search, '_cameras', lambda: [{'id': 'drive', 'name': 'Driveway'}, {'id': 'yard', 'name': 'Front Yard'}])
+    monkeypatch.setattr(search, 'admin_timezone', lambda: timezone.utc)
+    return search, ids
+
+
+NOW = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
+
+
+def test_keyword_plan_finds_camera_and_time(search_env):
+    search, _ids = search_env
+    plan = search.plan_with_keywords('show me anyone carrying a ladder in the front yard yesterday afternoon', NOW)
+    assert plan['groups'] == [['carrying'], ['ladder']]
+    assert plan['camera']['id'] == 'yard'
+    assert plan['since'].startswith('2026-09-27T12:00') and plan['until'].startswith('2026-09-27T18:00')
+
+
+def test_keyword_search_without_a_model(search_env, monkeypatch):
+    search, ids = search_env
+    monkeypatch.setattr(search, 'effective_ai_verification_settings', lambda: {'enabled': False, 'describe_events': 'off'})
+    result = search.search_events('red car', now_utc=NOW)
+    assert [e['id'] for e in result['items']] == [ids['red_car']]
+    assert result['interpretation']['interpreted_by'] == 'keywords'
+
+
+def test_model_plan_with_synonyms_camera_and_times(search_env, monkeypatch):
+    search, ids = search_env
+    av = importlib.import_module('app.ai_verification')
+    with _SmartModelServer(search={'terms': [['red'], ['car', 'vehicle', 'ute']], 'camera': 'driveway',
+                                   'start': '2026-09-27 00:00', 'end': '2026-09-27 23:59'}) as server:
+        monkeypatch.setattr(search, 'effective_ai_verification_settings',
+                            lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'enabled': True, 'server_url': server.url})
+        result = search.search_events('red vehicle on the driveway yesterday', now_utc=NOW)
+    assert [e['id'] for e in result['items']] == [ids['red_car']]
+    interp = result['interpretation']
+    assert interp['interpreted_by'] == 'model' and interp['camera'] == 'Driveway'
+    assert interp['since'].startswith('2026-09-27T00:00')
+
+
+def test_model_failure_falls_back_and_unmatched_concepts_relax(search_env, monkeypatch):
+    search, ids = search_env
+    av = importlib.import_module('app.ai_verification')
+    monkeypatch.setattr(search, 'effective_ai_verification_settings',
+                        lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'enabled': True,
+                                 'server_url': 'http://127.0.0.1:9/v1', 'timeout_seconds': 3})
+    result = search.search_events('blue car', now_utc=NOW)  # nothing mentions both
+    assert result['interpretation']['interpreted_by'] == 'keywords'
+    assert result['interpretation']['relaxed'] is True
+    assert {e['id'] for e in result['items']} == {ids['red_car'], ids['blue_ute']}
+
+
+def test_model_reply_is_sanitised(search_env):
+    search, _ids = search_env
+    groups = search._clean_groups([['Red', 'RED', 'the'], 'car', [1, None], ['x' * 60], []])
+    assert groups == [['red'], ['car']]
+
+
+# ---------------------------------------------------------------------------
+# API
+# ---------------------------------------------------------------------------
+
+def test_search_and_backfill_api(tmp_path, monkeypatch):
+    app, _db_path = _load_app(tmp_path, monkeypatch)
+    import app.state as state
+
+    db = state.database
+    described = _event(db, 'drive', '2026-09-28T01:00:00+00:00', 'A red car parks in the driveway.')
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        headers = {'Content-Type': 'application/json', 'X-CSRF-Token': csrf}
+        status, _h, result = client.request('/api/event-search?q=red%20car')
+        assert status == 200
+        assert [item['id'] for item in result['items']] == [described]
+        assert result['items'][0]['metadata']['ai_description']['text'].startswith('A red car')
+
+        status, _h, body = client.request('/api/settings/ai-verification/describe-backfill', method='POST',
+                                          data=json.dumps({'hours': 24}).encode(), headers=headers)
+        assert status == 400 and 'descriptions' in body['detail']  # describe mode is off
+        status, _h, _b = client.request('/api/settings/ai-verification/describe-backfill', method='POST',
+                                        data=json.dumps({'hours': 0}).encode(), headers=headers)
+        assert status == 400
+        status, _h, body = client.request('/api/settings/ai-verification/describe-backfill')
+        assert status == 200 and body['running'] is False
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+# ---------------------------------------------------------------------------
+# Backup restore: the index is allowlisted by exact DDL, nothing else is
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize('extra_sql', [
+    "CREATE VIRTUAL TABLE smuggled USING fts5(x)",
+    "DROP TRIGGER trg_events_delete_description; "
+    "CREATE TRIGGER trg_events_delete_description AFTER DELETE ON events BEGIN SELECT 1; END",
+])
+def test_restore_rejects_unknown_virtual_tables_and_altered_triggers(tmp_path, monkeypatch, extra_sql):
+    import sqlite3
+
+    from fastapi import HTTPException
+
+    _load_app(tmp_path, monkeypatch)
+    backup = importlib.import_module('app.backup')
+    crafted = tmp_path / 'crafted.sqlite3'
+    EventDatabase(str(crafted))  # a genuine app database, FTS index included
+    conn = sqlite3.connect(crafted)
+    conn.executescript(extra_sql)
+    conn.commit()
+    conn.close()
+    with pytest.raises(HTTPException) as exc:
+        backup.overwrite_database_from_file(crafted)
+    assert exc.value.status_code == 400
+
+
+def test_restore_accepts_a_genuine_database_with_the_index(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    backup = importlib.import_module('app.backup')
+    genuine = tmp_path / 'genuine.sqlite3'
+    source = EventDatabase(str(genuine))
+    _event(source, 'drive', '2026-09-28T01:00:00+00:00', 'A red car parks.')
+    backup.overwrite_database_from_file(genuine)  # no exception

@@ -130,7 +130,11 @@ def build_alert_content(
     else:
         motion_state_display = None
 
-    alert_message = str(alert.get('message') or 'Alert triggered.').title()
+    # An AI description (app.ai_verification, when enabled) replaces the
+    # generic "Alert triggered: person detected (87%)" line. It is a model
+    # caption, so it keeps its own casing; confidence stays in the details.
+    ai_description = ' '.join(str(alert.get('ai_description') or '').split())
+    alert_message = ai_description or str(alert.get('message') or 'Alert triggered.').title()
     confidence = float(alert.get('confidence') or 0)
 
     plain_lines = [alert_message, '', f"Camera: {camera_display}"]

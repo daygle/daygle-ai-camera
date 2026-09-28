@@ -15,7 +15,7 @@ from typing import Any
 
 import app.state as _state
 from app.ai_settings import ai_status_payload
-from app.ai_verification import submit_alert_notification_with_verification
+from app.ai_verification import submit_alert_notification_with_verification, submit_event_description
 from app.alert_dispatch import (
     _rule_notify_active_now,
     compute_minimum_rule_confidence,
@@ -1671,6 +1671,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             triggered, event_id, zone_rules,
             camera_id=camera_id, camera_name=str(settings.get('name') or ''),
         )
+    else:
+        # No alert: in 'describe all events' mode the AI pool still captions
+        # the snapshot in the background so the event is searchable.
+        submit_event_description(event_id, camera_id=camera_id, camera_name=str(settings.get('name') or ''))
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     email_rules = [
         rule for rule in zone_rules

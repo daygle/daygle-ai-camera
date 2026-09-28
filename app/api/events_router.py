@@ -84,6 +84,26 @@ def events(
     }
 
 
+@router.get('/api/event-search')
+def event_search(
+    request: Request,
+    q: str = Query('', max_length=300),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Plain-English search over AI event descriptions (see app.ai_search).
+
+    A sync route, so FastAPI runs it in the threadpool: interpreting the
+    question can take a model round-trip.
+    """
+    from app.ai_search import search_events
+
+    user = require_user(request)
+    owner_user_id = None if str(user.get('role') or '').lower() == 'admin' else int(user['id'])
+    result = search_events(q, limit=limit, owner_user_id=owner_user_id)
+    scoped = [_scope_event_recordings(event, user) for event in result['items']]
+    return {'items': [event for event in scoped if event is not None], 'interpretation': result['interpretation']}
+
+
 @router.get('/api/events/{event_id}')
 def event_detail(event_id: int, request: Request, db=Depends(get_database)):
     user = require_user(request)

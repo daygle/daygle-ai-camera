@@ -23,11 +23,12 @@ import base64
 import json
 import logging
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException
@@ -56,7 +57,13 @@ DEFAULT_AI_VERIFICATION_SETTINGS: dict[str, Any] = {
     # Crop around the detected object before asking; small models judge a
     # small, distant object far better from a close-up.
     'focus_crop': True,
+    # Plain-English event descriptions (shown in notifications and the Events
+    # list, and searchable): 'off', 'alerts' (events that notify) or 'all'
+    # (every event with a snapshot on the in-scope cameras).
+    'describe_events': 'off',
 }
+DESCRIBE_MODES = ('off', 'alerts', 'all')
+MAX_DESCRIPTION_CHARS = 300
 
 # Labels that are never sent to the model: face alerts are identity rules
 # (verified by face recognition itself) and motion has no object to check.
@@ -71,6 +78,37 @@ SYSTEM_PROMPT = (
     'You check security camera alerts for false alarms. '
     'Answer only with a JSON object and nothing else.'
 )
+
+
+DESCRIBE_SYSTEM_PROMPT = (
+    'You write short, factual captions for home security camera snapshots. '
+    'Reply with the caption only.'
+)
+
+
+def build_describe_prompt(camera_name: str = '') -> str:
+    where = f' from the camera "{camera_name}"' if camera_name else ''
+    return (
+        f'Describe what is happening in this security camera image{where} in one sentence of at most '
+        '25 words, for a notification. Mention the people, vehicles and animals, what they are doing, '
+        'and notable colours, clothing or objects they carry. Do not guess who anyone is. '
+        'If nothing notable is visible, say so briefly.'
+    )
+
+
+def clean_description(text: str) -> str:
+    """Normalise a model caption: one line, no quotes or markdown, bounded."""
+    caption = ' '.join(str(text or '').replace('*', ' ').replace('`', ' ').split())
+    for prefix in ('caption:', 'description:'):
+        if caption.lower().startswith(prefix):
+            caption = caption[len(prefix):].strip()
+    caption = caption.strip('"\'“”‘’ ')
+    if len(caption) > MAX_DESCRIPTION_CHARS:
+        cut = caption[:MAX_DESCRIPTION_CHARS]
+        caption = (cut[: cut.rfind(' ')] if ' ' in cut else cut).rstrip(',;:') + '…'
+    if not caption:
+        raise VerificationError('model returned an empty description')
+    return caption
 
 
 class VerificationError(RuntimeError):
@@ -167,17 +205,34 @@ def validate_ai_verification_settings(payload: dict[str, Any]) -> dict[str, Any]
         raise _bad('skip_above_confidence must be a number between 0 and 1.')
     settings['skip_above_confidence'] = skip_above
 
+    describe = str(settings['describe_events'] or 'off').strip().lower()
+    if describe not in DESCRIBE_MODES:
+        raise _bad("describe_events must be 'off', 'alerts' or 'all'.")
+    settings['describe_events'] = describe
+
     settings['camera_ids'] = _string_list(settings['camera_ids'], 'camera_ids')
     settings['labels'] = list(dict.fromkeys(label.lower() for label in _string_list(settings['labels'], 'labels')))
     return settings
 
 
-def applies_to_camera(camera_id: Any, settings: dict[str, Any] | None = None) -> bool:
-    settings = settings if settings is not None else effective_ai_verification_settings()
-    if not settings.get('enabled'):
-        return False
+def _camera_in_scope(camera_id: Any, settings: dict[str, Any]) -> bool:
     camera_ids = settings.get('camera_ids') or []
     return not camera_ids or str(camera_id or '') in camera_ids
+
+
+def applies_to_camera(camera_id: Any, settings: dict[str, Any] | None = None) -> bool:
+    settings = settings if settings is not None else effective_ai_verification_settings()
+    return bool(settings.get('enabled')) and _camera_in_scope(camera_id, settings)
+
+
+def describe_mode(settings: dict[str, Any]) -> str:
+    mode = str(settings.get('describe_events') or 'off').lower()
+    return mode if mode in DESCRIBE_MODES else 'off'
+
+
+def describes_camera(camera_id: Any, settings: dict[str, Any] | None = None) -> bool:
+    settings = settings if settings is not None else effective_ai_verification_settings()
+    return describe_mode(settings) != 'off' and _camera_in_scope(camera_id, settings)
 
 
 def _is_verifiable(alert: dict[str, Any], settings: dict[str, Any]) -> bool:
@@ -308,20 +363,14 @@ class VisionVerifier:
             return []
         return [str(item.get('id')) for item in data if isinstance(item, dict) and item.get('id')]
 
-    def ask(self, image_bytes: bytes, label: str, camera_name: str = '') -> tuple[bool, str]:
-        encoded = base64.b64encode(image_bytes).decode('ascii')
+    def chat(self, messages: list[dict[str, Any]], *, max_tokens: int = 80) -> str:
+        """One non-streaming chat completion; returns the reply text."""
         body = {
             'model': self.model,
             'temperature': 0,
-            'max_tokens': 80,
+            'max_tokens': max_tokens,
             'stream': False,
-            'messages': [
-                {'role': 'system', 'content': SYSTEM_PROMPT},
-                {'role': 'user', 'content': [
-                    {'type': 'text', 'text': build_prompt(label, camera_name)},
-                    {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{encoded}'}},
-                ]},
-            ],
+            'messages': messages,
         }
         payload = self._request('/chat/completions', body)
         try:
@@ -330,7 +379,32 @@ class VisionVerifier:
             raise VerificationError('model server reply had no message content') from exc
         if isinstance(content, list):  # some servers return content parts
             content = ' '.join(str(part.get('text') or '') for part in content if isinstance(part, dict))
-        return parse_verdict(str(content or ''))
+        return str(content or '')
+
+    @staticmethod
+    def _image_part(image_bytes: bytes) -> dict[str, Any]:
+        encoded = base64.b64encode(image_bytes).decode('ascii')
+        return {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{encoded}'}}
+
+    def ask(self, image_bytes: bytes, label: str, camera_name: str = '') -> tuple[bool, str]:
+        reply = self.chat([
+            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'user', 'content': [
+                {'type': 'text', 'text': build_prompt(label, camera_name)},
+                self._image_part(image_bytes),
+            ]},
+        ])
+        return parse_verdict(reply)
+
+    def describe(self, image_bytes: bytes, camera_name: str = '') -> str:
+        reply = self.chat([
+            {'role': 'system', 'content': DESCRIBE_SYSTEM_PROMPT},
+            {'role': 'user', 'content': [
+                {'type': 'text', 'text': build_describe_prompt(camera_name)},
+                self._image_part(image_bytes),
+            ]},
+        ], max_tokens=120)
+        return clean_description(reply)
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +544,44 @@ def _record(event_id: int, record: dict[str, Any]) -> None:
         logger.warning('Could not store AI verification result for event %s: %s', event_id, exc)
 
 
+def describe_event(
+    event: dict[str, Any],
+    settings: dict[str, Any],
+    *,
+    camera_name: str = '',
+    verifier: VisionVerifier | None = None,
+) -> dict[str, Any]:
+    """Caption an event's snapshot. Raises VerificationError when it can't."""
+    image = _read_snapshot(event)
+    if image is None:
+        raise VerificationError('no snapshot to describe')
+    started = time.monotonic()
+    text = (verifier or VisionVerifier(settings)).describe(image, camera_name)
+    return {
+        'text': text,
+        'model': settings.get('model'),
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'latency_ms': int((time.monotonic() - started) * 1000),
+    }
+
+
+def _describe_and_store(event: dict[str, Any], event_id: int, settings: dict[str, Any], camera_name: str) -> str | None:
+    """Describe and persist; returns the text, or None (logged) on failure."""
+    try:
+        record = describe_event(event, settings, camera_name=camera_name)
+    except VerificationError as exc:
+        logger.warning('AI description unavailable for event %s: %s', event_id, exc)
+        return None
+    except Exception:  # noqa: BLE001 - never break notification delivery
+        logger.exception('AI description failed unexpectedly for event %s', event_id)
+        return None
+    try:
+        _state.database.set_event_description(event_id, record)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('Could not store AI description for event %s: %s', event_id, exc)
+    return record['text']
+
+
 def verify_and_forward(
     triggered: list[dict[str, Any]],
     event_id: int,
@@ -477,39 +589,83 @@ def verify_and_forward(
     camera_name: str = '',
     submitted_at: float | None = None,
 ) -> None:
-    """Verification-pool job: check the alerts, then queue what survives."""
+    """AI-pool job: verify the alerts, describe the event, queue what survives.
+
+    Verification drops alerts the model rejects; the description (when
+    enabled) is attached to the surviving alerts so email and push show it.
+    Every failure path still forwards the alerts.
+    """
     settings = effective_ai_verification_settings()
-    labels = labels_to_verify(triggered, settings)
-    if not settings.get('enabled') or not labels:
+    labels = labels_to_verify(triggered, settings) if settings.get('enabled') else []
+    mode = describe_mode(settings)
+    if not labels and mode == 'off':
         _forward(triggered, event_id, rules)
         return
     # A backlog means alerts are already late; deliver rather than add more.
     max_wait = max(60.0, 3.0 * float(settings.get('timeout_seconds') or 20))
     if submitted_at is not None and time.monotonic() - submitted_at > max_wait:
-        _record(event_id, {'status': 'skipped', 'reason': 'Verification queue backlog; delivered unverified.'})
+        if labels:
+            _record(event_id, {'status': 'skipped', 'reason': 'Verification queue backlog; delivered unverified.'})
         _forward(triggered, event_id, rules)
         return
     try:
         event = _state.database.get_event(event_id) or {}
     except Exception:  # noqa: BLE001
         event = {}
-    record = verify_event(event, labels, settings, camera_name=camera_name)
-    _record(event_id, record)
-    rejected = {label for label, result in record['labels'].items() if result.get('present') is False}
-    kept = [
-        alert for alert in triggered
-        if not (_is_verifiable(alert, settings) and str(alert.get('label') or '').strip().lower() in rejected)
-    ]
-    if rejected:
-        logger.info(
-            'AI verification filtered event %s (%s): %s', event_id, ', '.join(sorted(rejected)),
-            '; '.join(f"{label}: {record['labels'][label].get('reason') or 'not present'}" for label in sorted(rejected)),
-        )
-    for label, result in record['labels'].items():
-        if result.get('error'):
-            logger.warning('AI verification unavailable for event %s (%s): %s; alert delivered unverified.',
-                           event_id, label, result['error'])
+    kept = list(triggered)
+    if labels:
+        record = verify_event(event, labels, settings, camera_name=camera_name)
+        _record(event_id, record)
+        rejected = {label for label, result in record['labels'].items() if result.get('present') is False}
+        kept = [
+            alert for alert in triggered
+            if not (_is_verifiable(alert, settings) and str(alert.get('label') or '').strip().lower() in rejected)
+        ]
+        if rejected:
+            logger.info(
+                'AI verification filtered event %s (%s): %s', event_id, ', '.join(sorted(rejected)),
+                '; '.join(f"{label}: {record['labels'][label].get('reason') or 'not present'}" for label in sorted(rejected)),
+            )
+        for label, result in record['labels'].items():
+            if result.get('error'):
+                logger.warning('AI verification unavailable for event %s (%s): %s; alert delivered unverified.',
+                               event_id, label, result['error'])
+    if mode == 'all' or (mode == 'alerts' and kept):
+        text = _describe_and_store(event, event_id, settings, camera_name)
+        if text:
+            kept = [{**alert, 'ai_description': text} for alert in kept]
     _forward(kept, event_id, rules)
+
+
+def describe_only(event_id: int, camera_name: str = '') -> None:
+    """AI-pool job for an event that notifies nobody (``describe_events=all``)."""
+    settings = effective_ai_verification_settings()
+    if describe_mode(settings) != 'all':
+        return
+    try:
+        event = _state.database.get_event(event_id)
+    except Exception:  # noqa: BLE001
+        event = None
+    if not event or (event.get('metadata') or {}).get('ai_description'):
+        return
+    _describe_and_store(event, event_id, settings, camera_name)
+
+
+def submit_event_description(event_id: int, *, camera_id: Any = None, camera_name: str = '') -> bool:
+    """Queue a background description for an event without alerts.
+
+    Only in ``all`` mode, behind alert work (lower priority), and dropped
+    rather than queued when the AI pool is busy.
+    """
+    settings = effective_ai_verification_settings()
+    if describe_mode(settings) != 'all' or not _camera_in_scope(camera_id, settings):
+        return False
+    from app.postprocess_pool import PRIORITY_BACKGROUND, verification_pool
+
+    return verification_pool().submit(
+        describe_only, event_id, camera_name,
+        priority=PRIORITY_BACKGROUND, block=False, label=f'describe-event-{event_id}',
+    )
 
 
 def submit_alert_notification_with_verification(
@@ -529,12 +685,14 @@ def submit_alert_notification_with_verification(
     from app.alert_dispatch import deliver_alert_notifications, submit_alert_notification
 
     settings = effective_ai_verification_settings()
-    if applies_to_camera(camera_id, settings) and labels_to_verify(triggered, settings):
-        from app.postprocess_pool import verification_pool
+    verify = applies_to_camera(camera_id, settings) and labels_to_verify(triggered, settings)
+    if verify or describes_camera(camera_id, settings):
+        from app.postprocess_pool import PRIORITY_CLIP, verification_pool
 
+        # Alert jobs run ahead of background describe-only jobs.
         accepted = verification_pool().submit(
             verify_and_forward, list(triggered), event_id, rules, camera_name, time.monotonic(),
-            block=False, label=f'verify-event-{event_id}',
+            priority=PRIORITY_CLIP, block=False, label=f'verify-event-{event_id}',
         )
         if accepted:
             return True
@@ -599,3 +757,70 @@ def _latest_object_event() -> dict[str, Any] | None:
         if labels - _UNVERIFIABLE_LABELS:
             return event
     return None
+
+
+# ---------------------------------------------------------------------------
+# Backfill: describe events recorded before descriptions were enabled
+# ---------------------------------------------------------------------------
+
+MAX_BACKFILL_EVENTS = 500
+_backfill_lock = threading.Lock()
+_backfill_state: dict[str, Any] = {'running': False, 'total': 0, 'done': 0, 'failed': 0,
+                                   'started_at': None, 'finished_at': None}
+
+
+def description_backfill_status() -> dict[str, Any]:
+    with _backfill_lock:
+        return dict(_backfill_state)
+
+
+def start_description_backfill(hours: int, *, limit: int = MAX_BACKFILL_EVENTS) -> dict[str, Any]:
+    """Describe up to ``limit`` undescribed events from the last ``hours``.
+
+    Runs on its own thread, one event at a time, and waits whenever the AI
+    pool has live work so alerts are never delayed. Stops when descriptions
+    are switched off. Returns the status (``running`` is False if nothing to do).
+    """
+    settings = effective_ai_verification_settings()
+    if describe_mode(settings) == 'off':
+        raise VerificationError('turn on event descriptions first')
+    since = (datetime.now(timezone.utc) - timedelta(hours=max(1, int(hours)))).isoformat()
+    with _backfill_lock:
+        if _backfill_state['running']:
+            return dict(_backfill_state)
+        events = _state.database.events_without_description(since=since, limit=max(1, min(int(limit), MAX_BACKFILL_EVENTS)))
+        _backfill_state.update(running=bool(events), total=len(events), done=0, failed=0,
+                               started_at=datetime.now(timezone.utc).isoformat(), finished_at=None)
+        if not events:
+            _backfill_state['finished_at'] = _backfill_state['started_at']
+            return dict(_backfill_state)
+    threading.Thread(target=_run_backfill, args=(events,), name='ai-description-backfill', daemon=True).start()
+    return description_backfill_status()
+
+
+def _ai_pool_busy() -> bool:
+    import app.postprocess_pool as pools
+
+    with pools._pool_lock:
+        pool = pools._verification_pool
+    if pool is None:
+        return False
+    stats = pool.stats()
+    return bool(stats.get('pending') or stats.get('inflight'))
+
+
+def _run_backfill(events: list[dict[str, Any]]) -> None:
+    try:
+        for event in events:
+            while _ai_pool_busy():
+                time.sleep(0.5)
+            settings = effective_ai_verification_settings()
+            if describe_mode(settings) == 'off':
+                break
+            camera_name = str((event.get('metadata') or {}).get('camera_name') or '')
+            text = _describe_and_store(event, int(event['id']), settings, camera_name)
+            with _backfill_lock:
+                _backfill_state['done' if text else 'failed'] += 1
+    finally:
+        with _backfill_lock:
+            _backfill_state.update(running=False, finished_at=datetime.now(timezone.utc).isoformat())

@@ -1,4 +1,4 @@
-# AI alert verification
+# AI alert verification, descriptions and search
 
 AI alert verification reduces false alarms. Before an object alert's email or
 push notification is sent, a local vision-language model looks at the event
@@ -79,6 +79,58 @@ Go to **Settings → Notifications → AI Alert Verification**.
 model, using the unsaved form values, and shows the verdict and how long it
 took. Use it to check the server, the model name and the speed before you
 enable the feature.
+
+## Event descriptions
+
+With **Describe Events** set, the same model writes one factual sentence about
+each event's snapshot, for example *"A courier in a hi-vis vest leaves a
+parcel at the front door."*
+
+- **Alerts only**: events that send a notification. The sentence is the first
+  line of the email and the push notification, replacing "Alert triggered:
+  person detected (87%)"; the confidence and other details stay below it.
+- **All events**: also every event that does not alert, described in the
+  background behind alert work. This makes all footage searchable, but uses
+  more GPU time: one model call per event.
+- The description appears under the detections in the Events list and is
+  stored in the event's metadata (`ai_description`: text, model, time).
+- Verification runs first. An alert the model rejects is not described in
+  *Alerts only* mode.
+- If describing fails or times out, the notification is sent without the
+  sentence. Descriptions are never a reason for an alert to be late or lost.
+- Uses the same server, model and camera selection as verification.
+
+**Describe Past Events** (Settings) describes events from the last 24 hours to
+30 days that have no description yet, up to 500 at a time, so they become
+searchable. It runs in the background, one event at a time, pauses whenever an
+alert needs the model, and stops if descriptions are switched off.
+
+## Plain-English search
+
+The search box on the **Events** page searches the descriptions. Ask it
+questions such as:
+
+- `red car in the driveway yesterday afternoon`
+- `anyone carrying a ladder`
+- `delivery at the front door this morning`
+
+The model turns the question into a query:
+
+- the things that must appear, each with synonyms ("car" also matches
+  "vehicle", "ute", "sedan");
+- a camera, when you name one;
+- a time window ("yesterday afternoon" is 12:00-18:00 yesterday in the admin
+  time zone).
+
+The line under the search box shows how the question was understood. The
+search runs against a full-text index that matches word forms ("carrying"
+finds "carries"). If nothing mentions every concept, it shows events that
+match any of them and says so.
+
+Without a reachable model, search still works on keywords, camera names and
+simple times (today, yesterday, this morning, this afternoon, last night).
+Only events that have a description are searchable. Non-admin users see the
+same events in search as in the Events list.
 
 ## Behaviour details
 

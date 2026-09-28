@@ -8,8 +8,10 @@ from starlette.concurrency import run_in_threadpool
 from app.ai_verification import (
     SETTINGS_KEY,
     VerificationError,
+    description_backfill_status,
     effective_ai_verification_settings,
     run_connection_test,
+    start_description_backfill,
     validate_ai_verification_settings,
 )
 from app.auth import utc_now
@@ -57,3 +59,25 @@ async def test_ai_verification_settings(request: Request):
         return await run_in_threadpool(run_connection_test, settings, event_id=event_id)
     except VerificationError as exc:
         raise HTTPException(status_code=400, detail=f'AI verification test failed: {exc}') from exc
+
+
+@router.get('/api/settings/ai-verification/describe-backfill')
+def get_description_backfill(request: Request):
+    require_admin(request)
+    return description_backfill_status()
+
+
+@router.post('/api/settings/ai-verification/describe-backfill')
+async def start_description_backfill_route(request: Request, db=Depends(get_database)):
+    """Describe past events so they become searchable (runs in the background)."""
+    require_admin(request)
+    payload = await read_json_object(request)
+    hours = payload.get('hours', 24)
+    if isinstance(hours, bool) or not isinstance(hours, int) or not 1 <= hours <= 24 * 30:
+        raise HTTPException(status_code=400, detail='hours must be an integer between 1 and 720.')
+    try:
+        status = await run_in_threadpool(start_description_backfill, hours)
+    except VerificationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    write_audit_log(request, db, 'start', 'settings.ai_verification.describe_backfill')
+    return status
