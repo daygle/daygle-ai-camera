@@ -1228,7 +1228,9 @@ def test_system_resources_endpoint(tmp_path, monkeypatch):
 
         status, _headers, payload = client.request("/api/system/resources")
         assert status == 200
-        assert set(payload) == {"cpu_percent", "cpu_count", "load_average", "memory", "gpu"}
+        assert set(payload) == {"cpu_percent", "cpu_count", "load_average", "memory", "gpu", "video_decode"}
+        assert payload["video_decode"]["setting"] == "auto"
+        assert set(payload["video_decode"]) == {"setting", "ffmpeg_cuda", "nvidia_gpu", "cameras"}
         # On the Linux CI host these are populated; values are best-effort so
         # only assert the shape, not exact numbers.
         assert payload["cpu_count"] is None or payload["cpu_count"] >= 1
