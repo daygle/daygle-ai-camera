@@ -92,6 +92,13 @@ parcel at the front door."*
 - **All events**: also every event that does not alert, described in the
   background behind alert work. This makes all footage searchable, but uses
   more GPU time: one model call per event.
+- **The model is told what the object detector found** (e.g. *"An object
+  detector flagged: bird. It can be wrong."*). With **Focus on Object** on,
+  it also gets a close-up of those objects as a second image. On a wide
+  camera, a small distant object is only a few pixels once the frame is
+  resized for the model, and without this a small model guesses (a magpie
+  captioned as *"a black cat"*). It is told to say "a small animal" rather
+  than guess.
 - The description appears under the detections in the Events list and is
   stored in the event's metadata (`ai_description`: text, model, time).
 - Verification runs first. An alert the model rejects is not described in
@@ -149,8 +156,14 @@ How it behaves:
   and sends a notification. The notification starts with
   *"AI tag alert (unconfirmed): Ladder on Front (Gate)."*, followed by the
   description.
-- **Unconfirmed:** only the language model saw the object. Start with areas
-  where an occasional false alert is harmless.
+- **Double-checked:** before alerting, the model is asked a separate yes/no
+  question for each matched word (*"is a real cat actually visible?"*), on a
+  close-up when the detector boxed that object. A word it then says no to
+  does not alert, and does not use up the cooldown. If that check fails or
+  times out, the alert is sent anyway.
+- **Unconfirmed:** only the language model saw the object, never the object
+  detector. Start with areas where an occasional false alert is harmless.
+  These notifications show "AI Tag" as the detection type and no confidence.
 - **Timing:** these alerts arrive a few seconds after the event, once the
   description is ready. If the model server is down, they don't fire.
 - **Cooldown:** it is only used up by an alert that is actually sent. A rule

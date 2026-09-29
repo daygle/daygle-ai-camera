@@ -76,6 +76,9 @@ if [[ "${{1:-}} ${{2:-}}" == "-m pip" ]]; then
   if [[ "${{1:-}}" == "show" ]]; then
     [[ " ${{DAYGLE_TEST_INSTALLED:-}} " == *" $2 "* ]] && exit 0 || exit 1
   fi
+  if [[ "${{1:-}}" == "download" && -n "${{DAYGLE_TEST_DOWNLOAD_FAILS:-}}" ]]; then
+    exit 1
+  fi
   exit 0
 fi
 """,
@@ -199,3 +202,37 @@ def test_cpu_torch_and_non_pascal_hosts_are_left_alone(harness):
     _fake_dist(harness["site"], "torch", "2.13.0")
     _stdout, log = harness["run"](DAYGLE_TEST_COMPUTE_CAP="8.6")
     assert _torch_installs(log) == []
+
+
+def test_cudnn_is_downloaded_before_cu13_is_removed(harness):
+    # Removing nvidia-cudnn-cu13 deletes the libcudnn*.so.9 files it shares
+    # with the pinned cu12 wheel. An update cut off right after that step once
+    # left a Tesla P4 with no cuDNN at all, so the replacement must already be
+    # on disk and the reinstall must be able to use it.
+    harness["lib"].write_bytes(b"cudnn 9.20 built for CUDA 13, no sm_61")
+    stdout, log = harness["run"](DAYGLE_TEST_INSTALLED="nvidia-cudnn-cu13")
+    download = next(i for i, line in enumerate(log) if line.startswith("download"))
+    uninstall = log.index("uninstall -y nvidia-cudnn-cu13")
+    assert download < uninstall
+    assert log[download].endswith(PIN) and "--no-deps" in log[download]
+    (reinstall,) = _reinstalls(log)
+    assert "--find-links" in reinstall
+    assert "Downloading nvidia-cudnn-cu12" in stdout
+
+
+def test_failed_download_keeps_cudnn_in_place(harness):
+    harness["lib"].write_bytes(b"cudnn 9.20 built for CUDA 13, no sm_61")
+    _stdout, log = harness["run"](DAYGLE_TEST_INSTALLED="nvidia-cudnn-cu13", DAYGLE_TEST_DOWNLOAD_FAILS="1")
+    assert not any("nvidia-cudnn-cu13" in line for line in log if line.startswith("uninstall"))
+    assert _reinstalls(log) == []
+    assert harness["lib"].exists()
+
+
+def test_missing_cudnn_files_are_reinstalled(harness):
+    # The state an interrupted update leaves behind: pip still lists the cu12
+    # wheel, but its libraries are gone. The next update must put them back.
+    harness["lib"].unlink()
+    _stdout, log = harness["run"]()
+    (reinstall,) = _reinstalls(log)
+    assert reinstall.endswith(PIN) and "--find-links" not in reinstall
+    assert not any(line.startswith("download") for line in log)

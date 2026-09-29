@@ -183,7 +183,25 @@ _repair_pascal_cuda_stack() {
 
   _use_cpu_torch
 
-  local conflict
+  # nvidia-cudnn-cu13 and nvidia-cudnn-cu12 share nvidia/cudnn/lib, so
+  # uninstalling the cu13 wheel deletes libcudnn*.so.9 out from under the
+  # pinned cu12 wheel until the reinstall below puts it back. Download that
+  # wheel first: if the network fails, keep cu13 (and the libraries) in place
+  # and let the next update retry, and if this script is interrupted between
+  # the two steps, the window is a local install rather than a ~665 MB
+  # download. (A half-finished update once left a P4 with no cuDNN at all.)
+  local stage='' cudnn_pin conflict
+  cudnn_pin="$(printf '%s\n' "${pins}" | awk 'tolower($0) ~ /^nvidia-cudnn-cu12==/ { print; exit }')"
+  if [[ -n "${cudnn_pin}" ]] && "${VENV_BIN}" -m pip show nvidia-cudnn-cu13 >/dev/null 2>&1; then
+    stage="$(mktemp -d)"
+    echo "Downloading ${cudnn_pin} before removing nvidia-cudnn-cu13 (they share nvidia/cudnn/lib)."
+    if ! "${VENV_BIN}" -m pip download "${PIP_NET_OPTS[@]}" --no-cache-dir --no-deps -d "${stage}" "${cudnn_pin}"; then
+      echo "WARNING: could not download ${cudnn_pin}; leaving nvidia-cudnn-cu13 installed so cuDNN is not removed. Re-run the update to retry." >&2
+      rm -rf "${stage}"
+      return 0
+    fi
+  fi
+
   for conflict in "${PASCAL_CUDA13_CONFLICTS[@]}"; do
     if "${VENV_BIN}" -m pip show "${conflict}" >/dev/null 2>&1; then
       echo "Removing ${conflict}: it overwrites the Pascal CUDA 12 libraries."
@@ -197,7 +215,7 @@ _repair_pascal_cuda_stack() {
   local broken
   # shellcheck disable=SC2086
   broken="$("${VENV_BIN}" -c '
-import base64, hashlib, sys
+import base64, csv, hashlib, sys
 from importlib import metadata
 from pathlib import Path
 installed, broken = 0, []
@@ -212,19 +230,20 @@ for pin in sys.argv[1:]:
     if dist.version != version:
         broken.append(pin)
         continue
-    for entry in dist.files or []:
-        text = str(entry)
-        if not entry.hash or entry.hash.mode != "sha256" or ".so" not in Path(text).name:
+    # Parse RECORD directly: on Python 3.12+ dist.files silently drops
+    # entries whose file is missing, which hid deleted libcudnn*.so.9 files.
+    for row in csv.reader((dist.read_text("RECORD") or "").splitlines()):
+        if len(row) < 2 or not row[1].startswith("sha256=") or ".so" not in Path(row[0]).name:
             continue
-        path = Path(dist.locate_file(entry))
+        path = Path(dist.locate_file(row[0]))
         try:
-            if entry.size is not None and path.stat().st_size != int(entry.size):
+            if len(row) > 2 and row[2] and path.stat().st_size != int(row[2]):
                 raise ValueError
             digest = hashlib.sha256(path.read_bytes()).digest()
         except (OSError, ValueError):
             broken.append(pin)
             break
-        if base64.urlsafe_b64encode(digest).rstrip(b"=").decode() != entry.hash.value:
+        if base64.urlsafe_b64encode(digest).rstrip(b"=").decode() != row[1][len("sha256="):]:
             broken.append(pin)
             break
 if installed:
@@ -232,9 +251,12 @@ if installed:
 ' ${pins})" || broken=''
   if [[ -n "${broken}" ]]; then
     echo "Restoring Pascal CUDA 12 wheels overwritten by the update:" ${broken}
+    local find_links=()
+    if [[ -n "${stage}" ]]; then find_links=(--find-links "${stage}"); fi
     # shellcheck disable=SC2086
-    "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" --no-cache-dir --no-deps --force-reinstall ${broken}
+    "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" "${find_links[@]}" --no-cache-dir --no-deps --force-reinstall ${broken}
   fi
+  if [[ -n "${stage}" ]]; then rm -rf "${stage}"; fi
 
   if [[ -f "${CUDA_LDCONF}" && -w "${CUDA_LDCONF}" ]]; then
     local site_packages dir name entries=''

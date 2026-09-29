@@ -21,6 +21,10 @@ from app.model_management import BASE_DIR, _parse_semver
 from app.utils import _current_version
 
 GITHUB_REPO = 'daygle/daygle-ai-camera'
+# update.sh reinstalls Python dependencies. On a GPU host that can mean
+# multi-hundred-MB wheels (the Pascal cuDNN alone is ~665 MB), and stopping the
+# script half-way can leave the CUDA libraries uninstalled, so allow plenty.
+UPDATE_TIMEOUT_SECONDS = 1800
 
 router = APIRouter()
 logger = logging.getLogger('daygle.ai')
@@ -84,11 +88,11 @@ def apply_update(request: Request, logger=Depends(get_logger)):
             _state._update_in_progress = False
         raise HTTPException(status_code=503, detail='Update script not found.')
     try:
-        result = subprocess.run(['bash', str(update_script)], capture_output=True, text=True, timeout=300, cwd=str(BASE_DIR))
+        result = subprocess.run(['bash', str(update_script)], capture_output=True, text=True, timeout=UPDATE_TIMEOUT_SECONDS, cwd=str(BASE_DIR))
     except subprocess.TimeoutExpired as exc:
         with _state._update_lock:
             _state._update_in_progress = False
-        raise HTTPException(status_code=504, detail='Update timed out after 5 minutes.') from exc
+        raise HTTPException(status_code=504, detail=f'Update timed out after {UPDATE_TIMEOUT_SECONDS // 60} minutes.') from exc
     except Exception as exc:
         with _state._update_lock:
             _state._update_in_progress = False
