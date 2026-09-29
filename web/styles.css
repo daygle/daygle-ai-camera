@@ -1151,6 +1151,10 @@ input[type="file"] { padding: 10px; }
      stacked row is content-sized. */
   .onnx-hero-copy,
   .arcface-hero-copy { flex-basis: auto; }
+  /* A stacked hero centers its emblem; the marks on the ONNX / ArcFace / AI
+     pages do this in their own page-local <style>, so this covers the pages
+     that took the shared emblem without a page-local block. */
+  .hero .onnx-hero-mark { margin: 0 auto; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .recording-timeline-layout { grid-template-columns: 1fr; }
   .form-grid, .user-row, .status-panel { grid-template-columns: 1fr; }
@@ -6769,6 +6773,11 @@ button.secondary:disabled, a.secondary:disabled {
   display: grid;
   place-items: center;
 }
+/* A hero carrying an emblem has three children: the copy, an optional action
+   button, and the mark. Let the copy absorb the free space so the button and
+   the mark stay together at the right edge instead of being pushed apart by
+   .hero's space-between. */
+.hero:has(> .onnx-hero-mark) > :first-child { flex: 1 1 auto; min-width: 0; }
 .onnx-hero-ring {
   position: absolute;
   border-radius: 50%;
@@ -6792,9 +6801,13 @@ button.secondary:disabled, a.secondary:disabled {
   border-radius: 18px;
   font-weight: 900;
   font-size: 18px;
-  color: #0c4a6e;
-  background: linear-gradient(135deg, var(--accent), #7dd3fc);
-  box-shadow: 0 8px 28px rgba(71, 214, 255, .28);
+  /* The core's text colour, gradient and glow are driven by the --mark-*
+     custom properties, so any page can tint its emblem by setting them on
+     the mark. The fallbacks below are the original cyan ONNX treatment, so
+     pages that set no tint look exactly as they did before. */
+  color: var(--mark-color, #0c4a6e);
+  background: linear-gradient(135deg, var(--mark-from, var(--accent)), var(--mark-to, #7dd3fc));
+  box-shadow: 0 8px 28px var(--mark-shadow, rgba(71, 214, 255, .28));
 }
 @keyframes onnx-ring-spin { to { transform: rotate(360deg); } }
 @keyframes onnx-ring-drift {
@@ -6808,9 +6821,43 @@ button.secondary:disabled, a.secondary:disabled {
 :root.light .onnx-hero-ring { border-color: rgba(2, 132, 199, .3); }
 :root.light .onnx-hero-ring-back { border-color: rgba(124, 58, 237, .25); }
 :root.light .onnx-hero-core {
-  color: #fff;
-  background: linear-gradient(135deg, #0284c7, #0369a1);
-  box-shadow: 0 8px 24px rgba(2, 132, 199, .25);
+  color: var(--mark-light-color, #fff);
+  background: linear-gradient(135deg, var(--mark-light-from, #0284c7), var(--mark-light-to, #0369a1));
+  box-shadow: 0 8px 24px var(--mark-light-shadow, rgba(2, 132, 199, .25));
+}
+
+/* Page tints for the hero emblem. A page picks one with a modifier class
+   (.hero-mark--violet) or sets the properties on its own mark selector, and
+   the core picks them up in both themes. No modifier = the cyan above. */
+.hero-mark--violet {
+  --mark-color: #fff;
+  --mark-from: #a78bfa;
+  --mark-to: #7c3aed;
+  --mark-shadow: rgba(167, 139, 250, .3);
+  --mark-light-color: #fff;
+  --mark-light-from: #7c3aed;
+  --mark-light-to: #6d28d9;
+  --mark-light-shadow: rgba(124, 58, 237, .25);
+}
+.hero-mark--amber {
+  --mark-color: #3f2d00;
+  --mark-from: #fbbf24;
+  --mark-to: #d97706;
+  --mark-shadow: rgba(251, 191, 36, .3);
+  --mark-light-color: #fff;
+  --mark-light-from: #d97706;
+  --mark-light-to: #b45309;
+  --mark-light-shadow: rgba(217, 119, 6, .25);
+}
+.hero-mark--slate {
+  --mark-color: #e2e8f0;
+  --mark-from: #64748b;
+  --mark-to: #334155;
+  --mark-shadow: rgba(100, 116, 139, .3);
+  --mark-light-color: #fff;
+  --mark-light-from: #475569;
+  --mark-light-to: #334155;
+  --mark-light-shadow: rgba(71, 85, 105, .25);
 }
 
 /* Tabs with a two-line label (title + small description) */
@@ -6915,16 +6962,6 @@ button.secondary:disabled, a.secondary:disabled {
    ===================================================================== */
 .arcface-toolbar { border-left: 3px solid #a78bfa; }
 .arcface-hero-copy { flex: 1 1 420px; min-width: 0; }
-.arcface-hero-mark .onnx-hero-core {
-  color: #fff;
-  background: linear-gradient(135deg, #a78bfa, #7c3aed);
-  box-shadow: 0 8px 28px rgba(167, 139, 250, .3);
-}
-:root.light .arcface-hero-mark .onnx-hero-core {
-  color: #fff;
-  background: linear-gradient(135deg, #7c3aed, #6d28d9);
-  box-shadow: 0 8px 24px rgba(124, 58, 237, .25);
-}
 .arcface-tab-icon { color: #a78bfa; }
 :root.light .arcface-tab-icon { color: #7c3aed; }
 .arcface-badge {
