@@ -578,7 +578,11 @@ textarea {
 }
 .ai-verification-cameras legend { padding: 0 6px; font-weight: 500; }
 .ai-tags-add { width: 100%; margin-top: 6px; }
-.ai-settings-form { gap: inherit; }
+/* The AI page wraps its cards in this form, which is itself a .page-stack
+   grid item of the shell. Make it a grid too so the cards inside get the
+   same row gap as the cards on every other page (gap: inherit resolves to
+   the shell's 18px/16px gap, matching the sidebar-layout override). */
+.ai-settings-form { display: grid; gap: inherit; }
 .ai-save-row { justify-content: flex-end; }
 .ai-page-note { margin: 8px 0 0; }
 .settings-moved-note { margin: 4px 2px 0; }
