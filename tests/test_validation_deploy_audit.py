@@ -256,3 +256,24 @@ def test_systemd_unit_does_not_restrict_devices_or_the_updater():
         'ProtectSystem', 'ProtectHome', 'NoNewPrivileges', 'MemoryDenyWriteExecute',
     ):
         assert key not in directives, key
+
+
+def test_systemd_unit_loads_nvidia_uvm_before_starting():
+    """ProtectKernelModules stops the service loading nvidia_uvm itself, so at
+    boot CUDA could find "no CUDA-capable device" and detection ran on the
+    CPU. A privileged ("+"), non-fatal ("-") pre-start step loads it."""
+    root = Path(__file__).resolve().parents[1]
+    directives = _unit_directives()
+    assert directives.get('ExecStartPre') == '+-/bin/sh /opt/daygle-ai-camera/scripts/prepare_gpu.sh'
+    install = (root / 'scripts' / 'install_debian.sh').read_text()
+    assert 's|/opt/daygle-ai-camera/scripts/prepare_gpu.sh|' in install
+    update = (root / 'scripts' / 'update.sh').read_text()
+    assert 'ExecStartPre=+-/bin/sh ${APP_DIR}/scripts/prepare_gpu.sh' in update
+
+
+def test_prepare_gpu_never_fails_without_an_nvidia_gpu():
+    import subprocess
+    script = Path(__file__).resolve().parents[1] / 'scripts' / 'prepare_gpu.sh'
+    result = subprocess.run(['/bin/sh', str(script)], capture_output=True, text=True, timeout=30,
+                            env={'PATH': '/nonexistent'})
+    assert result.returncode == 0

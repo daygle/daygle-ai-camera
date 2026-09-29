@@ -144,6 +144,7 @@ sed -i \
   -e "s|WorkingDirectory=/opt/daygle-ai-camera|WorkingDirectory=$(_esc "${APP_DIR}")|" \
   -e "s|Environment=DAYGLE_CONFIG=/etc/daygle-ai-camera/config.yaml|Environment=DAYGLE_CONFIG=$(_esc "${CONFIG_DIR}/config.yaml")|" \
   -e "s|ExecStart=/opt/daygle-ai-camera/.venv/bin/python|ExecStart=$(_esc "${APP_DIR}/.venv/bin/python")|" \
+  -e "s|/opt/daygle-ai-camera/scripts/prepare_gpu.sh|$(_esc "${APP_DIR}/scripts/prepare_gpu.sh")|" \
   -e "s|User=.*|User=root|" \
   -e "s|Group=.*|Group=root|" \
   -e "s|ReadWritePaths=/etc/daygle-ai-camera /opt/daygle-ai-camera/data|ReadWritePaths=$(_esc "${CONFIG_DIR} ${DATA_DIR} ${MODEL_DIR}")|" \

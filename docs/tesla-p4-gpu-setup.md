@@ -269,6 +269,23 @@ Ruling out the other causes, in the order worth checking:
 - A warning naming a missing `.so` is the plain unmet-dependency case covered by
   section 3, not this one.
 
+### `no CUDA-capable device is detected` after a reboot
+
+`nvidia-smi` works and ffmpeg decodes on the GPU, but the detector logs
+`CUDA failure 100: no CUDA-capable device is detected` and falls back to the
+CPU. CUDA needs the `nvidia_uvm` module, which is usually loaded by the first
+program that uses CUDA. The service runs with `ProtectKernelModules=yes`, so
+it cannot load it; if the detector starts before anything else (Ollama,
+`nvidia-smi`) has, it sees no GPU. GPU video decoding does not need
+`nvidia_uvm`, which is why ffmpeg still works.
+
+The service now runs `scripts/prepare_gpu.sh` before it starts (a privileged
+`ExecStartPre=+-`), which loads `nvidia_uvm` and waits for `/dev/nvidia-uvm`.
+Existing installs get it as a drop-in on the next `scripts/update.sh` run.
+Until then, `systemctl restart daygle-ai-camera` fixes it for the current
+boot, and `echo nvidia_uvm | sudo tee /etc/modules-load.d/nvidia-uvm.conf`
+loads the module at every boot.
+
 ## Version ceilings to hold
 
 These are enforced in `requirements.txt` (and documented in
