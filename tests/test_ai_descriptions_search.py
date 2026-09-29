@@ -12,7 +12,7 @@ from __future__ import annotations
 import importlib
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -573,3 +573,98 @@ def test_description_gets_detector_hint_and_close_up(monkeypatch):
     av.describe_event(event, {**settings, 'focus_crop': False})
     content = sent[0][1]['content']
     assert len(content) == 2 and 'flagged: bird' in content[0]['text']
+
+
+# ---------------------------------------------------------------------------
+# Catch-up: events skipped while the AI queue was full
+# ---------------------------------------------------------------------------
+
+class _CatchUpDb:
+    def __init__(self, events):
+        self.events = {event['id']: event for event in events}
+        self.described: list[int] = []
+
+    def events_without_description(self, *, since=None, limit=100):
+        pending = [e for e in self.events.values() if e['id'] not in self.described and e['created_at'] >= since]
+        return sorted(pending, key=lambda e: -e['id'])[:limit]
+
+
+@pytest.fixture
+def catch_up(av, monkeypatch):
+    now = datetime.now(timezone.utc)
+
+    def event(event_id, camera='cam', age=10):
+        created = (now - timedelta(seconds=age)).isoformat()
+        return {'id': event_id, 'created_at': created, 'snapshot_path': 's.jpg', 'detections': [],
+                'metadata': {'camera_id': camera, 'camera_name': camera.title()}}
+
+    calls: list[tuple[int, bool]] = []
+
+    def setup(events, *, modes=None):
+        db = _CatchUpDb(events)
+        monkeypatch.setattr(av._state, 'database', db)
+        monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, describe_events='all'))
+        monkeypatch.setattr(av, 'camera_describe_mode', lambda cid, _s: (modes or {}).get(cid, 'all'))
+
+        def describe(event, event_id, _settings_, _name, *, evaluate_rules=True):
+            calls.append((event_id, evaluate_rules))
+            db.described.append(event_id)
+            return 'A car.'
+
+        monkeypatch.setattr(av, '_describe_and_store', describe)
+        return db
+
+    monkeypatch.setattr(av, '_catch_up_attempted', set())
+    return setup, event, calls
+
+
+def test_catch_up_describes_skipped_events_newest_first(av, catch_up):
+    setup, event, calls = catch_up
+    setup([event(1, age=600), event(2, age=30), event(3, camera='porch'), event(4, age=5 * 3600)],
+          modes={'porch': 'alerts'})
+    while av.catch_up_once():
+        pass
+    # Newest first; the 'alerts'-only camera and the event outside the window
+    # are left alone; only a recent event still runs its tag alert rules.
+    assert calls == [(2, True), (1, False)]
+
+
+def test_catch_up_tries_each_event_once(av, catch_up, monkeypatch):
+    setup, event, calls = catch_up
+    db = setup([event(7)])
+    monkeypatch.setattr(av, '_describe_and_store',
+                        lambda *_a, **_k: calls.append('failed'))   # e.g. snapshot missing: stays undescribed
+    assert av.catch_up_once() is True
+    assert av.catch_up_once() is False                               # not retried forever
+    assert calls == ['failed'] and db.described == []
+
+
+def test_full_queue_starts_catch_up_that_waits_for_idle(av, catch_up, monkeypatch):
+    setup, event, calls = catch_up
+    setup([event(9)])
+    pools = importlib.import_module('app.postprocess_pool')
+
+    class _FullPool:
+        def submit(self, *_a, **_k):
+            return False
+
+    monkeypatch.setattr(pools, 'verification_pool', lambda: _FullPool())
+    busy = iter([True, True, False, False])
+    monkeypatch.setattr(av, '_ai_pool_busy', lambda: next(busy, False))
+    started: list = []
+
+    class _Thread:
+        def __init__(self, target, **_kw):
+            self.target = target
+
+        def start(self):
+            started.append(self)
+
+    monkeypatch.setattr(av.threading, 'Thread', _Thread)
+    monkeypatch.setattr(av, '_catch_up_running', False)
+    assert av.submit_event_description(9, camera_id='cam', camera_name='Cam') is False
+    assert av.submit_event_description(10, camera_id='cam', camera_name='Cam') is False
+    assert len(started) == 1                      # one catch-up thread, however many are skipped
+    assert started[0].target is av._run_catch_up
+    av._run_catch_up(idle_poll_seconds=0)
+    assert calls == [(9, True)] and av._catch_up_running is False
