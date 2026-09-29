@@ -64,7 +64,8 @@ test('the actions cell does not reuse the page-level button-row bar', () => {
   assert.match(html, /\.camera-model-actions button \{ min-width: 0; \}/);
 });
 
-test('nav links the Camera Models page under Intelligence', () => {
-  assert.match(nav, /\{ href: '\/camera-models', match: '\/camera-models', label: 'Camera Models' \}/);
-  assert.ok(nav.indexOf('/camera-models') > nav.indexOf('/onnx'));
+test('Camera Models is a tab of Intelligence > Models', () => {
+  assert.match(nav, /\{ href: '\/onnx', matches: \['\/onnx', '\/camera-models', '\/yamnet-tflite', '\/arcface'\], label: 'Models'/);
+  assert.match(nav, /\{ href: '\/camera-models', label: 'Camera Models' \}/);
+  assert.ok(nav.indexOf("href: '/camera-models', label") > nav.indexOf("href: '/onnx', label"));
 });

@@ -16,7 +16,7 @@
 // then on as expected.
 //
 // The helper is exercised behaviourally in a vm sandbox; the dashboard wiring
-// is pinned with source assertions because app.js runs DOM-coupled code at
+// is pinned with source assertions because the page scripts run DOM-coupled code at
 // import.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,7 +28,6 @@ import vm from 'node:vm';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const readWeb = (name) => readFileSync(path.resolve(here, '../web', name), 'utf8');
 const utilsSource = readWeb('utils.js');
-const appSource = readWeb('app.js');
 
 function loadUtils() {
   const winListeners = new Map();
@@ -101,42 +100,6 @@ test('the helper is registered as a shared global for the page scripts', () => {
   const eslintConfig = readFileSync(path.resolve(here, '..', 'eslint.config.js'), 'utf8');
   assert.ok(
     eslintConfig.includes('isPageLeavingError'),
-    'isPageLeavingError must be declared in WEB_SHARED_GLOBALS or app.js fails no-undef',
+    'isPageLeavingError must be declared in WEB_SHARED_GLOBALS or the page scripts fail no-undef',
   );
-});
-
-// ─── Dashboard wiring (web/app.js) ─────────────────────────────────────────
-// Every toast on the dashboard used to be reachable from a poll rejection, so
-// each of these call sites needs the guard. The pattern is pinned rather than
-// executed because app.js touches the DOM at import time.
-test('every dashboard error toast is guarded against page-leaving rejections', () => {
-  const unguarded = [];
-  const lines = appSource.split('\n');
-  lines.forEach((line, index) => {
-    if (!line.includes('window.showToast?.(error.message, true)')) return;
-    // Walk back over the preceding guard lines in the same catch block.
-    const preceding = lines.slice(Math.max(0, index - 4), index).join('\n');
-    if (!preceding.includes('isPageLeavingError(error)')) {
-      unguarded.push(index + 1);
-    }
-  });
-  assert.deepEqual(
-    unguarded,
-    [],
-    `app.js shows an unguarded error toast at line(s) ${unguarded.join(', ')}; ` +
-    'a poll rejected by page unload would flash an error banner on navigation',
-  );
-});
-
-test('the dashboard loads the event feed through a cursor pager, not a full drain', () => {
-  assert.ok(
-    !/loadEvents[\s\S]{0,400}fetchAllCursorPages/.test(appSource),
-    'loadEvents must not drain every page; the feed paints from the first page and streams the rest',
-  );
-  assert.ok(appSource.includes('eventsPager = createCursorPager(url, ACTIVITY_PAGE_SIZE)'),
-    'loadEvents must build a cursor pager');
-  assert.ok(appSource.includes('wireActivityLoadMore()'),
-    'the streamed feed must wire its Load more control');
-  assert.ok(appSource.includes("setLoadMoreSentinel('dashboard-activity'"),
-    'the load-more sentinel needs a dashboard-specific key');
 });

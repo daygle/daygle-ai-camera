@@ -264,7 +264,7 @@ async def authentication_middleware(request: Request, call_next):
 <div class="error-page">
 <h1>403</h1>
 <p>You need administrator access to view this page.</p>
-<a href="/" class="button primary">Return to Dashboard</a>
+<a href="/" class="button primary">Return to Live</a>
 </div>
 </body>
 </html>''',

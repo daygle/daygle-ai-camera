@@ -5,7 +5,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAYBACK_FILES = (
-    ROOT / 'web' / 'app.js',
     ROOT / 'web' / 'recordings.js',
     ROOT / 'web' / 'timeline.js',
 )

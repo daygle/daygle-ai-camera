@@ -63,7 +63,7 @@ Filter by camera ID, event type, or severity when investigating a specific strea
 
 ## Cloudflare Tunnel
 
-Open **Settings → System → Cloudflare Tunnel** to manage the optional built-in `cloudflared` connector. Paste a token from Cloudflare Zero Trust and save it; the token field is cleared after saving and the **Saved securely** indicator confirms that a token is present without exposing it. The card also shows the connector state and provides **Start Tunnel**, **Stop Tunnel**, and **Restart Tunnel** actions. LAN serving is on by default: the app keeps the configured bind host (typically `0.0.0.0`) even while the tunnel runs, so LAN clients and the tunnel coexist. Disable **Serve LAN While Tunnel Is Active** on the **LAN & Proxy Access** card (or set `server.tunnel_loopback_only: true` in `config.yaml`) to bind to `127.0.0.1` so the tunnel is the only ingress; the change applies on restart. The same card holds **Trusted Proxy IPs**, where you add any reverse proxy in front of Daygle (e.g. an OPNsense HAProxy) whose `X-Forwarded-For` / `X-Forwarded-Proto` headers should be honored.
+Open **Settings → Network & Access → Cloudflare Tunnel** to manage the optional built-in `cloudflared` connector. Paste a token from Cloudflare Zero Trust and save it; the token field is cleared after saving and the **Saved securely** indicator confirms that a token is present without exposing it. The card also shows the connector state and provides **Start Tunnel**, **Stop Tunnel**, and **Restart Tunnel** actions. LAN serving is on by default: the app keeps the configured bind host (typically `0.0.0.0`) even while the tunnel runs, so LAN clients and the tunnel coexist. Disable **Serve LAN While Tunnel Is Active** on the **LAN & Proxy Access** card (or set `server.tunnel_loopback_only: true` in `config.yaml`) to bind to `127.0.0.1` so the tunnel is the only ingress; the change applies on restart. The same card holds **Trusted Proxy IPs**, where you add any reverse proxy in front of Daygle (e.g. an OPNsense HAProxy) whose `X-Forwarded-For` / `X-Forwarded-Proto` headers should be honored.
 
 A token saved through the UI is stored in a protected file next to the SQLite database, while SQLite and the status API contain only non-secret metadata. A token supplied through `DAYGLE_CLOUDFLARED_TOKEN` or bootstrap configuration is labelled as externally configured and is not necessarily stored in that file. If the connector exits, the status card reports the problem while the local Daygle service remains available.
 
@@ -98,14 +98,14 @@ Open **YAMNet TFLite** (`/yamnet-tflite`) to confirm whether the sound detection
 ## Logs and backups
 
 - Application logs are written to `data/logs/app.log` with rotation.
-- SQLite backups can be downloaded from **Settings → System → Database Backup & Restore → Download Database Backup**.
+- SQLite backups can be downloaded from **Settings → Maintenance → Database Backup & Restore → Download Database Backup**.
 - **Download Full Backup** in the same section produces a zip with the database, recordings, snapshots, legacy event artifacts, and installed model assets. The database-only backup does **not** contain media; use the full backup when you need a portable recovery bundle.
 - Restores accept either a previously downloaded `.sqlite` database backup or a `.zip` full backup. Full restores validate the archive, protect against traversal and symbolic links, remap media paths to the current storage directories, restore media/models, and create a full safety backup first.
 - Configuration supplied through environment variables, external `config.yaml` files, protected secret files (including the Cloudflare Tunnel token), and external service credentials must be configured separately after recovery. These are intentionally not copied into a downloadable archive.
 
 ## Update checks
 
-Admins can check for and apply application updates from **Settings → System → Software Updates**. The current version is shown at the top of the section. The updater verifies the canonical repository origin, refreshes Python dependencies, provisions `cloudflared`, and can migrate the systemd launcher to `python -m app.server`. Service installs schedule a restart after a successful browser-initiated update when permissions allow; otherwise restart the service manually.
+Admins can check for and apply application updates from **Settings → Maintenance → Software Updates**. The current version is shown at the top of the section. The updater verifies the canonical repository origin, refreshes Python dependencies, provisions `cloudflared`, and can migrate the systemd launcher to `python -m app.server`. Service installs schedule a restart after a successful browser-initiated update when permissions allow; otherwise restart the service manually.
 
 For manual service updates, run `./scripts/update.sh` from the configured application directory (the default is `/opt/daygle-ai-camera`), then restart `daygle-ai-camera` if it was not restarted automatically. The updater can install `cloudflared` system-wide or fall back to the application virtual environment for unprivileged GUI updates.
 
@@ -228,4 +228,4 @@ constantly creating recording files. Verify with
 
 ## Start Clean (Danger Zone)
 
-**Settings → System → Danger Zone → Start Clean** deletes all **events, recordings, and alert history** so you can begin fresh. Settings, users, sessions, and alert rules are preserved. The action is irreversible and requires typing `START CLEAN` to confirm.
+**Settings → Maintenance → Danger Zone → Start Clean** deletes all **events, recordings, and alert history** so you can begin fresh. Settings, users, sessions, and alert rules are preserved. The action is irreversible and requires typing `START CLEAN` to confirm.

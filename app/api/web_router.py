@@ -86,14 +86,16 @@ def _safe_return_to(raw: str | None) -> str:
 
 @router.get('/')
 def root(web_dir: Path = Depends(get_web_dir)):
-    index_path = web_dir / 'index.html'
-    if index_path.exists():
-        return FileResponse(index_path)
+    # Live footage is the home page (the old dashboard's counts live on
+    # Events and its system metrics on Admin > System).
+    live_path = web_dir / 'live.html'
+    if live_path.exists():
+        return FileResponse(live_path)
     return {'application': 'Daygle AI Camera', 'status': 'running'}
 
 
 def _page(web_dir: Path, filename: str):
-    """Serve ``web/<filename>``, falling back to the dashboard shell."""
+    """Serve ``web/<filename>``, falling back to the home page."""
     page_path = web_dir / filename
     if page_path.exists():
         return FileResponse(page_path)
@@ -203,8 +205,16 @@ def _setup_page_route(
 
 
 @router.get('/live')
-def live_page(web_dir: Path = Depends(get_web_dir)):
-    return _page(web_dir, 'live.html')
+def live_page():
+    # Live is now the home page; keep old bookmarks working.
+    return RedirectResponse('/', status_code=308)
+
+
+@router.get('/system')
+def system_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    # Admin > System > Health: CPU, memory, GPU and storage at a glance.
+    require_admin(request)
+    return _page(web_dir, 'system.html')
 
 
 @router.get('/zones')
@@ -248,8 +258,9 @@ def events_page(web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/search')
-def dashboard_aliases(web_dir: Path = Depends(get_web_dir)):
-    return root(web_dir=web_dir)
+def dashboard_aliases():
+    # Footage search lives on the Events page.
+    return RedirectResponse('/events', status_code=308)
 
 
 @router.get('/recordings')

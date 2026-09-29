@@ -15,7 +15,7 @@ router = APIRouter()
 @router.get('/api/alerts')
 def alert_history(request: Request, limit: int = Query(25, ge=1, le=10000), since: str | None = Query(None), db=Depends(get_database)):
     # Alert history is an administrator-only surface, matching the /alerts
-    # page and the dismiss/delete operations. Do not return alert metadata or
+    # page and the delete operation. Do not return alert metadata or
     # recording references to viewer accounts.
     require_admin(request)
     return db.alerts(limit=limit, since=since)
@@ -27,17 +27,3 @@ def delete_all_alert_history(request: Request, db=Depends(get_database)):
     deleted = db.delete_all_alerts()
     write_audit_log(request, db, 'delete_all', 'alert_history', details={'count': deleted})
     return {'ok': True, 'deleted': deleted}
-
-
-@router.post('/api/alerts/dismiss-all')
-def dismiss_all_alerts_route(request: Request, db=Depends(get_database)):
-    require_admin(request)
-    dismissed = db.dismiss_all_alerts()
-    return {'ok': True, 'dismissed': dismissed}
-
-
-@router.post('/api/alerts/{group_key}/dismiss')
-def dismiss_alert_group_route(group_key: str, request: Request, db=Depends(get_database)):
-    require_admin(request)
-    dismissed = db.dismiss_alert_group(group_key)
-    return {'ok': True, 'dismissed': dismissed}

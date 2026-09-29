@@ -22,7 +22,6 @@ import vm from 'node:vm';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const readWeb = (name) => readFileSync(path.resolve(here, '../web', name), 'utf8');
-const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const utilsSource = readWeb('utils.js');
 
 // ─── startPageInterval (web/utils.js) ─────────────────────────────────────
@@ -117,15 +116,11 @@ test('a bad poller registration is ignored instead of throwing', () => {
 });
 
 // ─── Page wiring ──────────────────────────────────────────────────────────
-test('the dashboard suspends stats, system resources and the activity feed', () => {
-  const source = readWeb('app.js');
-  assert.doesNotMatch(source, /^setInterval\(/m, 'no raw setInterval on the dashboard');
-  for (const call of ['loadStats()', 'loadSystemResources()', 'loadEvents()']) {
-    assert.ok(
-      new RegExp(`startPageInterval\\([\\s\\S]{0,120}?${escapeRegExp(call)}`).test(source),
-      `${call} should run through startPageInterval`,
-    );
-  }
+test('the System page suspends system resource polling', () => {
+  const source = readWeb('system.js');
+  assert.doesNotMatch(source, /^setInterval\(/m, 'no raw setInterval on the System page');
+  assert.ok(/startPageInterval\([\s\S]{0,120}?loadSystemResources\(\)/.test(source),
+    'loadSystemResources() should run through startPageInterval');
 });
 
 test('the camera list suspends health and resolution polling', () => {
