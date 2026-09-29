@@ -69,7 +69,7 @@ Go to **Intelligence → AI** (admin only). The page has four sections: Model Se
 | Server URL | `http://127.0.0.1:11434/v1` | The OpenAI-compatible base URL. |
 | Model | `gemma3:4b` | Must be a model that can read images. |
 | API Key | (none) | Only if the server requires one. Ollama doesn't. |
-| Timeout (seconds) | 20 | Per question. On timeout the alert is sent unverified. |
+| Timeout (seconds) | 20 | Per question for alerts. On timeout the alert is sent unverified. Background descriptions (Describe Events: All events, catch-up, Describe Past Events) wait up to 90 s, because the model keeps working on a request the app gives up on. |
 | Skip Above Confidence | 1 | Alerts at or above this detector confidence are sent without checking. `1` means every alert is checked. Set it to, say, `0.85` to check only borderline alerts. |
 | Object Labels | (all) | For example `person, car`. Leave empty to check every object label. |
 | Focus on Object | Enabled | Sends a close-up around the detected object, with context, instead of the whole frame. Small models judge small or distant objects much better this way. |
@@ -98,11 +98,19 @@ parcel at the front door."*
   Events** for anything older.
 - **The model is told what the object detector found** (e.g. *"An object
   detector flagged: bird. It can be wrong."*). With **Focus on Object** on,
-  it also gets a close-up of those objects as a second image. On a wide
+  small objects (at most a fifth of the frame) are described from a
+  close-up with their surroundings instead of the whole frame. On a wide
   camera, a small distant object is only a few pixels once the frame is
   resized for the model, and without this a small model guesses (a magpie
   captioned as *"a black cat"*). It is told to say "a small animal" rather
   than guess.
+- **One image per request, at most 1280 px.** Vision models resize images
+  themselves, so larger frames only cost time; sending two images roughly
+  doubled the time per description on a Tesla P4.
+- **After a timeout, background descriptions pause for 30 s.** The model is
+  still busy with the request the app gave up on; without the pause, every
+  later request queued behind it and timed out too. Skipped events are
+  described by the catch-up once the model is free.
 - The description appears under the detections in the Events list and is
   stored in the event's metadata (`ai_description`: text, model, time).
 - Verification runs first. An alert the model rejects is not described in
