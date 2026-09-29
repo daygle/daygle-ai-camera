@@ -1695,6 +1695,31 @@ tr.drag-over {
   flex-shrink: 0;
 }
 
+/* Filter disclosure. The caret mirrors .multi-select-caret: it points down
+   while the panel is closed and flips up once it is open. */
+.recordings-filter-caret { transition: transform 0.15s; }
+.recordings-filter-toggle[aria-expanded="true"] .recordings-filter-caret { transform: rotate(180deg); }
+/* Count of live filters, shown on the button while the panel is collapsed so
+   a filtered library never looks unfiltered. Tinted like .zone-shape-badge so
+   it reads in both themes. */
+.recordings-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(71, 214, 255, .18);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+:root.light .recordings-filter-badge { background: rgba(2, 132, 199, .12); color: #0369a1; }
+.recordings-filter-toggle.is-filtered { border-color: var(--accent); color: var(--accent); }
+:root.light .recordings-filter-toggle.is-filtered { border-color: #0369a1; color: #0369a1; }
+
 .hero-action {
   flex-shrink: 0;
 }

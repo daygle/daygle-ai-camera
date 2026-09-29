@@ -9,6 +9,8 @@ const els = {
   recordingSearchBtn: document.getElementById('recordingSearchBtn'),
   recordingClearBtn: document.getElementById('recordingClearBtn'),
   filterForm: document.getElementById('recordingsFilterForm'),
+  filterToggle: document.getElementById('recordingsFilterToggle'),
+  filterBadge: document.getElementById('recordingsFilterBadge'),
   clipPlayer: document.getElementById('clipPlayer'),
   clipPlayerStatus: document.getElementById('clipPlayerStatus'),
   recordingDetails: document.getElementById('recordingDetails'),
@@ -196,6 +198,36 @@ function updateFilterStat(label, hint) {
   if (!els.statFilterStatus || !els.statFilterHint) return;
   els.statFilterStatus.textContent = label;
   els.statFilterHint.textContent = hint;
+}
+
+// ── Collapsible filter panel ──────────────────────────────────────────────
+// The filter form is eight controls tall and most visits never touch it, so
+// it starts collapsed behind the toolbar's Filters button. The choice is
+// remembered, so someone who filters every visit keeps it open and everyone
+// else keeps a short page.
+function setFilterPanelOpen(open, { persist = true } = {}) {
+  if (!els.filterForm || !els.filterToggle) return;
+  els.filterForm.hidden = !open;
+  els.filterToggle.setAttribute('aria-expanded', String(open));
+  if (!persist) return;
+  // Storage can throw (privacy modes, sandboxed frames) - same guarded
+  // convention as every other localStorage read on this page.
+  try { localStorage.setItem(RECORDINGS_FILTER_PANEL_KEY, open ? '1' : '0'); } catch (_err) { /* storage disabled - keep default */ }
+}
+
+// Surface how many filters are live on the collapsed button. The stat card
+// spells them out in words, so this is a glanceable count rather than the
+// only signal - a filtered list must never look unfiltered.
+function updateFilterPanelBadge(activeCount) {
+  const count = Number(activeCount) || 0;
+  if (els.filterBadge) {
+    els.filterBadge.textContent = String(count);
+    els.filterBadge.hidden = !count;
+  }
+  if (!els.filterToggle) return;
+  els.filterToggle.classList.toggle('is-filtered', count > 0);
+  // Keeps the visible word "Filters" as the start of the accessible name.
+  els.filterToggle.setAttribute('aria-label', count ? `Filters, ${count} active` : 'Filters');
 }
 
 function parseFilterTimeParts(timeString, fallbackHour, fallbackMinute, fallbackSecond = 0, fallbackMillisecond = 0) {
@@ -1214,6 +1246,7 @@ async function loadRecordings(filters = {}) {
   }
   if (session !== recordingsLoadSession) return currentRecordings;
   const activeFilters = describeFilters(resolved);
+  updateFilterPanelBadge(activeFilters.length);
   if (activeFilters.length) {
     updateFilterStat('Filtered', `Showing clips matching ${activeFilters.join(' and ')}.`);
   } else {
@@ -1304,6 +1337,26 @@ if (els.clipOverlayToggle) {
   });
 }
 } // end if (els.clipPlayer)
+
+// Restore the saved open/closed choice. A visit that arrives already
+// filtered (?label=..., and friends) always shows the controls: the list
+// would otherwise be filtered with nothing on screen explaining why.
+(function initFilterPanel() {
+  if (!els.filterForm || !els.filterToggle) return;
+  const params = new URLSearchParams(window.location.search);
+  const deepLinked = Boolean(params.get('label') || params.get('camera_id') || params.get('face'));
+  let saved = null;
+  try { saved = localStorage.getItem(RECORDINGS_FILTER_PANEL_KEY); } catch (_err) { /* storage disabled - keep default */ }
+  setFilterPanelOpen(deepLinked || saved === '1', { persist: false });
+})();
+
+els.filterToggle?.addEventListener('click', () => {
+  const opening = Boolean(els.filterForm?.hidden);
+  setFilterPanelOpen(opening);
+  // Land the keyboard inside the panel it just revealed rather than leaving
+  // focus on the button that opened it.
+  if (opening) els.filterForm?.querySelector('select, input, button')?.focus();
+});
 
 els.cameraFilter?.addEventListener('change', () => {
   loadRecordings().catch((error) => {
