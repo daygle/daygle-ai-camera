@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import base64
 import importlib
 import json
 import threading
@@ -541,38 +542,74 @@ def test_detection_promotes_a_label_first_seen_as_an_ai_tag(tmp_path):
 
 def test_description_gets_detector_hint_and_close_up(monkeypatch):
     # A wide frame with a small detected bird: the model must hear what the
-    # detector found and get a close-up, so it does not guess "a black cat".
+    # detector found and see a close-up, so it does not guess "a black cat".
+    # One image per request: two images doubled the model's time on a P4 and
+    # pushed descriptions past the timeout.
     cv2 = pytest.importorskip('cv2')
     np = pytest.importorskip('numpy')
     av = importlib.import_module('app.ai_verification')
-    ok, frame = cv2.imencode('.jpg', np.zeros((720, 1280, 3), dtype=np.uint8))
+    ok, frame = cv2.imencode('.jpg', np.zeros((1440, 2560, 3), dtype=np.uint8))
     assert ok
     monkeypatch.setattr(av, '_read_snapshot', lambda _event: frame.tobytes())
     sent: list = []
     monkeypatch.setattr(av.VisionVerifier, 'chat',
                         lambda _self, messages, **_kw: sent.append(messages) or '{"description": "A magpie.", "tags": []}')
-    event = {'detections': [
-        {'label': 'bird', 'confidence': 0.54, 'x': 0.7, 'y': 0.3, 'width': 0.04, 'height': 0.06},
-        {'label': 'motion', 'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0},
-    ]}
-    settings = dict(av.DEFAULT_AI_VERIFICATION_SETTINGS)
-    record = av.describe_event(event, settings, camera_name='Pergola')
-    assert record['text'] == 'A magpie.'
-    content = sent[0][1]['content']
-    assert 'An object detector flagged: bird.' in content[0]['text']
-    assert 'close-up' in content[0]['text'] and 'rather than guessing' in content[0]['text']
-    images = [part for part in content if part['type'] == 'image_url']
-    assert len(images) == 2 and images[0] != images[1]
 
-    # No objects (motion only), or focus crop off: one image, no detector line.
-    sent.clear()
-    av.describe_event({'detections': event['detections'][1:]}, settings)
-    content = sent[0][1]['content']
-    assert len(content) == 2 and 'flagged' not in content[0]['text']
-    sent.clear()
-    av.describe_event(event, {**settings, 'focus_crop': False})
-    content = sent[0][1]['content']
-    assert len(content) == 2 and 'flagged: bird' in content[0]['text']
+    def sent_image():
+        content = sent[-1][1]['content']
+        images = [part for part in content if part['type'] == 'image_url']
+        assert len(images) == 1
+        data = base64.b64decode(images[0]['image_url']['url'].split(',', 1)[1])
+        return content[0]['text'], cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR).shape[:2]
+
+    bird = {'label': 'bird', 'confidence': 0.54, 'x': 0.7, 'y': 0.3, 'width': 0.04, 'height': 0.06}
+    motion = {'label': 'motion', 'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}
+    settings = dict(av.DEFAULT_AI_VERIFICATION_SETTINGS)
+    record = av.describe_event({'detections': [bird, motion]}, settings, camera_name='Pergola')
+    assert record['text'] == 'A magpie.'
+    text, (height, width) = sent_image()
+    assert 'An object detector flagged: bird.' in text and 'close-up' in text and 'rather than guessing' in text
+    assert (height, width) == (504, 896), 'a 35% close-up of the 2560x1440 frame'
+
+    # A large object is described from the whole frame, shrunk to 1280 px.
+    car = {'label': 'car', 'confidence': 0.9, 'x': 0.2, 'y': 0.3, 'width': 0.5, 'height': 0.4}
+    av.describe_event({'detections': [car]}, settings)
+    text, shape = sent_image()
+    assert 'flagged: car' in text and 'close-up' not in text and shape == (720, 1280)
+
+    # Motion only, or focus crop off: the whole frame.
+    av.describe_event({'detections': [motion]}, settings)
+    text, shape = sent_image()
+    assert 'flagged' not in text and shape == (720, 1280)
+    av.describe_event({'detections': [bird]}, {**settings, 'focus_crop': False})
+    text, shape = sent_image()
+    assert 'flagged: bird' in text and 'close-up' not in text and shape == (720, 1280)
+
+
+def test_background_descriptions_wait_longer_and_timeouts_cool_down(monkeypatch):
+    av = importlib.import_module('app.ai_verification')
+    monkeypatch.setattr(av, '_read_snapshot', lambda _event: b'jpeg')
+    timeouts: list = []
+
+    def chat(self, _messages, **_kw):
+        timeouts.append(self.timeout)
+        return '{"description": "A car.", "tags": []}'
+
+    monkeypatch.setattr(av.VisionVerifier, 'chat', chat)
+    settings = {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'timeout_seconds': 20}
+    av.describe_event({'detections': []}, settings)
+    av.describe_event({'detections': []}, settings, background=True)
+    assert timeouts == [20.0, av.BACKGROUND_DESCRIBE_TIMEOUT_SECONDS]
+
+    # A timed-out request marks the model busy, so background work holds off.
+    import urllib.request
+    monkeypatch.setattr(av, '_model_cooldown_until', 0.0)
+    monkeypatch.setattr(urllib.request, 'urlopen', lambda *_a, **_k: (_ for _ in ()).throw(TimeoutError('timed out')))
+    with pytest.raises(av.VerificationError, match='did not answer within 20s'):
+        av.VisionVerifier(settings)._request('/chat/completions', {})
+    assert av.model_cooling_down()
+    monkeypatch.setattr(av, '_model_cooldown_until', 0.0)
+    assert not av.model_cooling_down()
 
 
 # ---------------------------------------------------------------------------
@@ -606,7 +643,7 @@ def catch_up(av, monkeypatch):
         monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, describe_events='all'))
         monkeypatch.setattr(av, 'camera_describe_mode', lambda cid, _s: (modes or {}).get(cid, 'all'))
 
-        def describe(event, event_id, _settings_, _name, *, evaluate_rules=True):
+        def describe(event, event_id, _settings_, _name, *, evaluate_rules=True, background=False):
             calls.append((event_id, evaluate_rules))
             db.described.append(event_id)
             return 'A car.'
@@ -668,3 +705,22 @@ def test_full_queue_starts_catch_up_that_waits_for_idle(av, catch_up, monkeypatc
     assert started[0].target is av._run_catch_up
     av._run_catch_up(idle_poll_seconds=0)
     assert calls == [(9, True)] and av._catch_up_running is False
+
+
+def test_describe_only_defers_to_catch_up_while_the_model_cools_down(av, monkeypatch):
+    class _Db:
+        def get_event(self, event_id):
+            return {'id': event_id, 'snapshot_path': 's.jpg', 'detections': [], 'metadata': {}}
+
+    monkeypatch.setattr(av._state, 'database', _Db())
+    monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, describe_events='all'))
+    described: list = []
+    catch_ups: list = []
+    monkeypatch.setattr(av, '_describe_and_store', lambda *a, **k: described.append(k))
+    monkeypatch.setattr(av, 'start_description_catch_up', lambda: catch_ups.append(True))
+    monkeypatch.setattr(av, 'model_cooling_down', lambda: True)
+    av.describe_only(5, 'Gate')
+    assert described == [] and catch_ups == [True]
+    monkeypatch.setattr(av, 'model_cooling_down', lambda: False)
+    av.describe_only(6, 'Gate')
+    assert described == [{'background': True}]

@@ -102,7 +102,7 @@ def build_describe_prompt(camera_name: str = '', detected: list[str] | None = No
     if detected:
         context = f'An object detector flagged: {", ".join(detected)}. It can be wrong. '
     if close_up:
-        context += 'The second image is a close-up of where the detector found them. '
+        context += 'The image is a close-up around what the detector found, with some of its surroundings. '
     return (
         f'Describe what is happening in this security camera image{where}. {context}'
         'Only name people, animals and objects you can clearly make out; if something is too small '
@@ -388,11 +388,11 @@ def parse_verdict(text: str) -> tuple[bool, str]:
 class VisionVerifier:
     """Minimal OpenAI-compatible chat client for yes/no image questions."""
 
-    def __init__(self, settings: dict[str, Any]):
+    def __init__(self, settings: dict[str, Any], *, timeout: float | None = None):
         self.server_url = str(settings.get('server_url') or '').rstrip('/')
         self.model = str(settings.get('model') or '')
         self.api_key = str(settings.get('api_key') or '')
-        self.timeout = float(settings.get('timeout_seconds') or 20)
+        self.timeout = float(timeout or settings.get('timeout_seconds') or 20)
 
     def _request(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         headers = {'Accept': 'application/json'}
@@ -418,6 +418,13 @@ class VisionVerifier:
             raise VerificationError(f'HTTP {exc.code} from model server {detail[:200]}'.strip()) from exc
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
             reason = getattr(exc, 'reason', exc)
+            if isinstance(reason, TimeoutError) or 'timed out' in str(reason).lower():
+                # The server keeps working on a request we give up on, so the
+                # next one queues behind it: let background work back off.
+                _note_model_timeout()
+                raise VerificationError(
+                    f'model did not answer within {self.timeout:.0f}s (busy or slow)'
+                ) from exc
             raise VerificationError(f'model server unreachable: {reason}') from exc
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise VerificationError('model server response too large')
@@ -456,7 +463,7 @@ class VisionVerifier:
 
     @staticmethod
     def _image_part(image_bytes: bytes) -> dict[str, Any]:
-        encoded = base64.b64encode(image_bytes).decode('ascii')
+        encoded = base64.b64encode(_shrink_for_model(image_bytes)).decode('ascii')
         return {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{encoded}'}}
 
     def ask(self, image_bytes: bytes, label: str, camera_name: str = '',
@@ -471,13 +478,13 @@ class VisionVerifier:
         return parse_verdict(reply)
 
     def describe(self, image_bytes: bytes, camera_name: str = '', *, detected: list[str] | None = None,
-                 close_up: bytes | None = None) -> tuple[str, list[str]]:
+                 close_up: bool = False) -> tuple[str, list[str]]:
+        # One image per request: a second image roughly doubled the model's
+        # time on a small GPU and pushed descriptions past the timeout.
         content: list[dict[str, Any]] = [
-            {'type': 'text', 'text': build_describe_prompt(camera_name, detected, close_up is not None)},
+            {'type': 'text', 'text': build_describe_prompt(camera_name, detected, close_up)},
             self._image_part(image_bytes),
         ]
-        if close_up is not None:
-            content.append(self._image_part(close_up))
         reply = self.chat([
             {'role': 'system', 'content': DESCRIBE_SYSTEM_PROMPT},
             {'role': 'user', 'content': content},
@@ -488,6 +495,53 @@ class VisionVerifier:
 # ---------------------------------------------------------------------------
 # Image preparation
 # ---------------------------------------------------------------------------
+
+# Longest side sent to the model. Vision models resize internally (gemma3 to
+# 896 px), so a 2560 px camera frame only costs upload and decode time.
+MAX_MODEL_IMAGE_SIDE = 1280
+# Objects whose boxes span at most this fraction of the frame are described
+# from a close-up (with context) rather than the whole frame.
+SMALL_OBJECT_FRACTION = 0.2
+
+
+def _shrink_for_model(image_bytes: bytes) -> bytes:
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return image_bytes
+    frame = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        return image_bytes
+    height, width = frame.shape[:2]
+    scale = MAX_MODEL_IMAGE_SIDE / max(height, width)
+    if scale >= 1:
+        return image_bytes
+    frame = cv2.resize(frame, (max(1, int(width * scale)), max(1, int(height * scale))), interpolation=cv2.INTER_AREA)
+    ok, encoded = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+    return encoded.tobytes() if ok else image_bytes
+
+
+# ---------------------------------------------------------------------------
+# Model timeouts
+# ---------------------------------------------------------------------------
+
+# Background descriptions wait this long for an answer (alert-path requests
+# keep the configured timeout so notifications are never held up).
+BACKGROUND_DESCRIBE_TIMEOUT_SECONDS = 90.0
+# After a timeout the model is still busy with the abandoned request; hold
+# background work this long so it can drain instead of piling up behind it.
+MODEL_TIMEOUT_COOLDOWN_SECONDS = 30.0
+_model_cooldown_until = 0.0
+
+
+def _note_model_timeout() -> None:
+    global _model_cooldown_until
+    _model_cooldown_until = time.monotonic() + MODEL_TIMEOUT_COOLDOWN_SECONDS
+
+
+def model_cooling_down() -> bool:
+    return time.monotonic() < _model_cooldown_until
 
 def _label_box(detections: list[dict[str, Any]], label: str | None) -> tuple[float, float, float, float] | None:
     """Union of this label's boxes (every object's when ``label`` is None),
@@ -630,19 +684,37 @@ def describe_event(
     *,
     camera_name: str = '',
     verifier: VisionVerifier | None = None,
+    background: bool = False,
 ) -> dict[str, Any]:
-    """Caption an event's snapshot. Raises VerificationError when it can't."""
+    """Caption an event's snapshot. Raises VerificationError when it can't.
+
+    ``background`` (events nobody is waiting on: describe-all, catch-up,
+    backfill) waits up to BACKGROUND_DESCRIBE_TIMEOUT_SECONDS: abandoning a
+    slow request does not stop the model working on it, so a short timeout
+    only wastes the answer and delays the next request.
+    """
     image = _read_snapshot(event)
     if image is None:
         raise VerificationError('no snapshot to describe')
     started = time.monotonic()
     detections = event.get('detections') or []
     labels = sorted({str(d.get('label') or '').strip().lower() for d in detections} - {'', 'motion'})
-    close_up = None
+    # A small object (a bird on a wide lawn) is a few pixels once the frame
+    # is resized for the model, so describe a close-up with context instead;
+    # a large one is described from the whole frame.
+    close_up = False
     if labels and settings.get('focus_crop', True):
-        crop = focus_image(image, detections, None)
-        close_up = crop if crop is not image else None
-    text, tags = (verifier or VisionVerifier(settings)).describe(
+        box = _label_box(detections, None)
+        if box and max(box[2] - box[0], box[3] - box[1]) <= SMALL_OBJECT_FRACTION:
+            crop = focus_image(image, detections, None)
+            if crop is not image:
+                image, close_up = crop, True
+    if verifier is None:
+        timeout = None
+        if background:
+            timeout = max(float(settings.get('timeout_seconds') or 20), BACKGROUND_DESCRIBE_TIMEOUT_SECONDS)
+        verifier = VisionVerifier(settings, timeout=timeout)
+    text, tags = verifier.describe(
         image, camera_name, detected=[label.replace('_', ' ') for label in labels], close_up=close_up,
     )
     # A tag that repeats a real detection label adds nothing: the detection
@@ -659,7 +731,7 @@ def describe_event(
 
 def _describe_and_store(
     event: dict[str, Any], event_id: int, settings: dict[str, Any], camera_name: str,
-    *, evaluate_rules: bool = True,
+    *, evaluate_rules: bool = True, background: bool = False,
 ) -> str | None:
     """Describe and persist; returns the text, or None (logged) on failure.
 
@@ -667,7 +739,7 @@ def _describe_and_store(
     backfill of past events turns it off so old events never alert.
     """
     try:
-        record = describe_event(event, settings, camera_name=camera_name)
+        record = describe_event(event, settings, camera_name=camera_name, background=background)
     except VerificationError as exc:
         logger.warning('AI description unavailable for event %s: %s', event_id, exc)
         return None
@@ -755,7 +827,12 @@ def describe_only(event_id: int, camera_name: str = '', camera_id: Any = None) -
         event = None
     if not event or (event.get('metadata') or {}).get('ai_description'):
         return
-    _describe_and_store(event, event_id, settings, camera_name)
+    if model_cooling_down():
+        # The model just timed out and is still working through it; leave
+        # this one to the catch-up instead of queueing behind it.
+        start_description_catch_up()
+        return
+    _describe_and_store(event, event_id, settings, camera_name, background=True)
 
 
 def submit_event_description(event_id: int, *, camera_id: Any = None, camera_name: str = '') -> bool:
@@ -812,7 +889,7 @@ def _run_catch_up(idle_poll_seconds: float = 1.0) -> None:
     global _catch_up_running
     try:
         while True:
-            while _ai_pool_busy() or description_backfill_status().get('running'):
+            while _ai_pool_busy() or model_cooling_down() or description_backfill_status().get('running'):
                 time.sleep(idle_poll_seconds)
             if not catch_up_once():
                 return
@@ -849,7 +926,7 @@ def catch_up_once() -> bool:
         except ValueError:
             age = float('inf')
         _describe_and_store(event, event_id, settings, str(metadata.get('camera_name') or ''),
-                            evaluate_rules=age <= CATCH_UP_ALERT_MAX_AGE_SECONDS)
+                            evaluate_rules=age <= CATCH_UP_ALERT_MAX_AGE_SECONDS, background=True)
         return True
     return False
 
@@ -998,13 +1075,14 @@ def _ai_pool_busy() -> bool:
 def _run_backfill(events: list[dict[str, Any]]) -> None:
     try:
         for event in events:
-            while _ai_pool_busy():
+            while _ai_pool_busy() or model_cooling_down():
                 time.sleep(0.5)
             settings = effective_ai_verification_settings()
             if describe_mode(settings) == 'off':
                 break
             camera_name = str((event.get('metadata') or {}).get('camera_name') or '')
-            text = _describe_and_store(event, int(event['id']), settings, camera_name, evaluate_rules=False)
+            text = _describe_and_store(event, int(event['id']), settings, camera_name, evaluate_rules=False,
+                                       background=True)
             with _backfill_lock:
                 _backfill_state['done' if text else 'failed'] += 1
     finally:
