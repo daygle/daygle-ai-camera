@@ -173,7 +173,7 @@ def flow(av, monkeypatch):
         monkeypatch.setattr(av._state, 'database', db)
         monkeypatch.setattr(av.VisionVerifier, 'ask', lambda _s, _img, _label, _cam='': verdict)
 
-        def describe(_self, _img, _cam=''):
+        def describe(_self, _img, _cam='', **_kw):
             if isinstance(caption, Exception):
                 raise caption
             return caption, list(tags)
@@ -537,3 +537,39 @@ def test_detection_promotes_a_label_first_seen_as_an_ai_tag(tmp_path):
     db.add_recording_labels(recording_id, ['dog'])
     recording = db.get_recording(recording_id)
     assert recording['labels'] == ['dog'] and recording['ai_labels'] == []
+
+
+def test_description_gets_detector_hint_and_close_up(monkeypatch):
+    # A wide frame with a small detected bird: the model must hear what the
+    # detector found and get a close-up, so it does not guess "a black cat".
+    cv2 = pytest.importorskip('cv2')
+    np = pytest.importorskip('numpy')
+    av = importlib.import_module('app.ai_verification')
+    ok, frame = cv2.imencode('.jpg', np.zeros((720, 1280, 3), dtype=np.uint8))
+    assert ok
+    monkeypatch.setattr(av, '_read_snapshot', lambda _event: frame.tobytes())
+    sent: list = []
+    monkeypatch.setattr(av.VisionVerifier, 'chat',
+                        lambda _self, messages, **_kw: sent.append(messages) or '{"description": "A magpie.", "tags": []}')
+    event = {'detections': [
+        {'label': 'bird', 'confidence': 0.54, 'x': 0.7, 'y': 0.3, 'width': 0.04, 'height': 0.06},
+        {'label': 'motion', 'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0},
+    ]}
+    settings = dict(av.DEFAULT_AI_VERIFICATION_SETTINGS)
+    record = av.describe_event(event, settings, camera_name='Pergola')
+    assert record['text'] == 'A magpie.'
+    content = sent[0][1]['content']
+    assert 'An object detector flagged: bird.' in content[0]['text']
+    assert 'close-up' in content[0]['text'] and 'rather than guessing' in content[0]['text']
+    images = [part for part in content if part['type'] == 'image_url']
+    assert len(images) == 2 and images[0] != images[1]
+
+    # No objects (motion only), or focus crop off: one image, no detector line.
+    sent.clear()
+    av.describe_event({'detections': event['detections'][1:]}, settings)
+    content = sent[0][1]['content']
+    assert len(content) == 2 and 'flagged' not in content[0]['text']
+    sent.clear()
+    av.describe_event(event, {**settings, 'focus_crop': False})
+    content = sent[0][1]['content']
+    assert len(content) == 2 and 'flagged: bird' in content[0]['text']

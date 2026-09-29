@@ -137,6 +137,10 @@ class EmailAlertService:
             f'<tr><td style="padding:4px 0;color:#888">Zone</td><td style="padding:4px 0">{escape(zone_name)}</td></tr>'
             if zone_name else ''
         )
+        confidence_row = (
+            f'<tr><td style="padding:4px 0;color:#888">Confidence</td><td style="padding:4px 0">{content.confidence:.2%}</td></tr>'
+            if content.confidence is not None else ''
+        )
         state_row = (
             f'<tr><td style="padding:4px 0;color:#888">State</td><td style="padding:4px 0">{escape(motion_state_display)}</td></tr>'
             if motion_state_display else ''
@@ -153,7 +157,7 @@ class EmailAlertService:
             f'<tr><td style="padding:4px 0;color:#888">Rule</td><td style="padding:4px 0">{escape(rule_display)}</td></tr>'
             f'{detected_at_row}'
             f'{all_triggers_row}'
-            f'<tr><td style="padding:4px 0;color:#888">Confidence</td><td style="padding:4px 0">{float(alert.get("confidence") or 0):.2%}</td></tr>'
+            f'{confidence_row}'
             f'<tr><td style="padding:4px 0;color:#888">Event ID</td><td style="padding:4px 0">{event_id}</td></tr>'
             f'</table>{img_tag}'
             '</body></html>'

@@ -32,7 +32,7 @@ class AlertContent:
     rule_display: str
     detected_at_display: str | None
     all_triggers_line: str | None
-    confidence: float
+    confidence: float | None
     event_id: int
     plain_text: str
 
@@ -97,7 +97,10 @@ def build_alert_content(
     # module-level dependency on the sound backend (mirrors app.api.sound_router).
     label_val = str(alert.get('label') or '').strip()
     label_lower = label_val.lower()
-    if label_lower == 'motion':
+    ai_tag_alert = bool(alert.get('ai_tag_alert'))
+    if ai_tag_alert:
+        detection_type = 'AI Tag'
+    elif label_lower == 'motion':
         detection_type = 'Motion'
     else:
         from app.sound_detector import SOUND_CLASSES
@@ -107,7 +110,10 @@ def build_alert_content(
     # "Camera / Zone / Label" rule name when present.
     zone_name = ''
     rule_name = str(alert.get('rule_name') or '').strip()
-    if ' / ' in rule_name:
+    if ai_tag_alert and ' · ' in rule_name:
+        # "Zone · Rule name" (app.ai_tag_alerts).
+        zone_name = rule_name.split(' · ', 1)[0].strip()
+    elif ' / ' in rule_name:
         parts = rule_name.split(' / ')
         if len(parts) >= 2:
             zone_name = parts[1].strip()
@@ -135,7 +141,9 @@ def build_alert_content(
     # caption, so it keeps its own casing; confidence stays in the details.
     ai_description = ' '.join(str(alert.get('ai_description') or '').split())
     alert_message = ai_description or str(alert.get('message') or 'Alert triggered.').title()
-    confidence = float(alert.get('confidence') or 0)
+    # An AI tag alert has no detector score: omit the line rather than
+    # print a misleading 0%.
+    confidence = None if ai_tag_alert else float(alert.get('confidence') or 0)
 
     plain_lines = [alert_message, '', f"Camera: {camera_display}"]
     if zone_name:
@@ -148,7 +156,8 @@ def build_alert_content(
         plain_lines.append(f"Detected: {detected_at_display}")
     if all_triggers_line:
         plain_lines.append(all_triggers_line)
-    plain_lines.append(f"Confidence: {confidence:.2%}")
+    if confidence is not None:
+        plain_lines.append(f"Confidence: {confidence:.2%}")
     plain_lines.append(f"Event ID: {event_id}")
     plain_text = '\n'.join(plain_lines)
 

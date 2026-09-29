@@ -201,7 +201,10 @@ def test_end_to_end_alert_on_a_described_event(tmp_path, monkeypatch):
     monkeypatch.setattr(dispatch, '_rule_notify_active_now', lambda _rule: True)
     monkeypatch.setattr(av, '_read_snapshot', lambda _event: b'jpeg')
     monkeypatch.setattr(av.VisionVerifier, 'describe',
-                        lambda _s, _img, _cam='': ('A man carries a ladder past the gate.', ['ladder']))
+                        lambda _s, _img, _cam='', **_kw: ('A man carries a ladder past the gate.', ['ladder']))
+    asked: list = []
+    monkeypatch.setattr(av.VisionVerifier, 'ask',
+                        lambda _s, _img, label, _cam='', source='': asked.append((label, source)) or (True, 'ladder'))
 
     # Global describe mode is off, but this camera has a tag rule, so the
     # event is queued for describing. Record the job instead of letting a real
@@ -224,6 +227,7 @@ def test_end_to_end_alert_on_a_described_event(tmp_path, monkeypatch):
     assert event['alert_triggered'] == 1
     assert event['alert']['rule_name'] == 'Gate · Ladders'
     assert [e for _t, e in sent] == [event_id]
+    assert asked == [('ladder', 'An automatic caption')]   # the term was confirmed first
 
     # A backfill of the same kind of event never alerts.
     second = db.add_event(created_at='2026-09-28T01:05:00+00:00', source='rtsp', snapshot_path='s.jpg',
@@ -243,3 +247,79 @@ def test_mark_event_alert_triggered(tmp_path):
     assert db.mark_event_alert_triggered(event_id) is True
     assert db.get_event(event_id)['alert_triggered'] == 1
     assert db.mark_event_alert_triggered(event_id + 50) is False
+
+
+# ---------------------------------------------------------------------------
+# Confirming a matched term before alerting
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def confirm_env(ata, fire_env, monkeypatch):
+    av = importlib.import_module('app.ai_verification')
+    answers: dict[str, object] = {}
+    asked: list[str] = []
+
+    def ask(_self, _img, label, _cam='', source=''):
+        asked.append(label)
+        answer = answers.get(label, (True, 'visible'))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(av, '_read_snapshot', lambda _event: b'jpeg')
+    monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: dict(av.DEFAULT_AI_VERIFICATION_SETTINGS))
+    monkeypatch.setattr(av.VisionVerifier, 'ask', ask)
+    return (*fire_env, answers, asked, av)
+
+
+def test_caption_the_model_does_not_confirm_never_alerts(ata, confirm_env):
+    # The real case: a magpie captioned as "A black cat is sitting on the grass".
+    db, sent, camera, answers, asked, _av = confirm_env
+    camera(_zone(_rule(name='Cat', tags=['cat'])))
+    answers['cat'] = (False, 'it is a black and white bird')
+    record = {'text': 'A black cat is sitting on the grass in the garden.', 'tags': ['cat']}
+    assert ata.evaluate_event(5, EVENT, record) == 0
+    assert asked == ['cat'] and sent == [] and db.alerts == []
+    # ...and the cooldown was not spent: a confirmed cat right after still alerts.
+    answers['cat'] = (True, 'a cat on the lawn')
+    assert ata.evaluate_event(6, {**EVENT, 'id': 6}, record) == 1
+
+
+def test_only_confirmed_terms_are_named(ata, confirm_env):
+    db, sent, camera, answers, asked, _av = confirm_env
+    camera(_zone(_rule(tags=['ladder', 'bucket'])))
+    answers['bucket'] = (False, 'no bucket')
+    assert ata.evaluate_event(5, EVENT, {'text': 'A man with a ladder and a bucket.', 'tags': []}) == 1
+    assert db.alerts[0]['label'] == 'ladder' and 'Bucket' not in db.alerts[0]['message']
+
+
+def test_confirmation_fails_open_and_is_asked_once_per_event(ata, confirm_env):
+    db, sent, camera, answers, asked, av = confirm_env
+    answers['ladder'] = av.VerificationError('timed out')
+    camera(_zone(), _zone(id='yard', name='Yard', x=0, y=0, width=1, height=1))
+    assert ata.evaluate_event(5, EVENT, RECORD) == 2      # both zones alert, unchecked
+    assert asked == ['ladder']                            # one model call, shared
+
+
+def test_cooling_down_rule_skips_the_model_call(ata, confirm_env):
+    db, sent, camera, answers, asked, _av = confirm_env
+    camera(_zone())
+    assert ata.evaluate_event(5, EVENT, RECORD) == 1
+    asked.clear()
+    assert ata.evaluate_event(6, {**EVENT, 'id': 6}, RECORD) == 0
+    assert asked == []
+
+
+def test_ai_tag_alert_email_has_no_confidence_line():
+    from app.alert_formatting import build_alert_content
+
+    content = build_alert_content(
+        {'rule_name': 'Pergola · Cat', 'label': 'cat', 'confidence': 0.0, 'ai_tag_alert': True,
+         'ai_description': 'AI tag alert (unconfirmed): Cat on Pergola (Pergola). A cat.'},
+        event_id=5, camera_name='Pergola',
+    )
+    assert content.confidence is None and 'Confidence' not in content.plain_text
+    assert content.detection_type == 'AI Tag' and content.zone_name == 'Pergola'
+    detector = build_alert_content({'rule_name': 'Pergola / Lawn / bird', 'label': 'bird', 'confidence': 0.54},
+                                   event_id=6, camera_name='Pergola')
+    assert 'Confidence: 54.00%' in detector.plain_text and detector.detection_type == 'Object'

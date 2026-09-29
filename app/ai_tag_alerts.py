@@ -9,6 +9,13 @@ the zone and the model named one of the terms:
 * ``description`` - in its sentence (whole words, plural forms included),
 * ``both``        - in either.
 
+Before a rule fires, each matched term gets a second, independent check: the
+model is asked the same yes/no question alert verification uses ("is a real
+cat visible?"), on a close-up when the detector boxed that object. A caption
+from a small model can misname a distant blob (a magpie became "a black
+cat"); a term it then answers "no" to does not alert. If that check cannot
+run, the alert is sent, as with verification.
+
 The alert is attached to the described event (an alert_history row, and the
 event is flagged as alerted) and delivered through the normal notification
 queue, led by the description. It is labelled *unconfirmed*: unlike object
@@ -122,14 +129,45 @@ def event_in_zone(event: dict[str, Any], zone: dict[str, Any]) -> bool:
     )
 
 
-def _cooldown_ok(key: str, seconds: int) -> bool:
+def _cooldown_ok(key: str, seconds: int, *, spend: bool = True) -> bool:
     now = time.monotonic()
     with _cooldown_lock:
         last = _cooldowns.get(key)
         if last is not None and now - last < seconds:
             return False
-        _cooldowns[key] = now
+        if spend:
+            _cooldowns[key] = now
         return True
+
+
+def _confirm_terms(event: dict[str, Any], terms: list[str], camera_name: str,
+                   cache: dict[str, bool]) -> list[str]:
+    """The terms the model still sees when asked directly. Fails open."""
+    from app import ai_verification as av
+
+    pending = [term for term in terms if term not in cache]
+    if pending:
+        settings = av.effective_ai_verification_settings()
+        image = av._read_snapshot(event)
+        if image is None:
+            cache.update(dict.fromkeys(pending, True))
+        else:
+            verifier = av.VisionVerifier(settings)
+            detections = event.get('detections') or []
+            for term in pending:
+                focused = av.focus_image(image, detections, term.lower()) if settings.get('focus_crop', True) else image
+                try:
+                    present, reason = verifier.ask(focused, term, camera_name, source='An automatic caption')
+                except av.VerificationError as exc:
+                    logger.warning('AI tag check unavailable for event %s (%s): %s; alerting unchecked.',
+                                   event.get('id'), term, exc)
+                    present = True
+                else:
+                    if not present:
+                        logger.info('AI tag alert suppressed for event %s: %s not confirmed (%s)',
+                                    event.get('id'), term, reason or 'not present')
+                cache[term] = present
+    return [term for term in terms if cache[term]]
 
 
 def evaluate_event(event_id: int, event: dict[str, Any], record: dict[str, Any]) -> int:
@@ -141,13 +179,14 @@ def evaluate_event(event_id: int, event: dict[str, Any], record: dict[str, Any])
         metadata = event.get('metadata') or {}
         camera = _camera_settings(metadata.get('camera_id'))
         fired = 0
+        confirmed: dict[str, bool] = {}
         for zone, rule in zone_rules(camera):
             if not event_in_zone(event, zone):
                 continue
             hits = matched_terms(rule, record.get('tags') or [], record.get('text') or '')
             if not hits:
                 continue
-            if _fire(event_id, camera, zone, rule, hits, record):
+            if _fire(event_id, event, camera, zone, rule, hits, record, confirmed):
                 fired += 1
         return fired
     except Exception:  # noqa: BLE001 - alerts must never break the AI pool job
@@ -155,8 +194,8 @@ def evaluate_event(event_id: int, event: dict[str, Any], record: dict[str, Any])
         return 0
 
 
-def _fire(event_id: int, camera: dict[str, Any], zone: dict[str, Any], rule: dict[str, Any],
-          hits: list[str], record: dict[str, Any]) -> bool:
+def _fire(event_id: int, event: dict[str, Any], camera: dict[str, Any], zone: dict[str, Any],
+          rule: dict[str, Any], hits: list[str], record: dict[str, Any], confirmed: dict[str, bool]) -> bool:
     from app.alert_dispatch import (
         _rule_notify_active_now,
         deliver_alert_notifications,
@@ -179,9 +218,14 @@ def _fire(event_id: int, camera: dict[str, Any], zone: dict[str, Any], rule: dic
         return False
     if not _rule_notify_active_now(notify_rule):
         return False
-    # Cooldown is spent only by an alert that is actually sent.
+    # Cooldown is spent only by an alert that is actually sent, and checked
+    # before the confirming model call so a cooling-down rule costs nothing.
     key = f"{camera.get('id')}::{zone.get('id') or zone.get('name')}::ai_tags"
-    if not _cooldown_ok(key, int(rule.get('cooldown_seconds') or 0)):
+    cooldown = int(rule.get('cooldown_seconds') or 0)
+    if not _cooldown_ok(key, cooldown, spend=False):
+        return False
+    hits = _confirm_terms({**event, 'id': event_id}, hits, camera_name, confirmed)
+    if not hits or not _cooldown_ok(key, cooldown):
         return False
     label = hits[0]
     terms = ', '.join(term.title() for term in hits)

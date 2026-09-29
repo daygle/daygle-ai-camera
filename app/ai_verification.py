@@ -93,10 +93,20 @@ _TAG_NOISE = frozenset({
 })
 
 
-def build_describe_prompt(camera_name: str = '') -> str:
+def build_describe_prompt(camera_name: str = '', detected: list[str] | None = None, close_up: bool = False) -> str:
     where = f' from the camera "{camera_name}"' if camera_name else ''
+    # A small model shown a wide frame (resized to under 1000 px) will guess
+    # at a distant blob, e.g. call a magpie "a black cat". Tell it what the
+    # detector found and, with a close-up, where to look.
+    context = ''
+    if detected:
+        context = f'An object detector flagged: {", ".join(detected)}. It can be wrong. '
+    if close_up:
+        context += 'The second image is a close-up of where the detector found them. '
     return (
-        f'Describe what is happening in this security camera image{where}. '
+        f'Describe what is happening in this security camera image{where}. {context}'
+        'Only name people, animals and objects you can clearly make out; if something is too small '
+        'or blurry to identify, call it "a small animal" or "an object" rather than guessing. '
         'Reply with JSON exactly like {"description": "A courier in a hi-vis vest leaves a parcel at the '
         'front door.", "tags": ["courier", "hi-vis vest", "parcel"]}. '
         '"description": one sentence of at most 25 words for a notification, mentioning the people, '
@@ -333,10 +343,10 @@ def labels_to_verify(triggered: list[dict[str, Any]], settings: dict[str, Any]) 
 # Model client
 # ---------------------------------------------------------------------------
 
-def build_prompt(label: str, camera_name: str = '') -> str:
+def build_prompt(label: str, camera_name: str = '', source: str = 'An object detector') -> str:
     where = f' from the camera "{camera_name}"' if camera_name else ''
     return (
-        f'An object detector reported a "{label}" in this security camera image{where}. '
+        f'{source} reported a "{label}" in this security camera image{where}. '
         f'Is a real {label} actually visible? It is NOT a real {label} if it is only a shadow, '
         f'reflection, picture, poster, statue, toy, plant, rubbish bin, or another object that '
         f'looks like a {label}, or if the image shows nothing clear. '
@@ -449,23 +459,28 @@ class VisionVerifier:
         encoded = base64.b64encode(image_bytes).decode('ascii')
         return {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{encoded}'}}
 
-    def ask(self, image_bytes: bytes, label: str, camera_name: str = '') -> tuple[bool, str]:
+    def ask(self, image_bytes: bytes, label: str, camera_name: str = '',
+            source: str = 'An object detector') -> tuple[bool, str]:
         reply = self.chat([
             {'role': 'system', 'content': SYSTEM_PROMPT},
             {'role': 'user', 'content': [
-                {'type': 'text', 'text': build_prompt(label, camera_name)},
+                {'type': 'text', 'text': build_prompt(label, camera_name, source)},
                 self._image_part(image_bytes),
             ]},
         ])
         return parse_verdict(reply)
 
-    def describe(self, image_bytes: bytes, camera_name: str = '') -> tuple[str, list[str]]:
+    def describe(self, image_bytes: bytes, camera_name: str = '', *, detected: list[str] | None = None,
+                 close_up: bytes | None = None) -> tuple[str, list[str]]:
+        content: list[dict[str, Any]] = [
+            {'type': 'text', 'text': build_describe_prompt(camera_name, detected, close_up is not None)},
+            self._image_part(image_bytes),
+        ]
+        if close_up is not None:
+            content.append(self._image_part(close_up))
         reply = self.chat([
             {'role': 'system', 'content': DESCRIBE_SYSTEM_PROMPT},
-            {'role': 'user', 'content': [
-                {'type': 'text', 'text': build_describe_prompt(camera_name)},
-                self._image_part(image_bytes),
-            ]},
+            {'role': 'user', 'content': content},
         ], max_tokens=200)
         return parse_description_reply(reply)
 
@@ -474,11 +489,13 @@ class VisionVerifier:
 # Image preparation
 # ---------------------------------------------------------------------------
 
-def _label_box(detections: list[dict[str, Any]], label: str) -> tuple[float, float, float, float] | None:
-    """Union of this label's boxes, in normalized [0, 1] coordinates."""
+def _label_box(detections: list[dict[str, Any]], label: str | None) -> tuple[float, float, float, float] | None:
+    """Union of this label's boxes (every object's when ``label`` is None),
+    in normalized [0, 1] coordinates. Motion boxes are never objects."""
     boxes = []
     for detection in detections or []:
-        if str(detection.get('label') or '').strip().lower() != label:
+        name = str(detection.get('label') or '').strip().lower()
+        if (label is not None and name != label) or (label is None and name in ('', 'motion')):
             continue
         try:
             x, y = float(detection['x']), float(detection['y'])
@@ -496,7 +513,7 @@ def _label_box(detections: list[dict[str, Any]], label: str) -> tuple[float, flo
     )
 
 
-def focus_image(image_bytes: bytes, detections: list[dict[str, Any]], label: str) -> bytes:
+def focus_image(image_bytes: bytes, detections: list[dict[str, Any]], label: str | None) -> bytes:
     """Crop around the label's boxes with generous context; else the frame.
 
     The crop keeps a margin of one box size on every side (and at least a
@@ -619,10 +636,18 @@ def describe_event(
     if image is None:
         raise VerificationError('no snapshot to describe')
     started = time.monotonic()
-    text, tags = (verifier or VisionVerifier(settings)).describe(image, camera_name)
+    detections = event.get('detections') or []
+    labels = sorted({str(d.get('label') or '').strip().lower() for d in detections} - {'', 'motion'})
+    close_up = None
+    if labels and settings.get('focus_crop', True):
+        crop = focus_image(image, detections, None)
+        close_up = crop if crop is not image else None
+    text, tags = (verifier or VisionVerifier(settings)).describe(
+        image, camera_name, detected=[label.replace('_', ' ') for label in labels], close_up=close_up,
+    )
     # A tag that repeats a real detection label adds nothing: the detection
     # already shows it (and is the authoritative source for that object).
-    detected = {str(d.get('label') or '').strip().lower() for d in event.get('detections') or []}
+    detected = {str(d.get('label') or '').strip().lower() for d in detections}
     return {
         'text': text,
         'tags': [tag for tag in tags if tag not in detected],
