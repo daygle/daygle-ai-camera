@@ -18,6 +18,12 @@ from typing import Any, Callable
 import app.state as _state
 from app.camera_id import camera_storage_key
 from app.detection_status import json_safe_detections
+from app.video_decode import (
+    hwaccel_input_args,
+    is_gpu_decode_error,
+    normalize_video_decode,
+    resolve_video_decode,
+)
 
 
 logger = logging.getLogger('daygle.ai')
@@ -201,6 +207,15 @@ class RecordingService:
         self._prebuffer_last_restart: dict[str, float] = {}
         self._continuous_lock = threading.Lock()
         self._continuous_workers: dict[str, dict[str, Any]] = {}
+        # Continuous recording carried by the camera's shared ingest ffmpeg
+        # (camera_key -> chunks_dir / chunk_seconds / on_chunk_complete), so a
+        # recording camera still holds ONE RTSP connection. The ingest worker
+        # reads this each tick and reconnects when it changes. The dedicated
+        # recorder above (``_continuous_workers``) remains only as a fallback
+        # for a camera without a running ingest.
+        self._shared_continuous: dict[str, dict[str, Any]] = {}
+        # Decoder each camera's ingest is using ('gpu' / 'cpu'), for status.
+        self._ingest_decode: dict[str, dict[str, Any]] = {}
         self._missing_ffmpeg_warnings: set[str] = set()
         # Final audio muxes are serialized because each operation creates a
         # second copy of a clip on the recordings filesystem. Concurrent
@@ -526,11 +541,62 @@ class RecordingService:
             camera_key = self._camera_key(camera_id)
             chunks_dir = self.recordings_dir / f'continuous-{camera_key}'
             chunks_dir.mkdir(parents=True, exist_ok=True)
+            if self._attach_continuous_to_ingest(camera_key, stream_url, chunks_dir, chunk_seconds, on_chunk_complete):
+                return True
             self._ensure_continuous_chunk_worker(camera_key, stream_url, chunks_dir, chunk_seconds, on_chunk_complete)
             return True
 
+    def _attach_continuous_to_ingest(
+        self,
+        camera_key: str,
+        stream_url: str,
+        chunks_dir: Path,
+        chunk_seconds: int,
+        on_chunk_complete: Callable[[str, Path], None] | None,
+    ) -> bool:
+        """Record continuous chunks through the camera's running ingest ffmpeg.
+
+        Returns False (caller starts the dedicated recorder instead) when the
+        camera has no live ingest on this stream URL. On success any dedicated
+        recorder left from before is stopped, so only one ffmpeg ever writes
+        the ``continuous-<key>/`` directory; the ingest picks the new output up
+        on its next tick (one reconnect, only when the setting changes).
+        """
+        with self._prebuffer_lock:
+            ingest = self._prebuffer_workers.get(camera_key)
+            thread = (ingest or {}).get('thread')
+            alive = (
+                ingest is not None
+                and ingest.get('stream_url') == stream_url
+                and isinstance(thread, threading.Thread)
+                and thread.is_alive()
+            )
+        if not alive:
+            return False
+        self._shared_continuous[camera_key] = {
+            'chunks_dir': chunks_dir,
+            'chunk_seconds': int(chunk_seconds),
+            'on_chunk_complete': on_chunk_complete,
+        }
+        with self._continuous_lock:
+            dedicated = self._continuous_workers.pop(camera_key, None)
+            if dedicated:
+                self._stop_worker(dedicated, join_timeout=self.CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS)
+        return True
+
+    @staticmethod
+    def _continuous_signature(entry: dict[str, Any] | None) -> tuple[str, int] | None:
+        if not entry:
+            return None
+        return str(entry['chunks_dir']), int(entry['chunk_seconds'])
+
+    def ingest_decode_status(self) -> dict[str, dict[str, Any]]:
+        """Per-camera decoder in use by the shared ingest (for System > Health)."""
+        return {key: dict(value) for key, value in self._ingest_decode.items()}
+
     def stop_continuous_chunk_recording(self, camera_id: str) -> None:
         camera_key = self._camera_key(camera_id)
+        self._shared_continuous.pop(camera_key, None)
         # Bug 4 fix: hold ``_continuous_lock`` through the join so a
         # concurrent ``_ensure_continuous_chunk_worker`` cannot start a new
         # ffmpeg writing into the just-vacated ``continuous-{key}/`` directory
@@ -550,6 +616,7 @@ class RecordingService:
         # concurrent ensure for any key can't race in. The join_timeout
         # (``CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS``) matches
         # ``_ensure_continuous_chunk_worker``'s worst-case ceiling.
+        self._shared_continuous.clear()
         with self._continuous_lock:
             workers = list(self._continuous_workers.values())
             self._continuous_workers = {}
@@ -565,6 +632,8 @@ class RecordingService:
         RecordingService is rebuilt.
         """
         camera_key = self._camera_key(camera_id)
+        self._shared_continuous.pop(camera_key, None)
+        self._ingest_decode.pop(camera_key, None)
         with self._prebuffer_lock:
             worker = self._prebuffer_workers.pop(camera_key, None)
             if worker:
@@ -1317,6 +1386,9 @@ class RecordingService:
         stall_seconds = max(self.PREBUFFER_SEGMENT_SECONDS * 5, 20)
         consecutive_failures = 0
         last_failure_log_at = 0.0  # time.monotonic() of the last emitted WARNING
+        # Set once GPU decoding has failed for this camera: it then decodes on
+        # the CPU for the rest of the worker's life (see app.video_decode).
+        gpu_decode_failed = False
 
         while not stop_event.is_set():
             from app.config_facades import effective_live_config as _elc
@@ -1418,6 +1490,46 @@ class RecordingService:
                     '1',
                     str(audio_pattern),
                 ]
+            # Decoder for the detection frames (output 2). The stream-copied
+            # outputs and audio are never decoded, so -hwaccel only moves the
+            # frame decode - the app's largest CPU cost - onto NVDEC.
+            desired_decode = resolve_video_decode(_live_config.get('video_decode'))
+            decode = 'cpu' if gpu_decode_failed else desired_decode
+            input_index = command.index('-i')
+            command[input_index:input_index] = hwaccel_input_args(decode)
+            self._ingest_decode[camera_key] = {
+                'camera_id': camera_id,
+                'decode': decode,
+                'setting': normalize_video_decode(_live_config.get('video_decode')),
+                'gpu_fallback': gpu_decode_failed,
+            }
+            # Output 4 (only while continuous recording is on): the continuous
+            # chunks, from this same connection instead of a second RTSP session.
+            continuous = self._shared_continuous.get(camera_key)
+            continuous_signature = self._continuous_signature(continuous)
+            chunk_list_file: Path | None = None
+            chunks_seen = 0
+            if continuous:
+                chunks_dir = Path(continuous['chunks_dir'])
+                chunks_dir.mkdir(parents=True, exist_ok=True)
+                chunk_list_file = chunks_dir / '.segment_list.txt'
+                chunk_list_file.unlink(missing_ok=True)
+                command += [
+                    '-map', '0:v:0',
+                    '-map', '0:a:0?',
+                    '-c:v', 'copy',
+                    '-c:a', 'aac',
+                    '-b:a', '128k',
+                    '-f', 'segment',
+                    '-segment_time', str(int(continuous['chunk_seconds'])),
+                    '-segment_format', 'mp4',
+                    '-reset_timestamps', '1',
+                    '-strftime', '1',
+                    '-segment_list', str(chunk_list_file),
+                    '-segment_list_type', 'flat',
+                    str(chunks_dir / f'continuous_{camera_key}_%Y%m%dT%H%M%S.mp4'),
+                ]
+            planned_restart = False
 
             stderr_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
             stderr_path = Path(stderr_file.name)
@@ -1461,9 +1573,22 @@ class RecordingService:
                     # second; this avoids doubling that scan plus an audio-dir
                     # scan per camera per second on the shared-ingest hot loop.
                     prune_tick += 1
+                    if continuous and chunk_list_file is not None:
+                        callback = (self._shared_continuous.get(camera_key) or continuous).get('on_chunk_complete')
+                        chunks_seen = self._drain_chunk_list(camera_key, chunks_dir, chunk_list_file, chunks_seen, callback)
+                    # Reconnect once when continuous recording is switched on/off
+                    # for this camera, or the decoder setting changes.
+                    if self._continuous_signature(self._shared_continuous.get(camera_key)) != continuous_signature:
+                        restart_reason = 'continuous_recording_changed'
+                        planned_restart = True
+                        break
                     if prune_tick % 5 == 0:
                         self._prune_prebuffer_segments(camera_dir, keep_seconds)
                         self._prune_audio_segments(audio_camera_dir, keep_seconds)
+                        if not gpu_decode_failed and resolve_video_decode(_elc().get('video_decode')) != decode:
+                            restart_reason = 'video_decode_changed'
+                            planned_restart = True
+                            break
                     # Dead-stream detection: if the camera stops sending data
                     # ffmpeg can hang indefinitely. If no new segment has been
                     # written within several segment intervals, kill and restart.
@@ -1481,7 +1606,11 @@ class RecordingService:
                         # SIGKILL rather than SIGTERM: the stream is already dead so
                         # graceful cleanup is pointless, and ffmpeg can segfault in its
                         # RTSP teardown path when the connection is in a broken state.
-                        process.kill()
+                        # Exception: an open continuous chunk (a plain MP4) needs the
+                        # graceful exit to write its index, so terminate it instead
+                        # and let the ``finally`` below escalate if it hangs.
+                        if not continuous:
+                            process.kill()
                         break
                     time.sleep(1)
             finally:
@@ -1489,7 +1618,9 @@ class RecordingService:
                 if return_code is None:
                     process.terminate()
                     try:
-                        process.wait(timeout=2)
+                        # A continuous chunk is a plain MP4 whose index is written
+                        # on exit; give it the same 5s the dedicated recorder had.
+                        process.wait(timeout=5 if continuous else 2)
                     except subprocess.TimeoutExpired:
                         process.kill()
                         try:
@@ -1497,12 +1628,39 @@ class RecordingService:
                         except subprocess.TimeoutExpired:
                             pass
                     return_code = process.poll()
+                # Surface the chunk ffmpeg finalised while exiting, as the
+                # dedicated recorder does, so it is not orphaned on disk.
+                if continuous and chunk_list_file is not None:
+                    callback = (self._shared_continuous.get(camera_key) or continuous).get('on_chunk_complete')
+                    chunks_seen = self._drain_chunk_list(camera_key, chunks_dir, chunk_list_file, chunks_seen, callback)
                 try:
                     stderr_content = stderr_path.read_text(encoding='utf-8', errors='replace')
                     if stderr_content.strip():
                         logger.debug('Prebuffer ffmpeg %s: %s', camera_key, stderr_content.strip()[:1000])
                 except OSError:
                     stderr_content = ''
+                # GPU decoding that fails right away (driver, codec or ffmpeg
+                # build without working CUDA) falls back to the CPU for this
+                # camera instead of leaving it without detection frames.
+                if (
+                    decode == 'gpu'
+                    and not planned_restart
+                    and not stop_event.is_set()
+                    and return_code not in (None, 0)
+                    and time.time() - ffmpeg_started_at < self.PREBUFFER_HEALTHY_RUN_SECONDS
+                    and is_gpu_decode_error(stderr_content)
+                ):
+                    gpu_decode_failed = True
+                    just_disabled_audio = True  # reconnect now, without the backoff
+                    logger.warning('GPU video decoding failed for %s; decoding on the CPU instead.', camera_key)
+                    self._emit_diagnostic(
+                        worker_state.get('camera_id') or camera_key,
+                        'ingest_gpu_decode_fallback',
+                        'GPU video decoding failed for this camera, so it now decodes on the CPU. '
+                        'Check the NVIDIA driver and that ffmpeg supports CUDA (ffmpeg -hwaccels).',
+                        severity='warning',
+                        details={'stderr_tail': self.redact_stream_credentials((stderr_content or '')[-500:])},
+                    )
                 # ffmpeg aborts with "Output file does not contain any stream"
                 # when an output target has no mapped streams - on a video-only
                 # camera that means the audio-WAV output. Detect it from the
@@ -1541,7 +1699,7 @@ class RecordingService:
                 # Emit a diagnostic when ffmpeg exits unexpectedly (not via stop_event)
                 # so operators can see frequent restarts that would leave the prebuffer
                 # empty at event time.
-                if not stop_event.is_set() and return_code not in (None, 0):
+                if not stop_event.is_set() and not planned_restart and return_code not in (None, 0):
                     uptime = time.time() - ffmpeg_started_at
                     camera_id = worker_state.get('camera_id') or camera_key
                     stderr_tail = self.redact_stream_credentials((stderr_content or '')[-500:])
@@ -1563,8 +1721,10 @@ class RecordingService:
                 # Skip the backoff on the recovery iteration so a worker that
                 # just lost its audio output reconnects video-only immediately
                 # rather than after 1-5s of doing nothing.
-                if just_disabled_audio:
+                if just_disabled_audio or planned_restart:
                     just_disabled_audio = False
+                    if planned_restart:
+                        logger.info('Camera ingest for %s reconnecting (%s).', camera_key, restart_reason)
                 else:
                     run_seconds = time.time() - ffmpeg_started_at
                     if run_seconds >= self.PREBUFFER_HEALTHY_RUN_SECONDS:

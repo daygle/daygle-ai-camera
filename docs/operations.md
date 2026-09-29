@@ -39,6 +39,29 @@ Daygle accepts H.264/AVC and H.265/HEVC RTSP streams. Camera-vendor H.265+ strea
 
 For reliable AI detection, use the H.264 detection/ingest stream and reserve H.265 or H.265+ for the main/recording stream. If the connection test reports that FFmpeg lacks the HEVC decoder, update the FFmpeg package or choose standard H.265/H.264 output on the camera. A proprietary H.265+ bitstream that FFmpeg cannot decode cannot be made compatible by the application.
 
+### One connection per camera
+
+Each camera has one ffmpeg ingest process holding a single RTSP connection. It fans out to every consumer:
+
+| Output | Used by |
+|---|---|
+| Rolling 4-second video segments (stream copy) | Event clips (pre-roll) |
+| Decoded frames (`latest.jpg`, *Detection Frame Rate* per second) | Motion, object and face detection; live snapshots; AI descriptions |
+| 1-second 16 kHz audio segments | Sound detection |
+| Continuous-recording chunks (stream copy), only while continuous recording is on | Continuous recordings |
+
+Continuous recording used to open a second connection per camera; it now rides the same ingest. Switching it on or off, or changing the chunk length, reconnects the ingest once. A camera without a running ingest still falls back to a dedicated recorder.
+
+### Video decoding on the GPU
+
+Decoding the camera stream for detection is usually the largest CPU cost: H.264/H.265 cannot skip frames, so the whole stream is decoded even though only a few frames a second are kept. **Settings → Detection & Live → Video Decoding** chooses where:
+
+- **Auto** (default): the NVIDIA GPU's video decoder (NVDEC) when an NVIDIA card is present and `ffmpeg -hwaccels` lists `cuda`; otherwise the CPU.
+- **GPU**: NVDEC whenever ffmpeg supports it.
+- **CPU**: always the CPU.
+
+NVDEC is separate from the CUDA cores that run detection and the AI model, so it does not slow them down; each decoding camera uses some GPU memory. Only the detection frames are decoded: recordings, pre-roll and audio are stream-copied either way. If GPU decoding fails for a camera (driver, codec or an ffmpeg build without working CUDA), that camera switches to the CPU on its own and the Camera Log records an `ingest_gpu_decode_fallback` entry. **Admin → System → Health** shows which decoder each camera is using. Changing the setting reconnects each camera once.
+
 ## Camera log
 
 Use **Camera Log** (`/camera-log`) to investigate operational issues. The log includes:

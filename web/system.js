@@ -17,6 +17,8 @@ const els = {
   vramValue: document.getElementById('vramValue'),
   vramSub: document.getElementById('vramSub'),
   gpuNote: document.getElementById('systemGpuNote'),
+  decodeSummary: document.getElementById('videoDecodeSummary'),
+  decodeCameras: document.getElementById('videoDecodeCameras'),
 };
 
 // ─── System resource cards (CPU / Load / RAM) ───────────────────────────────
@@ -56,6 +58,35 @@ function renderSystemResources(res) {
 
   renderGpuStatus(res?.gpu);
   renderVramStatus(res?.gpu);
+  renderVideoDecode(res?.video_decode);
+}
+
+// ─── Video decoding card ────────────────────────────────────────────────────
+// Which decoder each camera's ingest uses (app.video_decode): the NVIDIA
+// GPU's NVDEC, or the CPU. Set under Settings > Detection & Live.
+const DECODE_SETTING_LABELS = { auto: 'Auto', gpu: 'GPU', cpu: 'CPU' };
+
+function renderVideoDecode(status) {
+  if (!els.decodeSummary || !status) return;
+  const cameras = Array.isArray(status.cameras) ? status.cameras : [];
+  const onGpu = cameras.filter((camera) => camera.decode === 'gpu').length;
+  const setting = DECODE_SETTING_LABELS[status.setting] || 'Auto';
+  let summary = `Setting: ${setting}. `;
+  if (!status.ffmpeg_cuda) {
+    summary += 'This ffmpeg cannot decode on an NVIDIA GPU (no "cuda" in ffmpeg -hwaccels), so video is decoded on the CPU.';
+  } else if (!cameras.length) {
+    summary += 'No camera is connected yet.';
+  } else {
+    summary += `${onGpu} of ${cameras.length} camera${cameras.length === 1 ? '' : 's'} decoding on the GPU.`;
+  }
+  els.decodeSummary.textContent = summary;
+  if (!els.decodeCameras) return;
+  els.decodeCameras.innerHTML = cameras.map((camera) => {
+    const gpu = camera.decode === 'gpu';
+    const note = camera.gpu_fallback ? ' (GPU failed; using CPU)' : '';
+    return `<div class="decode-row"><strong>${escapeHtml(camera.name || camera.camera_id || '')}</strong>`
+      + `<span class="status-badge">${gpu ? 'GPU (NVDEC)' : 'CPU'}${escapeHtml(note)}</span></div>`;
+  }).join('');
 }
 
 // ─── GPU health card ────────────────────────────────────────────────────────

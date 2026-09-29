@@ -87,6 +87,9 @@ def test_prebuffer_worker_disables_audio_when_stream_lacks_it(tmp_path, monkeypa
 
     monkeypatch.setattr(recordings_module.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
     monkeypatch.setattr(recordings_module.subprocess, "Popen", fake_popen)
+    # Pin the decoder so the GPU-decode capability probe (app.video_decode)
+    # does not add its own ffmpeg launches to the count below.
+    monkeypatch.setattr(recordings_module, "resolve_video_decode", lambda _setting: "cpu")
 
     service._run_prebuffer_worker(
         camera_key,
@@ -169,6 +172,9 @@ def test_prebuffer_worker_skips_audio_when_marker_already_present(tmp_path, monk
 
     monkeypatch.setattr(recordings_module.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
     monkeypatch.setattr(recordings_module.subprocess, "Popen", fake_popen)
+    # Pin the decoder so the GPU-decode capability probe (app.video_decode)
+    # does not add its own ffmpeg launches to the count below.
+    monkeypatch.setattr(recordings_module, "resolve_video_decode", lambda _setting: "cpu")
 
     service._run_prebuffer_worker(
         camera_key,
