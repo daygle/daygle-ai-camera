@@ -400,6 +400,10 @@ window.daygleAuthReady = (async () => {
             <button id="navLogoutBtn" class="nav-dropdown-item" type="button">Logout</button>
           </div>
         </div>
+        <button id="navThemeToggle" class="nav-theme-toggle" type="button" aria-label="Switch theme">
+          <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
       </div>
     </div>
     <div class="app-nav-scrim" aria-hidden="true"></div>`;
@@ -534,19 +538,33 @@ window.daygleAuthReady = (async () => {
       const btn = document.getElementById('navTheme' + t.charAt(0).toUpperCase() + t.slice(1));
       if (btn) btn.classList.toggle('active', t === theme);
     });
+    const quick = document.getElementById('navThemeToggle');
+    if (quick) {
+      const dark = !document.documentElement.classList.contains('light');
+      quick.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+      quick.title = quick.getAttribute('aria-label');
+      quick.classList.toggle('is-dark', dark);
+    }
   }
 
-  document.getElementById('navThemeSystem')?.addEventListener('click', () => {
-    setActiveThemeButton('system');
-    if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref('system');
-  });
-  document.getElementById('navThemeLight')?.addEventListener('click', () => {
-    setActiveThemeButton('light');
-    if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref('light');
-  });
-  document.getElementById('navThemeDark')?.addEventListener('click', () => {
-    setActiveThemeButton('dark');
-    if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref('dark');
+  // Apply a theme and save it to the profile. Every page applies the
+  // profile's theme on load, so a choice that was only applied locally
+  // reverted on the next page.
+  function chooseTheme(theme) {
+    if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref(theme);
+    setActiveThemeButton(theme);
+    const user = window.daygleAuth?.user;
+    if (!user || typeof window.api !== 'function') return;
+    user.theme = theme;
+    window.api('/api/profile', { method: 'PUT', body: JSON.stringify({ theme }) })
+      .catch((error) => window.showToast?.(`Could not save theme: ${error.message}`, true));
+  }
+
+  document.getElementById('navThemeSystem')?.addEventListener('click', () => chooseTheme('system'));
+  document.getElementById('navThemeLight')?.addEventListener('click', () => chooseTheme('light'));
+  document.getElementById('navThemeDark')?.addEventListener('click', () => chooseTheme('dark'));
+  document.getElementById('navThemeToggle')?.addEventListener('click', () => {
+    chooseTheme(document.documentElement.classList.contains('light') ? 'dark' : 'light');
   });
 
   const logoutBtn = document.getElementById('navLogoutBtn');

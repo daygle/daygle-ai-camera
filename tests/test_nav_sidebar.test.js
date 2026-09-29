@@ -44,3 +44,14 @@ test('the sidebar is fixed on desktop and a drawer on phones', () => {
   assert.match(css, /\.app-nav\.nav-open \.app-nav-body \{ transform: none; \}/);
   assert.match(css, /body\.has-sidebar \.shell \{ width: auto; max-width: none;/);
 });
+
+test('a theme chosen in the sidebar is saved to the profile', () => {
+  // Every page applies the profile's theme on load, so a choice that was
+  // only applied locally reverted on the next page.
+  assert.match(nav, /window\.api\('\/api\/profile', \{ method: 'PUT', body: JSON\.stringify\(\{ theme \}\) \}\)/);
+  for (const id of ['navThemeSystem', 'navThemeLight', 'navThemeDark']) {
+    assert.match(nav, new RegExp(`getElementById\\('${id}'\\)\\?\\.addEventListener\\('click', \\(\\) => chooseTheme\\(`));
+  }
+  assert.match(nav, /id="navThemeToggle"/);
+  assert.match(nav, /chooseTheme\(document\.documentElement\.classList\.contains\('light'\) \? 'dark' : 'light'\)/);
+});

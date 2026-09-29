@@ -6109,6 +6109,7 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-card-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 14px;
   margin: 0 0 18px;
@@ -6117,7 +6118,8 @@ button.secondary:disabled, a.secondary:disabled {
   border-radius: 14px;
   background: rgba(71,214,255,.045);
 }
-.zone-card-actions > div:first-child { min-width: 0; }
+/* The text keeps a readable width; the buttons wrap below it in a narrow column. */
+.zone-card-actions > div:first-child { flex: 1 1 200px; min-width: 0; }
 .zone-card-actions strong,
 .zone-card-actions span { display: block; }
 .zone-card-actions strong { color: var(--text); font-size: 12px; }
@@ -7110,9 +7112,28 @@ body.has-sidebar { padding-left: var(--sidebar-w); background: var(--bg); }
 .nav-group-links { display: none; gap: 2px; padding-top: 2px; }
 .nav-group.open .nav-group-links { display: grid; }
 
-/* Account: bottom of the sidebar, menu opens upwards. */
-.app-nav-account { padding: 10px; border-top: 1px solid var(--border); }
+/* Account: bottom of the sidebar, menu opens upwards; the sun/moon button
+   beside it switches light/dark in one click. */
+.app-nav-account { display: flex; align-items: center; gap: 6px; padding: 10px; border-top: 1px solid var(--border); }
+.app-nav-account .nav-dropdown { flex: 1; min-width: 0; }
 .nav-dropdown { position: relative; }
+.nav-theme-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.nav-theme-toggle:hover { color: var(--text); background: var(--hover); }
+.nav-theme-toggle .icon-sun { display: none; }
+.nav-theme-toggle.is-dark .icon-sun { display: block; }
+.nav-theme-toggle.is-dark .icon-moon { display: none; }
 .nav-dropdown-trigger {
   display: flex;
   align-items: center;
