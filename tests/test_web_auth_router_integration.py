@@ -137,7 +137,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
     surfaced as an indicator on the Events row.
 
     The 24 paths are: ``/``, ``/favicon.ico``, ``/login``, ``/setup``,
-    ``/live``, ``/zones``, ``/alerts``, ``/sounds``, ``/objects``, ``/cameras``,
+    ``/live``, ``/system``, ``/zones``, ``/alerts``, ``/sounds``, ``/objects``, ``/cameras``,
     ``/events``, ``/search``, ``/recordings``, ``/snapshots``,
     ``/recordings/timeline``,
     ``/onnx``, ``/camera-models``, ``/ai``, ``/arcface``, ``/yamnet-tflite``,
@@ -151,6 +151,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
         "/login",
         "/setup",
         "/live",
+        "/system",
         "/zones",
         "/alerts",
         "/sounds",
@@ -269,28 +270,12 @@ def test_auth_router_registers_expected_auth_endpoints(app_modules):
 def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
     tmp_path, monkeypatch
 ):
-    """GET /search serves the SAME response as GET /.
+    """Live is the home page; the old dashboard paths redirect.
 
-    Bootstrap: ``_setup_admin`` + ``_login``. After that, ``GET /``
-    returns the dashboard shell (200 + Content-Type + body).
-
-    ``/search`` is mounted on ``dashboard_aliases`` which returns
-    ``root()`` -- so the same dashboard shell. We assert status,
-    Content-Type, and body all match ``GET /`` exactly. ``/events`` is
-    served by its own ``events_page`` function (the dedicated Events
-    page), so it is checked separately for a distinct 200 response
-    rather than byte-equality with the shell.
-
-    This is the marquee proof: the 2-decorator pattern on
-    ``dashboard_aliases`` truly routes through FastAPI to the same
-    handler as ``GET /`` (no chance copy/paste drift introduced
-    hidden differences in the paths).
-
-    Why a body-bytes equality check rather than just status code?
-    Because a refactor that accidentally moves an alias to a separate
-    function body returning a different component still produces
-    status == 200. The byte-equality is the only way to prove the
-    delegation works at the response-body level.
+    ``GET /`` serves the Live page. ``/live`` (its old address) and
+    ``/search`` (served by ``dashboard_aliases``; footage search now lives
+    on Events) are permanent redirects, so old bookmarks keep working.
+    ``/events`` is its own page.
     """
     app, _database_path = _load_app(tmp_path, monkeypatch)
     _server_obj, _thread, base_url = _server(app)
@@ -299,39 +284,19 @@ def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
         _setup_admin(client)
         _login(client)
 
-        # GET / -- the dashboard shell that dashboard_aliases delegates to.
-        root_status, root_headers, root_body = client.request("/")
-        assert root_status == 200, (
-            f"GET / should return 200 after login (dashboard shell) "
-            f"but got {root_status}"
-        )
-        root_content_type = LocalClient.header(root_headers, "Content-Type")
+        root_status, _root_headers, root_body = client.request("/")
+        assert root_status == 200
+        assert "Live Footage" in root_body
 
-        # /search -- should be BYTE-IDENTICAL to / (still a dashboard alias).
-        for path in ("/search",):
-            status, headers, body = client.request(path)
-            assert status == 200, (
-                f"GET {path} should return 200 after login but got {status}"
-            )
-            content_type = LocalClient.header(headers, "Content-Type")
-            assert content_type == root_content_type, (
-                f"GET {path} Content-Type ({content_type!r}) differs "
-                f"from GET / ({root_content_type!r}); "
-                f"dashboard_aliases delegation drift"
-            )
-            assert body == root_body, (
-                f"GET {path} body differs from GET /; "
-                f"dashboard_aliases delegation drift -- the alias "
-                f"decorator paths must serve identical content"
-            )
+        for path, target in (("/live", "/"), ("/search", "/events")):
+            status, headers, _body = client.request(path, follow_redirects=False)
+            assert status == 308, f"GET {path} should redirect, got {status}"
+            assert LocalClient.header(headers, "Location") == target
 
-        # /events is served by its own dedicated events_page function (the
-        # single activity feed), so it should be a distinct 200 response, NOT
-        # the dashboard shell.
         events_status, _events_headers, _events_body = client.request("/events")
-        assert events_status == 200, (
-            f"GET /events should return 200 after login but got {events_status}"
-        )
+        assert events_status == 200
+        system_status, _system_headers, system_body = client.request("/system")
+        assert system_status == 200 and 'id="cpuValue"' in system_body
     finally:
         _server_obj.should_exit = True
         _thread.join(timeout=5)

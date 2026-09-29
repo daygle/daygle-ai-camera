@@ -28,7 +28,7 @@ def stats(request: Request, since: str | None = Query(None), cameras_config=Depe
 def system_resources_status(request: Request):
     """Host CPU / load-average / RAM / GPU snapshot for the dashboard cards."""
     require_admin(request)
-    # GPU thermal thresholds are admin-tunable (Settings -> System -> GPU
+    # GPU thermal thresholds are admin-tunable (Settings -> Maintenance -> GPU
     # Health); fall back to the module defaults when unset.
     system = effective_system_config()
     return system_resources(

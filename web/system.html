@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<script>(function(){var t=localStorage.getItem("daygle.theme");if(t!=="dark")document.documentElement.classList.add("light");})()</script>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>System - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Admin</p>
+        <h1>System</h1>
+        <p class="muted">Live health of this server: processor, memory and the GPU running detection. Refreshes every 5 seconds. GPU temperature warning levels are set in Settings &rarr; Maintenance.</p>
+      </div>
+    </header>
+
+    <section class="grid stats-grid">
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">CPU</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>
+          </span>
+        </div>
+        <strong id="cpuValue" class="stat-card-value">-</strong>
+        <small class="muted stat-card-sub" id="cpuSub">Processor usage</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Load</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          </span>
+        </div>
+        <strong id="loadValue" class="stat-card-value">-</strong>
+        <small class="muted stat-card-sub" id="loadSub">1 / 5 / 15 min average</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">RAM</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="1"/><path d="M6 7v10M10 7v10M14 7v10M18 7v10"/></svg>
+          </span>
+        </div>
+        <strong id="ramValue" class="stat-card-value">-</strong>
+        <small class="muted stat-card-sub" id="ramSub">Memory usage</small>
+      </article>
+      <article class="card stat-card" id="gpuCard" hidden>
+        <div class="stat-card-head">
+          <span class="stat-card-label">GPU</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
+          </span>
+        </div>
+        <strong id="gpuValue" class="stat-card-value">-</strong>
+        <small class="muted stat-card-sub" id="gpuSub">Graphics card</small>
+      </article>
+      <article class="card stat-card" id="vramCard" hidden>
+        <div class="stat-card-head">
+          <span class="stat-card-label">VRAM</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 7v10M10 7v10M14 7v10M18 7v10"/></svg>
+          </span>
+        </div>
+        <strong id="vramValue" class="stat-card-value">-</strong>
+        <small class="muted stat-card-sub" id="vramSub">GPU memory usage</small>
+      </article>
+    </section>
+
+    <p id="systemGpuNote" class="muted" hidden>No NVIDIA GPU detected: detection is running on the CPU.</p>
+  </main>
+
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/system.js"></script>
+</body>
+</html>

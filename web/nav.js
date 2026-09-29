@@ -217,53 +217,57 @@ window.daygleAuthReady = (async () => {
   const currentPath = window.location.pathname;
   const nav = document.createElement('nav');
   nav.className = 'app-nav';
+  nav.setAttribute('aria-label', 'Main');
 
   /* ── Active-target matching ──────────────────────────────────────────────
-   * A nav target matches the current path on an exact hit or when the path
+   * A target matches the current path on an exact hit or when the path
    * continues past a "/" boundary (so "/recordings" matches "/recordings/42"
-   * but never "/recordings-archive"); "/" only matches the dashboard root.
-   * The ACTIVE target is the single longest such match, so
-   * "/recordings/timeline" lights up Timeline alone rather than Recordings
-   * and Timeline together, while "/recordings/{id}" still lights up
-   * Recordings. ``activeNavMatch`` is computed once below, after the nav
-   * structure is defined; ``dropdownIsActive`` (invoked later) reads it. */
+   * but never "/recordings-archive"); "/" only matches the home page. Each
+   * sidebar entry may cover several pages (``matches``): Recordings also
+   * lights up on Timeline and Snapshots, which are tabs of that section. */
   function pathMatchesNav(path, match) {
     if (match === '/') return path === '/';
     return path === match || path.startsWith(`${match}/`);
   }
-  function dropdownIsActive(links) {
-    return links.some((l) => (l.match || '') === activeNavMatch);
-  }
 
-  /* ── Define nav structure ── */
+  /* ── Icons (24px stroke icons, drawn at 16px) ── */
+  const ICONS = {
+    live: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m22 8-6 4 6 4V8z"/>',
+    events: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+    recordings: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4"/>',
+    cameras: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+    zones: '<path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/>',
+    alerts: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+    detection: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+    ai: '<path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/>',
+    models: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+    users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+    system: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4M6 12l3-3 2 2 4-4 3 3"/>',
+  };
+  const icon = (name) => `<svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+
+  /* ── Sidebar structure ──────────────────────────────────────────────────
+   * Daily pages at the top; set-once configuration in collapsible groups.
+   * ``matches`` lists every page an entry owns (its page tabs, below). */
   const primaryLinks = [
-    { href: '/', match: '/', label: 'Dashboard' },
-    { href: '/events', match: '/events', label: 'Events' },
-    { href: '/live', match: '/live', label: 'Live' },
+    { href: '/', matches: ['/'], label: 'Live', icon: 'live' },
+    { href: '/events', matches: ['/events'], label: 'Events', icon: 'events' },
+    { href: '/recordings', matches: ['/recordings', '/snapshots'], label: 'Recordings', icon: 'recordings' },
   ];
 
-  const dropdowns = [    { id: 'navMonitor',
-      label: 'Monitoring',
+  const dropdowns = [
+    {
+      id: 'navSetup',
+      label: 'Setup',
       admin: true,
       links: [
-        { href: '/cameras', match: '/cameras', label: 'Cameras' },
-        { href: '/zones', match: '/zones', label: 'Zones' },
-        { href: '/alerts', match: '/alerts', label: 'Alerts' },
-        { href: '/objects', match: '/objects', label: 'Objects' },
-        { href: '/sounds', match: '/sounds', label: 'Sounds' },
-        { href: '/face-recognition', match: '/face-recognition', label: 'Face Recognition' },
+        { href: '/cameras', matches: ['/cameras'], label: 'Cameras', icon: 'cameras' },
+        { href: '/zones', matches: ['/zones'], label: 'Zones', icon: 'zones' },
+        { href: '/alerts', matches: ['/alerts'], label: 'Alerts', icon: 'alerts' },
         // People enrolment lives on the Face Recognition page's People tab
         // (/face-recognition#people); /people redirects there.
-      ],
-    },
-    {
-      id: 'navData',
-      label: 'Clips',
-      admin: false,
-      links: [
-        { href: '/recordings', match: '/recordings', label: 'Recordings' },
-        { href: '/snapshots', match: '/snapshots', label: 'Snapshots' },
-        { href: '/recordings/timeline', match: '/recordings/timeline', label: 'Timeline' },
+        { href: '/objects', matches: ['/objects', '/sounds', '/face-recognition'], label: 'Detection', icon: 'detection' },
       ],
     },
     {
@@ -271,11 +275,8 @@ window.daygleAuthReady = (async () => {
       label: 'Intelligence',
       admin: true,
       links: [
-        { href: '/ai', match: '/ai', label: 'AI' },
-        { href: '/onnx', match: '/onnx', label: 'ONNX' },
-        { href: '/camera-models', match: '/camera-models', label: 'Camera Models' },
-        { href: '/yamnet-tflite', match: '/yamnet-tflite', label: 'YAMNet TFLite' },
-        { href: '/arcface', match: '/arcface', label: 'ArcFace' },
+        { href: '/ai', matches: ['/ai'], label: 'AI', icon: 'ai' },
+        { href: '/onnx', matches: ['/onnx', '/camera-models', '/yamnet-tflite', '/arcface'], label: 'Models', icon: 'models' },
       ],
     },
     {
@@ -283,74 +284,100 @@ window.daygleAuthReady = (async () => {
       label: 'Admin',
       admin: true,
       links: [
-        { href: '/settings', match: '/settings', label: 'Settings' },
-        { href: '/users', match: '/users', label: 'Users' },
-        { href: '/camera-log', match: '/camera-log', label: 'Camera Log' },
-        { href: '/application-log', match: '/application-log', label: 'Application Log' },
-        { href: '/audit', match: '/audit', label: 'Audit Log' },
+        { href: '/settings', matches: ['/settings'], label: 'Settings', icon: 'settings' },
+        { href: '/users', matches: ['/users'], label: 'Users', icon: 'users' },
+        { href: '/system', matches: ['/system', '/camera-log', '/application-log', '/audit'], label: 'System', icon: 'system' },
       ],
     },
   ];
 
-  // Longest matching target across every nav link (primary + dropdown).
-  const activeNavMatch = (() => {
-    const allMatches = [
-      ...primaryLinks.map((l) => l.match),
-      ...dropdowns.flatMap((dd) => dd.links.map((l) => l.match)),
-    ];
+  /* ── Page tabs: sibling pages shown as one section ─────────────────────
+   * Each group renders as a tab strip under the page heading. ``admin``
+   * tabs are hidden for viewers by renderNavAccount like the sidebar. */
+  const PAGE_TABS = [
+    [
+      { href: '/recordings', label: 'Recordings', match: (p) => p === '/recordings' || /^\/recordings\/\d+$/.test(p) },
+      { href: '/recordings/timeline', label: 'Timeline' },
+      { href: '/snapshots', label: 'Snapshots' },
+    ],
+    [
+      { href: '/objects', label: 'Objects' },
+      { href: '/sounds', label: 'Sounds' },
+      { href: '/face-recognition', label: 'Faces' },
+    ],
+    [
+      { href: '/onnx', label: 'Object Models' },
+      { href: '/camera-models', label: 'Camera Models' },
+      { href: '/yamnet-tflite', label: 'Sound Model' },
+      { href: '/arcface', label: 'Face Model' },
+    ],
+    [
+      { href: '/system', label: 'Health' },
+      { href: '/camera-log', label: 'Camera Log' },
+      { href: '/application-log', label: 'Application Log' },
+      { href: '/audit', label: 'Audit Log' },
+    ],
+  ];
+
+  // The single entry owning this page: the longest matching target.
+  const activeHref = (() => {
     let best = null;
-    for (const match of allMatches) {
-      if (pathMatchesNav(currentPath, match) && (best === null || match.length > best.length)) {
-        best = match;
+    let bestLength = -1;
+    for (const link of [...primaryLinks, ...dropdowns.flatMap((dd) => dd.links)]) {
+      for (const match of link.matches) {
+        if (pathMatchesNav(currentPath, match) && match.length > bestLength) {
+          best = link.href;
+          bestLength = match.length;
+        }
       }
     }
     return best;
   })();
 
-  /* ── Determine active dropdown ── */
-  function findActiveDropdown() {
-    for (const dd of dropdowns) {
-      if (dropdownIsActive(dd.links)) return dd.id;
-    }
-    return null;
-  }
-  const activeDropdownId = findActiveDropdown();
+  /* ── Group open state: the active group is always open; others remember
+   * the user's last choice (Cloudflare-style collapsible sections). */
+  const GROUP_STATE_KEY = 'daygle.navGroups';
+  let savedGroups = {};
+  try { savedGroups = JSON.parse(localStorage.getItem(GROUP_STATE_KEY) || '{}') || {}; } catch { savedGroups = {}; }
+
+  const renderLink = (link) => {
+    const active = link.href === activeHref;
+    return `<a href="${link.href}" class="nav-item${active ? ' active' : ''}"${active ? ' aria-current="page"' : ''}>${icon(link.icon)}<span>${link.label}</span></a>`;
+  };
 
   /* ── Build HTML ── */
   let html = `
-    <a class="app-brand" href="/">
-      <span class="brand-mark">D</span>
-      <span class="brand-text">Daygle AI Camera</span>
-    </a>
-    <button class="app-nav-toggle" type="button" aria-label="Toggle navigation">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-    </button>
+    <div class="app-topbar">
+      <button class="app-nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <a class="app-brand" href="/">
+        <span class="brand-mark">D</span>
+        <span class="brand-text">Daygle AI Camera</span>
+      </a>
+    </div>
     <div class="app-nav-body">
-      <div class="app-nav-links">`;
+      <a class="app-brand app-sidebar-brand" href="/">
+        <span class="brand-mark">D</span>
+        <span class="brand-text">Daygle AI Camera</span>
+      </a>
+      <div class="app-nav-links">
+        <div class="nav-section">`;
+  html += primaryLinks.map(renderLink).join('');
+  html += `
+        </div>`;
 
-  /* Primary links */
-  for (const link of primaryLinks) {
-    const isActive = link.match === activeNavMatch;
-    html += `<a href="${link.href}" class="nav-item${isActive ? ' active' : ''}">${link.label}</a>`;
-  }
-
-  /* Dropdown groups */
   for (const dd of dropdowns) {
-    const isActive = dd.id === activeDropdownId;
+    const containsActive = dd.links.some((link) => link.href === activeHref);
+    const open = containsActive || savedGroups[dd.id] !== false;
     const adminAttr = dd.admin ? ' data-admin="true"' : '';
     html += `
-        <div class="nav-dropdown${isActive ? ' active' : ''}" data-dropdown="${dd.id}"${adminAttr}>
-          <button type="button" class="nav-dropdown-trigger${isActive ? ' active' : ''}" aria-haspopup="true" aria-expanded="false">
-            <span class="nav-dropdown-label">${dd.label}</span>
-            <svg class="nav-dropdown-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        <div class="nav-group${open ? ' open' : ''}${containsActive ? ' active' : ''}" data-group="${dd.id}"${adminAttr}>
+          <button type="button" class="nav-group-trigger" aria-expanded="${open}">
+            <span>${dd.label}</span>
+            <svg class="nav-group-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
-          <div class="nav-dropdown-menu">`;
-    for (const link of dd.links) {
-      const linkActive = link.match === activeNavMatch;
-      html += `<a href="${link.href}" class="nav-dropdown-item${linkActive ? ' active' : ''}">${link.label}</a>`;
-    }
-    html += `
-          </div>
+          <div class="nav-group-links">${dd.links.map(renderLink).join('')}</div>
         </div>`;
   }
 
@@ -361,11 +388,11 @@ window.daygleAuthReady = (async () => {
           <button type="button" class="nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">
             <span id="navAvatar" class="nav-avatar"></span>
             <span id="navUser" class="nav-dropdown-label">Profile</span>
-            <svg class="nav-dropdown-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            <svg class="nav-dropdown-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
           </button>
           <div class="nav-dropdown-menu">
             <a href="/profile" class="nav-dropdown-item">Profile</a>
-            <div style="border-top:1px solid var(--border);margin:4px 0;padding:6px 12px;font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Theme</div>
+            <div class="nav-menu-heading">Theme</div>
             <button id="navThemeSystem" class="nav-dropdown-item" type="button">System</button>
             <button id="navThemeLight" class="nav-dropdown-item" type="button">Light</button>
             <button id="navThemeDark" class="nav-dropdown-item" type="button">Dark</button>
@@ -373,13 +400,59 @@ window.daygleAuthReady = (async () => {
             <button id="navLogoutBtn" class="nav-dropdown-item" type="button">Logout</button>
           </div>
         </div>
+        <button id="navThemeToggle" class="nav-theme-toggle" type="button" aria-label="Switch theme">
+          <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
       </div>
-    </div>`;
+    </div>
+    <div class="app-nav-scrim" aria-hidden="true"></div>`;
 
   nav.innerHTML = html;
   document.body.prepend(nav);
+  document.body.classList.add('has-sidebar');
 
-  /* ── Dropdown interaction ── */
+  /* ── Page tab strip for the current section ── */
+  const tabGroup = PAGE_TABS.find((tabs) => tabs.some((tab) => (tab.match ? tab.match(currentPath) : pathMatchesNav(currentPath, tab.href))));
+  const main = document.querySelector('main');
+  if (tabGroup && main) {
+    const strip = document.createElement('nav');
+    strip.className = 'page-tabs';
+    strip.setAttribute('aria-label', 'Section');
+    strip.innerHTML = tabGroup.map((tab) => {
+      const active = tab.match ? tab.match(currentPath) : pathMatchesNav(currentPath, tab.href);
+      return `<a href="${tab.href}" class="page-tab${active ? ' active' : ''}"${active ? ' aria-current="page"' : ''}>${tab.label}</a>`;
+    }).join('');
+    const hero = main.querySelector(':scope > .hero');
+    if (hero) hero.after(strip);
+    else main.prepend(strip);
+  }
+
+  /* ── Breadcrumb: the page's eyebrow names its place in the menu, e.g.
+   * "Setup › Detection", so page headings never drift from the sidebar. */
+  const eyebrow = main?.querySelector(':scope > .hero .eyebrow');
+  const ownerGroup = dropdowns.find((dd) => dd.links.some((link) => link.href === activeHref));
+  const ownerLink = [...primaryLinks, ...dropdowns.flatMap((dd) => dd.links)].find((link) => link.href === activeHref);
+  if (eyebrow && ownerLink) {
+    // Top-level pages (Live, Events, Recordings) need no breadcrumb: it would
+    // only repeat the title.
+    eyebrow.textContent = ownerGroup ? `${ownerGroup.label} › ${ownerLink.label}` : '';
+    eyebrow.hidden = !ownerGroup;
+  }
+
+  /* ── Group collapse ── */
+  nav.querySelectorAll('.nav-group-trigger').forEach((trigger) => {
+    trigger.addEventListener('click', () => {
+      const group = trigger.closest('.nav-group');
+      const open = !group.classList.contains('open');
+      group.classList.toggle('open', open);
+      trigger.setAttribute('aria-expanded', String(open));
+      savedGroups[group.dataset.group] = open;
+      try { localStorage.setItem(GROUP_STATE_KEY, JSON.stringify(savedGroups)); } catch { /* private mode */ }
+    });
+  });
+
+  /* ── Account dropdown ── */
   let openDropdown = null;
 
   function closeAllDropdowns() {
@@ -412,49 +485,27 @@ window.daygleAuthReady = (async () => {
     }
   });
 
-  /* Desktop: close dropdown on mouse-leave with small delay */
-  nav.querySelectorAll('.nav-dropdown').forEach((wrapper) => {
-    let leaveTimer = null;
-    wrapper.addEventListener('mouseenter', () => {
-      if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; }
-    });
-    wrapper.addEventListener('mouseleave', () => {
-      if (!wrapper.classList.contains('open')) return;
-      leaveTimer = setTimeout(() => {
-        wrapper.classList.remove('open');
-        const trigger = wrapper.querySelector('.nav-dropdown-trigger');
-        if (trigger) trigger.setAttribute('aria-expanded', 'false');
-        if (openDropdown === wrapper) openDropdown = null;
-      }, 200);
-    });
-  });
-
-  /* Close dropdowns on Escape */
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeAllDropdowns();
-  });
-
-  /* Close mobile menu when a link is clicked */
-  nav.querySelectorAll('.nav-item, .nav-dropdown-item').forEach((link) => {
-    link.addEventListener('click', () => {
-      nav.classList.remove('nav-open');
-    });
-  });
-
-  /* ── Mobile toggle ── */
+  /* ── Mobile drawer ── */
   const toggle = nav.querySelector('.app-nav-toggle');
-  if (toggle) {
-    toggle.addEventListener('click', (e) => {
-      e.stopPropagation();
-      nav.classList.toggle('nav-open');
-    });
+  function setDrawer(open) {
+    nav.classList.toggle('nav-open', open);
+    document.body.classList.toggle('nav-drawer-open', open);
+    if (toggle) toggle.setAttribute('aria-expanded', String(open));
   }
+  toggle?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setDrawer(!nav.classList.contains('nav-open'));
+  });
+  nav.querySelector('.app-nav-scrim')?.addEventListener('click', () => setDrawer(false));
+  nav.querySelectorAll('.nav-item').forEach((link) => {
+    link.addEventListener('click', () => setDrawer(false));
+  });
 
-  /* Close mobile nav on outside click */
-  document.addEventListener('click', (e) => {
-    if (nav.classList.contains('nav-open') && !nav.contains(e.target)) {
-      nav.classList.remove('nav-open');
-    }
+  /* Close the drawer and dropdowns on Escape */
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    closeAllDropdowns();
+    setDrawer(false);
   });
 
   /* ── Auth ── */
@@ -487,19 +538,33 @@ window.daygleAuthReady = (async () => {
       const btn = document.getElementById('navTheme' + t.charAt(0).toUpperCase() + t.slice(1));
       if (btn) btn.classList.toggle('active', t === theme);
     });
+    const quick = document.getElementById('navThemeToggle');
+    if (quick) {
+      const dark = !document.documentElement.classList.contains('light');
+      quick.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+      quick.title = quick.getAttribute('aria-label');
+      quick.classList.toggle('is-dark', dark);
+    }
   }
 
-  document.getElementById('navThemeSystem')?.addEventListener('click', () => {
-    setActiveThemeButton('system');
-    if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref('system');
-  });
-  document.getElementById('navThemeLight')?.addEventListener('click', () => {
-    setActiveThemeButton('light');
-    if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref('light');
-  });
-  document.getElementById('navThemeDark')?.addEventListener('click', () => {
-    setActiveThemeButton('dark');
-    if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref('dark');
+  // Apply a theme and save it to the profile. Every page applies the
+  // profile's theme on load, so a choice that was only applied locally
+  // reverted on the next page.
+  function chooseTheme(theme) {
+    if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref(theme);
+    setActiveThemeButton(theme);
+    const user = window.daygleAuth?.user;
+    if (!user || typeof window.api !== 'function') return;
+    user.theme = theme;
+    window.api('/api/profile', { method: 'PUT', body: JSON.stringify({ theme }) })
+      .catch((error) => window.showToast?.(`Could not save theme: ${error.message}`, true));
+  }
+
+  document.getElementById('navThemeSystem')?.addEventListener('click', () => chooseTheme('system'));
+  document.getElementById('navThemeLight')?.addEventListener('click', () => chooseTheme('light'));
+  document.getElementById('navThemeDark')?.addEventListener('click', () => chooseTheme('dark'));
+  document.getElementById('navThemeToggle')?.addEventListener('click', () => {
+    chooseTheme(document.documentElement.classList.contains('light') ? 'dark' : 'light');
   });
 
   const logoutBtn = document.getElementById('navLogoutBtn');

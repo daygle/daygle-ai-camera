@@ -1,6 +1,6 @@
 # Daygle AI Camera
 
-Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local development. It provides a browser-based dashboard for managing RTSP/ONVIF cameras, ONNX YOLO object detection, sound detection, event recordings, alerts, and audit logging.
+Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local development. It provides a browser-based web UI for managing RTSP/ONVIF cameras, ONNX YOLO object detection, sound detection, event recordings, alerts, and audit logging.
 
 ## Features
 
@@ -274,13 +274,13 @@ Daygle can manage one Cloudflare Tunnel connector for secure public HTTPS access
 2. Open **Network → Tunnels → Create a Tunnel**.
 3. Choose **Cloudflared**, name the tunnel, and create it.
 4. On the connector setup screen, copy the tunnel token (the value after `--token`).
-5. In Daygle, open **Settings → System → Cloudflare Tunnel**, paste the token, choose whether it should start automatically, and save it. The field is intentionally cleared after saving; the **Saved securely** indicator confirms that a token is present without revealing it. For tokens saved through the UI, Daygle stores only non-secret tunnel metadata in SQLite and keeps the token in a protected `0600` file next to the database; the token is never returned by the status API or written to logs.
+5. In Daygle, open **Settings → Network & Access → Cloudflare Tunnel**, paste the token, choose whether it should start automatically, and save it. The field is intentionally cleared after saving; the **Saved securely** indicator confirms that a token is present without revealing it. For tokens saved through the UI, Daygle stores only non-secret tunnel metadata in SQLite and keeps the token in a protected `0600` file next to the database; the token is never returned by the status API or written to logs.
 6. In the tunnel's **Public Hostnames** configuration, map your hostname to `http://localhost:8080` (or the port configured in Daygle). The card reports whether the connector is running, stopped, unconfigured, or needs attention. Start, stop, or restart it from the same card, or let it start automatically on boot.
 7. Browse to the HTTPS hostname. No port forwarding or additional SSL/reverse-proxy setup is required.
 
 For headless/service deployments, set `DAYGLE_CLOUDFLARED_TOKEN` in the service environment (a protected systemd drop-in is recommended). That token takes precedence over the saved UI value and automatically starts `cloudflared` at application boot. Do not put a token in a shell command or a world-readable config file; Daygle passes it to cloudflared through the child environment rather than its command line. Changing the binding after a UI save takes effect on the next Daygle restart.
 
-LAN serving is the default: even after a tunnel token is configured, Daygle keeps binding the configured `server.host` (typically `0.0.0.0`), so the connector and LAN clients coexist. To make the tunnel the only ingress, disable **Serve LAN While Tunnel Is Active** on the **LAN & Proxy Access** card in Settings → System (or set `server.tunnel_loopback_only: true` in `config.yaml`; a UI-saved value wins). In that tunnel-only mode Daygle binds Uvicorn to `127.0.0.1` and enables `--proxy-headers --forwarded-allow-ips=127.0.0.1`; this keeps the connector as the only ingress while preserving the client address supplied by the trusted local connector path for audit and login rate-limit handling.
+LAN serving is the default: even after a tunnel token is configured, Daygle keeps binding the configured `server.host` (typically `0.0.0.0`), so the connector and LAN clients coexist. To make the tunnel the only ingress, disable **Serve LAN While Tunnel Is Active** on the **LAN & Proxy Access** card in Settings → Network & Access (or set `server.tunnel_loopback_only: true` in `config.yaml`; a UI-saved value wins). In that tunnel-only mode Daygle binds Uvicorn to `127.0.0.1` and enables `--proxy-headers --forwarded-allow-ips=127.0.0.1`; this keeps the connector as the only ingress while preserving the client address supplied by the trusted local connector path for audit and login rate-limit handling.
 
 Deployments that need both the tunnel and LAN access (split DNS: LAN clients resolve the hostname to a local reverse proxy such as OPNsense HAProxy while external clients use the tunnel) keep both ingress paths on the same origin out of the box. The app binds the configured `server.host` (typically `0.0.0.0`) even while the tunnel is active, so the connector and the LAN proxy both reach it. Add the LAN reverse proxy's IP to `auth.trusted_proxies` (the **Trusted Proxy IPs** field on the **LAN & Proxy Access** card, or config) and have the proxy send `X-Forwarded-Proto` (and `X-Forwarded-For`) so the dashboard's origin checks, audit log, and login rate-limiting keep working for LAN clients. Changing the binding takes effect on the next Daygle restart.
 
@@ -294,24 +294,25 @@ If cloudflared cannot start or later exits, Daygle logs a clear warning and cont
 
 - `/setup` - initial admin creation
 - `/login` - user login
-- `/` - dashboard and event search
-- `/live` - live camera view with detection overlay
-- `/cameras` - camera management, recording, and PTZ
-- `/zones` - monitoring zone editor (use **Draw polygon** or **Full Frame** to add areas, and the per-zone **Shape** control to convert between full frame and polygon), visibility controls, and per-area detection scope: assign which objects, motion, and faces each area detects, their confidence, and whether each records. Notification delivery is configured on `/alerts`
-- `/alerts` - notification delivery policies (email, push, schedules, cooldowns) for the objects, motion, faces, and sound classes assigned on `/zones` and `/sounds`, plus recognized-person and stranger alerts; multiple policies can target the same subject with different schedules and thresholds
-- `/objects` - per-object detection behavior (Moving Only / Still Only / both) and still-alert thresholds with a global default; recording is set per area on `/zones`
-- `/sounds` - camera audio detection: enable it per camera and choose which sound classes the camera listens for, their confidence, and whether each records; notification delivery is configured on `/alerts`
-- `/onnx` - AI model library and detector settings
-- `/camera-models` - per-camera YOLO model assignment (assign, switch, or unassign a dedicated object-detection model per camera)
-- `/settings` - detection, recording, notifications, retention, backup, Cloudflare Tunnel, and updates
-- `/users` - user management (admin)
-- `/profile` - change your own password
-- `/audit` - audit log
-- `/recordings` - recordings list
-- `/recordings/timeline` - timeline playback
-- `/camera-log` - camera diagnostics
-- `/application-log` - in-browser application log viewer
-- `/yamnet-tflite` - sound detection backend status
+
+The web UI has a left sidebar (a slide-in menu on phones). Pages that belong together are tabs of one section.
+
+- **Live** (`/`) - live camera view with detection overlay (the home page; `/live` redirects here)
+- **Events** (`/events`) - the activity feed, with plain-English footage search (`/search` redirects here)
+- **Recordings** - tabs: Recordings (`/recordings`), Timeline (`/recordings/timeline`), Snapshots (`/snapshots`)
+- **Setup** (admin)
+  - **Cameras** (`/cameras`) - camera management, recording, and PTZ
+  - **Zones** (`/zones`) - monitoring zone editor (use **Draw polygon** or **Full Frame** to add areas, and the per-zone **Shape** control to convert between full frame and polygon), visibility controls, and per-area detection scope: assign which objects, motion, and faces each area detects, their confidence, and whether each records. Notification delivery is configured on Alerts
+  - **Alerts** (`/alerts`) - notification delivery policies (email, push, schedules, cooldowns) for the objects, motion, faces, and sound classes assigned on Zones and Sounds, plus recognized-person and stranger alerts; multiple policies can target the same subject with different schedules and thresholds
+  - **Detection** - tabs: Objects (`/objects`, per-object Moving Only / Still Only behavior and still-alert thresholds), Sounds (`/sounds`, per-camera audio detection classes), Faces (`/face-recognition`)
+- **Intelligence** (admin)
+  - **AI** (`/ai`) - the local vision model: alert verification, event descriptions, search and AI tags
+  - **Models** - tabs: Object Models (`/onnx`), Camera Models (`/camera-models`, per-camera YOLO model assignment), Sound Model (`/yamnet-tflite`), Face Model (`/arcface`)
+- **Admin** (admin)
+  - **Settings** (`/settings`) - tabs: Detection & Live, Recording & Storage, Notifications, Network & Access (Cloudflare Tunnel, LAN & proxy, login security), Maintenance (updates, GPU health, backup, danger zone)
+  - **Users** (`/users`) - user management
+  - **System** - tabs: Health (`/system`, CPU, load, RAM, GPU and VRAM), Camera Log (`/camera-log`), Application Log (`/application-log`), Audit Log (`/audit`)
+- `/profile` - change your own password and theme (account menu at the bottom of the sidebar)
 
 ## Events, recordings, and alerts
 
@@ -410,7 +411,7 @@ sudo systemctl restart daygle-ai-camera
 
 The updater verifies that the Git origin is the canonical `daygle/daygle-ai-camera` repository, refreshes Python dependencies, provisions the optional `cloudflared` binary, and migrates older systemd launchers to `python -m app.server` when it has the required privileges. It may fall back to installing `cloudflared` inside the application virtual environment when system-wide installation is unavailable.
 
-Admins can also use **Settings → System → Software Updates**. A successful browser-initiated service update schedules a restart when the installation permits it; otherwise restart the service manually.
+Admins can also use **Settings → Maintenance → Software Updates**. A successful browser-initiated service update schedules a restart when the installation permits it; otherwise restart the service manually.
 
 ## Tests
 

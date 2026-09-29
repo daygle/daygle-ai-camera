@@ -149,8 +149,8 @@ def test_static_files_bypass_auth(tmp_path, monkeypatch):
     server, thread, base_url = _server(app)
     try:
         # No _setup_admin, no _login -- still needs to serve.
-        status, _headers, _body = LocalClient(base_url).request("/static/app.js")
-        assert status == 200, f"/static/app.js (no admin, no session) expected 200, got {status}"
+        status, _headers, _body = LocalClient(base_url).request("/static/utils.js")
+        assert status == 200, f"/static/utils.js (no admin, no session) expected 200, got {status}"
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -173,15 +173,15 @@ def test_static_assets_must_revalidate_every_load(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
     try:
-        status, headers, _body = LocalClient(base_url).request("/static/app.js")
+        status, headers, _body = LocalClient(base_url).request("/static/utils.js")
         assert status == 200
         cache_control = LocalClient.header(headers, "Cache-Control") or ""
         assert "no-cache" in cache_control, (
-            f"/static/app.js should be revalidated every load; "
+            f"/static/utils.js should be revalidated every load; "
             f"got Cache-Control={cache_control!r}"
         )
         assert "must-revalidate" in cache_control, (
-            f"/static/app.js Cache-Control should require revalidation; "
+            f"/static/utils.js Cache-Control should require revalidation; "
             f"got {cache_control!r}"
         )
     finally:

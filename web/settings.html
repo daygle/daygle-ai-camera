@@ -12,7 +12,7 @@
   <main class="shell page-stack">
     <header class="hero">
       <div>
-        <p class="eyebrow">Administration</p>
+        <p class="eyebrow">Admin</p>
         <h1>Settings</h1>
         <p class="muted">Manage camera, recording, storage, notifications, and login settings.</p>
       </div>
@@ -22,9 +22,10 @@
 
     <div class="settings-tabs" role="tablist" aria-label="Settings sections">
       <button class="settings-tab" type="button" role="tab" id="tab-detection" aria-controls="panel-detection" data-tab="detection" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">⚡</span><span class="settings-tab-label">Detection &amp; Live</span></button>
-      <button class="settings-tab" type="button" role="tab" id="tab-recording" aria-controls="panel-recording" data-tab="recording" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🎬</span><span class="settings-tab-label">Recording</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-recording" aria-controls="panel-recording" data-tab="recording" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🎬</span><span class="settings-tab-label">Recording &amp; Storage</span></button>
       <button class="settings-tab" type="button" role="tab" id="tab-notifications" aria-controls="panel-notifications" data-tab="notifications" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🔔</span><span class="settings-tab-label">Notifications</span></button>
-      <button class="settings-tab" type="button" role="tab" id="tab-system" aria-controls="panel-system" data-tab="system" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">⚙️</span><span class="settings-tab-label">System</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-network" aria-controls="panel-network" data-tab="network" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🌐</span><span class="settings-tab-label">Network &amp; Access</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-maintenance" aria-controls="panel-maintenance" data-tab="maintenance" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🛠️</span><span class="settings-tab-label">Maintenance</span></button>
     </div>
 
     <div class="settings-panel" id="panel-detection" role="tabpanel" aria-labelledby="tab-detection" data-panel="detection">
@@ -377,23 +378,7 @@
 
     </div><!-- /panel-notifications -->
 
-    <div class="settings-panel" id="panel-system" role="tabpanel" aria-labelledby="tab-system" data-panel="system" hidden>
-
-    <section class="card" id="updateSection">
-      <div class="settings-section-header">
-        <div class="settings-section-icon" aria-hidden="true">🔄</div>
-        <div>
-          <h2>Software Updates</h2>
-          <p class="settings-section-subtitle">Current version: <strong id="currentVersion">Loading…</strong>. Check for and apply updates from GitHub.</p>
-        </div>
-      </div>
-      <div id="updateStatus" class="status-panel" style="display:none"></div>
-      <div class="button-row">
-        <button id="checkUpdateBtn" class="btn-info" type="button">Check for Updates</button>
-        <button id="applyUpdateBtn" class="btn-warning" type="button" style="display:none">Apply Update</button>
-      </div>
-      <pre id="updateOutput" class="update-output" style="display:none"></pre>
-    </section>
+    <div class="settings-panel" id="panel-network" role="tabpanel" aria-labelledby="tab-network" data-panel="network" hidden>
 
     <section class="card" id="cloudflareTunnelSection">
       <div class="settings-section-header">
@@ -461,6 +446,50 @@
       </div>
     </section>
 
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🔒</div>
+        <div>
+          <h2>Login Security</h2>
+          <p class="settings-section-subtitle">Protect against brute-force attacks and manage session duration.</p>
+        </div>
+      </div>
+      <form id="authSettingsForm" class="form-grid">
+        <label>
+          <span>Session Timeout (hours) <span class="info-tip" data-tip="How long a user stays logged in before re-authentication is required. Default: 12 hours" title="How long a user stays logged in before re-authentication is required. Default: 12 hours" tabindex="0" aria-label="Help: How long a user stays logged in before re-authentication is required. Default: 1..."></span></span>
+          <input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="12" /></label>
+        <label>
+          <span>Max Login Attempts <span class="info-tip" data-tip="Number of failed attempts before the account is temporarily locked. Default: 5" title="Number of failed attempts before the account is temporarily locked. Default: 5" tabindex="0" aria-label="Help: Number of failed attempts before the account is temporarily locked. Default: 5"></span></span>
+          <input name="max_login_attempts" type="number" min="1" max="100" placeholder="5" /></label>
+        <label>
+          <span>Lockout Minutes <span class="info-tip" data-tip="How long the account is locked after exceeding max login attempts. Default: 15 minutes" title="How long the account is locked after exceeding max login attempts. Default: 15 minutes" tabindex="0" aria-label="Help: How long the account is locked after exceeding max login attempts. Default: 15 m..."></span></span>
+          <input name="lockout_minutes" type="number" min="1" max="1440" placeholder="15" /></label>
+      </form>
+      <div class="button-row">
+        <button type="submit" form="authSettingsForm">Save Login Security</button>
+      </div>
+    </section>
+
+    </div><!-- /panel-network -->
+
+    <div class="settings-panel" id="panel-maintenance" role="tabpanel" aria-labelledby="tab-maintenance" data-panel="maintenance" hidden>
+
+    <section class="card" id="updateSection">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🔄</div>
+        <div>
+          <h2>Software Updates</h2>
+          <p class="settings-section-subtitle">Current version: <strong id="currentVersion">Loading…</strong>. Check for and apply updates from GitHub.</p>
+        </div>
+      </div>
+      <div id="updateStatus" class="status-panel" style="display:none"></div>
+      <div class="button-row">
+        <button id="checkUpdateBtn" class="btn-info" type="button">Check for Updates</button>
+        <button id="applyUpdateBtn" class="btn-warning" type="button" style="display:none">Apply Update</button>
+      </div>
+      <pre id="updateOutput" class="update-output" style="display:none"></pre>
+    </section>
+
     <section class="card" id="gpuHealthCard">
       <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">🖥️</div>
@@ -477,7 +506,7 @@
           <span>Critical Temperature (°C) <span class="info-tip" data-tip="The dashboard GPU card turns red at this temperature - treat it as the card's throttle limit (the Tesla P4 throttles at ~90°C). Default: 90°C" title="The dashboard GPU card turns red at this temperature - treat it as the card's throttle limit. Default: 90°C" tabindex="0" aria-label="Help: The dashboard GPU card turns red at this temperature - treat it as the card's throttle limit. Default: 90°C"></span></span>
           <input name="gpu_temp_critical_c" type="number" min="40" max="150" step="1" placeholder="90" /></label>
       </form>
-      <p class="field-help">These values apply to the GPU card on the Dashboard. The defaults match the Tesla P4's ~90°C throttle ceiling; tune them to your own card's limit.</p>
+      <p class="field-help">These values apply to the GPU card on Admin → System. The defaults match the Tesla P4's ~90°C throttle ceiling; tune them to your own card's limit.</p>
       <div class="button-row">
         <button type="submit" form="gpuHealthForm">Save GPU Health Settings</button>
       </div>
@@ -503,30 +532,6 @@
       </div>
     </section>
 
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon" aria-hidden="true">🔒</div>
-        <div>
-          <h2>Login Security</h2>
-          <p class="settings-section-subtitle">Protect against brute-force attacks and manage session duration.</p>
-        </div>
-      </div>
-      <form id="authSettingsForm" class="form-grid">
-        <label>
-          <span>Session Timeout (hours) <span class="info-tip" data-tip="How long a user stays logged in before re-authentication is required. Default: 12 hours" title="How long a user stays logged in before re-authentication is required. Default: 12 hours" tabindex="0" aria-label="Help: How long a user stays logged in before re-authentication is required. Default: 1..."></span></span>
-          <input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="12" /></label>
-        <label>
-          <span>Max Login Attempts <span class="info-tip" data-tip="Number of failed attempts before the account is temporarily locked. Default: 5" title="Number of failed attempts before the account is temporarily locked. Default: 5" tabindex="0" aria-label="Help: Number of failed attempts before the account is temporarily locked. Default: 5"></span></span>
-          <input name="max_login_attempts" type="number" min="1" max="100" placeholder="5" /></label>
-        <label>
-          <span>Lockout Minutes <span class="info-tip" data-tip="How long the account is locked after exceeding max login attempts. Default: 15 minutes" title="How long the account is locked after exceeding max login attempts. Default: 15 minutes" tabindex="0" aria-label="Help: How long the account is locked after exceeding max login attempts. Default: 15 m..."></span></span>
-          <input name="lockout_minutes" type="number" min="1" max="1440" placeholder="15" /></label>
-      </form>
-      <div class="button-row">
-        <button type="submit" form="authSettingsForm">Save Login Security</button>
-      </div>
-    </section>
-
     <section class="card danger-zone-card">
       <div class="settings-section-header settings-section-header-danger">
         <div class="settings-section-icon settings-section-icon-danger" aria-hidden="true">⚠️</div>
@@ -546,7 +551,7 @@
       </div>
     </section>
 
-    </div><!-- /panel-system -->
+    </div><!-- /panel-maintenance -->
 
   </main>
   <script src="/static/nav.js"></script>

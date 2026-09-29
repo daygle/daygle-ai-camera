@@ -95,7 +95,7 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
         csrf = _login(client)
         status, _headers, root = client.request("/")
         assert status == 200
-        assert "Dashboard" in root
+        assert "Live Footage" in root   # Live is the home page
 
         status, _headers, payload = client.request("/api/status")
         assert status == 200
@@ -112,7 +112,7 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
         assert client.request("/api/alerts")[0] == 200
         assert client.request("/api/stats")[2]["total_events"] == 0
         assert client.request("/api/config")[2]["auth"]["enabled"] is True
-        assert client.request("/static/app.js")[0] == 200
+        assert client.request("/static/live.js")[0] == 200
 
         with sqlite3.connect(database_path) as db:
             tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}

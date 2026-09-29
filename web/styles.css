@@ -153,12 +153,6 @@
   border-color: rgba(2, 132, 199, 0.36);
   box-shadow: 0 8px 32px rgba(0,0,0,.10);
 }
-:root.light .app-nav-toggle { background: rgba(0,0,0,.04); }
-:root.light .app-nav-toggle:hover { color: var(--text); border-color: rgba(0,0,0,.18); }
-:root.light .app-nav-body .nav-item:hover,
-:root.light .app-nav-body .nav-dropdown-trigger:hover {
-  background: rgba(0,0,0,.04);
-}
 :root.light .nav-dropdown-menu {
   background: var(--panel-strong);
   box-shadow: 0 12px 40px rgba(0,0,0,.12);
@@ -330,196 +324,7 @@ body {
 .shell.page-stack { display: grid; gap: 18px; }
 .shell.page-stack .hero { margin-bottom: 6px; }
 .shell:not(.page-stack) > .card + .card { margin-top: 18px; }
-/* ─── Top navigation ───────────────────────────────────────────────────── */
-.app-nav {
-  position: sticky;
-  top: 0;
-  z-index: 50;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 14px;
-  width: min(1280px, calc(100% - 32px));
-  margin: 0 auto;
-  padding: 10px 0;
-  backdrop-filter: blur(18px);
-}
-.app-brand,
-.app-nav a {
-  color: var(--text);
-  text-decoration: none;
-  font-weight: 850;
-}
-.app-brand { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  color: #04111c;
-  background: linear-gradient(135deg, var(--accent), var(--success));
-  font-size: 14px;
-  font-weight: 900;
-}
-.brand-text { font-size: 15px; }
-
-/* ── User avatar initial ── */
-.nav-avatar {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 999px;
-  color: #04111c;
-  background: linear-gradient(135deg, var(--accent), var(--success));
-  font-size: 12px;
-  font-weight: 900;
-  flex-shrink: 0;
-  line-height: 1;
-}
-
-/* ── Mobile toggle ── */
-.app-nav-toggle {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: rgba(255,255,255,.05);
-  color: var(--muted);
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.app-nav-toggle:hover { color: var(--text); border-color: rgba(255,255,255,.18); }
-.app-nav-toggle:active { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.25); }
-
-/* ── Nav body (links + account) ── */
-.app-nav-body {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.app-nav-links,
-.app-nav-account {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-.app-nav-links { flex: 1; min-width: 0; }
-.app-nav-account { justify-content: flex-end; gap: 6px; }
-
-/* ── Shared nav item pill ── */
-.nav-item,
-.nav-dropdown-trigger {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  color: var(--muted);
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  background: none;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.nav-item.active,
-.nav-dropdown-trigger.active,
-.nav-item:hover,
-.nav-dropdown-trigger:hover {
-  border-color: var(--border);
-  color: var(--text);
-  background: rgba(255,255,255,.06);
-}
-.nav-item:active,
-.nav-dropdown-trigger:active {
-  background: rgba(255,255,255,.10);
-  border-color: rgba(255,255,255,.18);
-  transition-duration: 0.05s;
-}
-
-/* ── Dropdown ── */
-.nav-dropdown { position: relative; }
-.nav-dropdown-trigger { gap: 5px; }
-.nav-dropdown-chevron {
-  transition: transform 0.2s ease;
-  opacity: 0.5;
-}
-.nav-dropdown.open .nav-dropdown-chevron,
-.nav-dropdown.active .nav-dropdown-chevron { opacity: 0.8; }
-.nav-dropdown.active .nav-dropdown-trigger { color: var(--text); }
-.nav-dropdown.open .nav-dropdown-trigger {
-  border-color: var(--border);
-  color: var(--text);
-  background: rgba(255,255,255,.06);
-}
-.nav-dropdown.open .nav-dropdown-chevron { transform: rotate(180deg); }
-.nav-dropdown-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  min-width: 180px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--panel-strong);
-  backdrop-filter: blur(20px);
-  box-shadow: 0 16px 48px rgba(0,0,0,.45);
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(-6px);
-  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
-  z-index: 60;
-}
-.nav-dropdown.open .nav-dropdown-menu {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
-.nav-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 12px;
-  min-height: 44px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
-  background: none;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
-  -webkit-tap-highlight-color: transparent;
-}
-.nav-dropdown-item:hover {
-  border-color: var(--border);
-  color: var(--text);
-  background: rgba(255,255,255,.06);
-}
-.nav-dropdown-item.active {
-  border-color: var(--border);
-  color: var(--text);
-  background: rgba(255,255,255,.06);
-}
-.nav-dropdown-item:active {
-  background: rgba(255,255,255,.10);
-  transition-duration: 0.05s;
-}
-
-/* Account dropdown: align menu to the right so it doesn't overflow off-screen */
-.app-nav-account .nav-dropdown-menu { right: 0; left: auto; }
+/* Navigation: see "App shell: sidebar navigation" at the end of this file. */
 
 /* ─── Session countdown ─────────────────────────────────────────────────── */
 .nav-countdown {
@@ -854,8 +659,10 @@ textarea {
   color: var(--accent);
   background: rgba(71, 214, 255, 0.12);
 }
+/* The bubble exists only while shown: a hidden 280px bubble beside the
+   right edge would otherwise widen the page and add a sideways scroll. */
 .info-tip::after {
-  content: attr(data-tip);
+  content: none;
   position: absolute;
   bottom: calc(100% + 8px);
   left: 50%;
@@ -881,6 +688,7 @@ textarea {
 }
 .info-tip:hover::after,
 .info-tip:focus::after {
+  content: attr(data-tip);
   opacity: 1;
   visibility: visible;
 }
@@ -1330,80 +1138,6 @@ input[type="file"] { padding: 10px; }
   font-weight: 800;
 }
 @media (max-width: 900px) {
-  .app-nav-toggle { display: flex; }
-  .app-nav-body {
-    display: flex;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    background: rgba(7, 11, 19, 0.96);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    z-index: 55;
-    opacity: 0;
-    visibility: hidden;
-    transform: translateY(-8px);
-    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
-    pointer-events: none;
-    max-height: calc(100vh - 64px);
-    overflow-y: auto;
-  }
-  :root.light .app-nav-body {
-    background: rgba(242, 245, 250, 0.98);
-    border-bottom-color: var(--border);
-  }
-  .app-nav.nav-open .app-nav-body {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0);
-    pointer-events: auto;
-  }
-  .app-nav-links {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 2px;
-  }
-  .app-nav-links .nav-item,
-  .app-nav-links .nav-dropdown-trigger {
-    justify-content: space-between;
-    width: 100%;
-    border-radius: 10px;
-  }
-  .app-nav-account {
-    flex-direction: row;
-    justify-content: flex-start;
-    gap: 6px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border);
-  }
-  .nav-dropdown-menu {
-    position: static;
-    box-shadow: none;
-    background: rgba(255,255,255,.03);
-    border: none;
-    border-radius: 10px;
-    padding: 4px 0 4px 16px;
-    transform: none;
-    opacity: 1;
-    visibility: visible;
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.25s ease, padding 0.25s ease;
-    padding-top: 0;
-    padding-bottom: 0;
-    backdrop-filter: none;
-  }
-  .nav-dropdown.open .nav-dropdown-menu {
-    max-height: 400px;
-    padding: 4px 0 4px 16px;
-  }
-  .nav-dropdown-item { padding: 11px 12px; min-height: 44px; }
   .hero { flex-direction: column; align-items: stretch; }
   /* A horizontal hero's flex-basis (420px on .onnx-hero-copy /
      .arcface-hero-copy) reserves WIDTH; once the hero stacks vertically that
@@ -2202,7 +1936,6 @@ tr.drag-over {
 /* Small phones (≤600px): compact nav, tighter cards, section headers that wrap */
 @media (max-width: 600px) {
   .card { padding: 16px; }
-  .brand-text { display: none; }
   /* Playback header actions stack cleanly on small phones. */
   .page-stack .button-row.clip-player-actions {
     width: 100%;
@@ -6376,6 +6109,7 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-card-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 14px;
   margin: 0 0 18px;
@@ -6384,7 +6118,8 @@ button.secondary:disabled, a.secondary:disabled {
   border-radius: 14px;
   background: rgba(71,214,255,.045);
 }
-.zone-card-actions > div:first-child { min-width: 0; }
+/* The text keeps a readable width; the buttons wrap below it in a narrow column. */
+.zone-card-actions > div:first-child { flex: 1 1 200px; min-width: 0; }
 .zone-card-actions strong,
 .zone-card-actions span { display: block; }
 .zone-card-actions strong { color: var(--text); font-size: 12px; }
@@ -7281,3 +7016,310 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-rule-table input:disabled { opacity: .5; }
 .zone-rule-toggle input:disabled + span { opacity: .5; }
 :root.light .zone-rule-advanced-row > td { background: rgba(0, 0, 0, .02); }
+
+/* ═══ App shell: sidebar navigation ═══════════════════════════════════════
+   A fixed left sidebar (brand, primary pages, collapsible groups, account at
+   the bottom) with the page using the full remaining width, in the style of
+   an admin console. On phones the sidebar becomes a slide-in drawer behind a
+   slim top bar. nav.js adds body.has-sidebar, so pages without the nav
+   (login, setup) keep their centred layout. */
+:root { --sidebar-w: 248px; --topbar-h: 56px; }
+
+body.has-sidebar { padding-left: var(--sidebar-w); background: var(--bg); }
+
+.app-nav {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 60;
+  width: var(--sidebar-w);
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+.app-topbar { display: none; }
+.app-nav-scrim { display: none; }
+.app-nav-body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.app-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.app-sidebar-brand { padding: 16px 18px 14px; border-bottom: 1px solid var(--border); }
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: #04111c;
+  background: linear-gradient(135deg, var(--accent), var(--success));
+  font-size: 13px;
+  font-weight: 900;
+}
+.brand-text { font-size: 14px; }
+
+.app-nav-links { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 10px 16px; }
+.nav-section { display: grid; gap: 2px; padding-bottom: 8px; }
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.12s, color 0.12s;
+}
+.nav-item:hover { background: var(--hover); color: var(--text); }
+.nav-item.active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.nav-item.active .nav-icon { color: var(--accent); }
+.nav-icon { flex: 0 0 auto; opacity: 0.9; }
+
+.nav-group { border-top: 1px solid var(--border); padding: 6px 0; }
+.nav-group-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.nav-group-trigger:hover { color: var(--text); background: var(--hover); }
+.nav-group.active .nav-group-trigger { color: var(--text); }
+.nav-group-chevron { transition: transform 0.15s ease; opacity: 0.7; transform: rotate(-90deg); }
+.nav-group.open .nav-group-chevron { transform: rotate(0); }
+.nav-group-links { display: none; gap: 2px; padding-top: 2px; }
+.nav-group.open .nav-group-links { display: grid; }
+
+/* Account: bottom of the sidebar, menu opens upwards; the sun/moon button
+   beside it switches light/dark in one click. */
+.app-nav-account { display: flex; align-items: center; gap: 6px; padding: 10px; border-top: 1px solid var(--border); }
+.app-nav-account .nav-dropdown { flex: 1; min-width: 0; }
+.nav-dropdown { position: relative; }
+.nav-theme-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.nav-theme-toggle:hover { color: var(--text); background: var(--hover); }
+.nav-theme-toggle .icon-sun { display: none; }
+.nav-theme-toggle.is-dark .icon-sun { display: block; }
+.nav-theme-toggle.is-dark .icon-moon { display: none; }
+.nav-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.nav-dropdown-trigger:hover, .nav-dropdown.open .nav-dropdown-trigger { background: var(--hover); border-color: var(--border); }
+.nav-dropdown-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; white-space: nowrap; }
+.nav-dropdown-chevron { opacity: 0.6; }
+.nav-avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  color: #04111c;
+  background: linear-gradient(135deg, var(--accent), var(--success));
+  font-size: 11px;
+  font-weight: 900;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.nav-dropdown-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-strong);
+  box-shadow: 0 16px 48px rgba(0,0,0,.35);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  z-index: 70;
+}
+.nav-dropdown.open .nav-dropdown-menu { opacity: 1; visibility: visible; transform: none; }
+.nav-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.nav-dropdown-item:hover, .nav-dropdown-item.active { background: var(--hover); color: var(--text); }
+.nav-menu-heading {
+  margin: 4px 0 0;
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Content: full width beside the sidebar. */
+body.has-sidebar .shell { width: auto; max-width: none; margin: 0; padding: 24px 32px 40px; }
+/* minmax(0, 1fr): a wide table or strip scrolls inside its own card instead
+   of stretching the whole page column past the viewport on phones. */
+body.has-sidebar .shell.page-stack { gap: 16px; grid-template-columns: minmax(0, 1fr); }
+
+/* Compact page header: breadcrumb-style eyebrow, title, one-line summary. */
+body.has-sidebar .hero { margin-bottom: 0; gap: 16px; align-items: flex-start; }
+body.has-sidebar .shell.page-stack .hero { margin-bottom: 0; }
+body.has-sidebar .hero h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.2; }
+body.has-sidebar .hero .eyebrow { margin: 0 0 4px; color: var(--muted); font-size: 11px; letter-spacing: 0.1em; }
+body.has-sidebar .hero p.muted { margin: 6px 0 0; max-width: 90ch; font-size: 13.5px; line-height: 1.5; }
+
+/* Section tabs (sibling pages such as Recordings | Timeline | Snapshots). */
+.page-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: none;
+}
+.page-tab {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.page-tab:hover { color: var(--text); }
+.page-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* In-page tabs (Settings, Face Recognition, ...) match the section tabs. */
+body.has-sidebar .settings-tabs {
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  scrollbar-width: none;
+}
+body.has-sidebar .settings-tab {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+body.has-sidebar .settings-tab[aria-selected="true"] { background: none; border-color: var(--accent); }
+body.has-sidebar .settings-tab-icon { font-size: 14px; }
+
+/* Flatter, denser cards to fit more on screen. */
+body.has-sidebar .card {
+  border-radius: 12px;
+  padding: 20px;
+  border-color: var(--border);
+  background: var(--panel);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+body.has-sidebar .card:hover { border-color: var(--border); box-shadow: none; }
+body.has-sidebar .card::before { display: none; }
+:root.light body.has-sidebar .card { background: var(--surface); border-color: var(--border); box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+body.has-sidebar .stats-grid .card { padding: 16px 18px; }
+body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
+
+/* Phones and narrow tablets: slim top bar + slide-in drawer. */
+@media (max-width: 900px) {
+  body.has-sidebar { padding-left: 0; }
+  .app-nav { position: sticky; inset: auto; top: 0; width: auto; height: var(--topbar-h); border-right: 0; border-bottom: 1px solid var(--border); }
+  .app-topbar { display: flex; align-items: center; gap: 10px; height: var(--topbar-h); padding: 0 12px; }
+  .app-nav-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: none;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .app-nav-body {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 80;
+    width: min(300px, 86vw);
+    height: 100%;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 0 0 40px rgba(0,0,0,.4);
+  }
+  .app-nav.nav-open .app-nav-body { transform: none; }
+  .app-nav.nav-open .app-nav-scrim { display: block; position: fixed; inset: 0; z-index: 75; background: rgba(0,0,0,.45); }
+  body.nav-drawer-open { overflow: hidden; }
+  body.has-sidebar .shell { padding: 16px 16px 32px; }
+  body.has-sidebar .hero h1 { font-size: 22px; }
+}

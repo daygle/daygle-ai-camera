@@ -9,7 +9,7 @@ include deployment context when reporting.
 
 Only the **latest tagged release** is supported. Releases are published as
 `v1.0.x` git tags, and updates are normally applied through the in-app updater
-(Settings → System → Software Updates) or `scripts/update.sh`. Fixes are not
+(Settings → Maintenance → Software Updates) or `scripts/update.sh`. Fixes are not
 backported to older releases.
 
 If you are on an older version, update before reporting: the issue you found
@@ -32,7 +32,7 @@ as a patch is ready and to coordinate public disclosure with you.
 To help reproduce and triage the issue, please include:
 
 - The affected version - the git tag, or the output of
-  `git describe --tags --abbrev=0` / the version shown in Settings → System.
+  `git describe --tags --abbrev=0` / the version shown in Settings → Maintenance.
 - Deployment type: Debian service install, Docker-style/dev clone, or local
   development, and whether it is exposed via LAN, a reverse proxy, or Cloudflare
   Tunnel.
