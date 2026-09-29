@@ -71,6 +71,12 @@ _UNVERIFIABLE_LABELS = frozenset(GENERIC_TRIGGER_LABELS | {'face'})
 MAX_LABELS_PER_EVENT = 3
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 256 * 1024
+# Newer local models (Qwen 3.5, Gemma 4) "think" before answering, and Ollama
+# turns that on by default. The short reply budgets here would be spent on
+# thinking and the answer would come back empty, so every request asks for no
+# reasoning. Servers that reject the field are remembered and asked without it.
+_NO_REASONING = {'reasoning_effort': 'none'}
+_servers_without_reasoning_effort: set[str] = set()
 _MODEL_NAME_RE = re.compile(r'^[A-Za-z0-9._:/@+-]{1,200}$')
 _JSON_OBJECT_RE = re.compile(r'\{.*?\}', re.DOTALL)
 
@@ -452,14 +458,34 @@ class VisionVerifier:
             'stream': False,
             'messages': messages,
         }
-        payload = self._request('/chat/completions', body)
+        payload = self._chat_request(body)
         try:
-            content = payload['choices'][0]['message']['content']
+            message = payload['choices'][0]['message']
+            content = message['content']
         except (KeyError, IndexError, TypeError) as exc:
             raise VerificationError('model server reply had no message content') from exc
         if isinstance(content, list):  # some servers return content parts
             content = ' '.join(str(part.get('text') or '') for part in content if isinstance(part, dict))
+        if not str(content or '').strip() and isinstance(message, dict) and (
+                message.get('reasoning') or message.get('reasoning_content')):
+            raise VerificationError(
+                'model spent its whole reply thinking and gave no answer; '
+                'use a non-thinking model or update the model server'
+            )
         return str(content or '')
+
+    def _chat_request(self, body: dict[str, Any]) -> dict[str, Any]:
+        if self.server_url in _servers_without_reasoning_effort:
+            return self._request('/chat/completions', body)
+        try:
+            return self._request('/chat/completions', {**body, **_NO_REASONING})
+        except VerificationError as exc:
+            text = str(exc).lower()
+            if not (text.startswith('http 4') and 'reasoning' in text):
+                raise
+        # This server does not accept reasoning_effort: ask without it from now on.
+        _servers_without_reasoning_effort.add(self.server_url)
+        return self._request('/chat/completions', body)
 
     @staticmethod
     def _image_part(image_bytes: bytes) -> dict[str, Any]:
@@ -985,11 +1011,7 @@ def run_connection_test(settings: dict[str, Any], *, event_id: int | None = None
     if event is None:
         # No stored object event yet: prove the model answers at all.
         started = time.monotonic()
-        body = {
-            'model': verifier.model, 'temperature': 0, 'max_tokens': 5, 'stream': False,
-            'messages': [{'role': 'user', 'content': 'Reply with the single word OK.'}],
-        }
-        verifier._request('/chat/completions', body)
+        verifier.chat([{'role': 'user', 'content': 'Reply with the single word OK.'}], max_tokens=5)
         result['latency_ms'] = int((time.monotonic() - started) * 1000)
         result['message'] = 'No object event with a snapshot exists yet, so only a text reply was tested.'
         return result
