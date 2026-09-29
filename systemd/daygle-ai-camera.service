@@ -10,6 +10,10 @@ Group=daygle
 WorkingDirectory=/opt/daygle-ai-camera
 Environment=DAYGLE_CONFIG=/etc/daygle-ai-camera/config.yaml
 Environment=PYTHONUNBUFFERED=1
+# Load nvidia_uvm before CUDA starts (the service itself may not load kernel
+# modules; see scripts/prepare_gpu.sh). "+" runs it with full privileges,
+# "-" means a machine without an NVIDIA GPU still starts.
+ExecStartPre=+-/bin/sh /opt/daygle-ai-camera/scripts/prepare_gpu.sh
 # --proxy-headers makes request.url honour X-Forwarded-Proto/Host from a
 # reverse proxy so HSTS, redirects, and the same-origin CSRF guard see the
 # external scheme/host. --forwarded-allow-ips defaults to loopback for a

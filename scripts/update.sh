@@ -139,6 +139,11 @@ if command -v systemctl >/dev/null 2>&1 && run_privileged systemctl list-unit-fi
 ExecStart=
 ExecStart=${APP_DIR}/.venv/bin/python -m app.server
 EOF
+  # Units installed before prepare_gpu.sh existed: load nvidia_uvm before the
+  # service starts so a reboot cannot leave detection on the CPU.
+  if ! run_privileged systemctl cat daygle-ai-camera.service 2>/dev/null | grep -v '^#' | grep -q 'prepare_gpu\.sh'; then
+    echo "ExecStartPre=+-/bin/sh ${APP_DIR}/scripts/prepare_gpu.sh" >> "${DROPIN_TEMP}"
+  fi
   if run_privileged mkdir -p "${DROPIN_DIR}" && run_privileged install -m 0644 "${DROPIN_TEMP}" "${DROPIN_FILE}" && run_privileged systemctl daemon-reload; then
     echo "Systemd launcher migrated to app.server."
   else
