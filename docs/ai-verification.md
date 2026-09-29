@@ -91,7 +91,11 @@ parcel at the front door."*
   person detected (87%)"; the confidence and other details stay below it.
 - **All events**: also every event that does not alert, described in the
   background behind alert work. This makes all footage searchable, but uses
-  more GPU time: one model call per event.
+  more GPU time: one model call per event. A burst of events (a car parking
+  can log five in a second) outruns a small model, so events that do not fit
+  in the AI queue are described a little later, once the model is idle, newest
+  first. Events from the last 3 hours are caught up; use **Describe Past
+  Events** for anything older.
 - **The model is told what the object detector found** (e.g. *"An object
   detector flagged: bird. It can be wrong."*). With **Focus on Object** on,
   it also gets a close-up of those objects as a second image. On a wide

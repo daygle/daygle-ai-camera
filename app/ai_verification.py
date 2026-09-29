@@ -761,18 +761,97 @@ def describe_only(event_id: int, camera_name: str = '', camera_id: Any = None) -
 def submit_event_description(event_id: int, *, camera_id: Any = None, camera_name: str = '') -> bool:
     """Queue a background description for an event without alerts.
 
-    Only in ``all`` mode, behind alert work (lower priority), and dropped
-    rather than queued when the AI pool is busy.
+    Only in ``all`` mode, behind alert work (lower priority), and never
+    blocking the live monitor: when the AI pool's queue is full the event is
+    left for the catch-up below, which describes it once the model is idle.
     """
     settings = effective_ai_verification_settings()
     if camera_describe_mode(camera_id, settings) != 'all':
         return False
     from app.postprocess_pool import PRIORITY_BACKGROUND, verification_pool
 
-    return verification_pool().submit(
+    queued = verification_pool().submit(
         describe_only, event_id, camera_name, camera_id,
         priority=PRIORITY_BACKGROUND, block=False, label=f'describe-event-{event_id}',
     )
+    if not queued:
+        start_description_catch_up()
+    return queued
+
+
+# ---------------------------------------------------------------------------
+# Catch-up: describe events skipped while the model was busy
+# ---------------------------------------------------------------------------
+
+# A burst of events (a car parking, five detections in a second) outruns a
+# small model at several seconds per caption, so the AI queue fills and new
+# events are skipped. Once that happens, one thread waits for the pool to go
+# idle and describes the recent undescribed events, newest first, then exits.
+CATCH_UP_WINDOW_HOURS = 3
+CATCH_UP_BATCH = 50
+# A caught-up event younger than this still runs its AI tag alert rules; an
+# older one would alert too late to be useful, as with the backfill.
+CATCH_UP_ALERT_MAX_AGE_SECONDS = 120
+_catch_up_lock = threading.Lock()
+_catch_up_running = False
+_catch_up_attempted: set[int] = set()
+
+
+def start_description_catch_up() -> bool:
+    """Start the catch-up thread unless it (or a backfill) is already running."""
+    global _catch_up_running
+    with _catch_up_lock:
+        if _catch_up_running:
+            return False
+        _catch_up_running = True
+    threading.Thread(target=_run_catch_up, name='ai-description-catch-up', daemon=True).start()
+    return True
+
+
+def _run_catch_up(idle_poll_seconds: float = 1.0) -> None:
+    global _catch_up_running
+    try:
+        while True:
+            while _ai_pool_busy() or description_backfill_status().get('running'):
+                time.sleep(idle_poll_seconds)
+            if not catch_up_once():
+                return
+    except Exception:  # noqa: BLE001 - a background helper must never crash the app
+        logger.exception('AI description catch-up failed')
+    finally:
+        with _catch_up_lock:
+            _catch_up_running = False
+
+
+def catch_up_once() -> bool:
+    """Describe the newest skipped event; False when none is left.
+
+    Only events from the last few hours, on cameras still in ``all`` mode,
+    each tried at most once per process (so an event that cannot be
+    described, e.g. a missing snapshot, is not retried forever).
+    """
+    settings = effective_ai_verification_settings()
+    since = datetime.now(timezone.utc) - timedelta(hours=CATCH_UP_WINDOW_HOURS)
+    for event in _state.database.events_without_description(since=since.isoformat(), limit=CATCH_UP_BATCH):
+        event_id = int(event['id'])
+        metadata = event.get('metadata') or {}
+        with _catch_up_lock:
+            if event_id in _catch_up_attempted:
+                continue
+            if len(_catch_up_attempted) > 10000:
+                _catch_up_attempted.clear()
+            _catch_up_attempted.add(event_id)
+        if camera_describe_mode(metadata.get('camera_id'), settings) != 'all':
+            continue
+        try:
+            created = datetime.fromisoformat(str(event.get('created_at')).replace('Z', '+00:00'))
+            age = (datetime.now(timezone.utc) - created).total_seconds()
+        except ValueError:
+            age = float('inf')
+        _describe_and_store(event, event_id, settings, str(metadata.get('camera_name') or ''),
+                            evaluate_rules=age <= CATCH_UP_ALERT_MAX_AGE_SECONDS)
+        return True
+    return False
 
 
 def submit_alert_notification_with_verification(
