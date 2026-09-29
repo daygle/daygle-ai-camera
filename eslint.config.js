@@ -122,6 +122,7 @@ const WEB_SHARED_GLOBALS = {
   timeSelectValue: 'readonly',
   titleCase: 'readonly',
   RECORDINGS_OVERLAY_TOGGLE_KEY: 'readonly',
+  RECORDINGS_FILTER_PANEL_KEY: 'readonly',
   TIMELINE_OVERLAY_TOGGLE_KEY: 'readonly',
   // web/utils.js - behavioural tripwire geometry/normalisation (Zones canvas).
   tripwireDefaultLine: 'readonly',
