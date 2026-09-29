@@ -353,6 +353,57 @@ def test_client_sends_image_and_parses_reply(av):
     assert server.headers[0]['Authorization'] == 'Bearer sekret'
 
 
+class _ReasoningServer(_FakeModelServer):
+    """Replies like a server that either rejects ``reasoning_effort`` or
+    returns an answer spent entirely on thinking."""
+
+    def __init__(self, *, rejects_reasoning_effort=False, thinks=False):
+        super().__init__()
+        owner = self
+        base = self.httpd.RequestHandlerClass
+
+        class Handler(base):
+            def do_POST(self):  # noqa: N802 - http.server API
+                length = int(self.headers.get('Content-Length') or 0)
+                body = json.loads(self.rfile.read(length))
+                owner.requests.append(body)
+                if rejects_reasoning_effort and 'reasoning_effort' in body:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b'{"error": "Unrecognized request argument: reasoning_effort"}')
+                    return
+                message = {'role': 'assistant', 'content': owner.reply}
+                if thinks:
+                    message = {'role': 'assistant', 'content': '', 'reasoning': 'Let me look at the image...'}
+                self._send({'choices': [{'message': message}]})
+
+        self.httpd.RequestHandlerClass = Handler
+
+
+def test_client_asks_the_model_not_to_think(av):
+    with _FakeModelServer() as server:
+        verifier = av.VisionVerifier({**_settings(av), 'server_url': server.url, 'timeout_seconds': 5})
+        verifier.ask(b'jpeg', 'person')
+    assert server.requests[0]['reasoning_effort'] == 'none'
+
+
+def test_server_rejecting_reasoning_effort_is_asked_without_it(av):
+    with _ReasoningServer(rejects_reasoning_effort=True) as server:
+        verifier = av.VisionVerifier({**_settings(av), 'server_url': server.url, 'timeout_seconds': 5})
+        assert verifier.ask(b'jpeg', 'person') == (False, 'a shadow on the wall')
+        assert verifier.ask(b'jpeg', 'person') == (False, 'a shadow on the wall')
+    # First call retried once without the field; the second skips it outright.
+    assert ['reasoning_effort' in body for body in server.requests] == [True, False, False]
+    av._servers_without_reasoning_effort.discard(server.url)
+
+
+def test_reply_spent_on_thinking_gives_a_clear_error(av):
+    with _ReasoningServer(thinks=True) as server:
+        verifier = av.VisionVerifier({**_settings(av), 'server_url': server.url, 'timeout_seconds': 5})
+        with pytest.raises(av.VerificationError, match='thinking'):
+            verifier.ask(b'jpeg', 'person')
+
+
 def test_client_reports_an_unreachable_server(av):
     verifier = av.VisionVerifier({**_settings(av), 'server_url': 'http://127.0.0.1:9/v1', 'timeout_seconds': 3})
     with pytest.raises(av.VerificationError, match='unreachable'):

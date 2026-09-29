@@ -40,6 +40,13 @@ Ollama listens on `127.0.0.1:11434` and uses the NVIDIA GPU automatically.
 detectors on an 8 GB card. Smaller options are `qwen2.5vl:3b` and
 `moondream`, which is fastest but least accurate.
 
+Newer models that "think" before answering (`qwen3.5`, `gemma4`) work too:
+every request sends `reasoning_effort: "none"`, which Ollama uses to turn
+thinking off. Without that the short replies the app asks for would be spent
+on thinking and come back empty. A server that rejects the field is asked
+without it. If Test still reports "model spent its whole reply thinking",
+update Ollama or choose a non-thinking model.
+
 By default Ollama unloads an idle model after 5 minutes, so the first alert
 after a quiet period waits a few seconds while the model reloads. To keep it
 loaded:
