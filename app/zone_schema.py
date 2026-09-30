@@ -330,6 +330,16 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         scale_fraction = _optional_fraction(
             rule.get('scale_fraction'), 0.001, 1.0,
         ) if label == 'motion' else None
+        # Per-rule AI alert verification (app.ai_verification): the vision
+        # model double-checks this rule's alerts before they notify, and
+        # alerts at or above ``ai_verify_skip_above`` are sent unchecked (1.0 =
+        # check every alert). Motion and face rules have no object to check.
+        ai_verify = label not in ('motion', 'face') and normalize_bool_setting(rule.get('ai_verify'), False)
+        try:
+            ai_verify_skip_above = float(rule.get('ai_verify_skip_above', 1.0))
+        except (TypeError, ValueError):
+            ai_verify_skip_above = 1.0
+        ai_verify_skip_above = max(0.0, min(1.0, ai_verify_skip_above))
         alert_schedules = normalize_zone_alert_schedules(rule)
         first_schedule = alert_schedules[0]
         email_recipients = list(dict.fromkeys(
@@ -347,6 +357,8 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             'gate_fraction': gate_fraction,
             'scale_fraction': scale_fraction,
             'cooldown_seconds': max(0, cooldown_seconds),
+            'ai_verify': ai_verify,
+            'ai_verify_skip_above': ai_verify_skip_above,
             # Legacy top-level fields aggregate channels/recipients and mirror
             # the first window; schedule-aware dispatch uses the full list.
             'email_enabled': any(schedule['email_enabled'] for schedule in alert_schedules),

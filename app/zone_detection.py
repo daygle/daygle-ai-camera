@@ -872,6 +872,8 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                     'min_confidence': rule.get('min_confidence', 0.45 if label in ('motion', 'face') else 0.5),
                     'max_confidence': rule.get('max_confidence', 1.0),
                     'cooldown_seconds': rule.get('cooldown_seconds', 60),
+                    'ai_verify': bool(rule.get('ai_verify', False)),
+                    'ai_verify_skip_above': rule.get('ai_verify_skip_above', 1.0),
                     'enabled': True,
                     'email_enabled': bool(schedule.get('email_enabled', False)),
                     'email_recipients': normalize_email_recipients(schedule.get('email_recipients', [])),

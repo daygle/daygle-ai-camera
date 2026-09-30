@@ -157,6 +157,11 @@ class AlertEngine:
                 # and push notifications can report it (see app.alert_formatting).
                 if state in ('moving', 'still'):
                     alert_entry['motion_state'] = state
+                # The rule asks the vision model to double-check this alert
+                # before it notifies (app.ai_verification).
+                if rule.get('ai_verify'):
+                    alert_entry['ai_verify'] = True
+                    alert_entry['ai_verify_skip_above'] = float(rule.get('ai_verify_skip_above', 1.0))
                 alerts.append(alert_entry)
 
         # Evaluate generic motion after all concrete object detections. This

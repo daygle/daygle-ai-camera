@@ -1,6 +1,7 @@
 // ai.js - Intelligence > AI page (ai.html). Admin-only.
-// The local vision model (app/ai_verification.py): server + model, alert
-// verification, event descriptions / search, and the past-events backfill.
+// The local vision model (app/ai_verification.py): server + model, shared
+// alert-verification options (verification itself is ticked per alert rule on
+// the Alerts page), event descriptions / search, and the past-events backfill.
 // One form, one PUT /api/settings/ai-verification. Uses api() / escapeHtml /
 // showToast from utils.js.
 
@@ -13,19 +14,15 @@ let aiBackfillTimer = null;
 // Keep the form usable with a partial API response; the backend owns
 // validation and persistence.
 const AI_FORM_DEFAULTS = {
-  enabled: 'false',
   server_url: 'http://127.0.0.1:11434/v1',
   model: 'gemma3:4b',
   api_key: '',
   timeout_seconds: 20,
-  skip_above_confidence: 1,
-  labels: '',
   focus_crop: 'true',
   describe_events: 'off',
 };
-const AI_BOOLEAN_FIELDS = new Set(['enabled', 'focus_crop']);
+const AI_BOOLEAN_FIELDS = new Set(['focus_crop']);
 const AI_INTEGER_FIELDS = new Set(['timeout_seconds']);
-const AI_NUMBER_FIELDS = new Set(['skip_above_confidence']);
 
 function aiMessage(text, isError = false) {
   if (text) window.showToast?.(text, isError);
@@ -44,11 +41,7 @@ function aiGuard(fn) {
 
 function fillAiForm(settings) {
   if (!aiForm) return;
-  const values = {
-    ...AI_FORM_DEFAULTS,
-    ...(settings || {}),
-    labels: Array.isArray(settings?.labels) ? settings.labels.join(', ') : '',
-  };
+  const values = { ...AI_FORM_DEFAULTS, ...(settings || {}) };
   Object.entries(values).forEach(([key, value]) => {
     const field = aiForm.elements[key];
     if (field && !(field instanceof RadioNodeList)) field.value = String(value ?? '');
@@ -66,10 +59,8 @@ function aiPayload() {
     if (!field) return;
     const raw = String(field.value ?? '');
     if (AI_BOOLEAN_FIELDS.has(key)) data[key] = raw === 'true';
-    else if (key === 'labels') data[key] = raw.split(',').map((item) => item.trim()).filter(Boolean);
     else if (raw === '') return;
     else if (AI_INTEGER_FIELDS.has(key)) data[key] = Number.parseInt(raw, 10);
-    else if (AI_NUMBER_FIELDS.has(key)) data[key] = Number(raw);
     else data[key] = raw;
   });
   data.camera_ids = [...aiForm.querySelectorAll('input[name="camera_id_choice"]:checked')].map((box) => box.value);

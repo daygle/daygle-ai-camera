@@ -66,32 +66,16 @@
         <div class="settings-section-icon" aria-hidden="true">✅</div>
         <div>
           <h2>Alert Verification</h2>
-          <p class="settings-section-subtitle">Before an object alert's email or push notification is sent, the model confirms the object is really there. Alerts it rejects (shadows, reflections, bushes) are not notified, but the event and recording are kept and marked <strong>🤖 Filtered</strong> in the Events list. Face, motion and sound alerts are never verified.</p>
+          <p class="settings-section-subtitle">Before an object alert's email or push notification is sent, the model confirms the object is really there. Alerts it rejects (shadows, reflections, bushes) are not notified, but the event and recording are kept and marked <strong>🤖 Filtered</strong> in the Events list. Turn it on per alert with <strong>AI Verify</strong> on the <a href="/alerts">Alerts</a> page. Face, motion and sound alerts are never verified.</p>
         </div>
       </div>
       <div class="form-grid">
-        <label>
-          <span>AI Verification <span class="info-tip" data-tip="Master toggle. When disabled, notifications are sent exactly as before. Default: Disabled" title="Master toggle. When disabled, notifications are sent exactly as before. Default: Disabled" tabindex="0" aria-label="Help: Master toggle. When disabled, notifications are sent exactly as before. Default: Disabled"></span></span>
-          <select name="enabled">
-            <option value="false">Disabled</option>
-            <option value="true">Enabled</option>
-          </select></label>
-        <label>
-          <span>Skip Above Confidence <span class="info-tip" data-tip="Alerts whose detector confidence is at or above this are sent without asking the model, so it only checks borderline ones. 1 = verify every alert. Default: 1" title="Alerts whose detector confidence is at or above this are sent without asking the model, so it only checks borderline ones. 1 = verify every alert. Default: 1" tabindex="0" aria-label="Help: Alerts whose detector confidence is at or above this are sent without asking the model, so it only checks borderline ones. 1 = verify every alert. Default: 1"></span></span>
-          <input name="skip_above_confidence" type="number" min="0" max="1" step="0.01" placeholder="1" /></label>
-        <label>
-          <span>Object Labels <span class="info-tip" data-tip="Comma-separated labels to verify, e.g. person, car. Empty = every object label. Default: (all)" title="Comma-separated labels to verify, e.g. person, car. Empty = every object label. Default: (all)" tabindex="0" aria-label="Help: Comma-separated labels to verify, e.g. person, car. Empty = every object label. Default: (all)"></span></span>
-          <input name="labels" placeholder="All object labels" autocomplete="off" /></label>
         <label>
           <span>Focus on Object <span class="info-tip" data-tip="Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled" title="Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled" tabindex="0" aria-label="Help: Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled"></span></span>
           <select name="focus_crop">
             <option value="true">Enabled</option>
             <option value="false">Disabled</option>
           </select></label>
-        <fieldset class="ai-verification-cameras">
-          <legend>Cameras <span class="info-tip" data-tip="Cameras whose alerts are verified and (per Describe Events) described. None ticked = all cameras. Cameras with an AI tag alert are always described." title="Cameras whose alerts are verified and (per Describe Events) described. None ticked = all cameras. Cameras with an AI tag alert are always described." tabindex="0" aria-label="Help: Cameras whose alerts are verified and (per Describe Events) described. None ticked = all cameras. Cameras with an AI tag alert are always described."></span></legend>
-          <div id="aiCameras" class="ai-verification-camera-list"><span class="muted">Loading cameras…</span></div>
-        </fieldset>
       </div>
     </section>
 
@@ -111,6 +95,10 @@
             <option value="alerts">Alerts Only</option>
             <option value="all">All Events</option>
           </select></label>
+        <fieldset class="ai-verification-cameras">
+          <legend>Cameras <span class="info-tip" data-tip="Cameras whose events are described (per Describe Events). None ticked = all cameras. Cameras with an AI tag alert are always described." title="Cameras whose events are described (per Describe Events). None ticked = all cameras. Cameras with an AI tag alert are always described." tabindex="0" aria-label="Help: Cameras whose events are described (per Describe Events). None ticked = all cameras. Cameras with an AI tag alert are always described."></span></legend>
+          <div id="aiCameras" class="ai-verification-camera-list"><span class="muted">Loading cameras…</span></div>
+        </fieldset>
       </div>
       <div class="ai-backfill-row">
         <label class="ai-backfill-hours">

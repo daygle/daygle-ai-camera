@@ -60,6 +60,8 @@
 .alerts-policy-table th:nth-child(3), .alerts-policy-table td:nth-child(3),
 .alerts-policy-table th:nth-child(4), .alerts-policy-table td:nth-child(4),
 .alerts-policy-table th:nth-child(5), .alerts-policy-table td:nth-child(5) { width: 10%; }
+.alerts-policy-table.has-ai-column th:nth-child(2), .alerts-policy-table.has-ai-column td:nth-child(2) { width: 20%; }
+.alerts-policy-table .alerts-ai-verify-col { width: 10%; }
 .alerts-policy-table th:last-child, .alerts-policy-table td:last-child { width: 18%; }
 .alerts-policy-table td { vertical-align: middle; }
 .alerts-policy-row td { border-bottom: 1px solid var(--border); }
