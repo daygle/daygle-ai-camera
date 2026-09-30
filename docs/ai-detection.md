@@ -1,8 +1,11 @@
 # AI Object Detection Guide
 
 Daygle AI Camera runs ONNX YOLO models to detect objects in camera frames. All
-of the object-detection engine is configured from **ONNX** (`/onnx`), an
-admin-only page split into three tabs: **Status**, **Models**, and **Settings**.
+of the object-detection engine is configured under **Intelligence → Models**,
+an admin-only section with one tab row: **Object Models** (`/models`, the
+detector status and the object model library), **Face Models**
+(`/models/faces`), **Camera Models** (`/models/cameras`), **Sound Model**
+(`/models/sound`) and **Settings** (`/models/settings`, the detector settings).
 
 This guide explains the model library, the detector settings, and the advanced
 tuning options. For how object detection fits together with the motion gate and
@@ -10,9 +13,10 @@ zone rules, see [motion-detection.md](motion-detection.md).
 
 ---
 
-## Status tab
+## Object Detection Status
 
-The Status tab shows the live detector state and quick diagnostic actions.
+The status card at the top of **Object Models** shows the live detector state
+and quick diagnostic actions.
 
 - **Current Backend** - the execution backend that is actually loaded (for
   example CPU or CUDA).
@@ -34,9 +38,9 @@ Action buttons:
 
 ---
 
-## Models tab
+## Model library
 
-### Model library
+### Object models
 
 The model library lists the supported YOLO models across three families. Larger
 models are more accurate but use more CPU/GPU per frame.
@@ -57,7 +61,7 @@ Actions per model:
   "Fast" through 1280 "Max"; 640 is the default). Higher resolutions are more
   accurate on small/distant objects but slower per frame. YOLO26 models default
   to a 768 input size. Downloading never changes the default model: the
-  operator picks what runs with **Use**, or per camera on `/camera-models`.
+  operator picks what runs with **Use**, or per camera on `/models/cameras`.
 - **Use** - make an installed model the active detector.
 - **Update** - re-export a model when newer weights are available. On the active
   model this re-exports in place.
@@ -66,8 +70,8 @@ Actions per model:
   that have a newer release.
 
 Nothing is downloaded on a clean install. A fresh install starts with an empty
-`models/` directory and object detection OFF, and the Status tab says so with a
-link straight to the Object Models tab. This is deliberate: silently exporting
+`models/` directory and object detection OFF, and the status card on Object
+Models says so, with a button that scrolls to the model library below it. This is deliberate: silently exporting
 a model at first start would pick a model, require network access, and burn CPU
 competing with the capture workers - all without telling anyone. Install a model
 (**Download**), then activate it (**Use**); until then only motion rules run.
@@ -109,9 +113,10 @@ changes the behavior of your existing per-class rules. Pick a group from the
 
 ---
 
-## Settings tab
+## Settings
 
-The main detection settings are always visible; low-level tuning lives under the
+The **Settings** tab (`/models/settings`) holds the detector settings. The main
+detection settings are always visible; low-level tuning lives under the
 **Advanced** disclosure. Save with the **Save** button - the detector reloads
 automatically, and any reload warning is surfaced in the Status panel.
 
@@ -178,14 +183,14 @@ touch these. Change one at a time so you can attribute any per-frame impact.
 ## Per-camera model assignment
 
 By default every camera runs the one primary object model configured on the
-Models tab. `/camera-models` lets a camera run its own model instead - for
+Object Models tab. **Camera Models** (`/models/cameras`) lets a camera run its own model instead - for
 example a fast `yolo11n` on a quiet view and a larger `yolo11m` on the view
 that matters. Cameras without an assignment keep following the global model.
 
 An assignment is stored in the camera's `detection` block as `model_path`
 (plus an optional `labels_path`, default `models/coco.names`) and is picked up
 by the live pipeline on the camera's next detection cycle - no detector reload
-or restart is needed. Assign, switch, and unassign from `/camera-models`, or
+or restart is needed. Assign, switch, and unassign from `/models/cameras`, or
 through the API:
 
 ```http
@@ -310,7 +315,7 @@ before changing thresholds or rules.
   Concurrent Cameras to your camera count only if you have spare cores.
 - **NVIDIA GPU host** - install the NVIDIA driver and `onnxruntime-gpu` (see the
   README), set Device to *Auto* or *CUDA*, and confirm *Current Backend* reads
-  CUDA on the Status tab. FP16 precision and CUDA IO Binding can further reduce
+  CUDA in the Object Models status card. FP16 precision and CUDA IO Binding can further reduce
   latency. Use **GPU Memory Limit** to leave headroom on shared GPUs.
 - **Accuracy over speed** - move up a model size (m/l/x) and/or a higher export
   resolution. YOLO26 models offer strong accuracy with NMS-free inference.
@@ -347,7 +352,7 @@ when you download one from the library - see below):
 ### Downloading a face model
 
 The model library ships a **YOLO11 · Face** family - Nano, Small, Medium, and
-Large - alongside the COCO models on the Models tab. Downloading one works
+Large - on the **Face Models** tab (`/models/faces`). Downloading one works
 exactly like any other model: its source weights are fetched, exported to ONNX
 through the same Ultralytics pipeline, and the active AI settings are bound to
 `models/face.names` and `keypoint_count = 5` automatically. No manual settings
@@ -381,8 +386,8 @@ source for weights Ultralytics cannot resolve by name. The download flow fetches
 
 ## Troubleshooting
 
-- **`MODEL MISSING`** - open the Models tab, download/select a model, then
-  Reload Detector on the Status tab.
+- **`MODEL MISSING`** - open **Object Models**, download/select a model, then
+  press Reload Detector in its status card.
 - **No objects detected after enabling a face model** - older versions saved a
   face model as the primary detector, which disables object detection. The
   server now repairs this automatically at startup (the face model moves to

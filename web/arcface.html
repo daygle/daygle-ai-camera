@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ArcFace - Daygle AI Camera</title>
+  <title>Face Models - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="stylesheet" href="/static/model-card-messages.css" />
@@ -25,8 +25,8 @@
     <header class="hero arcface-hero">
       <div class="arcface-hero-copy">
         <p class="eyebrow">Identity workspace</p>
-        <h1>ArcFace</h1>
-        <p class="muted">Face-embedding models for identity recognition. Download, select, and manage the embedding models used to identify enrolled people on your cameras. Both models are Apache-2.0 licensed (commercial use permitted).</p>
+        <h1>Face Models</h1>
+        <p class="muted">Two kinds of face model. A face-detection model finds faces in each frame, alongside your object model. An ArcFace embedding model then recognises who each face belongs to among your enrolled people. The embedding models are Apache-2.0 licensed (commercial use permitted).</p>
       </div>
       <div class="onnx-hero-mark arcface-hero-mark hero-mark--violet" aria-hidden="true">
         <span class="onnx-hero-ring onnx-hero-ring-back"></span>
@@ -35,63 +35,87 @@
       </div>
     </header>
 
-    <div class="settings-tabs" role="tablist" aria-label="ArcFace sections">
-      <button class="settings-tab" type="button" role="tab" id="tab-status" aria-controls="panel-status" data-tab="status" aria-selected="true">
-        <span class="settings-tab-icon" aria-hidden="true">🧠</span><span class="settings-tab-copy"><span class="settings-tab-label">Status</span><small>Recognition health</small></span>
-      </button>
-      <button class="settings-tab" type="button" role="tab" id="tab-models" aria-controls="panel-models" data-tab="models" aria-selected="false" tabindex="-1">
-        <span class="settings-tab-icon arcface-tab-icon" aria-hidden="true">📦</span><span class="settings-tab-copy"><span class="settings-tab-label">Embedding Models</span><small>Download &amp; manage</small></span>
-      </button>
-    </div>
+    <!-- Face detection: the parallel face pass (web/models.js) -->
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">👤</div>
+        <div>
+          <h2>Face Detection Status</h2>
+          <p class="settings-section-subtitle">An extra detector for faces, running at the same time as object detection so both are seen in the same frames. Turn it on and choose the model under <a href="/models/settings">Settings</a>.</p>
+        </div>
+      </div>
+      <div id="faceStatusPanel" class="status-panel"></div>
+    </section>
 
-    <div class="settings-panel" id="panel-status" role="tabpanel" aria-labelledby="tab-status" data-panel="status">
+    <section class="model-library-toolbar model-library-toolbar-face" aria-labelledby="faceLibraryTitle">
+      <div class="model-library-toolbar-copy">
+        <span class="model-library-kicker">Face detection</span>
+        <h2 id="faceLibraryTitle">Face detection models</h2>
+        <p>Models that look for faces only. They run alongside your object model and never replace it.</p>
+      </div>
+      <div class="model-library-toolbar-actions">
+        <span class="model-library-count" id="faceModelCount">Loading models…</span>
+        <button id="checkFaceModelUpdatesBtn" class="btn-info model-update-check-btn" type="button">
+          <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
+        </button>
+      </div>
+    </section>
+    <div id="faceModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
 
+    <section class="card model-library-card" id="faceModelsCard">
+      <div class="model-library-card-header">
+        <div>
+          <span class="model-library-kicker">Available catalog</span>
+          <h2>Choose a face-detection model</h2>
+        </div>
+        <span class="model-library-tip">Turn it on under Settings</span>
+      </div>
+      <div id="faceModelList" class="model-card-grid"></div>
+      <p id="faceModelsEmpty" class="model-library-empty" hidden>No face models yet - download one, then turn on Face Detection under <a href="/models/settings">Settings</a>.</p>
+    </section>
+
+    <!-- Face recognition: ArcFace embedding models (web/arcface.js) -->
     <section class="card">
       <div class="settings-section-header">
         <div class="settings-section-icon">🧠</div>
         <div>
-          <h2>Recognition status</h2>
+          <h2>Face Recognition Status</h2>
           <p class="settings-section-subtitle">Current recognition state, active embedding model, and enrolment counts.</p>
         </div>
       </div>
       <div id="arcfaceStatusPanel" class="status-panel"></div>
     </section>
 
-    </div><!-- /panel-status -->
+    <section class="model-library-toolbar model-library-toolbar-face arcface-toolbar" aria-labelledby="arcfaceLibraryTitle">
+      <div class="model-library-toolbar-copy">
+        <span class="model-library-kicker">Identity models</span>
+        <h2 id="arcfaceLibraryTitle">Embedding models</h2>
+        <p>Each model turns an aligned face crop into a 512-number faceprint. Enrolments are compatible between models that share the same embedding space.</p>
+      </div>
+      <div class="model-library-toolbar-actions">
+        <span class="model-library-count" id="arcfaceModelCount">Loading models…</span>
+        <button id="checkArcfaceModelUpdatesBtn" class="btn-info model-update-check-btn" type="button">
+          <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
+        </button>
+      </div>
+    </section>
+    <div id="arcfaceModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
 
-    <div class="settings-panel" id="panel-models" role="tabpanel" aria-labelledby="tab-models" data-panel="models" hidden>
-
-      <section class="model-library-toolbar model-library-toolbar-face arcface-toolbar" aria-labelledby="faceLibraryTitle">
-        <div class="model-library-toolbar-copy">
-          <span class="model-library-kicker">Identity models</span>
-          <h2 id="faceLibraryTitle">Embedding models</h2>
-          <p>Each model turns an aligned face crop into a 512-number faceprint. Enrolments are compatible between models that share the same embedding space.</p>
+    <section class="card model-library-card" id="arcfaceModelsCard">
+      <div class="model-library-card-header">
+        <div>
+          <span class="model-library-kicker">Available catalog</span>
+          <h2>Choose an embedding model</h2>
         </div>
-        <div class="model-library-toolbar-actions">
-          <span class="model-library-count" id="arcfaceModelCount">Loading models…</span>
-          <button id="checkArcfaceModelUpdatesBtn" class="btn-info model-update-check-btn" type="button">
-            <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
-          </button>
-        </div>
-      </section>
-      <div id="arcfaceModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
-
-      <section class="card model-library-card" id="arcfaceModelsCard">
-        <div class="model-library-card-header">
-          <div>
-            <span class="model-library-kicker">Available catalog</span>
-            <h2>Choose an embedding model</h2>
-          </div>
-          <span class="model-library-tip">Enable recognition in Settings → Face Recognition</span>
-        </div>
-        <div id="arcfaceModelsMessage" class="muted" hidden></div>
-        <div id="arcfaceModelList" class="model-card-grid"></div>
-      </section>
-
-    </div><!-- /panel-models -->
+        <span class="model-library-tip">Turn recognition on under Detection → Faces</span>
+      </div>
+      <div id="arcfaceModelsMessage" class="muted" hidden></div>
+      <div id="arcfaceModelList" class="model-card-grid"></div>
+    </section>
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
+  <script src="/static/models.js"></script>
   <script src="/static/arcface.js"></script>
 </body>
 </html>

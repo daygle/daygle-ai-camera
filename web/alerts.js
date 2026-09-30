@@ -299,7 +299,7 @@ function renderPolicies() {
     const emptyMessage = alertType === 'object'
       ? 'No objects are assigned to this area yet. Open the <a href="/zones">Zones</a> page to add object, motion, or face detection, then configure alerts here.'
       : alertType === 'sound'
-        ? 'No sound classes are assigned to this camera yet. Open the <a href="/sounds">Sounds</a> page to enable classes, then configure alerts here.'
+        ? 'No sound classes are assigned to this camera yet. Open the <a href="/detection/sounds">Sounds</a> page to enable classes, then configure alerts here.'
         : alertType === 'tripwire'
           ? 'No line crossing is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Line crossing and draw a line, then set its alerts here.'
           : alertType === 'loiter'

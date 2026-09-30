@@ -267,7 +267,7 @@ window.daygleAuthReady = (async () => {
         { href: '/alerts', matches: ['/alerts'], label: 'Alerts', icon: 'alerts' },
         // People enrolment lives on the Face Recognition page's People tab
         // (/face-recognition#people); /people redirects there.
-        { href: '/objects', matches: ['/objects', '/sounds', '/face-recognition'], label: 'Detection', icon: 'detection' },
+        { href: '/detection', matches: ['/detection', '/objects', '/sounds', '/face-recognition'], label: 'Detection', icon: 'detection' },
       ],
     },
     {
@@ -276,7 +276,7 @@ window.daygleAuthReady = (async () => {
       admin: true,
       links: [
         { href: '/ai', matches: ['/ai'], label: 'AI', icon: 'ai' },
-        { href: '/onnx', matches: ['/onnx', '/camera-models', '/yamnet-tflite', '/arcface'], label: 'Models', icon: 'models' },
+        { href: '/models', matches: ['/models', '/onnx', '/camera-models', '/yamnet-tflite', '/arcface'], label: 'Models', icon: 'models' },
       ],
     },
     {
@@ -300,16 +300,19 @@ window.daygleAuthReady = (async () => {
       { href: '/recordings/timeline', label: 'Timeline' },
       { href: '/snapshots', label: 'Snapshots' },
     ],
+    // The section's own URL is also the prefix of its sibling tabs, so its
+    // tab matches exactly rather than by prefix.
     [
-      { href: '/objects', label: 'Objects' },
-      { href: '/sounds', label: 'Sounds' },
-      { href: '/face-recognition', label: 'Faces' },
+      { href: '/detection', label: 'Objects', match: (p) => p === '/detection' },
+      { href: '/detection/sounds', label: 'Sounds' },
+      { href: '/detection/faces', label: 'Faces' },
     ],
     [
-      { href: '/onnx', label: 'Object Models' },
-      { href: '/camera-models', label: 'Camera Models' },
-      { href: '/yamnet-tflite', label: 'Sound Model' },
-      { href: '/arcface', label: 'Face Model' },
+      { href: '/models', label: 'Object Models', match: (p) => p === '/models' },
+      { href: '/models/faces', label: 'Face Models' },
+      { href: '/models/cameras', label: 'Camera Models' },
+      { href: '/models/sound', label: 'Sound Model' },
+      { href: '/models/settings', label: 'Settings' },
     ],
     [
       { href: '/system', label: 'Health' },

@@ -210,7 +210,7 @@ This solves the standing-still problem: even if a person has been absorbed into 
 
 By default YOLO reports every object it can recognise, whether the subject is
 walking down the drive or parked in it. The **Objects** page
-(`/objects`, admin) lets you decide, per object class, whether detections
+(`/detection`, admin) lets you decide, per object class, whether detections
 should count when the subject is **moving**, **still**, or **both** (the
 default). This is a separate knob from the motion gate: it does not change
 when YOLO *runs*, only which detections become events, recordings, and

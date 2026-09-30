@@ -156,7 +156,7 @@ frReloadBtn.addEventListener('click', reloadService);
 loadSettings();
 loadFaceMode();
 // Tab bar (Settings / People). Shared implementation with URL-hash
-// deep-linking lives in utils.js - /face-recognition#people opens People.
+// deep-linking lives in utils.js - /detection/faces#people opens People.
 // When the Review tab is activated, refresh the unknown faces list.
 initDaygleTabs();
 

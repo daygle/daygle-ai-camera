@@ -304,10 +304,12 @@ The web UI has a left sidebar (a slide-in menu on phones). Pages that belong tog
   - **Cameras** (`/cameras`) - camera management, recording, and PTZ
   - **Zones** (`/zones`) - monitoring zone editor (use **Draw polygon** or **Full Frame** to add areas, and the per-zone **Shape** control to convert between full frame and polygon), visibility controls, and per-area detection scope: assign which objects, motion, and faces each area detects, their confidence, and whether each records. Notification delivery is configured on Alerts
   - **Alerts** (`/alerts`) - notification delivery policies (email, push, schedules, cooldowns) for the objects, motion, faces, and sound classes assigned on Zones and Sounds, plus recognized-person and stranger alerts; multiple policies can target the same subject with different schedules and thresholds
-  - **Detection** - tabs: Objects (`/objects`, per-object Moving Only / Still Only behavior and still-alert thresholds), Sounds (`/sounds`, per-camera audio detection classes), Faces (`/face-recognition`)
+  - **Detection** - tabs: Objects (`/detection`, per-object Moving Only / Still Only behavior and still-alert thresholds), Sounds (`/detection/sounds`, per-camera audio detection classes), Faces (`/detection/faces`)
 - **Intelligence** (admin)
   - **AI** (`/ai`) - the local vision model: alert verification, event descriptions, search and AI tags
-  - **Models** - tabs: Object Models (`/onnx`), Camera Models (`/camera-models`, per-camera YOLO model assignment), Sound Model (`/yamnet-tflite`), Face Model (`/arcface`)
+  - **Models** - tabs: Object Models (`/models`), Face Models (`/models/faces`, face detection and ArcFace recognition models), Camera Models (`/models/cameras`, per-camera YOLO model assignment), Sound Model (`/models/sound`), Settings (`/models/settings`, detection runtime tuning)
+
+The old page URLs (`/objects`, `/sounds`, `/face-recognition`, `/onnx`, `/arcface`, `/camera-models`, `/yamnet-tflite`) redirect to their new locations, so bookmarks keep working.
 - **Admin** (admin)
   - **Settings** (`/settings`) - tabs: Detection & Live, Recording & Storage, Notifications, Network & Access (Cloudflare Tunnel, LAN & proxy, login security), Maintenance (updates, GPU health, backup, danger zone)
   - **Users** (`/users`) - user management
@@ -326,25 +328,25 @@ Email and push notifications use the same alert title/body format. Configure del
 
 ### ONNX detection
 
-- Open `/onnx` as an admin. The page is split into **Status**, **Models**, and **Settings** tabs.
-- On **Models**, pick a YOLO model (YOLOv8, YOLO11, or YOLO26) and a download resolution, then download and install it. Use **Use** to activate an installed model and **Check for Updates** to re-export newer weights. A new install has no model at all: download one and press **Use** to turn detection on.
-- On **Settings**, choose the inference device (Auto, CUDA, or CPU), precision (FP32, FP16, or INT8), and any advanced tuning such as concurrency, inference threads, GPU memory limit, execution mode, NMS dedupe, and CUDA IO Binding.
-- On **Status**, use **Check Model**, **Reload Detector**, and **Test Detector** to confirm the detector is healthy.
+- Open **Intelligence → Models** (`/models`) as an admin.
+- On **Object Models**, the status card at the top shows whether detection is running; use **Check Model**, **Reload Detector**, and **Test Detector** to confirm the detector is healthy. Below it, pick a YOLO model (YOLOv8, YOLO11, or YOLO26) and a download resolution, then download and install it. Use **Use** to activate an installed model and **Check for Updates** to re-export newer weights. A new install has no model at all: download one and press **Use** to turn detection on.
+- On **Face Models**, install a face-detection model for the parallel face pass, and the ArcFace embedding models used for recognition.
+- On **Settings** (`/models/settings`), choose the inference device (Auto, CUDA, or CPU), precision (FP32, FP16, or INT8), the face detection pass, and any advanced tuning such as concurrency, inference threads, GPU memory limit, execution mode, NMS dedupe, and CUDA IO Binding.
 
-Models are stored under `models/`. Nothing is downloaded for you: a new install starts with object detection off, and `/onnx` tells you to install a model and press **Use**. `yolo26n` is badged **Recommended** as a starting point; pick a YOLO11 or YOLOv8 export if you need INT8 precision on a CPU-only host. See `docs/ai-detection.md` for the full settings reference and `docs/detection-benchmarking.md` for labeled precision/recall/mAP evaluation and confidence sweeps.
+Models are stored under `models/`. Nothing is downloaded for you: a new install starts with object detection off, and `/models` tells you to install a model and press **Use**. `yolo26n` is badged **Recommended** as a starting point; pick a YOLO11 or YOLOv8 export if you need INT8 precision on a CPU-only host. See `docs/ai-detection.md` for the full settings reference and `docs/detection-benchmarking.md` for labeled precision/recall/mAP evaluation and confidence sweeps.
 
 ### Per-camera model assignment
 
-- Open `/camera-models` to give any camera its own object-detection model. A quiet driveway can run a fast nano model while a busy yard gets a larger one, and cameras without an assignment keep following the default model from `/onnx`.
+- Open **Models → Camera Models** (`/models/cameras`) to give any camera its own object-detection model. A quiet driveway can run a fast nano model while a busy yard gets a larger one, and cameras without an assignment keep following the default model from `/models`.
 - Use the **Assign Model** column to pick an installed model, then **Assign** / **Change** to switch, or **Unassign** to return the camera to the default. Changes apply on the camera's next detection cycle - no reload or restart needed.
-- Assignments use the same runtime tuning (device, precision, threads) as the default detector. Face models are not assignable here - they run in the separate face-detection pass configured on `/onnx`.
+- Assignments use the same runtime tuning (device, precision, threads) as the default detector. Face models are not assignable here - they run in the separate face-detection pass set up on **Face Models** and **Settings**.
 
 ### Sound detection
 
-- Open `/sounds`
+- Open **Detection → Sounds** (`/detection/sounds`)
 - Enable sound detection for a camera and add the sound classes it should listen for
-- Set each class's confidence and whether it records on `/sounds`; configure schedules and email/push policies on `/alerts`
-- Confirm runtime availability on `/yamnet-tflite`
+- Set each class's confidence and whether it records on `/detection/sounds`; configure schedules and email/push policies on `/alerts`
+- Confirm runtime availability on **Models → Sound Model** (`/models/sound`)
 
 If the TFLite runtime is missing, install `ai-edge-litert` or `tflite-runtime`.
 
@@ -446,7 +448,7 @@ gates with zero warnings and no `--max-warnings` pin.
 
 - Cannot log in after first start: open `/setup` and create the initial admin user.
 - Setup redirects to login: a user already exists.
-- `MODEL MISSING`: no detection model is installed. Open `/onnx`, press **Download** on a model, then **Use** to activate it. This is the normal state on a fresh install - nothing is downloaded automatically.
+- `MODEL MISSING`: no detection model is installed. Open `/models`, press **Download** on a model, then **Use** to activate it. This is the normal state on a fresh install - nothing is downloaded automatically.
 - ONNX fails to load: verify model and label paths and confirm the expected ONNX Runtime wheel is installed. For GPU, check that `CUDAExecutionProvider` appears in `ort.get_available_providers()` and that the NVIDIA driver/CUDA/cuDNN versions match the ONNX Runtime release.
 - Email alerts fail: verify SMTP settings under `/settings`, and confirm email notifications are enabled for the rule.
 - Push notifications fail: verify ntfy settings and use the test notification action.

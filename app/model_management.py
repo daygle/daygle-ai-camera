@@ -586,7 +586,7 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
             status_code=400,
             detail=(
                 f"Cannot delete '{model_name}' because it is assigned to camera(s): "
-                f"{', '.join(assigned_cameras)}. Unassign the model on /camera-models first."
+                f"{', '.join(assigned_cameras)}. Unassign the model on Models > Camera Models (/models/cameras) first."
             ),
         )
 

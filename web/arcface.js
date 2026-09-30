@@ -75,7 +75,7 @@ async function loadStatus() {
   }
 }
 
-// Mirrors the ONNX models page card format (web/onnx.js): an active/
+// Mirrors the models page card format (web/models.js): an active/
 // installed/available card state, a status badge, license/dimension badges,
 // a size indicator, and a Download / Use / Refresh / Delete action set.
 function renderModels(models) {
@@ -284,10 +284,6 @@ arcfaceModelList.addEventListener('click', (event) => {
   if (!button) return;
   runModelAction(button.dataset.action, button.dataset.modelId, button);
 });
-
-// Group the ArcFace cards into Status / Models tabs.
-// Shared implementation (ARIA tabs + URL-hash deep-linking) lives in utils.js.
-initDaygleTabs();
 
 loadStatus();
 loadModels();

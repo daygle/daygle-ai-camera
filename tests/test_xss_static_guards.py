@@ -128,7 +128,7 @@ class H2RegressionGuardTests(unittest.TestCase):
         'web/sounds.js',
         'web/settings.js',
         'web/nav.js',
-        'web/onnx.js',
+        'web/models.js',
         'web/profile.js',
         'web/objects.js',
     )

@@ -15,7 +15,7 @@ test('page exposes the default-model panel and the assignment table', () => {
   assert.match(html, /id="defaultModelInfo"/);
   assert.match(html, /id="cameraModelsTable"/);
   assert.match(html, /id="cameraModelsBody"/);
-  assert.match(html, /href="\/onnx"/);
+  assert.match(html, /href="\/models"/);
   assert.match(html, /camera-models\.js/);
 });
 
@@ -65,7 +65,7 @@ test('the actions cell does not reuse the page-level button-row bar', () => {
 });
 
 test('Camera Models is a tab of Intelligence > Models', () => {
-  assert.match(nav, /\{ href: '\/onnx', matches: \['\/onnx', '\/camera-models', '\/yamnet-tflite', '\/arcface'\], label: 'Models'/);
-  assert.match(nav, /\{ href: '\/camera-models', label: 'Camera Models' \}/);
-  assert.ok(nav.indexOf("href: '/camera-models', label") > nav.indexOf("href: '/onnx', label"));
+  assert.match(nav, /\{ href: '\/models', matches: \['\/models', '\/onnx', '\/camera-models', '\/yamnet-tflite', '\/arcface'\], label: 'Models'/);
+  assert.match(nav, /\{ href: '\/models\/cameras', label: 'Camera Models' \}/);
+  assert.ok(nav.indexOf("href: '/models/cameras', label") > nav.indexOf("href: '/models', label"));
 });

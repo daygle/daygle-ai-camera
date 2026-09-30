@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<script>(function(){var t=localStorage.getItem("daygle.theme");if(t!=="dark")document.documentElement.classList.add("light");})()</script>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Object Models - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/model-card-messages.css" />
+  <style>
+    /* On phones the hero stacks vertically; keep the copy content-sized
+       instead of carrying the desktop 420px flex basis into its height. */
+    @media (max-width: 900px) {
+      .onnx-hero { gap: 16px; min-height: 0; }
+      .onnx-hero-copy { flex: 0 0 auto; }
+      .onnx-hero-mark { margin: 0 auto; }
+    }
+    /* First-run state: nothing is installed, so object detection is off. This
+       standing call to action replaces the silent first-start model download
+       the app used to perform. Theme-safe tokens only (no color-mix). */
+    .first-run-notice {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+      margin: 0 0 16px; padding: 16px 18px;
+      background: var(--muted-bg);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--warning);
+      border-radius: 12px;
+    }
+    .first-run-notice[hidden] { display: none; }
+    .first-run-notice-copy { flex: 1 1 320px; min-width: 0; }
+    .first-run-notice-copy strong { display: block; font-size: 15px; }
+    .first-run-notice-copy p { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+    /* "Recommended" badge on the model the server suggests. Page-local: the
+       badge only ever renders on this page's model cards, and web/styles.css
+       is a shared sheet. Tones follow the shared .model-status pills. */
+    .model-status-recommended {
+      background: rgba(71,214,255,.12);
+      color: var(--accent);
+      border: 1px solid rgba(71,214,255,.32);
+    }
+    :root.light .model-status-recommended { background: rgba(2,132,199,.08); color: #026aa7; border-color: rgba(2,132,199,.28); }
+  </style>
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero onnx-hero">
+      <div class="onnx-hero-copy">
+        <p class="eyebrow">AI model workspace</p>
+        <h1>Object Models</h1>
+        <p class="muted">Choose the model that detects people, vehicles, animals and everyday objects on your cameras. Face detection has its own tab, and runtime tuning is under Settings.</p>
+      </div>
+      <div class="onnx-hero-mark" aria-hidden="true">
+        <span class="onnx-hero-ring onnx-hero-ring-back"></span>
+        <span class="onnx-hero-ring onnx-hero-ring-front"></span>
+        <span class="onnx-hero-core">AI</span>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">📦</div>
+        <div>
+          <h2>Object Detection Status</h2>
+          <p class="settings-section-subtitle">Detects everyday objects (person, car…) - these labels are what zones, alerts, and recordings use.</p>
+        </div>
+      </div>
+      <div id="firstRunNotice" class="first-run-notice" hidden>
+        <div class="first-run-notice-copy">
+          <strong>Object detection is off - no model installed</strong>
+          <p>Nothing is downloaded automatically, so a new install starts here. Install a model to choose what your cameras detect; until then only motion rules run.</p>
+        </div>
+        <button id="firstRunChooseModelBtn" class="btn-info" type="button">Choose a model</button>
+      </div>
+      <div id="settingsMessage" class="muted"></div>
+      <div id="objectStatusPanel" class="status-panel"></div>
+      <div class="button-row">
+        <button id="checkModelBtn" class="btn-info" type="button">Check Model</button>
+        <button id="reloadDetectorBtn" class="btn-info" type="button">Reload Detector</button>
+        <button id="testDetectorBtn" class="btn-success" type="button">Test Detector</button>
+      </div>
+    </section>
+
+    <section class="model-library-toolbar model-library-toolbar-object" aria-labelledby="objectLibraryTitle">
+      <div class="model-library-toolbar-copy">
+        <span class="model-library-kicker">Primary detector</span>
+        <h2 id="objectLibraryTitle">Object models</h2>
+        <p>Models for people, vehicles, animals, and the everyday objects used by your zones and alerts. Downloading installs a model; it does not become the default until you choose <strong>Use</strong> (or assign it to a camera on Camera Models).</p>
+      </div>
+      <div class="model-library-toolbar-actions">
+        <span class="model-library-count" id="objectModelCount">Loading models…</span>
+        <button id="checkObjectModelUpdatesBtn" class="btn-info model-update-check-btn" type="button">
+          <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
+        </button>
+      </div>
+    </section>
+    <div id="objectModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
+
+    <section class="card model-library-card" id="objectModelsCard">
+      <div class="model-library-card-header">
+        <div>
+          <span class="model-library-kicker">Available catalog</span>
+          <h2>Choose an object model</h2>
+        </div>
+        <span class="model-library-tip">Larger models trade speed for accuracy</span>
+      </div>
+      <div id="objectModelList" class="model-card-grid"></div>
+      <p id="objectModelsEmpty" class="model-library-empty" hidden>No object models available.</p>
+      <p class="model-library-empty" id="objectModelsFirstRunHint">Nothing here is installed for you: press <strong>Download</strong> to install a model, then <strong>Use</strong> to make it the one your cameras run. Recommended starting point: <strong id="recommendedModelName">&hellip;</strong>. Need INT8 precision on a CPU-only host? Pick a YOLO11 or YOLOv8 export instead.</p>
+    </section>
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/models.js"></script>
+</body>
+</html>

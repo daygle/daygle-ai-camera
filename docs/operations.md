@@ -116,7 +116,7 @@ Use **Recordings Timeline** (`/recordings/timeline`) to view clip segments in a 
 
 ## YAMNet TFLite status
 
-Open **YAMNet TFLite** (`/yamnet-tflite`) to confirm whether the sound detection backend is available and the YAMNet assets have been downloaded. If the TensorFlow Lite runtime or model files are missing, the page reports the issue.
+Open **Models → Sound Model** (`/models/sound`) to confirm whether the sound detection backend is available and the YAMNet assets have been downloaded. If the TensorFlow Lite runtime or model files are missing, the page reports the issue.
 
 ## Logs and backups
 

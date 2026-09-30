@@ -1,3 +1,13 @@
+// models.js - Intelligence > Models (object and face-detection models plus
+// the detection runtime settings). One script serves three pages, each of
+// which holds only some of the sections, so every section is optional:
+//   /models          (models.html)          object status + object library
+//   /models/faces    (arcface.html)         face-detection status + library,
+//                                           beside arcface.js (recognition)
+//   /models/settings (models-settings.html) the detection settings form
+// Wrapped in its own scope because arcface.js shares the Face Models page
+// and declares some of the same top-level names.
+(() => {
 const aiForm = document.getElementById('aiSettingsForm');
 const messageEl = document.getElementById('settingsMessage');
 // Two separate status cards: the PRIMARY object detector and the parallel
@@ -66,7 +76,7 @@ function displayValue(value, fallback = 'None') {
 }
 
 function setMessage(text, isError = false) {
-  messageEl.textContent = text;
+  if (messageEl) messageEl.textContent = text;
   if (text) window.showToast(text, isError);
 }
 
@@ -204,7 +214,7 @@ function renderStatus(status) {
     );
     firstRunNotice.hidden = !noModel;
   }
-  objectStatusPanel.innerHTML = objectRows.join('');
+  if (objectStatusPanel) objectStatusPanel.innerHTML = objectRows.join('');
 
   // Face pass card: always rendered so the parallel architecture stays
   // visible -- Disabled when off, Loaded/Not loaded when on.
@@ -223,12 +233,20 @@ function renderStatus(status) {
     faceModelRow,
   ];
   if (status.face_enabled && status.face_model_loaded === false) {
-    faceRows.push(safeHtml`<div class="wide"><span style="color:var(--danger)">Face Model Error</span><strong style="color:var(--danger)">${status.face_model_path ? `Face model not found or failed to load: ${status.face_model_path}` : 'No face model selected - choose one under Settings or download one on the Models tab.'}</strong></div>`);
+    faceRows.push(safeHtml`<div class="wide"><span style="color:var(--danger)">Face Model Error</span><strong style="color:var(--danger)">${status.face_model_path ? `Face model not found or failed to load: ${status.face_model_path}` : 'No face model selected - download one below, then choose it under Settings.'}</strong></div>`);
   }
-  faceStatusPanel.innerHTML = faceRows.join('');
+  if (faceStatusPanel) faceStatusPanel.innerHTML = faceRows.join('');
 }
 
 function renderAi(settings) {
+  if (aiForm) fillAiForm(settings);
+  renderStatus(settings);
+  if (settings.reload_succeeded === false) setMessage(`Settings saved, but detector reload failed: ${settings.reload_error || settings.last_detector_error}`);
+  else if (messageEl) messageEl.textContent = settings.last_detector_error ? `Detector warning: ${settings.last_detector_error}` : '';
+}
+
+// The Settings tab's form; the other pages only show status.
+function fillAiForm(settings) {
   for (const [key, value] of Object.entries(settings)) {
     const el = aiForm.elements[key];
     if (!el) continue;
@@ -261,28 +279,26 @@ function renderAi(settings) {
     const conf = settings.confidence == null ? NaN : Number(settings.confidence);
     aiForm.elements['confidence'].value = Number.isFinite(conf) ? String(conf) : '0.45';
   }
-  renderStatus(settings);
-  if (settings.reload_succeeded === false) setMessage(`Settings saved, but detector reload failed: ${settings.reload_error || settings.last_detector_error}`);
-  else messageEl.textContent = settings.last_detector_error ? `Detector warning: ${settings.last_detector_error}` : '';
+}
+
+// Fill one library (object or face) when this page has it.
+function renderLibrary(card, list, empty, count, familyModels) {
+  if (!list) return;
+  if (card) card.hidden = false;
+  list.innerHTML = familyModels.map(renderCard).join('');
+  if (empty) empty.hidden = familyModels.length > 0;
+  if (count) {
+    count.textContent = familyModels.length
+      ? `${familyModels.filter((m) => m.installed).length} installed · ${familyModels.length} available`
+      : '0 models';
+  }
 }
 
 function renderModelList(models) {
-  // Both cards ALWAYS render once the catalog loads: the two detector slots
-  // (primary objects vs parallel face pass) should stay visible even when one
-  // side has nothing installed, so the architecture is obvious.
-  if (!models.length) {
-    objectModelList.innerHTML = '';
-    faceModelList.innerHTML = '';
-    objectModelsEmpty.hidden = false;
-    faceModelsEmpty.hidden = false;
-    objectModelCount.textContent = '0 models';
-    faceModelCount.textContent = '0 models';
-    return;
-  }
+  // A library ALWAYS renders once the catalog loads, even with nothing
+  // installed, so the detector slot it fills stays visible.
   const objectModels = models.filter((m) => m.family !== 'face');
   const faceModels = models.filter((m) => m.family === 'face');
-  objectModelCount.textContent = `${objectModels.filter((m) => m.installed).length} installed · ${objectModels.length} available`;
-  faceModelCount.textContent = `${faceModels.filter((m) => m.installed).length} installed · ${faceModels.length} available`;
   // Name the server's recommended model instead of hard-coding a model id in
   // the markup, so changing the recommendation needs no HTML edit.
   const recommended = objectModels.find((m) => m.recommended);
@@ -290,15 +306,8 @@ function renderModelList(models) {
     recommendedModelName.textContent = recommended.label;
   }
 
-  // Object models card (PRIMARY)
-  objectModelsCard.hidden = false;
-  objectModelList.innerHTML = objectModels.map(renderCard).join('');
-  objectModelsEmpty.hidden = objectModels.length > 0;
-
-  // Face models card (parallel pass)
-  faceModelsCard.hidden = false;
-  faceModelList.innerHTML = faceModels.map(renderCard).join('');
-  faceModelsEmpty.hidden = faceModels.length > 0;
+  renderLibrary(objectModelsCard, objectModelList, objectModelsEmpty, objectModelCount, objectModels);
+  renderLibrary(faceModelsCard, faceModelList, faceModelsEmpty, faceModelCount, faceModels);
 
   bindModelCardActions();
 }
@@ -520,16 +529,17 @@ async function loadModels() {
     const models = await api('/api/settings/ai/models');
     lastLoadedModels = models;
     renderModelList(models);
-    populateFaceModelSelect(models, aiForm.elements['face_model_path']?.value || '');
+    populateFaceModelSelect(models, aiForm?.elements['face_model_path']?.value || '');
   } catch {
-    objectModelList.innerHTML = '';
-    faceModelList.innerHTML = '';
-    objectModelsEmpty.hidden = false;
-    faceModelsEmpty.hidden = false;
-    objectModelsEmpty.textContent = 'Could not load the model list.';
-    faceModelsEmpty.textContent = 'Could not load the model list.';
-    objectModelUpdatesMessage.textContent = 'Could not load model list.';
-    faceModelUpdatesMessage.textContent = 'Could not load model list.';
+    for (const list of [objectModelList, faceModelList]) if (list) list.innerHTML = '';
+    for (const empty of [objectModelsEmpty, faceModelsEmpty]) {
+      if (!empty) continue;
+      empty.hidden = false;
+      empty.textContent = 'Could not load the model list.';
+    }
+    for (const message of [objectModelUpdatesMessage, faceModelUpdatesMessage]) {
+      if (message) message.textContent = 'Could not load model list.';
+    }
     window.showToast('Could not load the model list.', true);
   }
 }
@@ -565,7 +575,7 @@ async function checkForModelUpdates(family) {
       isError = true;
     } else if (!installedCount) {
       message = family === 'face'
-        ? 'No face models installed yet. Download one, then enable Face Detection under AI Settings.'
+        ? 'No face models installed yet. Download one, then turn on Face Detection under Settings.'
         : 'No object models installed yet.';
     } else if (updateCount) {
       message = `${updateCount} ${family} model${updateCount === 1 ? '' : 's'} ready to update.`;
@@ -594,7 +604,7 @@ async function loadAll() {
   renderAi(aiSettings);
   // renderAi applies the persisted face_model_path AFTER the model list was
   // fetched, so re-populate the dropdown now that the saved value is known.
-  populateFaceModelSelect(lastLoadedModels, aiForm.elements['face_model_path']?.value || '');
+  populateFaceModelSelect(lastLoadedModels, aiForm?.elements['face_model_path']?.value || '');
 }
 
 async function runAction(buttonId, path, label) {
@@ -620,7 +630,7 @@ document.querySelectorAll('.field-help').forEach((el) => {
   if (!el.title) el.title = el.textContent;
 });
 
-aiForm.addEventListener('submit', async (event) => {
+aiForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
     const result = await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify(formPayload(aiForm)) });
@@ -638,26 +648,22 @@ aiForm.addEventListener('submit', async (event) => {
   }
 });
 
-document.getElementById('checkModelBtn').addEventListener('click', () => runAction('checkModelBtn', '/api/settings/ai/check-model', 'Checking model'));
-document.getElementById('reloadDetectorBtn').addEventListener('click', () => runAction('reloadDetectorBtn', '/api/settings/ai/reload', 'Reloading detector'));
-document.getElementById('testDetectorBtn').addEventListener('click', () => runAction('testDetectorBtn', '/api/settings/ai/test-detector', 'Testing detector'));
-document.getElementById('checkObjectModelUpdatesBtn').addEventListener('click', () => checkForModelUpdates('object'));
-document.getElementById('checkFaceModelUpdatesBtn').addEventListener('click', () => checkForModelUpdates('face'));
-// The first-run notice's call to action: jump to the Object Models tab by
-// clicking its tab button, which reuses the shared ARIA tab wiring (and its
-// URL-hash deep link) rather than reaching into the panels directly.
+document.getElementById('checkModelBtn')?.addEventListener('click', () => runAction('checkModelBtn', '/api/settings/ai/check-model', 'Checking model'));
+document.getElementById('reloadDetectorBtn')?.addEventListener('click', () => runAction('reloadDetectorBtn', '/api/settings/ai/reload', 'Reloading detector'));
+document.getElementById('testDetectorBtn')?.addEventListener('click', () => runAction('testDetectorBtn', '/api/settings/ai/test-detector', 'Testing detector'));
+document.getElementById('checkObjectModelUpdatesBtn')?.addEventListener('click', () => checkForModelUpdates('object'));
+document.getElementById('checkFaceModelUpdatesBtn')?.addEventListener('click', () => checkForModelUpdates('face'));
+// The first-run notice's call to action: the object catalog sits below the
+// status card on the same page, so bring it into view.
 if (firstRunChooseModelBtn) {
   firstRunChooseModelBtn.addEventListener('click', () => {
-    document.getElementById('tab-object-models')?.click();
+    objectModelsCard?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
-
-// Group the ONNX cards into Status / Models / Settings tabs. Shared
-// implementation (ARIA tabs + URL-hash deep-linking) lives in utils.js.
-initDaygleTabs();
 
 loadAll().catch((error) => {
   // Skip UI updates if api() triggered a 401 redirect
   if (window.daygleAuth?.redirecting) return;
   setMessage(error.message, true);
 });
+})();

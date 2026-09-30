@@ -11,19 +11,21 @@ Routes:
 - GET  /live          -- live_page
 - GET  /zones         -- zones_page
 - GET  /alerts        -- alerts_page
-- GET  /sounds        -- sounds_page
-- GET  /objects       -- objects_page
+- GET  /detection/sounds -- sounds_page (/sounds redirects)
+- GET  /detection     -- objects_page (/objects redirects)
+- GET  /detection/faces -- face_recognition_page (/face-recognition redirects)
 - GET  /cameras       -- cameras_page
 - GET  /events        -- events_page
 - GET  /search        -- dashboard_aliases
 - GET  /recordings    -- recordings_page
 - GET  /snapshots     -- snapshots_page
 - GET  /recordings/timeline -- recordings_timeline_page
-- GET  /onnx          -- onnx_page
-- GET  /camera-models  -- camera_models_page
+- GET  /models        -- models_page (/onnx redirects)
+- GET  /models/faces  -- face_models_page (/arcface redirects)
+- GET  /models/cameras -- camera_models_page (/camera-models redirects)
+- GET  /models/sound  -- yamnet_tflite_page (/yamnet-tflite, /yamnet redirect)
+- GET  /models/settings -- model_settings_page
 - GET  /ai            -- ai_settings_page (308 redirect)
-- GET  /yamnet-tflite -- yamnet_tflite_page
-- GET  /yamnet        -- yamnet_page (308 redirect)
 - GET  /profile       -- profile_page
 - GET  /settings      -- system_settings_page
 - GET  /users         -- users_page
@@ -229,16 +231,26 @@ def alerts_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     return _page(web_dir, 'alerts.html')
 
 
-@router.get('/sounds')
+@router.get('/detection/sounds')
 def sounds_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
     return _page(web_dir, 'sounds.html')
 
 
-@router.get('/objects')
+@router.get('/sounds')
+def legacy_sounds_page():
+    return RedirectResponse('/detection/sounds', status_code=308)
+
+
+@router.get('/detection')
 def objects_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
     return _page(web_dir, 'objects.html')
+
+
+@router.get('/objects')
+def legacy_objects_page():
+    return RedirectResponse('/detection', status_code=308)
 
 
 @router.get('/cameras')
@@ -297,16 +309,46 @@ def recording_playback_page(recording_id: str, web_dir: Path = Depends(get_web_d
     return _page(web_dir, 'recordings.html')
 
 
-@router.get('/onnx')
-def onnx_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+# Intelligence > Models: one tab row of sibling pages under /models. The
+# pre-/models URLs redirect so bookmarks keep working.
+@router.get('/models')
+def models_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    return _page(web_dir, 'onnx.html')
+    return _page(web_dir, 'models.html')
 
 
-@router.get('/camera-models')
+@router.get('/models/faces')
+def face_models_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
+    return _page(web_dir, 'arcface.html')
+
+
+@router.get('/models/cameras')
 def camera_models_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
     return _page(web_dir, 'camera-models.html')
+
+
+@router.get('/models/sound')
+def yamnet_tflite_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
+    return _page(web_dir, 'yamnet-tflite.html')
+
+
+@router.get('/models/settings')
+def model_settings_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
+    return _page(web_dir, 'models-settings.html')
+
+
+@router.get('/onnx')
+def onnx_page():
+    return RedirectResponse('/models', status_code=308)
+
+
+@router.get('/camera-models')
+def legacy_camera_models_page():
+    return RedirectResponse('/models/cameras', status_code=308)
 
 
 @router.get('/ai')
@@ -317,16 +359,20 @@ def ai_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     return _page(web_dir, 'ai.html')
 
 
-@router.get('/face-recognition')
+@router.get('/detection/faces')
 def face_recognition_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
     return _page(web_dir, 'face-recognition.html')
 
 
+@router.get('/face-recognition')
+def legacy_face_recognition_page():
+    return RedirectResponse('/detection/faces', status_code=308)
+
+
 @router.get('/arcface')
-def arcface_page(request: Request, web_dir: Path = Depends(get_web_dir)):
-    require_admin(request)
-    return _page(web_dir, 'arcface.html')
+def arcface_page():
+    return RedirectResponse('/models/faces', status_code=308)
 
 
 @router.get('/people')
@@ -334,18 +380,17 @@ def people_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
     # People enrolment moved into the Face Recognition page's People tab;
     # the hash opens that tab directly via initDaygleTabs' deep-linking.
-    return RedirectResponse('/face-recognition#people', status_code=303)
+    return RedirectResponse('/detection/faces#people', status_code=303)
 
 
 @router.get('/yamnet-tflite')
-def yamnet_tflite_page(request: Request, web_dir: Path = Depends(get_web_dir)):
-    require_admin(request)
-    return _page(web_dir, 'yamnet-tflite.html')
+def legacy_yamnet_tflite_page():
+    return RedirectResponse('/models/sound', status_code=308)
 
 
 @router.get('/yamnet')
 def yamnet_page():
-    return RedirectResponse('/yamnet-tflite', status_code=308)
+    return RedirectResponse('/models/sound', status_code=308)
 
 
 @router.get('/profile')

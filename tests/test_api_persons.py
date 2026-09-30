@@ -227,7 +227,7 @@ def test_persons_require_admin(tmp_path, monkeypatch):
 
 def test_people_page_served_to_admin(tmp_path, monkeypatch):
     """People enrolment lives on the Face Recognition page's People tab; the
-    /people route is a redirect to /face-recognition#people."""
+    /people route is a redirect to /detection/faces#people."""
     app, _db = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
     client = LocalClient(base_url)
@@ -236,9 +236,9 @@ def test_people_page_served_to_admin(tmp_path, monkeypatch):
         _login(client)
         status, headers, page = client.request('/people', follow_redirects=False)
         assert status in (302, 303)
-        assert '/face-recognition' in str(LocalClient.header(headers, 'location') or '')
+        assert '/detection/faces#people' in str(LocalClient.header(headers, 'location') or '')
         # Following the redirect lands on the tabbed Face Recognition page.
-        final_status, _h, page = client.request('/face-recognition')
+        final_status, _h, page = client.request('/detection/faces')
         assert final_status == 200
         assert '<title>Face Recognition - Daygle AI Camera</title>' in page
     finally:
