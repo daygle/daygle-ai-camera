@@ -267,7 +267,7 @@ window.daygleAuthReady = (async () => {
         { href: '/alerts', matches: ['/alerts'], label: 'Alerts', icon: 'alerts' },
         // People enrolment lives on the Face Recognition page's People tab
         // (/face-recognition#people); /people redirects there.
-        { href: '/objects', matches: ['/objects', '/sounds', '/face-recognition'], label: 'Detection', icon: 'detection' },
+        { href: '/detection', matches: ['/detection', '/objects', '/sounds', '/face-recognition'], label: 'Detection', icon: 'detection' },
       ],
     },
     {
@@ -276,7 +276,7 @@ window.daygleAuthReady = (async () => {
       admin: true,
       links: [
         { href: '/ai', matches: ['/ai'], label: 'AI', icon: 'ai' },
-        { href: '/onnx', matches: ['/onnx', '/camera-models', '/yamnet-tflite', '/arcface'], label: 'Models', icon: 'models' },
+        { href: '/models', matches: ['/models', '/onnx', '/camera-models', '/yamnet-tflite', '/arcface'], label: 'Models', icon: 'models' },
       ],
     },
     {
@@ -296,26 +296,29 @@ window.daygleAuthReady = (async () => {
    * tabs are hidden for viewers by renderNavAccount like the sidebar. */
   const PAGE_TABS = [
     [
-      { href: '/recordings', label: 'Recordings', match: (p) => p === '/recordings' || /^\/recordings\/\d+$/.test(p) },
-      { href: '/recordings/timeline', label: 'Timeline' },
-      { href: '/snapshots', label: 'Snapshots' },
+      { href: '/recordings', icon: '🎞️', label: 'Recordings', match: (p) => p === '/recordings' || /^\/recordings\/\d+$/.test(p) },
+      { href: '/recordings/timeline', icon: '🕒', label: 'Timeline' },
+      { href: '/snapshots', icon: '📸', label: 'Snapshots' },
+    ],
+    // The section's own URL is also the prefix of its sibling tabs, so its
+    // tab matches exactly rather than by prefix.
+    [
+      { href: '/detection', icon: '📦', label: 'Objects', match: (p) => p === '/detection' },
+      { href: '/detection/sounds', icon: '🔊', label: 'Sounds' },
+      { href: '/detection/faces', icon: '👤', label: 'Faces' },
     ],
     [
-      { href: '/objects', label: 'Objects' },
-      { href: '/sounds', label: 'Sounds' },
-      { href: '/face-recognition', label: 'Faces' },
+      { href: '/models', icon: '📦', label: 'Object Models', match: (p) => p === '/models' },
+      { href: '/models/faces', icon: '👤', label: 'Face Models' },
+      { href: '/models/cameras', icon: '📷', label: 'Camera Models' },
+      { href: '/models/sound', icon: '🔊', label: 'Sound Model' },
+      { href: '/models/settings', icon: '⚙️', label: 'Settings' },
     ],
     [
-      { href: '/onnx', label: 'Object Models' },
-      { href: '/camera-models', label: 'Camera Models' },
-      { href: '/yamnet-tflite', label: 'Sound Model' },
-      { href: '/arcface', label: 'Face Model' },
-    ],
-    [
-      { href: '/system', label: 'Health' },
-      { href: '/camera-log', label: 'Camera Log' },
-      { href: '/application-log', label: 'Application Log' },
-      { href: '/audit', label: 'Audit Log' },
+      { href: '/system', icon: '🩺', label: 'Health' },
+      { href: '/camera-log', icon: '📹', label: 'Camera Log' },
+      { href: '/application-log', icon: '📄', label: 'Application Log' },
+      { href: '/audit', icon: '🛡️', label: 'Audit Log' },
     ],
   ];
 
@@ -421,7 +424,8 @@ window.daygleAuthReady = (async () => {
     strip.setAttribute('aria-label', 'Section');
     strip.innerHTML = tabGroup.map((tab) => {
       const active = tab.match ? tab.match(currentPath) : pathMatchesNav(currentPath, tab.href);
-      return `<a href="${tab.href}" class="page-tab${active ? ' active' : ''}"${active ? ' aria-current="page"' : ''}>${tab.label}</a>`;
+      // Every tab carries an icon beside its text, like the in-page tabs.
+      return `<a href="${tab.href}" class="page-tab${active ? ' active' : ''}"${active ? ' aria-current="page"' : ''}><span class="page-tab-icon" aria-hidden="true">${tab.icon}</span><span>${tab.label}</span></a>`;
     }).join('');
     const hero = main.querySelector(':scope > .hero');
     if (hero) hero.after(strip);

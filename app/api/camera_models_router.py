@@ -146,7 +146,7 @@ async def assign_camera_model(
     if models_dir_file(model_path) is None:
         raise HTTPException(
             status_code=404,
-            detail=f'Model file not found: {model_path}. Install it on /onnx first.',
+            detail=f'Model file not found: {model_path}. Install it on Models > Object Models (/models) first.',
         )
     if models_dir_file(labels_path) is None:
         raise HTTPException(status_code=404, detail=f'Labels file not found: {labels_path}.')

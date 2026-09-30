@@ -240,10 +240,10 @@ function buildEditFormHtml(camera, index) {
       '<button type="button" class="secondary cam-edit-collapse-btn" data-index="' + htmlAttr(index) + '" title="Collapse camera settings" aria-label="Collapse camera settings">' + ICONS.chevronUp + '</button>' +
     '</div>' +
     '<div class="modal-tabs" role="tablist">' +
-      '<button class="modal-tab active" data-tab="connection" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="true">Connection</button>' +
-      '<button class="modal-tab" data-tab="recording" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="false" tabindex="-1">Recording</button>' +
-      '<button class="modal-tab" data-tab="ptz" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="false" tabindex="-1">PTZ</button>' +
-      '<button class="modal-tab" data-tab="advanced" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="false" tabindex="-1">Advanced</button>' +
+      '<button class="modal-tab active" data-tab="connection" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="true"><span class="modal-tab-icon" aria-hidden="true">🔌</span>Connection</button>' +
+      '<button class="modal-tab" data-tab="recording" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="false" tabindex="-1"><span class="modal-tab-icon" aria-hidden="true">🎬</span>Recording</button>' +
+      '<button class="modal-tab" data-tab="ptz" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="false" tabindex="-1"><span class="modal-tab-icon" aria-hidden="true">🎯</span>PTZ</button>' +
+      '<button class="modal-tab" data-tab="advanced" data-form="' + htmlAttr(formId) + '" type="button" role="tab" aria-selected="false" tabindex="-1"><span class="modal-tab-icon" aria-hidden="true">🛠️</span>Advanced</button>' +
     '</div>' +
     '<form class="camera-edit-form modal-body" data-camera-index="' + htmlAttr(index) + '" id="' + htmlAttr(formId) + '" novalidate autocomplete="off">' +
       '<input type="hidden" name="camera_index" value="' + htmlAttr(index) + '" />' +

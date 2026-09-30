@@ -4,42 +4,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ONNX - Daygle AI Camera</title>
+  <title>Model Settings - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
-  <link rel="stylesheet" href="/static/model-card-messages.css" />
   <style>
-    /* On phones the hero stacks vertically; keep the copy content-sized
-       instead of carrying the desktop 420px flex basis into its height. */
     @media (max-width: 900px) {
       .onnx-hero { gap: 16px; min-height: 0; }
       .onnx-hero-copy { flex: 0 0 auto; }
       .onnx-hero-mark { margin: 0 auto; }
     }
-    /* First-run state: nothing is installed, so object detection is off. This
-       standing call to action replaces the silent first-start model download
-       the app used to perform. Theme-safe tokens only (no color-mix). */
-    .first-run-notice {
-      display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
-      margin: 0 0 16px; padding: 16px 18px;
-      background: var(--muted-bg);
-      border: 1px solid var(--border);
-      border-left: 3px solid var(--warning);
-      border-radius: 12px;
-    }
-    .first-run-notice[hidden] { display: none; }
-    .first-run-notice-copy { flex: 1 1 320px; min-width: 0; }
-    .first-run-notice-copy strong { display: block; font-size: 15px; }
-    .first-run-notice-copy p { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
-    /* "Recommended" badge on the model the server suggests. Page-local: the
-       badge only ever renders on this page's model cards, and web/styles.css
-       is a shared sheet. Tones follow the shared .model-status pills. */
-    .model-status-recommended {
-      background: rgba(71,214,255,.12);
-      color: var(--accent);
-      border: 1px solid rgba(71,214,255,.32);
-    }
-    :root.light .model-status-recommended { background: rgba(2,132,199,.08); color: #026aa7; border-color: rgba(2,132,199,.28); }
   </style>
 </head>
 <body>
@@ -47,8 +20,8 @@
     <header class="hero onnx-hero">
       <div class="onnx-hero-copy">
         <p class="eyebrow">AI model workspace</p>
-        <h1>ONNX</h1>
-        <p class="muted">Choose the models that power detection on your cameras. Object detection and face detection run as separate passes, so you can tune each one independently.</p>
+        <h1>Model Settings</h1>
+        <p class="muted">Turn detection on or off, choose the device, set the minimum confidence and the face detection pass, and tune how the models run.</p>
       </div>
       <div class="onnx-hero-mark" aria-hidden="true">
         <span class="onnx-hero-ring onnx-hero-ring-back"></span>
@@ -56,121 +29,6 @@
         <span class="onnx-hero-core">AI</span>
       </div>
     </header>
-
-    <div class="settings-tabs onnx-tabs" role="tablist" aria-label="ONNX sections">
-      <button class="settings-tab" type="button" role="tab" id="tab-status" aria-controls="panel-status" data-tab="status" aria-selected="true">
-        <span class="settings-tab-icon" aria-hidden="true">⌁</span><span class="settings-tab-copy"><span class="settings-tab-label">Overview</span><small>Live health</small></span>
-      </button>
-      <button class="settings-tab" type="button" role="tab" id="tab-object-models" aria-controls="panel-object-models" data-tab="object-models" aria-selected="false" tabindex="-1">
-        <span class="settings-tab-icon onnx-tab-icon-object" aria-hidden="true">◈</span><span class="settings-tab-copy"><span class="settings-tab-label">Object Models</span><small>Everyday detection</small></span>
-      </button>
-      <button class="settings-tab" type="button" role="tab" id="tab-face-models" aria-controls="panel-face-models" data-tab="face-models" aria-selected="false" tabindex="-1">
-        <span class="settings-tab-icon onnx-tab-icon-face" aria-hidden="true">◉</span><span class="settings-tab-copy"><span class="settings-tab-label">Face Models</span><small>Face detection</small></span>
-      </button>
-      <button class="settings-tab" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" data-tab="settings" aria-selected="false" tabindex="-1">
-        <span class="settings-tab-icon" aria-hidden="true">⚙</span><span class="settings-tab-copy"><span class="settings-tab-label">Settings</span><small>Runtime tuning</small></span>
-      </button>
-    </div>
-
-    <div class="settings-panel" id="panel-status" role="tabpanel" aria-labelledby="tab-status" data-panel="status">
-
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">📦</div>
-        <div>
-          <h2>Object Detection Status</h2>
-          <p class="settings-section-subtitle">Detects everyday objects (person, car…) - these labels are what zones, alerts, and recordings use.</p>
-        </div>
-      </div>
-      <div id="firstRunNotice" class="first-run-notice" hidden>
-        <div class="first-run-notice-copy">
-          <strong>Object detection is off - no model installed</strong>
-          <p>Nothing is downloaded automatically, so a new install starts here. Install a model to choose what your cameras detect; until then only motion rules run.</p>
-        </div>
-        <button id="firstRunChooseModelBtn" class="btn-info" type="button">Choose a model</button>
-      </div>
-      <div id="settingsMessage" class="muted"></div>
-      <div id="objectStatusPanel" class="status-panel"></div>
-      <div class="button-row">
-        <button id="checkModelBtn" class="btn-info" type="button">Check Model</button>
-        <button id="reloadDetectorBtn" class="btn-info" type="button">Reload Detector</button>
-        <button id="testDetectorBtn" class="btn-success" type="button">Test Detector</button>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">👤</div>
-        <div>
-          <h2>Face Detection Status</h2>
-          <p class="settings-section-subtitle">An extra detector for faces, running at the same time as object detection so both are seen in the same frames. Configure it under Settings → Face Detection.</p>
-        </div>
-      </div>
-      <div id="faceStatusPanel" class="status-panel"></div>
-    </section>
-
-    </div><!-- /panel-status -->
-
-    <div class="settings-panel" id="panel-object-models" role="tabpanel" aria-labelledby="tab-object-models" data-panel="object-models" hidden>
-      <section class="model-library-toolbar model-library-toolbar-object" aria-labelledby="objectLibraryTitle">
-        <div class="model-library-toolbar-copy">
-          <span class="model-library-kicker">Primary detector</span>
-          <h2 id="objectLibraryTitle">Object models</h2>
-          <p>Models for people, vehicles, animals, and the everyday objects used by your zones and alerts. Downloading installs a model; it does not become the default until you choose <strong>Use</strong> (or assign it to a camera on Camera Models).</p>
-        </div>
-        <div class="model-library-toolbar-actions">
-          <span class="model-library-count" id="objectModelCount">Loading models…</span>
-          <button id="checkObjectModelUpdatesBtn" class="btn-info model-update-check-btn" type="button">
-            <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
-          </button>
-        </div>
-      </section>
-      <div id="objectModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
-
-      <section class="card model-library-card" id="objectModelsCard">
-        <div class="model-library-card-header">
-          <div>
-            <span class="model-library-kicker">Available catalog</span>
-            <h2>Choose an object model</h2>
-          </div>
-          <span class="model-library-tip">Larger models trade speed for accuracy</span>
-        </div>
-        <div id="objectModelList" class="model-card-grid"></div>
-        <p id="objectModelsEmpty" class="model-library-empty" hidden>No object models available.</p>
-        <p class="model-library-empty" id="objectModelsFirstRunHint">Nothing here is installed for you: press <strong>Download</strong> to install a model, then <strong>Use</strong> to make it the one your cameras run. Recommended starting point: <strong id="recommendedModelName">&hellip;</strong>. Need INT8 precision on a CPU-only host? Pick a YOLO11 or YOLOv8 export instead.</p>
-      </section>
-    </div><!-- /panel-object-models -->
-
-    <div class="settings-panel" id="panel-face-models" role="tabpanel" aria-labelledby="tab-face-models" data-panel="face-models" hidden>
-      <section class="model-library-toolbar model-library-toolbar-face" aria-labelledby="faceLibraryTitle">
-        <div class="model-library-toolbar-copy">
-          <span class="model-library-kicker">Parallel detector</span>
-          <h2 id="faceLibraryTitle">Face models</h2>
-          <p>Models that look for faces only. They run alongside your object model and never replace it.</p>
-        </div>
-        <div class="model-library-toolbar-actions">
-          <span class="model-library-count" id="faceModelCount">Loading models…</span>
-          <button id="checkFaceModelUpdatesBtn" class="btn-info model-update-check-btn" type="button">
-            <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
-          </button>
-        </div>
-      </section>
-      <div id="faceModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
-
-      <section class="card model-library-card" id="faceModelsCard">
-        <div class="model-library-card-header">
-          <div>
-            <span class="model-library-kicker">Available catalog</span>
-            <h2>Choose a face model</h2>
-          </div>
-          <span class="model-library-tip">Enable your selection in Settings</span>
-        </div>
-        <div id="faceModelList" class="model-card-grid"></div>
-        <p id="faceModelsEmpty" class="model-library-empty" hidden>No face models yet - download one, then enable Face Detection under AI Settings.</p>
-      </section>
-    </div><!-- /panel-face-models -->
-
-    <div class="settings-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings" hidden>
 
     <section class="card">
       <div class="settings-section-header">
@@ -180,6 +38,7 @@
           <p class="settings-section-subtitle">Configure the AI detection engine, model path, and inference parameters.</p>
         </div>
       </div>
+      <div id="settingsMessage" class="muted"></div>
       <form id="aiSettingsForm">
         <div class="form-grid">
         <label>
@@ -206,18 +65,18 @@
         <p class="settings-device-group">Face Detection <span class="settings-device-note">Runs at the same time as object detection above</span></p>
         <div class="form-grid">
         <label>
-          <span>Face Detection <span class="info-tip" data-tip="Run an extra face-detection model at the same time as object detection, so objects (person, car…) and faces are detected in the same frames. Requires an installed YOLO11 · Face model from the Models tab." title="Run an extra face-detection model at the same time as object detection, so objects (person, car…) and faces are detected in the same frames. Requires an installed YOLO11 · Face model from the Models tab." tabindex="0" aria-label="Help: Run an extra face-detection model at the same time as object detection"></span></span>
+          <span>Face Detection <span class="info-tip" data-tip="Run an extra face-detection model at the same time as object detection, so objects (person, car…) and faces are detected in the same frames. Requires a face model installed on the Face Models tab." title="Run an extra face-detection model at the same time as object detection, so objects (person, car…) and faces are detected in the same frames. Requires a face model installed on the Face Models tab." tabindex="0" aria-label="Help: Run an extra face-detection model at the same time as object detection"></span></span>
           <select name="face_enabled">
             <option value="false">Disabled</option>
             <option value="true">Enabled</option>
           </select></label>
         <label>
-          <span>Face Model <span class="info-tip" data-tip="The installed face-model ONNX used for face detection. Install one from the Models tab above; this list fills automatically. Leave empty to disable." title="The installed face-model ONNX used for face detection. Install one from the Models tab above; this list fills automatically." tabindex="0" aria-label="Help: The installed face-model ONNX used for face detection"></span></span>
+          <span>Face Model <span class="info-tip" data-tip="The installed face-model ONNX used for face detection. Install one on the Face Models tab; this list fills automatically. Leave empty to disable." title="The installed face-model ONNX used for face detection. Install one on the Face Models tab; this list fills automatically." tabindex="0" aria-label="Help: The installed face-model ONNX used for face detection"></span></span>
           <select name="face_model_path" id="faceModelSelect"><option value="">None Installed</option></select></label>
         </div>
         <details class="settings-advanced">
           <summary>Advanced</summary>
-          <p class="settings-advanced-hint">Optional inference tuning that works on its defaults - most setups never need to touch these. Change one at a time so you can attribute any per-frame impact. Settings are grouped by where they apply: the CPU and GPU groups only affect their own device, so on a CPU-only host the GPU group is inert (and vice versa). The device actually running is shown as <strong>Device</strong> on the Status tab.</p>
+          <p class="settings-advanced-hint">Optional inference tuning that works on its defaults - most setups never need to touch these. Change one at a time so you can attribute any per-frame impact. Settings are grouped by where they apply: the CPU and GPU groups only affect their own device, so on a CPU-only host the GPU group is inert (and vice versa). The device actually running is shown as <strong>Device</strong> on the Object Models tab.</p>
 
           <p class="settings-device-group">All Devices</p>
           <div class="form-grid">
@@ -266,13 +125,13 @@
           </select></label>
           </div>
 
-          <p class="settings-device-group">Paths <span class="settings-device-note">Managed by the Model Library above</span></p>
+          <p class="settings-device-group">Paths <span class="settings-device-note">Managed on the Object Models and Face Models tabs</span></p>
           <div class="form-grid">
         <label>
-          <span>Model Path <span class="info-tip" data-tip="Path to the active ONNX model file. Managed by the Model Library above - use the Use button to change it. Default: models/yolo26n.onnx" title="Path to the active ONNX model file. Managed by the Model Library above - use the Use button to change it. Default: models/yolo26n.onnx" tabindex="0" aria-label="Help: Path to the active ONNX model file. Managed by the Model Library above. Default: models/yolo26n.onnx"></span></span>
+          <span>Model Path <span class="info-tip" data-tip="Path to the active ONNX model file. Managed on the Object Models tab - use the Use button there to change it. Default: models/yolo26n.onnx" title="Path to the active ONNX model file. Managed on the Object Models tab - use the Use button there to change it. Default: models/yolo26n.onnx" tabindex="0" aria-label="Help: Path to the active ONNX model file. Managed on the Object Models tab. Default: models/yolo26n.onnx"></span></span>
           <input name="model_path" readonly /></label>
         <label>
-          <span>Face Model Path <span class="info-tip" data-tip="Path to the installed face-model ONNX used for face detection. Managed by the Face Model selector above and the Model Library - empty when face detection is off." title="Path to the installed face-model ONNX used for face detection. Managed by the Face Model selector above and the Model Library - empty when face detection is off." tabindex="0" aria-label="Help: Path to the installed face-model ONNX used for face detection"></span></span>
+          <span>Face Model Path <span class="info-tip" data-tip="Path to the installed face-model ONNX used for face detection. Managed by the Face Model selector above and the Face Models tab - empty when face detection is off." title="Path to the installed face-model ONNX used for face detection. Managed by the Face Model selector above and the Face Models tab - empty when face detection is off." tabindex="0" aria-label="Help: Path to the installed face-model ONNX used for face detection"></span></span>
           <input name="face_model_path_display" readonly placeholder="Not configured" /></label>
         <label>
           <span>Labels Path <span class="info-tip" data-tip="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" title="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" tabindex="0" aria-label="Help: Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names"></span></span>
@@ -281,14 +140,12 @@
         </details>
       </form>
       <div class="button-row">
-        <button type="submit" form="aiSettingsForm" aria-label="Save ONNX settings">Save</button>
+        <button type="submit" form="aiSettingsForm" aria-label="Save model settings">Save</button>
       </div>
     </section>
-
-    </div><!-- /panel-settings -->
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
-  <script src="/static/onnx.js"></script>
+  <script src="/static/models.js"></script>
 </body>
 </html>

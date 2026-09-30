@@ -7312,6 +7312,13 @@ body.has-sidebar .hero p.muted { margin: 6px 0 0; max-width: 90ch; font-size: 13
   text-decoration: none;
   white-space: nowrap;
 }
+.page-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.page-tab-icon, .modal-tab-icon { font-size: 14px; line-height: 1; }
+.modal-tab-icon { margin-right: 6px; }
 .page-tab:hover { color: var(--text); }
 .page-tab.active { color: var(--text); border-bottom-color: var(--accent); }
 

@@ -210,7 +210,7 @@ This solves the standing-still problem: even if a person has been absorbed into 
 
 By default YOLO reports every object it can recognise, whether the subject is
 walking down the drive or parked in it. The **Objects** page
-(`/objects`, admin) lets you decide, per object class, whether detections
+(`/detection`, admin) lets you decide, per object class, whether detections
 should count when the subject is **moving**, **still**, or **both** (the
 default). This is a separate knob from the motion gate: it does not change
 when YOLO *runs*, only which detections become events, recordings, and
@@ -510,6 +510,8 @@ Default: `0.005`
 The pixel change fraction that maps to 100% motion confidence. At `0.03`, if 3% of pixels changed, confidence is 1.0. At 1.5%, confidence is 0.5.
 
 This does not affect whether motion fires - that is controlled by Gate Fraction. It only affects the confidence score that Layer 3 motion rules compare against.
+
+Because confidence is capped at 100%, most real movement scores 100%. The Recordings, Events, Snapshots and Timeline pages therefore show the **share of the zone's pixels that changed** on the Motion pill (for example **Motion · 4.2%**) rather than the confidence. Hover the pill to see what the number means. Motion saved before this was added has no stored share, so those clips still show the confidence.
 
 - **Lower:** More sensitive confidence scoring - small movements get higher scores
 - **Higher:** Only large, obvious movements score close to 1.0

@@ -201,6 +201,12 @@ class EventDatabase(
                 db.execute("ALTER TABLE detections ADD COLUMN still_alert_minutes INTEGER")
             except sqlite3.OperationalError:
                 pass  # Column already exists on upgrades from pre-still-alert schema
+            # Migration: the share of pixels that changed for a motion
+            # detection (NULL for objects and older motion rows).
+            try:
+                db.execute("ALTER TABLE detections ADD COLUMN motion_fraction REAL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists on upgrades from pre-motion-fraction schema
             # Migration: make "which clip this event belongs to" a first-class
             # link. A recording spans many events (a continuous clip accrues a
             # fresh event each time a new object/sound appears), so events carry
@@ -259,6 +265,7 @@ class EventDatabase(
                     zone_name TEXT,
                     still_alert INTEGER NOT NULL DEFAULT 0,
                     still_alert_minutes INTEGER,
+                    motion_fraction REAL,
                     FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
                 );
 

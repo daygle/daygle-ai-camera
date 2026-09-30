@@ -1122,11 +1122,11 @@ function renderRecordingDetails(recording) {
   let detectionLabel;
   if (isMotionOnly) {
     detectionLabel = 'Motion';
-    detectionBadges = motionPill(motionConfidenceFor(recording));
+    detectionBadges = motionPill(motionConfidenceFor(recording), motionFractionFor(recording));
   } else if (!isSound && isContinuousOnlyRecording(recording)) {
     detectionLabel = 'Recording';
     const motionBadge = recordingHasMotion(recording)
-      ? motionPill(motionConfidenceFor(recording))
+      ? motionPill(motionConfidenceFor(recording), motionFractionFor(recording))
       : '';
     detectionBadges = `${continuousPill()}${motionBadge}`;
   } else if (isSound) {

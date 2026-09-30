@@ -1,11 +1,11 @@
 # Sound Detection Guide
 
-Daygle AI Camera can monitor RTSP audio streams and create alerts or recordings when configured sounds are detected. Sound rules are managed per camera from **Sounds** (`/sounds`) and are independent from video zones and object rules.
+Daygle AI Camera can monitor RTSP audio streams and create alerts or recordings when configured sounds are detected. Sound rules are managed per camera from **Detection → Sounds** (`/detection/sounds`) and are independent from video zones and object rules.
 
 ## How sound detection works
 
 1. A camera must have an RTSP stream with an audio track.
-2. Sound detection is enabled for that camera from `/sounds`.
+2. Sound detection is enabled for that camera from `/detection/sounds`.
 3. The per-camera ingest (the same single RTSP connection that feeds video pre-roll
    and object detection) extracts the audio track and writes 1-second 16 kHz WAV
    segments. The sound monitor consumes those segments, so it never opens a second
@@ -46,7 +46,7 @@ The sound backend stores YAMNet assets in `models/` alongside object detection m
 ## Configuration workflow
 
 1. Add or edit the camera from **Cameras** (`/cameras`) and confirm the RTSP stream works.
-2. Open **Sounds** (`/sounds`).
+2. Open **Detection → Sounds** (`/detection/sounds`).
 3. Select the camera.
 4. Change **Sound Detection** to **Enabled (RTSP audio)**.
 5. Add one or more sound rules.
@@ -57,11 +57,11 @@ The sound backend stores YAMNet assets in `models/` alongside object detection m
    - **Record**: whether the sound should create a recording clip.
    - **Email / push**: whether to send notifications.
 7. Save the sound settings.
-8. Open **YAMNet TFLite** (`/yamnet-tflite`) to confirm the backend is active.
+8. Open **Models → Sound Model** (`/models/sound`) to confirm the backend is active.
 
 ## Check Interval
 
-Each camera on `/sounds` has a **Check Interval** (0.1-0.5 s, default 0.5).
+Each camera on `/detection/sounds` has a **Check Interval** (0.1-0.5 s, default 0.5).
 This is how often the classifier runs.
 
 The analysis window itself never changes: every check scores a full 1-second
@@ -92,7 +92,7 @@ takes effect immediately.
 
 ### YAMNet TFLite is unavailable
 
-Open `/yamnet-tflite` and check the reported reason. If the runtime is missing, install `ai-edge-litert` or `tflite-runtime` into the same Python environment that runs Daygle AI Camera.
+Open **Models → Sound Model** (`/models/sound`) and check the reported reason. If the runtime is missing, install `ai-edge-litert` or `tflite-runtime` into the same Python environment that runs Daygle AI Camera.
 
 ### No sound events are created
 

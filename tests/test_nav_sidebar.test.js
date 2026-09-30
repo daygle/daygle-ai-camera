@@ -26,8 +26,8 @@ test('configuration lives in admin-only Setup, Intelligence and Admin groups', (
 });
 
 test('every page is either a sidebar entry or a section tab', () => {
-  for (const href of ['/cameras', '/zones', '/alerts', '/objects', '/sounds', '/face-recognition', '/ai', '/onnx',
-    '/camera-models', '/yamnet-tflite', '/arcface', '/settings', '/users', '/system', '/camera-log',
+  for (const href of ['/cameras', '/zones', '/alerts', '/detection', '/detection/sounds', '/detection/faces', '/ai',
+    '/models', '/models/faces', '/models/cameras', '/models/sound', '/models/settings', '/settings', '/users', '/system', '/camera-log',
     '/application-log', '/audit', '/recordings/timeline', '/snapshots']) {
     assert.ok(nav.includes(`href: '${href}'`), `${href} is not reachable from the navigation`);
   }
@@ -54,4 +54,12 @@ test('a theme chosen in the sidebar is saved to the profile', () => {
   }
   assert.match(nav, /id="navThemeToggle"/);
   assert.match(nav, /chooseTheme\(document\.documentElement\.classList\.contains\('light'\) \? 'dark' : 'light'\)/);
+});
+
+test('every section tab shows an icon beside its text', () => {
+  const tabs = [...nav.matchAll(/\{ href: '([^']+)', (icon: '[^']+', )?label: '[^']+'(, match: [^}]+)? \}/g)];
+  const sectionTabs = tabs.filter((match) => nav.indexOf(match[0]) > nav.indexOf('const PAGE_TABS'));
+  assert.ok(sectionTabs.length >= 15);
+  for (const match of sectionTabs) assert.ok(match[2], `${match[1]} has no icon`);
+  assert.match(nav, /<span class="page-tab-icon" aria-hidden="true">\$\{tab\.icon\}<\/span>/);
 });

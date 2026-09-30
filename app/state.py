@@ -67,9 +67,10 @@ PUBLIC_PREFIXES: tuple[str, ...] = ('/static/',)
 # and admin gating (see tests/test_healthz.py and docs/operations.md).
 PUBLIC_PATHS: frozenset[str] = frozenset({'/favicon.ico', '/healthz', '/login', '/setup'})
 ADMIN_PATHS: frozenset[str] = frozenset({
+    '/models', '/models/faces', '/models/cameras', '/models/sound', '/models/settings',
     '/onnx', '/yamnet-tflite', '/ai', '/cameras', '/settings',
-    '/users', '/zones', '/sounds', '/objects', '/audit', '/camera-log',
-    '/application-log',
+    '/users', '/zones', '/detection', '/detection/sounds', '/detection/faces',
+    '/sounds', '/objects', '/audit', '/camera-log', '/application-log',
 })
 MUTATING_METHODS: frozenset[str] = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 

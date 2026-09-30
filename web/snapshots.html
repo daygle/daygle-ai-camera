@@ -71,13 +71,21 @@
         <div class="settings-section-icon">📸</div>
         <div>
           <h2>Snapshot Library</h2>
-          <p class="settings-section-subtitle">Browse saved detection frames and narrow them by camera, label, date, or time. Today's frames load first; applying an earlier From Date loads older ones. Each row opens the annotated image; admins can delete a stored snapshot without touching the event or its recording.</p>
+          <p class="settings-section-subtitle">Browse saved detection frames and narrow them with Filters by camera, label, date, or time. Today's frames load first; applying an earlier From Date loads older ones. Each row opens the annotated image; admins can delete a stored snapshot without touching the event or its recording.</p>
+        </div>
+        <div class="button-row recordings-toolbar-actions">
+          <button id="snapshotsFilterToggle" class="secondary recordings-filter-toggle" type="button" aria-expanded="false" aria-controls="snapshotFilterForm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            <span>Filters</span>
+            <span id="snapshotsFilterBadge" class="recordings-filter-badge" aria-hidden="true" hidden>0</span>
+            <svg class="recordings-filter-caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
         </div>
       </div>
 
       <p id="listStatus" class="muted recordings-list-status"></p>
 
-      <form id="snapshotFilterForm" class="form-grid snapshots-filter-grid" onsubmit="return false;">
+      <form id="snapshotFilterForm" class="form-grid snapshots-filter-grid" onsubmit="return false;" hidden>
         <label>
           <span>Camera <span class="info-tip" data-tip="Limit results to a specific camera. Default: every camera" title="Limit results to a specific camera. Default: every camera" tabindex="0" aria-label="Help: Limit results to a specific camera. Default: every camera"></span></span>
           <select id="snapshotCameraFilter" aria-label="Filter by camera">

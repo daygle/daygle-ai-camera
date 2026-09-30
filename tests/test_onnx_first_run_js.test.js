@@ -1,4 +1,4 @@
-// Regression tests for the ONNX page's first-run state (/onnx).
+// Regression tests for the Object Models page's first-run state (/models).
 //
 // Nothing is downloaded on a clean install any more, so the page owns the job
 // of telling the operator that detection is off and of pointing them at a
@@ -11,10 +11,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const html = readFileSync(path.resolve(here, '../web/onnx.html'), 'utf8');
-const source = readFileSync(path.resolve(here, '../web/onnx.js'), 'utf8');
+const html = readFileSync(path.resolve(here, '../web/models.html'), 'utf8');
+const source = readFileSync(path.resolve(here, '../web/models.js'), 'utf8');
 
-test('the Status tab carries a first-run call to action', () => {
+test('the status card carries a first-run call to action', () => {
   assert.match(html, /id="firstRunNotice"/);
   // Hidden by default: a healthy install must not show it.
   assert.match(html, /<div id="firstRunNotice" class="first-run-notice" hidden>/);
@@ -39,9 +39,9 @@ test('the notice appears only while the model is missing and links to the catalo
   assert.match(source, /firstRunNotice\.hidden = !noModel;/);
   // Deliberately-disabled AI is not a missing model, so the notice stays away.
   assert.match(source, /const aiEnabled = status\.enabled === undefined/);
-  // The button reuses the shared ARIA tab wiring by clicking the tab.
+  // The catalog is on the same page, below the status card: scroll to it.
   assert.match(source, /firstRunChooseModelBtn\.addEventListener\('click'/);
-  assert.match(source, /document\.getElementById\('tab-object-models'\)\?\.click\(\)/);
+  assert.match(source, /objectModelsCard\?\.scrollIntoView\(/);
 });
 
 test('the object catalog explains that nothing is installed for you', () => {

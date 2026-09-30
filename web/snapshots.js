@@ -35,6 +35,8 @@ const els = {
   timeTo: null,   // populated by renderFilterTimeSelects() below
   sort: document.getElementById('snapshotSort'),
   filterForm: document.getElementById('snapshotFilterForm'),
+  filterToggle: document.getElementById('snapshotsFilterToggle'),
+  filterBadge: document.getElementById('snapshotsFilterBadge'),
   clearBtn: document.getElementById('snapshotClearBtn'),
   statTotal: document.getElementById('statTotalSnapshots'),
   statCameras: document.getElementById('statCameraCount'),
@@ -120,7 +122,7 @@ function snapshotPills(event) {
     const strongest = (event.detections || [])
       .filter((d) => String(d && d.label || '').toLowerCase() === 'motion')
       .reduce((best, d) => (d && d.confidence > (best ? best.confidence : -1) ? d : best), null);
-    return motionPill(strongest ? strongest.confidence : null);
+    return motionPill(strongest ? strongest.confidence : null, motionFractionOf(event.detections));
   }
   const detections = event.detections || [];
   const objectDetections = detections
@@ -131,7 +133,7 @@ function snapshotPills(event) {
     (best, d) => (d && Number(d.confidence) > (best ? Number(best.confidence) : -1) ? d : best),
     null,
   );
-  const motionBadge = motionDetections.length ? motionPill(strongestMotion?.confidence ?? null) : '';
+  const motionBadge = motionDetections.length ? motionPill(strongestMotion?.confidence ?? null, motionFractionOf(motionDetections)) : '';
   return `${motionBadge}${objectDetections.map((d) => detectionPill(d.label, d.confidence)).join('')}`
     || '<span class="muted">No detections</span>';
 }
@@ -269,7 +271,49 @@ function describeFilters(filters) {
   return parts;
 }
 
+// ── Collapsible filter panel ──────────────────────────────────────────────
+// Same as the Recordings page: the filter form starts collapsed behind the
+// toolbar's Filters button, and the open/closed choice is remembered.
+const SNAPSHOTS_FILTER_PANEL_KEY = 'daygle.snapshots.filters.open';
+
+function setFilterPanelOpen(open, { persist = true } = {}) {
+  if (!els.filterForm || !els.filterToggle) return;
+  els.filterForm.hidden = !open;
+  els.filterToggle.setAttribute('aria-expanded', String(open));
+  if (!persist) return;
+  try { localStorage.setItem(SNAPSHOTS_FILTER_PANEL_KEY, open ? '1' : '0'); } catch (_err) { /* storage disabled - keep default */ }
+}
+
+// Filters changed from the defaults (today, whole day, every camera and
+// label), counted on the collapsed button so a filtered gallery never looks
+// unfiltered.
+function activeFilterCount(filters) {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return [
+    filters.label,
+    filters.face,
+    filters.cameraId,
+    filters.dateFrom && filters.dateFrom !== today,
+    filters.dateTo && filters.dateTo !== today,
+    filters.timeFrom && filters.timeFrom !== FILTER_TIME_FROM_DEFAULT,
+    filters.timeTo && filters.timeTo !== FILTER_TIME_TO_DEFAULT,
+  ].filter(Boolean).length;
+}
+
+function updateFilterPanelBadge(filters) {
+  const count = activeFilterCount(filters);
+  if (els.filterBadge) {
+    els.filterBadge.textContent = String(count);
+    els.filterBadge.hidden = !count;
+  }
+  if (!els.filterToggle) return;
+  els.filterToggle.classList?.toggle('is-filtered', count > 0);
+  els.filterToggle.setAttribute('aria-label', count ? `Filters, ${count} active` : 'Filters');
+}
+
 function updateFilterStat(filters) {
+  updateFilterPanelBadge(filters);
   if (!els.statFilterStatus || !els.statFilterHint) return;
   const active = describeFilters(filters);
   if (active.length) {
@@ -603,4 +647,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   await window.daygleAuthReady;
   await loadCameras();
   loadSnapshots();
+});
+
+// Restore the saved open/closed choice; a visit deep-linked with a filter
+// (?label=..., ?camera_id=..., ?face=...) always shows the controls.
+(function initFilterPanel() {
+  if (!els.filterForm || !els.filterToggle) return;
+  const params = new URLSearchParams(window.location?.search || '');
+  const deepLinked = Boolean(params.get('label') || params.get('camera_id') || params.get('face'));
+  let saved = null;
+  try { saved = localStorage.getItem(SNAPSHOTS_FILTER_PANEL_KEY); } catch (_err) { /* storage disabled - keep default */ }
+  setFilterPanelOpen(deepLinked || saved === '1', { persist: false });
+})();
+
+els.filterToggle?.addEventListener('click', () => {
+  const opening = Boolean(els.filterForm?.hidden);
+  setFilterPanelOpen(opening);
+  if (opening) els.filterForm?.querySelector('select, input, button')?.focus();
 });

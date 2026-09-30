@@ -51,6 +51,10 @@ const {
   isMotionOnlyEvent,
   isMotionOnlyEventItem,
   motionConfidenceFor,
+  motionFractionFor,
+  motionFractionOf,
+  motionPill,
+  formatMotionFraction,
   GENERIC_TRIGGER_LABELS,
   isSoundRecording,
   recordingDetectionSummary,
@@ -279,6 +283,33 @@ test('isMotionOnlyRecording: event clip recorded in continuous mode → true', (
     labels: ['motion'],
     detections: [{ label: 'motion', confidence: 1.0 }],
   }), true);
+});
+
+// ─── Motion pixel share (motion_fraction) ─────────────────────────────────
+
+test('motionFractionFor: largest changed-pixel share across detections + track', () => {
+  const rec = {
+    detections: [{ label: 'motion', confidence: 1, motion_fraction: 0.021 }, { label: 'person', confidence: 0.9 }],
+    track: [{ detections: [{ label: 'motion', confidence: 1, motion_fraction: 0.043 }] }],
+  };
+  assert.equal(motionFractionFor(rec), 0.043);
+  // Older clips saved no share: null, so the pill falls back to confidence.
+  assert.equal(motionFractionFor({ detections: [{ label: 'motion', confidence: 1 }] }), null);
+  assert.equal(motionFractionOf([{ label: 'person', motion_fraction: 0.5 }]), null);
+});
+
+test('formatMotionFraction: one decimal below 10%, whole numbers above', () => {
+  assert.equal(formatMotionFraction(0.0423), '4.2%');
+  assert.equal(formatMotionFraction(0.1234), '12%');
+  assert.equal(formatMotionFraction(0.0004), '<0.1%');
+  assert.equal(formatMotionFraction(0), '0.0%');
+});
+
+test('motionPill: shows the pixel share when known, else the confidence', () => {
+  assert.match(motionPill(1, 0.0423), /Motion · 4\.2%/);
+  assert.doesNotMatch(motionPill(1, 0.0423), /100%/);
+  assert.match(motionPill(1, null), /Motion · 100%/);
+  assert.match(motionPill(null), /Motion<\/span>/);
 });
 
 // ─── motionConfidenceFor ──────────────────────────────────────────────────

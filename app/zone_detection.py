@@ -541,6 +541,11 @@ def zone_motion_detections(
             box = _zone_motion_pixel_box(diff_mask, zone)
         result.append({
             'confidence': zone_confidence,
+            # The share of the zone's pixels that changed (0-1). Confidence
+            # is this divided by the scale fraction and capped at 1, so it
+            # reads 100% for most real movement; the raw share is what the
+            # recordings and events pages show.
+            **({'motion_fraction': round(zone_fraction, 6)} if zone_fraction >= 0 else {}),
             'zone_id': zone_id,
             'zone_name': zone.get('name') or zone_id,
             'box': box or {

@@ -11,6 +11,17 @@ from app.utils import _normalize_iso_to_utc
 _SQLITE_BATCH_SIZE = 400
 
 
+def _motion_fraction(detection: dict[str, Any]) -> float | None:
+    """The changed-pixel share of a motion detection, clamped to 0-1, or None."""
+    try:
+        value = float(detection.get('motion_fraction'))
+    except (TypeError, ValueError):
+        return None
+    if value != value:  # NaN
+        return None
+    return max(0.0, min(1.0, value))
+
+
 def _batched(values: list[int]) -> list[list[int]]:
     return [values[index:index + _SQLITE_BATCH_SIZE] for index in range(0, len(values), _SQLITE_BATCH_SIZE)]
 
@@ -58,8 +69,8 @@ class EventsMixin:
                 box = detection.get("box", {})
                 db.execute(
                     """
-                    INSERT INTO detections (event_id, label, confidence, x, y, width, height, zone_name, still_alert, still_alert_minutes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO detections (event_id, label, confidence, x, y, width, height, zone_name, still_alert, still_alert_minutes, motion_fraction)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event_id,
@@ -72,6 +83,7 @@ class EventsMixin:
                         detection.get("zone_name") or None,
                         int(bool(detection.get("still_alert"))),
                         detection.get("still_alert_minutes") or None,
+                        _motion_fraction(detection),
                     ),
                 )
             return event_id
@@ -100,9 +112,9 @@ class EventsMixin:
             for detection in detections:
                 box = detection.get('box', {})
                 db.execute(
-                    """INSERT INTO detections (event_id, label, confidence, x, y, width, height, zone_name, still_alert, still_alert_minutes)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (event_id, detection['label'], float(detection['confidence']), float(box.get('x', 0)), float(box.get('y', 0)), float(box.get('width', 0)), float(box.get('height', 0)), detection.get('zone_name') or None, int(bool(detection.get('still_alert'))), detection.get('still_alert_minutes') or None),
+                    """INSERT INTO detections (event_id, label, confidence, x, y, width, height, zone_name, still_alert, still_alert_minutes, motion_fraction)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (event_id, detection['label'], float(detection['confidence']), float(box.get('x', 0)), float(box.get('y', 0)), float(box.get('width', 0)), float(box.get('height', 0)), detection.get('zone_name') or None, int(bool(detection.get('still_alert'))), detection.get('still_alert_minutes') or None, _motion_fraction(detection)),
                 )
             for alert in alerts:
                 db.execute(
