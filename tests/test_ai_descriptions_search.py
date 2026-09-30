@@ -196,15 +196,15 @@ def test_alert_description_is_stored_and_attached(av, flow):
 
 def test_filtered_alert_is_not_described_in_alerts_mode(av, flow):
     configure, forwarded = flow
-    db = configure(enabled=True, describe_events='alerts', verdict=(False, 'shadow'))
-    av.verify_and_forward([{'label': 'person', 'confidence': 0.6}], 4, [], '')
+    db = configure(describe_events='alerts', verdict=(False, 'shadow'))
+    av.verify_and_forward([{'label': 'person', 'confidence': 0.6, 'ai_verify': True}], 4, [], '')
     assert forwarded == [] and db.descriptions == {}
 
 
 def test_all_mode_describes_even_filtered_events(av, flow):
     configure, forwarded = flow
-    db = configure(enabled=True, describe_events='all', verdict=(False, 'shadow'))
-    av.verify_and_forward([{'label': 'person', 'confidence': 0.6}], 5, [], '')
+    db = configure(describe_events='all', verdict=(False, 'shadow'))
+    av.verify_and_forward([{'label': 'person', 'confidence': 0.6, 'ai_verify': True}], 5, [], '')
     assert forwarded == [] and 5 in db.descriptions
 
 
@@ -400,7 +400,8 @@ def test_model_plan_with_synonyms_camera_and_times(search_env, monkeypatch):
     with _SmartModelServer(search={'terms': [['red'], ['car', 'vehicle', 'ute']], 'camera': 'driveway',
                                    'start': '2026-09-27 00:00', 'end': '2026-09-27 23:59'}) as server:
         monkeypatch.setattr(search, 'effective_ai_verification_settings',
-                            lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'enabled': True, 'server_url': server.url})
+                            lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'describe_events': 'alerts',
+                                    'server_url': server.url})
         result = search.search_events('red vehicle on the driveway yesterday', now_utc=NOW)
     assert [e['id'] for e in result['items']] == [ids['red_car']]
     interp = result['interpretation']
@@ -412,7 +413,7 @@ def test_model_failure_falls_back_and_unmatched_concepts_relax(search_env, monke
     search, ids = search_env
     av = importlib.import_module('app.ai_verification')
     monkeypatch.setattr(search, 'effective_ai_verification_settings',
-                        lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'enabled': True,
+                        lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'describe_events': 'alerts',
                                  'server_url': 'http://127.0.0.1:9/v1', 'timeout_seconds': 3})
     result = search.search_events('blue car', now_utc=NOW)  # nothing mentions both
     assert result['interpretation']['interpreted_by'] == 'keywords'

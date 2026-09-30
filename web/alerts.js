@@ -159,7 +159,7 @@ function defaultRule(label = 'person', type = alertType) {
     const sound = soundClasses.find((item) => item.id === label);
     return { class: label, name: sound?.label || label, enabled: true, record_on_detect: true, confidence_threshold: sound?.default_threshold ?? 0.35, cooldown_seconds: sound?.default_cooldown ?? 30, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null };
   }
-  return { id: `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, label, enabled: true, record_on_detect: true, min_confidence: label === 'motion' || label === 'face' ? 0.45 : 0.5, max_confidence: 1, cooldown_seconds: 60, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null, alert_schedules: [defaultAlertSchedule()] };
+  return { id: `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, label, enabled: true, record_on_detect: true, min_confidence: label === 'motion' || label === 'face' ? 0.45 : 0.5, max_confidence: 1, cooldown_seconds: 60, ai_verify: false, ai_verify_skip_above: 1, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null, alert_schedules: [defaultAlertSchedule()] };
 }
 
 function renderObjectSchedules(rule, ruleIndex, schedules) {
@@ -315,7 +315,11 @@ function renderPolicies() {
     return;
   }
   const statusNow = new Date();
-  $('alertsList').innerHTML = `<div class="cameras-table-wrap alerts-policy-table-wrap"><table class="rule-table alerts-policy-table"><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Enabled</th><th scope="col">Email</th><th scope="col">Push</th><th scope="col" aria-label="Actions"></th></tr></thead><tbody>${rules.map((rule, index) => {
+  // Object alerts can ask the local vision model (Intelligence > AI) to confirm
+  // the object before notifying; motion and face rules have nothing to check.
+  const aiColumn = alertType === 'object';
+  const aiVerifiable = (rule) => aiColumn && !['motion', 'face'].includes(String(rule.label || '').toLowerCase());
+  $('alertsList').innerHTML = `<div class="cameras-table-wrap alerts-policy-table-wrap"><table class="rule-table alerts-policy-table${aiColumn ? ' has-ai-column' : ''}"><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Enabled</th><th scope="col">Email</th><th scope="col">Push</th>${aiColumn ? '<th scope="col" class="alerts-ai-verify-col" title="The AI model confirms the object is really there before notifying">AI Verify</th>' : ''}<th scope="col" aria-label="Actions"></th></tr></thead><tbody>${rules.map((rule, index) => {
     const people = alertType === 'people';
     const sound = alertType === 'sound';
     const tripwire = alertType === 'tripwire';
@@ -358,15 +362,17 @@ function renderPolicies() {
       <td data-label="Enabled"><label class="alerts-table-toggle"><input data-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''}><span>${rule.enabled !== false ? 'On' : 'Off'}</span></label></td>
       <td data-label="Email"><label class="alerts-table-toggle"><input data-field="email_enabled" type="checkbox" ${emailEnabled ? 'checked' : ''}><span>${emailEnabled ? 'On' : 'Off'}</span></label></td>
       <td data-label="Push"><label class="alerts-table-toggle"><input data-field="push_enabled" type="checkbox" ${pushEnabled ? 'checked' : ''}><span>${pushEnabled ? 'On' : 'Off'}</span></label></td>
+      ${aiColumn ? `<td class="alerts-ai-verify-col" data-label="AI Verify">${aiVerifiable(rule) ? `<label class="alerts-table-toggle" title="The AI model confirms the ${escapeHtml(rule.label)} is really there before notifying. Set the model up under Intelligence &gt; AI."><input data-field="ai_verify" type="checkbox" ${rule.ai_verify ? 'checked' : ''}><span>${rule.ai_verify ? 'On' : 'Off'}</span></label>` : '<span class="muted">-</span>'}</td>` : ''}
       <td class="alerts-table-actions" data-label="Actions"><button class="secondary alerts-policy-expand" data-expand-policy="${index}" type="button" aria-expanded="false" aria-controls="alert-policy-settings-${index}" title="Edit alert policy" aria-label="Edit ${escapeHtml(ruleLabel(rule))}">${ICONS.edit}</button><button class="delete-btn secondary alerts-policy-remove" data-delete-rule type="button" title="Remove alert policy" aria-label="Remove ${escapeHtml(ruleLabel(rule))}">${ICONS.remove}</button></td>
     </tr>
-    <tr class="alerts-policy-details-row" id="alert-policy-settings-${index}" data-policy-details-for="${index}" hidden><td colspan="6">
+    <tr class="alerts-policy-details-row" id="alert-policy-settings-${index}" data-policy-details-for="${index}" hidden><td colspan="${aiColumn ? 7 : 6}">
     <article class="alerts-policy ${rule.enabled !== false ? 'is-enabled' : ''}" data-rule-index="${index}">
       <div class="alerts-policy-head"><div><span class="zones-panel-kicker">${escapeHtml(scopeLabel())} · Policy ${index + 1}</span><h3>${escapeHtml(ruleLabel(rule))}</h3></div><button type="button" class="secondary alerts-policy-collapse" data-collapse-policy="${index}" title="Collapse policy settings" aria-label="Collapse ${escapeHtml(ruleLabel(rule))} settings">${ICONS.chevronUp}</button></div>
       <div class="alerts-policy-grid">
         ${people ? `<label><span>Person</span><select data-field="person_id">${ruleOptions(rule)}</select></label>` : ''}
         ${behaviour ? '' : `<label><span>${confidenceLabel}</span><input data-field="${people ? 'min_confidence' : sound ? 'confidence_threshold' : 'min_confidence'}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(confidence ?? (people ? '' : 0.5)))}"></label>`}
         ${!people && !sound && !behaviour ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
+        ${aiVerifiable(rule) ? `<label><span>AI Verify Skip Above <span class="info-tip" data-tip="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" title="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" tabindex="0" aria-label="Help: With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1"></span></span><input data-field="ai_verify_skip_above" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(rule.ai_verify_skip_above ?? 1))}"></label>` : ''}
         <label><span>${cooldownLabel}</span><input data-field="${people ? 'cooldown_minutes' : 'cooldown_seconds'}" type="number" min="0" max="${people ? '1440' : '3600'}" step="${people ? '1' : '5'}" value="${escapeHtml(String(cooldown ?? (people ? 5 : 60)))}"></label>
       </div>
       ${alertType === 'object' ? renderObjectSchedules(rule, index, schedules) : people ? '' : behaviour
@@ -419,7 +425,7 @@ function renderPolicies() {
         details?.querySelector('.alerts-policy')?.classList.toggle('is-enabled', rule.enabled !== false);
       }
     } else if (key === 'email_recipients') rule[key] = alertType === 'people' ? field.value : field.value.split(',').map((item) => item.trim()).filter(Boolean);
-    else if (['min_confidence', 'max_confidence', 'confidence_threshold', 'cooldown_seconds', 'cooldown_minutes'].includes(key)) rule[key] = field.value === '' ? null : Number(field.value);
+    else if (['min_confidence', 'max_confidence', 'confidence_threshold', 'cooldown_seconds', 'cooldown_minutes', 'ai_verify_skip_above'].includes(key)) rule[key] = field.value === '' ? null : Number(field.value);
     else if (key === 'person_id') {
       rule.person_id = field.value || null;
       rule.name = enrolledPeople.find((person) => String(person.id) === field.value)?.name || 'Unknown Person';

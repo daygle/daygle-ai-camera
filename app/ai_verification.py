@@ -10,7 +10,11 @@ still visible in the Events list.
 The model is reached over the OpenAI-compatible ``/chat/completions`` API, so
 Ollama, llama.cpp's server, LM Studio, vLLM or OpenLLM all work.
 
-Everything fails open: when the model is disabled, unreachable, slow, returns
+Verification is chosen per alert rule on the Alerts page (``ai_verify`` on a
+zone object rule, carried onto each alert it fires by app.alerts); this
+module's settings hold the model server and the description options.
+
+Everything fails open: when the model is unreachable, slow, returns
 something unparseable, or the verification queue is full, notifications are
 delivered exactly as they would be without this feature. Verification runs on
 its own single-worker pool, never on the detection loop, and face, motion and
@@ -42,18 +46,14 @@ logger = logging.getLogger('daygle.ai')
 SETTINGS_KEY = 'ai_verification'
 
 DEFAULT_AI_VERIFICATION_SETTINGS: dict[str, Any] = {
-    'enabled': False,
     # Ollama's OpenAI-compatible endpoint on the same host.
     'server_url': 'http://127.0.0.1:11434/v1',
     'model': 'gemma3:4b',
     'api_key': '',
     'timeout_seconds': 20,
-    # Empty = every camera / every object label.
+    # Cameras whose events are described (Describe Events). Empty = every
+    # camera. Alert verification is per alert rule and ignores this.
     'camera_ids': [],
-    'labels': [],
-    # Alerts at or above this detector confidence skip verification (1.0 =
-    # verify every alert). Lets the model spend its time on borderline ones.
-    'skip_above_confidence': 1.0,
     # Crop around the detected object before asking; small models judge a
     # small, distant object far better from a close-up.
     'focus_crop': True,
@@ -197,7 +197,9 @@ def _build_effective_settings() -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - a settings read must not break alerts
             stored = None
     if isinstance(stored, dict):
-        settings.update(stored)
+        # Keys from before verification moved to the alert rules (enabled,
+        # labels, skip_above_confidence) are ignored.
+        settings.update({key: value for key, value in stored.items() if key in DEFAULT_AI_VERIFICATION_SETTINGS})
     return settings
 
 
@@ -229,11 +231,10 @@ def validate_ai_verification_settings(payload: dict[str, Any]) -> dict[str, Any]
     settings = {**effective_ai_verification_settings(), **payload}
     settings = {key: settings[key] for key in DEFAULT_AI_VERIFICATION_SETTINGS}
 
-    for field in ('enabled', 'focus_crop'):
-        value = settings[field]
-        if isinstance(value, str):
-            value = value.strip().lower() in {'1', 'true', 'yes', 'on'}
-        settings[field] = bool(value)
+    focus_crop = settings['focus_crop']
+    if isinstance(focus_crop, str):
+        focus_crop = focus_crop.strip().lower() in {'1', 'true', 'yes', 'on'}
+    settings['focus_crop'] = bool(focus_crop)
 
     server_url = str(settings['server_url'] or '').strip().rstrip('/')
     parsed = urllib.parse.urlparse(server_url)
@@ -261,32 +262,18 @@ def validate_ai_verification_settings(payload: dict[str, Any]) -> dict[str, Any]
         raise _bad('timeout_seconds must be an integer between 3 and 120.')
     settings['timeout_seconds'] = timeout
 
-    try:
-        skip_above = float(settings['skip_above_confidence'])
-    except (TypeError, ValueError) as exc:
-        raise _bad('skip_above_confidence must be a number between 0 and 1.') from exc
-    if isinstance(settings['skip_above_confidence'], bool) or not 0.0 <= skip_above <= 1.0:
-        raise _bad('skip_above_confidence must be a number between 0 and 1.')
-    settings['skip_above_confidence'] = skip_above
-
     describe = str(settings['describe_events'] or 'off').strip().lower()
     if describe not in DESCRIBE_MODES:
         raise _bad("describe_events must be 'off', 'alerts' or 'all'.")
     settings['describe_events'] = describe
 
     settings['camera_ids'] = _string_list(settings['camera_ids'], 'camera_ids')
-    settings['labels'] = list(dict.fromkeys(label.lower() for label in _string_list(settings['labels'], 'labels')))
     return settings
 
 
 def _camera_in_scope(camera_id: Any, settings: dict[str, Any]) -> bool:
     camera_ids = settings.get('camera_ids') or []
     return not camera_ids or str(camera_id or '') in camera_ids
-
-
-def applies_to_camera(camera_id: Any, settings: dict[str, Any] | None = None) -> bool:
-    settings = settings if settings is not None else effective_ai_verification_settings()
-    return bool(settings.get('enabled')) and _camera_in_scope(camera_id, settings)
 
 
 def describe_mode(settings: dict[str, Any]) -> str:
@@ -314,27 +301,27 @@ def describes_camera(camera_id: Any, settings: dict[str, Any] | None = None) -> 
     return camera_describe_mode(camera_id, settings) != 'off'
 
 
-def _is_verifiable(alert: dict[str, Any], settings: dict[str, Any]) -> bool:
+def _is_verifiable(alert: dict[str, Any]) -> bool:
+    """True when the alert's rule asked for AI verification and it applies."""
+    if not alert.get('ai_verify'):
+        return False
     label = str(alert.get('label') or '').strip().lower()
     if not label or label in _UNVERIFIABLE_LABELS:
         return False
     if alert.get('face_rule_id') or alert.get('face_rule_ids') or alert.get('motion_event'):
         return False
-    labels = settings.get('labels') or []
-    if labels and label not in labels:
-        return False
     try:
         confidence = float(alert.get('confidence') or 0.0)
+        skip_above = float(alert.get('ai_verify_skip_above', 1.0))
     except (TypeError, ValueError):
-        confidence = 0.0
-    skip_above = float(settings.get('skip_above_confidence', 1.0))
+        return True
     return not (skip_above < 1.0 and confidence >= skip_above)
 
 
-def labels_to_verify(triggered: list[dict[str, Any]], settings: dict[str, Any]) -> list[str]:
+def labels_to_verify(triggered: list[dict[str, Any]]) -> list[str]:
     """Distinct alert labels to ask about, strongest alert first."""
     ordered = sorted(
-        (alert for alert in triggered if _is_verifiable(alert, settings)),
+        (alert for alert in triggered if _is_verifiable(alert)),
         key=lambda alert: -float(alert.get('confidence') or 0.0),
     )
     labels: list[str] = []
@@ -800,10 +787,7 @@ def verify_and_forward(
     Every failure path still forwards the alerts.
     """
     settings = effective_ai_verification_settings()
-    # The job can be queued only for a description (an AI tag alert rule makes
-    # an out-of-scope camera describe everything): honour the camera scope.
-    verifies = applies_to_camera(camera_id, settings) if camera_id is not None else bool(settings.get('enabled'))
-    labels = labels_to_verify(triggered, settings) if verifies else []
+    labels = labels_to_verify(triggered)
     mode = camera_describe_mode(camera_id, settings) if camera_id is not None else describe_mode(settings)
     if not labels and mode == 'off':
         _forward(triggered, event_id, rules)
@@ -826,7 +810,7 @@ def verify_and_forward(
         rejected = {label for label, result in record['labels'].items() if result.get('present') is False}
         kept = [
             alert for alert in triggered
-            if not (_is_verifiable(alert, settings) and str(alert.get('label') or '').strip().lower() in rejected)
+            if not (_is_verifiable(alert) and str(alert.get('label') or '').strip().lower() in rejected)
         ]
         if rejected:
             logger.info(
@@ -970,15 +954,14 @@ def submit_alert_notification_with_verification(
 ) -> bool:
     """Queue an alert's notifications, via AI verification when it applies.
 
-    Never blocks the caller. When verification is off, does not apply to this
-    camera or these alerts, or its queue is full, notifications are queued
-    directly, exactly as without this feature.
+    Never blocks the caller. When no alert's rule asks for verification and
+    the camera's events are not described, or the queue is full,
+    notifications are queued directly, exactly as without this feature.
     """
     from app.alert_dispatch import deliver_alert_notifications, submit_alert_notification
 
     settings = effective_ai_verification_settings()
-    verify = applies_to_camera(camera_id, settings) and labels_to_verify(triggered, settings)
-    if verify or describes_camera(camera_id, settings):
+    if labels_to_verify(triggered) or describes_camera(camera_id, settings):
         from app.postprocess_pool import PRIORITY_CLIP, verification_pool
 
         # Alert jobs run ahead of background describe-only jobs.
@@ -1023,7 +1006,7 @@ def run_connection_test(settings: dict[str, Any], *, event_id: int | None = None
         for detection in event.get('detections') or []
         if str(detection.get('label') or '').strip().lower() not in _UNVERIFIABLE_LABELS
     })[:MAX_LABELS_PER_EVENT] or ['person']
-    record = verify_event(event, labels, {**settings, 'enabled': True},
+    record = verify_event(event, labels, settings,
                           camera_name=str((event.get('metadata') or {}).get('camera_name') or ''),
                           verifier=verifier)
     errors = [value['error'] for value in record['labels'].values() if value.get('error')]

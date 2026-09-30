@@ -9,7 +9,9 @@ person (car, dog, ...) here, or is it a shadow, reflection, bush or poster?"*
   recording and its alert rows are kept, and the Events list marks the event
   **🤖 Filtered**. Hover the badge to see the model's reason. Confirmed alerts
   show **🤖 Verified**.
-- **It fails open.** If the model is disabled, unreachable, slow, gives an
+- **Chosen per alert.** Tick **AI Verify** on an object alert on the
+  **Alerts** page to have that alert checked. Alerts start unticked.
+- **It fails open.** If the model is unreachable, slow, gives an
   answer that can't be read, or the verification queue is full, the alert is
   sent exactly as it would be without this feature.
 - **Only object alerts are checked.** Face-recognition, motion and sound
@@ -68,24 +70,37 @@ nvidia-smi   # after the first request, an ollama process uses the GPU
 
 ## Settings
 
+### Turning verification on for an alert
+
+On the **Alerts** page, choose **Alert Type: Object** and pick a camera and
+area. Each object alert has an **AI Verify** checkbox next to Email and Push.
+Tick it to have the model check that alert before it notifies you. Motion and
+face alerts show "-" because they have no object to check.
+
+Open the alert's settings (the edit button) to set **AI Verify Skip Above**.
+Alerts at or above this detector confidence are sent without asking the
+model, so it only checks borderline ones. `1`, the default, checks every
+alert. For example, `0.85` checks only alerts below 85%.
+
+Dwell ("still for N minutes") alerts are not verified.
+
+### Model settings
+
 Go to **Intelligence → AI** (admin only). The page has four sections: Model Server, Alert Verification, Descriptions & Search, and a pointer to AI Tag Alerts. One **Save AI Settings** button saves them all.
 
 | Setting | Default | Notes |
 |---|---|---|
-| AI Verification | Disabled | Master switch. |
 | Server URL | `http://127.0.0.1:11434/v1` | The OpenAI-compatible base URL. |
 | Model | `gemma3:4b` | Must be a model that can read images. |
 | API Key | (none) | Only if the server requires one. Ollama doesn't. |
 | Timeout (seconds) | 20 | Per question for alerts. On timeout the alert is sent unverified. Background descriptions (Describe Events: All events, catch-up, Describe Past Events) wait up to 90 s, because the model keeps working on a request the app gives up on. |
-| Skip Above Confidence | 1 | Alerts at or above this detector confidence are sent without checking. `1` means every alert is checked. Set it to, say, `0.85` to check only borderline alerts. |
-| Object Labels | (all) | For example `person, car`. Leave empty to check every object label. |
 | Focus on Object | Enabled | Sends a close-up around the detected object, with context, instead of the whole frame. Small models judge small or distant objects much better this way. |
-| Cameras | (all) | Tick cameras to limit verification to them. |
+| Cameras | (all) | Under Descriptions & Search. Tick cameras to limit **Describe Events** to them. It does not affect verification, which is set per alert. |
 
 **Test on Latest Event** sends the most recent object event's snapshot to the
 model, using the unsaved form values, and shows the verdict and how long it
 took. Use it to check the server, the model name and the speed before you
-enable the feature.
+tick AI Verify on any alerts.
 
 ## Event descriptions
 
@@ -124,7 +139,8 @@ parcel at the front door."*
   *Alerts only* mode.
 - If describing fails or times out, the notification is sent without the
   sentence. Descriptions are never a reason for an alert to be late or lost.
-- Uses the same server, model and camera selection as verification.
+- Uses the same server and model as verification. The **Cameras** list limits
+  which cameras are described.
 
 ### AI tags
 
@@ -216,7 +232,8 @@ search runs against a full-text index that matches word forms ("carrying"
 finds "carries"). If nothing mentions every concept, it shows events that
 match any of them and says so.
 
-Without a reachable model, search still works on keywords, camera names and
+The model interprets questions when **Describe Events** is on. Otherwise, or
+without a reachable model, search still works on keywords, camera names and
 simple times (today, yesterday, this morning, this afternoon, last night).
 Only events that have a description are searchable. Non-admin users see the
 same events in search as in the Events list.

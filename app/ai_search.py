@@ -233,7 +233,7 @@ def plan_with_keywords(query: str, now_utc: datetime) -> dict[str, Any]:
 
 
 def model_available(settings: dict[str, Any]) -> bool:
-    return bool(settings.get('enabled')) or describe_mode(settings) != 'off'
+    return describe_mode(settings) != 'off'
 
 
 def search_events(
