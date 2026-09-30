@@ -1016,15 +1016,46 @@ function stillAlertBadge(minutes) {
   return `<span class="detection detection-still-alert" title="${escapeHtml(title)}">${DETECTION_CLOCK_ICON} ${label}</span>`;
 }
 
-// Render the teal/green "Motion" pill (running-man icon + optional motion
-// intensity confidence). Shared by the recordings list, dashboard activity
-// feed and timeline so every surface shows the same chip styling.
-function motionPill(confidence = null) {
+// Render the teal/green "Motion" pill (running-man icon + a percentage).
+// Shared by the recordings list, dashboard activity feed and timeline so
+// every surface shows the same chip styling. ``fraction`` is the share of the
+// zone's pixels that changed (motion_fraction, 0-1) and is shown when known;
+// motion confidence is that share over the scale fraction, capped at 1, so it
+// reads 100% for most movement and is only the fallback for older clips.
+function motionPill(confidence = null, fraction = null) {
+  const numericFraction = fraction == null ? NaN : Number(fraction);
+  if (Number.isFinite(numericFraction)) {
+    const text = formatMotionFraction(numericFraction);
+    const title = `${text} of the zone's pixels changed`;
+    return `<span class="detection detection-motion" title="${escapeHtml(title)}">${DETECTION_MOTION_ICON} Motion · ${text}</span>`;
+  }
   const numericConfidence = confidence == null ? NaN : Number(confidence);
   const confidenceText = Number.isFinite(numericConfidence)
     ? ` · ${Math.round(numericConfidence * 100)}%`
     : '';
   return `<span class="detection detection-motion">${DETECTION_MOTION_ICON} Motion${confidenceText}</span>`;
+}
+
+// Changed-pixel share as a percentage: one decimal below 10% (small moves
+// are the common case: a person across a wide yard is a few percent), whole
+// numbers above.
+function formatMotionFraction(fraction) {
+  const percent = Math.max(0, Math.min(1, Number(fraction) || 0)) * 100;
+  if (percent > 0 && percent < 0.1) return '<0.1%';
+  return `${percent < 10 ? percent.toFixed(1) : Math.round(percent)}%`;
+}
+
+// Largest changed-pixel share among motion detections, or null when none of
+// them recorded one (objects, and motion saved before the share was kept).
+function motionFractionOf(detections) {
+  let best = null;
+  for (const d of (detections || [])) {
+    if (!d || String(d.label || '').trim().toLowerCase() !== 'motion') continue;
+    if (d.motion_fraction == null) continue;
+    const value = Number(d.motion_fraction);
+    if (Number.isFinite(value) && (best === null || value > best)) best = value;
+  }
+  return best;
 }
 
 // Render the neutral "Continuous" pill for always-on recording chunks.
@@ -1231,6 +1262,15 @@ function motionConfidenceFor(recording) {
     for (const d of (sample?.detections || [])) consider(d);
   }
   return best;
+}
+
+// Changed-pixel share for a recording: its event detections and, when loaded,
+// its playback track. Null when the clip predates motion_fraction.
+function motionFractionFor(recording) {
+  const values = [motionFractionOf(recording?.detections)];
+  for (const sample of (recording?.track || [])) values.push(motionFractionOf(sample?.detections));
+  const known = values.filter((value) => value !== null);
+  return known.length ? Math.max(...known) : null;
 }
 
 // Mixed recordings keep their object classification, but still need a
@@ -1487,7 +1527,7 @@ function recordingEventPills(event) {
     const strongest = detections
       .filter((d) => String(d && d.label || '').trim().toLowerCase() === 'motion')
       .reduce((best, d) => (d && Number(d.confidence) > (best ? Number(best.confidence) : -1) ? d : best), null);
-    return strongest ? motionPill(strongest.confidence) : '';
+    return strongest ? motionPill(strongest.confidence, motionFractionOf(detections)) : '';
   }
   // Object event: the strongest concrete detection of THIS event (plus its
   // still-alert badge when the event fired a dwell alert). The clip-level
@@ -2265,11 +2305,11 @@ window.daygleUi = {
   handleSessionLoss, defaultReturnTo,
   // UI helpers
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
-  detectionPill, motionPill, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON,
+  detectionPill, motionPill, formatMotionFraction, motionFractionOf, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON,
   // Face-identity pills + filters (recordings + snapshots)
   DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
-  isMotionOnlyRecording, isContinuousOnlyRecording, motionConfidenceFor, recordingHasMotion,
+  isMotionOnlyRecording, isContinuousOnlyRecording, motionConfidenceFor, motionFractionFor, recordingHasMotion,
   isMotionOnlyEvent, isMotionOnlyEventItem, markSupersededMotionRows,
   // Shared recording readers (recordings list + timeline).
   isSoundRecording, recordingTriggerType, recordingTriggerLabel, recordingZoneNames, recordingDetectionSummary, recordingEventPills, cameraLabel,

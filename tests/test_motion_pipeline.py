@@ -57,10 +57,42 @@ class MotionPipelineTests(unittest.TestCase):
             [self._expected_motion_detection('local')],
         )
 
+    def test_zone_motion_keeps_the_changed_pixel_share(self):
+        # Confidence is the share over the scale fraction, capped at 1, so a
+        # small move reads 100%; the raw share is kept for the UI.
+        settings = {
+            'detection': {'zones': [{
+                'id': 'yard', 'enabled': True, 'monitor_motion': True,
+                'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                'object_rules': [{'label': 'motion', 'enabled': True, 'min_confidence': 0.1}],
+            }]},
+        }
+        mask = np.zeros((20, 30), dtype=bool)
+        mask[:3, :10] = True  # 30 of 600 pixels = 5%
+        detections = zone_motion_detections(
+            settings, diff_mask=mask, frame_size=(30, 20), gate_fraction=0.001, scale_fraction=0.02,
+        )
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0]['confidence'], 1.0)
+        self.assertAlmostEqual(detections[0]['motion_fraction'], 0.05)
+
+    def test_zone_motion_without_a_mask_has_no_pixel_share(self):
+        settings = {
+            'detection': {'zones': [{
+                'id': 'yard', 'enabled': True, 'monitor_motion': True,
+                'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                'object_rules': [{'label': 'motion', 'enabled': True, 'min_confidence': 0.1}],
+            }]},
+        }
+        detections = zone_motion_detections(settings, frame_motion_confidence=0.9)
+        self.assertEqual(len(detections), 1)
+        self.assertNotIn('motion_fraction', detections[0])
+
     @staticmethod
     def _expected_motion_detection(zone_id):
         return {
             'confidence': 1.0,
+            'motion_fraction': 1.0,
             'zone_id': zone_id, 'zone_name': zone_id,
             'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0},
         }

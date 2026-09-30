@@ -129,6 +129,8 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
     overlays. ``track_id`` rides along for the same reason: the overlay draws
     the stable id beside the label, so a person who walks through a group or a
     car that passes a parked one keeps its identity visible on playback.
+    ``motion_fraction`` (a motion detection's changed-pixel share) rides along
+    so playback reports it instead of the capped motion confidence.
     Everything else is intentionally dropped -- the history is a compact box
     record, not a full detection dict."""
     sample = [
@@ -138,6 +140,7 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
             'box': detection.get('box'),
             **({'motion_state': detection['motion_state']} if detection.get('motion_state') in ('moving', 'still') else {}),
             **({'track_id': detection['track_id']} if isinstance(detection.get('track_id'), int) and detection['track_id'] > 0 else {}),
+            **({'motion_fraction': detection['motion_fraction']} if isinstance(detection.get('motion_fraction'), (int, float)) else {}),
         }
         for detection in detections
         if isinstance(detection.get('box'), dict)

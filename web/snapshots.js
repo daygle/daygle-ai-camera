@@ -120,7 +120,7 @@ function snapshotPills(event) {
     const strongest = (event.detections || [])
       .filter((d) => String(d && d.label || '').toLowerCase() === 'motion')
       .reduce((best, d) => (d && d.confidence > (best ? best.confidence : -1) ? d : best), null);
-    return motionPill(strongest ? strongest.confidence : null);
+    return motionPill(strongest ? strongest.confidence : null, motionFractionOf(event.detections));
   }
   const detections = event.detections || [];
   const objectDetections = detections
@@ -131,7 +131,7 @@ function snapshotPills(event) {
     (best, d) => (d && Number(d.confidence) > (best ? Number(best.confidence) : -1) ? d : best),
     null,
   );
-  const motionBadge = motionDetections.length ? motionPill(strongestMotion?.confidence ?? null) : '';
+  const motionBadge = motionDetections.length ? motionPill(strongestMotion?.confidence ?? null, motionFractionOf(motionDetections)) : '';
   return `${motionBadge}${objectDetections.map((d) => detectionPill(d.label, d.confidence)).join('')}`
     || '<span class="muted">No detections</span>';
 }

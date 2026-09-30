@@ -511,6 +511,8 @@ The pixel change fraction that maps to 100% motion confidence. At `0.03`, if 3% 
 
 This does not affect whether motion fires - that is controlled by Gate Fraction. It only affects the confidence score that Layer 3 motion rules compare against.
 
+Because confidence is capped at 100%, most real movement scores 100%. The Recordings, Events, Snapshots and Timeline pages therefore show the **share of the zone's pixels that changed** on the Motion pill (for example **Motion · 4.2%**) rather than the confidence. Hover the pill to see what the number means. Motion saved before this was added has no stored share, so those clips still show the confidence.
+
 - **Lower:** More sensitive confidence scoring - small movements get higher scores
 - **Higher:** Only large, obvious movements score close to 1.0
 

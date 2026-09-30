@@ -160,9 +160,12 @@ function recordingDisplayTrigger(recording) {
     if (detectionLabels.length) {
       return detectionLabels.map((label) => titleCase(label)).join(' · ');
     }
+    // A motion-only clip reads "Motion" even when a motion alert rule fired
+    // and stamped the recording's trigger_type as 'alert'.
+    if (isMotionOnlyRecording(recording)) return 'Motion';
     // If detections exist and none are specific, trust the detection set and keep this as motion.
-    if (!hasDetections && triggerLabel && !GENERIC_TRIGGER_LABELS.has(triggerLabel)) return `${triggerType} · ${triggerLabel}`;
-    return triggerType;
+    if (!hasDetections && triggerLabel && !GENERIC_TRIGGER_LABELS.has(triggerLabel)) return `${titleCase(triggerType)} · ${titleCase(triggerLabel)}`;
+    return titleCase(triggerType);
   }
 
   if (triggerType === 'continuous' || triggerType === 'none' || triggerType === 'off') {
@@ -171,16 +174,16 @@ function recordingDisplayTrigger(recording) {
     // trigger instead: a motion clip reads "motion", an object clip reads its
     // concrete labels.
     if (!isContinuousOnlyRecording(recording)) {
-      if (isMotionOnlyRecording(recording)) return 'motion';
+      if (isMotionOnlyRecording(recording)) return 'Motion';
       if (detectionLabels.length) {
         return detectionLabels.map((label) => titleCase(label)).join(' · ');
       }
     }
-    return triggerType;
+    return titleCase(triggerType);
   }
 
-  if (triggerLabel && triggerLabel !== triggerType) return `${triggerType} · ${triggerLabel}`;
-  return triggerLabel || triggerType;
+  if (triggerLabel && triggerLabel !== triggerType) return `${titleCase(triggerType)} · ${titleCase(triggerLabel)}`;
+  return titleCase(triggerLabel || triggerType);
 }
 
 function formatDurationShort(totalSeconds) {
@@ -624,14 +627,14 @@ function recordingRowHtml(recording) {
     // Motion-only clips have no concrete object labels - show a single
     // teal "Motion · NN%" pill so the row reads distinctly from object
     // and sound recordings without falling back to "No detections".
-    badges = motionPill(motionConfidenceFor(recording));
+    badges = motionPill(motionConfidenceFor(recording), motionFractionFor(recording));
   } else if (isContinuous) {
     // Always-on capture: no triggering detection. Show the neutral
     // "Continuous" chip (plus a Motion pill if the segment happened to
     // catch frame motion) instead of the "No detections" broken-looking
     // fallback.
     const motionBadge = hasRecordingMotion(recording)
-      ? motionPill(motionConfidenceFor(recording))
+      ? motionPill(motionConfidenceFor(recording), motionFractionFor(recording))
       : '';
     badges = `${continuousPill()}${motionBadge}`;
   } else {
@@ -641,7 +644,7 @@ function recordingRowHtml(recording) {
     // as an Object Recording, but show the motion intensity separately so
     // the list does not lose one of the event types.
     const motionBadge = !isSound && hasRecordingMotion(recording)
-      ? motionPill(motionConfidenceFor(recording))
+      ? motionPill(motionConfidenceFor(recording), motionFractionFor(recording))
       : '';
     badges = `${motionBadge}${summaryBadges}` || '<span class="muted">No detections</span>';
   }
@@ -690,11 +693,11 @@ function renderRecordingDetails(recording) {
   let detectionLabel;
   if (isMotionOnly) {
     detectionLabel = 'Motion';
-    detectionBadges = motionPill(motionConfidenceFor(recording));
+    detectionBadges = motionPill(motionConfidenceFor(recording), motionFractionFor(recording));
   } else if (isContinuous) {
     detectionLabel = 'Recording';
     const motionBadge = hasRecordingMotion(recording)
-      ? motionPill(motionConfidenceFor(recording))
+      ? motionPill(motionConfidenceFor(recording), motionFractionFor(recording))
       : '';
     detectionBadges = `${continuousPill()}${motionBadge}`;
   } else if (isSound) {
@@ -706,7 +709,7 @@ function renderRecordingDetails(recording) {
   } else {
     detectionLabel = 'Detections';
     const motionBadge = hasRecordingMotion(recording)
-      ? motionPill(motionConfidenceFor(recording))
+      ? motionPill(motionConfidenceFor(recording), motionFractionFor(recording))
       : '';
     const objectBadges = detections.map((d) => detectionPill(d.label, d.confidence, false, d.count)).join(' ');
     detectionBadges = `${motionBadge}${objectBadges}` || 'none';
