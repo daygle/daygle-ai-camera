@@ -296,29 +296,29 @@ window.daygleAuthReady = (async () => {
    * tabs are hidden for viewers by renderNavAccount like the sidebar. */
   const PAGE_TABS = [
     [
-      { href: '/recordings', label: 'Recordings', match: (p) => p === '/recordings' || /^\/recordings\/\d+$/.test(p) },
-      { href: '/recordings/timeline', label: 'Timeline' },
-      { href: '/snapshots', label: 'Snapshots' },
+      { href: '/recordings', icon: '🎞️', label: 'Recordings', match: (p) => p === '/recordings' || /^\/recordings\/\d+$/.test(p) },
+      { href: '/recordings/timeline', icon: '🕒', label: 'Timeline' },
+      { href: '/snapshots', icon: '📸', label: 'Snapshots' },
     ],
     // The section's own URL is also the prefix of its sibling tabs, so its
     // tab matches exactly rather than by prefix.
     [
-      { href: '/detection', label: 'Objects', match: (p) => p === '/detection' },
-      { href: '/detection/sounds', label: 'Sounds' },
-      { href: '/detection/faces', label: 'Faces' },
+      { href: '/detection', icon: '📦', label: 'Objects', match: (p) => p === '/detection' },
+      { href: '/detection/sounds', icon: '🔊', label: 'Sounds' },
+      { href: '/detection/faces', icon: '👤', label: 'Faces' },
     ],
     [
-      { href: '/models', label: 'Object Models', match: (p) => p === '/models' },
-      { href: '/models/faces', label: 'Face Models' },
-      { href: '/models/cameras', label: 'Camera Models' },
-      { href: '/models/sound', label: 'Sound Model' },
-      { href: '/models/settings', label: 'Settings' },
+      { href: '/models', icon: '📦', label: 'Object Models', match: (p) => p === '/models' },
+      { href: '/models/faces', icon: '👤', label: 'Face Models' },
+      { href: '/models/cameras', icon: '📷', label: 'Camera Models' },
+      { href: '/models/sound', icon: '🔊', label: 'Sound Model' },
+      { href: '/models/settings', icon: '⚙️', label: 'Settings' },
     ],
     [
-      { href: '/system', label: 'Health' },
-      { href: '/camera-log', label: 'Camera Log' },
-      { href: '/application-log', label: 'Application Log' },
-      { href: '/audit', label: 'Audit Log' },
+      { href: '/system', icon: '🩺', label: 'Health' },
+      { href: '/camera-log', icon: '📹', label: 'Camera Log' },
+      { href: '/application-log', icon: '📄', label: 'Application Log' },
+      { href: '/audit', icon: '🛡️', label: 'Audit Log' },
     ],
   ];
 
@@ -424,7 +424,8 @@ window.daygleAuthReady = (async () => {
     strip.setAttribute('aria-label', 'Section');
     strip.innerHTML = tabGroup.map((tab) => {
       const active = tab.match ? tab.match(currentPath) : pathMatchesNav(currentPath, tab.href);
-      return `<a href="${tab.href}" class="page-tab${active ? ' active' : ''}"${active ? ' aria-current="page"' : ''}>${tab.label}</a>`;
+      // Every tab carries an icon beside its text, like the in-page tabs.
+      return `<a href="${tab.href}" class="page-tab${active ? ' active' : ''}"${active ? ' aria-current="page"' : ''}><span class="page-tab-icon" aria-hidden="true">${tab.icon}</span><span>${tab.label}</span></a>`;
     }).join('');
     const hero = main.querySelector(':scope > .hero');
     if (hero) hero.after(strip);
