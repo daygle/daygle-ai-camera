@@ -271,6 +271,19 @@ def test_backlogged_job_is_delivered_unverified(av, flow):
     assert db.metadata[12]['ai_verification']['status'] == 'skipped'
 
 
+def test_out_of_scope_camera_queued_for_description_is_not_verified(av, flow, monkeypatch):
+    # An AI tag alert rule makes an out-of-scope camera describe every event,
+    # which queues its alerts on the AI pool; they must still skip verification.
+    configure, forwarded = flow
+    db = configure({'person': (False, 'a shadow')}, camera_ids=['cam-A'])
+    monkeypatch.setattr(importlib.import_module('app.ai_tag_alerts'), 'camera_has_rules', lambda cid: cid == 'cam-B')
+    monkeypatch.setattr(av, '_describe_and_store', lambda *_args, **_kwargs: None)
+    triggered = [{'label': 'person', 'confidence': 0.6}]
+    av.verify_and_forward(triggered, 13, [], 'Back', camera_id='cam-B')
+    assert forwarded == [triggered]
+    assert 13 not in db.metadata
+
+
 def test_missing_snapshot_fails_open(av, flow, monkeypatch):
     configure, forwarded = flow
     configure({'person': (False, 'never asked')})

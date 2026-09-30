@@ -800,7 +800,10 @@ def verify_and_forward(
     Every failure path still forwards the alerts.
     """
     settings = effective_ai_verification_settings()
-    labels = labels_to_verify(triggered, settings) if settings.get('enabled') else []
+    # The job can be queued only for a description (an AI tag alert rule makes
+    # an out-of-scope camera describe everything): honour the camera scope.
+    verifies = applies_to_camera(camera_id, settings) if camera_id is not None else bool(settings.get('enabled'))
+    labels = labels_to_verify(triggered, settings) if verifies else []
     mode = camera_describe_mode(camera_id, settings) if camera_id is not None else describe_mode(settings)
     if not labels and mode == 'off':
         _forward(triggered, event_id, rules)
