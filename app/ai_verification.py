@@ -809,12 +809,15 @@ def verify_and_forward(
     kept = list(triggered)
     if labels:
         record = verify_event(event, labels, settings, camera_name=camera_name)
-        _record(event_id, record)
         rejected = {label for label, result in record['labels'].items() if result.get('present') is False}
         kept = [
             alert for alert in triggered
             if not (_is_verifiable(alert) and str(alert.get('label') or '').strip().lower() in rejected)
         ]
+        # 'filtered' means some label was rejected; whether any alert still
+        # went out is what decides if the event is described in 'alerts' mode.
+        record['delivered'] = bool(kept)
+        _record(event_id, record)
         if rejected:
             logger.info(
                 'AI verification filtered event %s (%s): %s', event_id, ', '.join(sorted(rejected)),
@@ -926,21 +929,36 @@ def _catch_up_describes(event: dict[str, Any], mode: str) -> bool:
     if mode != 'alerts' or not event.get('alert_triggered'):
         return False
     verification = (event.get('metadata') or {}).get('ai_verification') or {}
-    return verification.get('status') != 'filtered'
+    return verification.get('delivered') is not False
+
+
+def _undescribed_events(since: str):
+    """Every undescribed event since ``since``, newest first, a page at a time.
+
+    Paged so that events the catch-up skips (already tried, or not described
+    in their camera's mode) cannot hide older ones behind a full batch.
+    """
+    before_id = None
+    while True:
+        page = _state.database.events_without_description(since=since, limit=CATCH_UP_BATCH, before_id=before_id)
+        yield from page
+        if len(page) < CATCH_UP_BATCH:
+            return
+        before_id = int(page[-1]['id'])
 
 
 def catch_up_once() -> bool:
     """Describe the newest skipped event; False when none is left.
 
     Only events from the last few hours that their camera's mode describes
-    (every event in ``all``; in ``alerts``, those that alerted and were not
-    filtered by verification), each tried at most once per process (so an
+    (every event in ``all``; in ``alerts``, those whose alert went out, i.e.
+    verification did not reject every alert), each tried at most once per process (so an
     event that cannot be described, e.g. a missing snapshot, is not retried
     forever).
     """
     settings = effective_ai_verification_settings()
     since = datetime.now(timezone.utc) - timedelta(hours=CATCH_UP_WINDOW_HOURS)
-    for event in _state.database.events_without_description(since=since.isoformat(), limit=CATCH_UP_BATCH):
+    for event in _undescribed_events(since.isoformat()):
         event_id = int(event['id'])
         metadata = event.get('metadata') or {}
         with _catch_up_lock:

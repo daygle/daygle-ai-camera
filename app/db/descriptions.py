@@ -93,8 +93,13 @@ class EventDescriptionsMixin:
         with self.connect() as db:
             return db.execute("UPDATE events SET alert_triggered = 1 WHERE id = ?", (int(event_id),)).rowcount > 0
 
-    def events_without_description(self, *, since: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-        """Newest object events with a snapshot and no description yet (for backfill)."""
+    def events_without_description(
+        self, *, since: str | None = None, limit: int = 100, before_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Newest object events with a snapshot and no description yet (for backfill).
+
+        ``before_id`` pages further back: only events older than that id.
+        """
         clauses = ["e.snapshot_path IS NOT NULL", "e.snapshot_path != ''",
                    f"{_DESCRIPTION_JSON} IS NULL",
                    "COALESCE(json_extract(e.metadata, '$.source'), '') != 'sound-detection'"]
@@ -102,6 +107,9 @@ class EventDescriptionsMixin:
         if since:
             clauses.append("e.created_at >= ?")
             params.append(_normalize_iso_to_utc(since))
+        if before_id is not None:
+            clauses.append("e.id < ?")
+            params.append(int(before_id))
         with self.connect() as db:
             rows = db.execute(
                 f"SELECT e.* FROM events e WHERE {' AND '.join(clauses)} ORDER BY e.id DESC LIMIT ?",

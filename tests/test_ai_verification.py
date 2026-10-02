@@ -275,15 +275,16 @@ def test_rejected_label_is_dropped_but_face_alert_still_sent(av, flow):
     av.verify_and_forward(triggered, 7, [], 'Gate')
     assert forwarded == [[triggered[1]]]
     record = db.metadata[7]['ai_verification']
-    assert record['status'] == 'filtered'
+    assert record['status'] == 'filtered' and record['delivered'] is True
     assert record['labels']['person'] == {'present': False, 'reason': 'a shadow'}
 
 
 def test_all_rejected_sends_nothing(av, flow):
     configure, forwarded = flow
-    configure({'person': (False, 'bush')})
+    db = configure({'person': (False, 'bush')})
     av.verify_and_forward([_alert('person', 0.6)], 8, [], '')
     assert forwarded == []
+    assert db.metadata[8]['ai_verification']['delivered'] is False
 
 
 def test_confirmed_alert_is_sent(av, flow):

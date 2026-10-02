@@ -359,6 +359,8 @@ def test_like_fallback_without_fts(described_db):
 def test_backfill_candidates(described_db):
     db, ids = described_db
     assert [e['id'] for e in db.events_without_description()] == [ids['plain']]
+    assert db.events_without_description(before_id=ids['plain']) == []
+    assert [e['id'] for e in db.events_without_description(before_id=ids['plain'] + 1)] == [ids['plain']]
 
 
 # ---------------------------------------------------------------------------
@@ -622,8 +624,9 @@ class _CatchUpDb:
         self.events = {event['id']: event for event in events}
         self.described: list[int] = []
 
-    def events_without_description(self, *, since=None, limit=100):
-        pending = [e for e in self.events.values() if e['id'] not in self.described and e['created_at'] >= since]
+    def events_without_description(self, *, since=None, limit=100, before_id=None):
+        pending = [e for e in self.events.values() if e['id'] not in self.described and e['created_at'] >= since
+                   and (before_id is None or e['id'] < before_id)]
         return sorted(pending, key=lambda e: -e['id'])[:limit]
 
 
@@ -710,13 +713,30 @@ def test_full_queue_starts_catch_up_that_waits_for_idle(av, catch_up, monkeypatc
 
 def test_catch_up_covers_alerted_events_in_alerts_mode(av, catch_up):
     setup, event, calls = catch_up
-    filtered = {**event(3), 'alert_triggered': 1}
-    filtered['metadata'] = {**filtered['metadata'], 'ai_verification': {'status': 'filtered'}}
-    setup([{**event(1), 'alert_triggered': 1}, event(2), filtered], modes={'cam': 'alerts'})
+    def alerted(event_id, **verification):
+        e = {**event(event_id), 'alert_triggered': 1}
+        if verification:
+            e['metadata'] = {**e['metadata'], 'ai_verification': verification}
+        return e
+
+    setup([alerted(1), event(2), alerted(3, status='filtered', delivered=False),
+           alerted(4, status='filtered', delivered=True)], modes={'cam': 'alerts'})
     while av.catch_up_once():
         pass
-    # The alert that went out undescribed is caught up; a quiet event and
-    # one whose alert verification rejected stay undescribed, as live.
+    # Alerts that went out undescribed are caught up, including one where
+    # verification rejected some labels but another alert was still sent; a
+    # quiet event and one whose every alert was rejected stay undescribed.
+    assert calls == [(4, True), (1, True)]
+
+
+def test_catch_up_pages_past_skipped_events(av, catch_up, monkeypatch):
+    setup, event, calls = catch_up
+    monkeypatch.setattr(av, 'CATCH_UP_BATCH', 2)
+    # Five newer quiet events (not described in 'alerts' mode) must not hide
+    # the older alerted one behind a full batch.
+    setup([{**event(1), 'alert_triggered': 1}] + [event(i) for i in range(2, 7)], modes={'cam': 'alerts'})
+    while av.catch_up_once():
+        pass
     assert calls == [(1, True)]
 
 
