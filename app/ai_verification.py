@@ -798,6 +798,9 @@ def verify_and_forward(
         if labels:
             _record(event_id, {'status': 'skipped', 'reason': 'Verification queue backlog; delivered unverified.'})
         _forward(triggered, event_id, rules)
+        if mode != 'off':
+            # Not described now; the catch-up captions it once the model is idle.
+            start_description_catch_up()
         return
     try:
         event = _state.database.get_event(event_id) or {}
@@ -825,6 +828,10 @@ def verify_and_forward(
         text = _describe_and_store(event, event_id, settings, camera_name)
         if text:
             kept = [{**alert, 'ai_description': text} for alert in kept]
+        else:
+            # Usually a timeout during a burst of events: the alert goes out
+            # now and the catch-up tags the event once the model is idle.
+            start_description_catch_up()
     _forward(kept, event_id, rules)
 
 
@@ -913,12 +920,23 @@ def _run_catch_up(idle_poll_seconds: float = 1.0) -> None:
             _catch_up_running = False
 
 
+def _catch_up_describes(event: dict[str, Any], mode: str) -> bool:
+    if mode == 'all':
+        return True
+    if mode != 'alerts' or not event.get('alert_triggered'):
+        return False
+    verification = (event.get('metadata') or {}).get('ai_verification') or {}
+    return verification.get('status') != 'filtered'
+
+
 def catch_up_once() -> bool:
     """Describe the newest skipped event; False when none is left.
 
-    Only events from the last few hours, on cameras still in ``all`` mode,
-    each tried at most once per process (so an event that cannot be
-    described, e.g. a missing snapshot, is not retried forever).
+    Only events from the last few hours that their camera's mode describes
+    (every event in ``all``; in ``alerts``, those that alerted and were not
+    filtered by verification), each tried at most once per process (so an
+    event that cannot be described, e.g. a missing snapshot, is not retried
+    forever).
     """
     settings = effective_ai_verification_settings()
     since = datetime.now(timezone.utc) - timedelta(hours=CATCH_UP_WINDOW_HOURS)
@@ -931,7 +949,7 @@ def catch_up_once() -> bool:
             if len(_catch_up_attempted) > 10000:
                 _catch_up_attempted.clear()
             _catch_up_attempted.add(event_id)
-        if camera_describe_mode(metadata.get('camera_id'), settings) != 'all':
+        if not _catch_up_describes(event, camera_describe_mode(metadata.get('camera_id'), settings)):
             continue
         try:
             created = datetime.fromisoformat(str(event.get('created_at')).replace('Z', '+00:00'))
@@ -972,6 +990,8 @@ def submit_alert_notification_with_verification(
         if accepted:
             return True
         logger.warning('AI verification queue full; delivering event %s notification unverified', event_id)
+        if describes_camera(camera_id, settings):
+            start_description_catch_up()
     return submit_alert_notification(deliver_alert_notifications, triggered, event_id, rules)
 
 

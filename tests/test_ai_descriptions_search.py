@@ -708,6 +708,40 @@ def test_full_queue_starts_catch_up_that_waits_for_idle(av, catch_up, monkeypatc
     assert calls == [(9, True)] and av._catch_up_running is False
 
 
+def test_catch_up_covers_alerted_events_in_alerts_mode(av, catch_up):
+    setup, event, calls = catch_up
+    filtered = {**event(3), 'alert_triggered': 1}
+    filtered['metadata'] = {**filtered['metadata'], 'ai_verification': {'status': 'filtered'}}
+    setup([{**event(1), 'alert_triggered': 1}, event(2), filtered], modes={'cam': 'alerts'})
+    while av.catch_up_once():
+        pass
+    # The alert that went out undescribed is caught up; a quiet event and
+    # one whose alert verification rejected stay undescribed, as live.
+    assert calls == [(1, True)]
+
+
+@pytest.mark.parametrize('case', ['describe_failed', 'backlog', 'queue_full'])
+def test_alert_events_left_undescribed_start_the_catch_up(av, flow, monkeypatch, case):
+    configure, forwarded = flow
+    configure(describe_events='alerts', caption=av.VerificationError('timed out'))
+    catch_ups: list = []
+    monkeypatch.setattr(av, 'start_description_catch_up', lambda: catch_ups.append(True))
+    triggered = [{'label': 'motion', 'confidence': 0.3, 'motion_event': True}]
+    if case == 'queue_full':
+        pools = importlib.import_module('app.postprocess_pool')
+
+        class _FullPool:
+            def submit(self, *_a, **_k):
+                return False
+
+        monkeypatch.setattr(pools, 'verification_pool', lambda: _FullPool())
+        av.submit_alert_notification_with_verification(triggered, 4, [], camera_id='cam')
+    else:
+        av.verify_and_forward(triggered, 4, [], 'Front Yard',
+                              submitted_at=-1e9 if case == 'backlog' else None)
+    assert forwarded == [triggered] and catch_ups == [True]
+
+
 def test_describe_only_defers_to_catch_up_while_the_model_cools_down(av, monkeypatch):
     class _Db:
         def get_event(self, event_id):
