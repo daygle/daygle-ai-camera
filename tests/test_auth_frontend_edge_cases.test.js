@@ -352,6 +352,44 @@ describe('Cross-tab auth sync', () => {
 });
 
 
+describe('Auth refresh audit regressions', () => {
+  test('concurrent refresh calls share one authoritative request', async () => {
+    const { sandbox } = createSandbox();
+    let finish;
+    let calls = 0;
+    sandbox.fetch = () => { calls++; return new Promise((resolve) => { finish = resolve; }); };
+    const first = sandbox.refreshDaygleAuth();
+    const second = sandbox.refreshDaygleAuth();
+    assert.equal(calls, 1);
+    finish({ status: 200, ok: true, json: async () => ({ user: { username: 'admin' }, csrf_token: 'current', expires_at: '' }) });
+    await Promise.all([first, second]);
+    assert.equal(sandbox.window.daygleAuth.csrfToken, 'current');
+  });
+
+  test('a late refresh cannot restore auth after session loss', async () => {
+    const { sandbox } = createSandbox();
+    let finish;
+    sandbox.fetch = () => new Promise((resolve) => { finish = resolve; });
+    const pending = sandbox.refreshDaygleAuth();
+    sandbox.window.daygleUi.handleSessionLoss('Expired', '/');
+    finish({ status: 200, ok: true, json: async () => ({ user: { username: 'admin' }, csrf_token: 'old' }) });
+    await pending;
+    assert.equal(sandbox.window.daygleAuth.user, null);
+  });
+
+  test('near-expiry and long-session refresh timers are bounded', () => {
+    const { sandbox } = createSandbox();
+    const delays = [];
+    sandbox.setTimeout = (_fn, delay) => { delays.push(delay); return 1; };
+    sandbox.window.daygleUi.setApiAuth({ username: 'admin' }, 'token', new Date(Date.now() + 10_000).toISOString());
+    sandbox.scheduleNextAuthRefresh();
+    assert.equal(delays.at(-1), 5000);
+    sandbox.window.daygleUi.setApiAuth({ username: 'admin' }, 'token', '3026-01-01T00:00:00Z');
+    sandbox.scheduleNextAuthRefresh();
+    assert.equal(delays.at(-1), 2_147_000_000);
+  });
+});
+
 describe('Logout with null CSRF token', () => {
   function captureHeadersSandbox() {
     const ctx = createSandbox();

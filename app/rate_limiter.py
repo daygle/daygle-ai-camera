@@ -17,6 +17,7 @@ public method calls another public method.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections import deque
@@ -49,7 +50,7 @@ def _positive_float(value: Any, name: str) -> float:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f'{name} must be a positive number') from exc
-    if parsed <= 0:
+    if not math.isfinite(parsed) or parsed <= 0:
         raise ValueError(f'{name} must be a positive number')
     return parsed
 
@@ -59,7 +60,7 @@ def _non_negative_float(value: Any, name: str) -> float:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f'{name} must be a non-negative number') from exc
-    if parsed < 0:
+    if not math.isfinite(parsed) or parsed < 0:
         raise ValueError(f'{name} must be a non-negative number')
     return parsed
 
@@ -129,7 +130,14 @@ class IPRateLimiter:
             if len(attempts) < self.max_attempts:
                 return 0.0
             excess = len(attempts) - self.max_attempts  # 0-indexed
-            delay = min(self.base_delay * (2 ** excess), self.max_delay)
+            # Bound the exponent before evaluating it: a burst of concurrent
+            # failures must not overflow float conversion or build huge ints.
+            if self.base_delay == 0:
+                delay = 0.0
+            elif excess >= math.log2(self.max_delay) - math.log2(self.base_delay):
+                delay = self.max_delay
+            else:
+                delay = math.ldexp(self.base_delay, excess)
             elapsed = time.time() - attempts[-1]
             return max(0.0, delay - elapsed)
 
@@ -311,7 +319,9 @@ class SlidingWindowRateLimiter:
             return
         self._last_global_evict = now
         cutoff = now - self._window
-        stale_keys = [key for key, dq in self._hits.items() if not dq or dq[0] < cutoff]
+        # Drop a bucket only when its NEWEST hit expired. An old first
+        # hit does not make the subsequent, still-live hits disposable.
+        stale_keys = [key for key, dq in self._hits.items() if not dq or dq[-1] < cutoff]
         for key in stale_keys:
             self._hits.pop(key, None)
 

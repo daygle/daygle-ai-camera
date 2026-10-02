@@ -138,6 +138,8 @@ class EventsMixin:
             )
             if recording_id is not None:
                 db.execute("UPDATE alert_history SET recording_id = ? WHERE event_id = ?", (int(recording_id), int(event_id)))
+                if cursor.rowcount > 0:
+                    self._copy_event_ai_tags(db, int(event_id), int(recording_id))
             return cursor.rowcount > 0
 
     def backfill_event_recording_links(self, db: sqlite3.Connection | None = None) -> int:

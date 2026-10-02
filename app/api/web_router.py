@@ -68,7 +68,10 @@ def _safe_return_to(raw: str | None) -> str:
     typo or attacker tweak can never strand the user in an infinite auth
     loop or worse.
     """
-    candidate = str(raw or '').strip()
+    text = str(raw or '')
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        return '/'
+    candidate = text.strip()
     if (
         not candidate
         or not candidate.startswith('/')
@@ -76,6 +79,7 @@ def _safe_return_to(raw: str | None) -> str:
         # Browsers can treat backslashes as URL separators; reject them rather
         # than allowing ``\\\\evil.example`` to become an external target.
         or '\\' in candidate
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in candidate)
     ):
         return '/'
     if any(candidate == prefix.rstrip('/') or candidate.startswith(prefix) for prefix in _LOGIN_DISALLOWED_REDIRECT_PREFIXES):
@@ -193,7 +197,7 @@ def _login_page_route(
     auth_enabled: bool = Depends(get_auth_enabled),
 ):
     """Route handler - injects deps and delegates to :func:`login_page`."""
-    return login_page(request, error=error, return_to=return_to, auth=auth, auth_enabled=auth_enabled)
+    return login_page(request, error=error, return_to=return_to or request.query_params.get('returnTo'), auth=auth, auth_enabled=auth_enabled)
 
 
 @router.get('/setup')

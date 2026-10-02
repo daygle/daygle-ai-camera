@@ -59,7 +59,7 @@ function aiPayload() {
     if (!field) return;
     const raw = String(field.value ?? '');
     if (AI_BOOLEAN_FIELDS.has(key)) data[key] = raw === 'true';
-    else if (raw === '') return;
+    else if (raw === '' && key !== 'api_key') return;
     else if (AI_INTEGER_FIELDS.has(key)) data[key] = Number.parseInt(raw, 10);
     else data[key] = raw;
   });

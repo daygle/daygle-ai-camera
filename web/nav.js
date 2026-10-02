@@ -576,9 +576,13 @@ window.daygleAuthReady = (async () => {
     logoutBtn.addEventListener('click', async () => {
       try {
         const token = (window.daygleAuth && window.daygleAuth.csrfToken) || '';
-        await fetch('/logout', { method: 'POST', headers: { 'X-CSRF-Token': token } });
+        const response = await fetch('/logout', { method: 'POST', headers: { 'X-CSRF-Token': token } });
+        if (!response.ok && response.status !== 401) throw new Error('Logout failed');
       } catch {
-        // Ignore network errors; the redirect below will clear the session server-side.
+        // GET /login does not revoke a session. Do not claim logout succeeded
+        // or clear other tabs when the revocation request never reached us.
+        window.showToast?.('Could not sign out. Check your connection and try again.', true);
+        return;
       }
       // Broadcast to other open tabs so they immediately know the session
       // is gone, rather than waiting for their next refresh cycle or API 401.

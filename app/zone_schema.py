@@ -753,18 +753,18 @@ def normalize_zone_ai_tags(zone: dict[str, Any]) -> dict[str, Any] | None:
     if match not in AI_TAG_MATCH_MODES:
         match = 'both'
     try:
-        cooldown = max(0, int(raw.get('cooldown_seconds') if raw.get('cooldown_seconds') is not None else 300))
-    except (TypeError, ValueError):
+        cooldown = max(0, min(86400, int(raw.get('cooldown_seconds') if raw.get('cooldown_seconds') is not None else 300)))
+    except (TypeError, ValueError, OverflowError):
         cooldown = 300
     return {
-        'enabled': bool(raw.get('enabled', True)),
+        'enabled': normalize_bool_setting(raw.get('enabled'), True),
         'name': str(raw.get('name') or 'AI tag alert').strip()[:60] or 'AI tag alert',
         'tags': tags,
         'match': match,
         'cooldown_seconds': cooldown,
-        'email_enabled': bool(raw.get('email_enabled', False)),
+        'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
-        'push_enabled': bool(raw.get('push_enabled', False)),
+        'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
         'notify_start': _strict_hhmm(raw.get('notify_start')),
         'notify_end': _strict_hhmm(raw.get('notify_end')),
     }

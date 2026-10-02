@@ -100,6 +100,7 @@ from pathlib import Path
 from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.responses import Response
+from starlette.concurrency import run_in_threadpool
 
 import app.state as _state
 from app.auth import CSRF_HEADER, SESSION_COOKIE
@@ -120,6 +121,15 @@ logger = logging.getLogger(__name__)
 
 
 def _is_same_origin(request: Request) -> tuple[bool, str]:
+    try:
+        return _check_same_origin(request)
+    except ValueError:
+        # URL ports are parsed lazily: urlsplit() alone does not validate
+        # non-numeric/out-of-range ports, including trusted proxy headers.
+        return False, 'Malformed origin or forwarded host'
+
+
+def _check_same_origin(request: Request) -> tuple[bool, str]:
     """Same-origin check for state-changing requests (defence-in-depth vs CSRF).
 
     Reads ``Origin`` first, then falls back to ``Referer`` (some privacy
@@ -209,7 +219,7 @@ async def authentication_middleware(request: Request, call_next):
         (path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
     ):
         return await call_next(request)
-    has_users = _state.auth.users_exist()
+    has_users = await run_in_threadpool(_state.auth.users_exist)
     if not has_users:
         if path.startswith('/api/'):
             return JSONResponse(
@@ -221,7 +231,7 @@ async def authentication_middleware(request: Request, call_next):
     # ``'session'`` fallback read a different cookie than the one login set
     # whenever ``cookie_name`` was absent from the effective auth config.
     _cookie_name = str(auth_config.get('cookie_name', SESSION_COOKIE))
-    session = _state.auth.get_session(request.cookies.get(_cookie_name))
+    session = await run_in_threadpool(_state.auth.get_session, request.cookies.get(_cookie_name))
     if session is None:
         if path.startswith('/api/'):
             return JSONResponse(
@@ -321,7 +331,7 @@ async def authentication_middleware(request: Request, call_next):
         if (
             not csrf_header
             or not isinstance(session.get('csrf_token'), str)
-            or not hmac.compare_digest(csrf_header, session['csrf_token'])
+            or not hmac.compare_digest(csrf_header.encode('utf-8'), session['csrf_token'].encode('utf-8'))
         ):
             return JSONResponse(
                 {'detail': 'CSRF token missing or invalid'}, status_code=403,
@@ -345,10 +355,8 @@ async def authentication_middleware(request: Request, call_next):
 
 async def _buffer_body(response) -> bytes:
     """Consume a streaming response body so it can be rewritten."""
-    body = b''
-    async for chunk in response.body_iterator:
-        body += chunk
-    return body
+    chunks = [chunk async for chunk in response.body_iterator]
+    return b''.join(chunks)
 
 
 # ── Static asset versioning (cache-busting) ────────────────────────────────
@@ -408,7 +416,7 @@ def _static_asset_version(web_dir: Path | None, asset: str) -> str | None:
     if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
         return cached[2]
     try:
-        digest = hashlib.sha1(file_path.read_bytes()).hexdigest()[:12]
+        digest = hashlib.sha1(file_path.read_bytes(), usedforsecurity=False).hexdigest()[:12]
     except OSError:
         return None
     _STATIC_VERSION_CACHE[asset] = (stat.st_mtime_ns, stat.st_size, digest)
@@ -456,6 +464,8 @@ async def app_navigation_middleware(request: Request, call_next):
     response = await call_next(request)
     content_type = response.headers.get('content-type', '')
     path = request.url.path
+    if path.startswith('/api/auth/') or path in {'/login', '/setup', '/logout'}:
+        response.headers['Cache-Control'] = 'no-store, must-revalidate'
 
     # ── Security response headers ────────────────────────────────────────
     # Defence-in-depth: set recommended security headers on every

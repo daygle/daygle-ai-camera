@@ -576,8 +576,9 @@ function defaultReturnTo() {
 function handleSessionLoss(reason, returnTo) {
   if (!window.daygleAuth) return;
   if (window.daygleAuth.redirecting) return;
-  if (typeof setApiAuth === 'function') setApiAuth(null, null, null);
   window.daygleAuth.redirecting = true;
+  clearTimeout(window.daygleAuth._refreshTimer);
+  if (typeof setApiAuth === 'function') setApiAuth(null, null, null);
   // Broadcast session loss to other open tabs so they don't stay stuck with
   // stale auth state. The empty csrf signals "session ended" to the cross-tab
   // listener in subscribeDaygleAuthCrossTabs. Safe to call with null user -
@@ -840,7 +841,18 @@ async function retryAfterCsrfRefresh(path, options) {
 // Transient network failures keep the last-known auth state intact so
 // the user doesn't get bounced on a flaky connection; only a real 401
 // triggers handleSessionLoss.
+let _authRefreshPending = null;
 async function refreshDaygleAuth() {
+  if (_authRefreshPending) return _authRefreshPending;
+  _authRefreshPending = refreshDaygleAuthOnce();
+  try {
+    return await _authRefreshPending;
+  } finally {
+    _authRefreshPending = null;
+  }
+}
+
+async function refreshDaygleAuthOnce() {
   let response;
   try {
     response = await fetch('/api/auth/me', { credentials: 'same-origin' });
@@ -856,6 +868,7 @@ async function refreshDaygleAuth() {
   }
   let payload;
   try { payload = await response.json(); } catch (_err) { return null; }
+  if (window.daygleAuth?.redirecting) return null;
   const user = payload?.user || null;
   const csrfToken = payload?.csrf_token || '';
   const expiresAt = payload?.expires_at || '';
@@ -874,12 +887,15 @@ function scheduleNextAuthRefresh() {
   if (!exp) return;
   const ms = Date.parse(exp) - Date.now() - 60_000;
   if (!Number.isFinite(ms)) return;
-  if (ms <= 0) {
-    // Already past the soft window - refresh now (network permitting).
-    window.daygleAuth._refreshTimer = setTimeout(refreshDaygleAuth, 0);
-  } else {
-    window.daygleAuth._refreshTimer = setTimeout(refreshDaygleAuth, ms);
-  }
+  if (window.daygleAuth.redirecting) return;
+  // Near the absolute deadline the server cannot extend expiry. A zero-delay
+  // refresh would spin until expiry; very long sessions also overflow the
+  // browser's signed 32-bit timer (which then fires almost immediately).
+  const delay = Math.max(5000, Math.min(ms, 2_147_000_000));
+  window.daygleAuth._refreshTimer = setTimeout(async () => {
+    await refreshDaygleAuth();
+    if (window.daygleAuth?.user && !window.daygleAuth.redirecting) scheduleNextAuthRefresh();
+  }, delay);
 }
 
 // localStorage is the cross-tab transport. The ``storage`` event in every

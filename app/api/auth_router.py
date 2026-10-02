@@ -18,6 +18,7 @@ from html import escape
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.auth import CSRF_COOKIE, CSRF_HEADER, AuthError, utc_now
 from app.auth_gates import _request_ip, require_session
@@ -44,7 +45,7 @@ def _csrf_double_submit_ok(data: dict, request: Request) -> bool:
     cookie = request.cookies.get(CSRF_COOKIE) or ''
     if not submitted or not cookie:
         return False
-    return hmac.compare_digest(str(submitted), str(cookie))
+    return hmac.compare_digest(str(submitted).encode('utf-8'), str(cookie).encode('utf-8'))
 
 
 @router.post('/login')
@@ -52,7 +53,7 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
     data = await form_data(request)
     # Double-submit CSRF check, constant-time (see middleware note).
     if not _csrf_double_submit_ok(data, request):
-        return login_page(request, 'Security token expired. Try again.', auth=auth, auth_enabled=auth_enabled)
+        return login_page(request, 'Security token expired. Try again.', return_to=data.get('return_to'), auth=auth, auth_enabled=auth_enabled)
     username = data.get('username', '')
     ip = _request_ip(request)
 
@@ -84,6 +85,7 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
             f'<p class="error">{escape(error_msg)}</p>'
             '<form class="form-stack" method="post" action="/login">'
             '  <input type="hidden" name="csrf_token" value="{csrf}" />'
+            f'  <input type="hidden" name="return_to" value="{escape(_safe_return_to(data.get("return_to")))}" />'
             '  <label>Username<input name="username" autocomplete="username" required /></label>'
             '  <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>'
             '  <button class="primary" type="submit">Sign In</button>'
@@ -94,7 +96,7 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
         return response
 
     try:
-        _user, token, _csrf_token, expires_at = auth.authenticate(username, data.get('password', ''), ip)
+        _user, token, _csrf_token, expires_at = await run_in_threadpool(auth.authenticate, username, data.get('password', ''), ip)
     except AuthError as exc:
         login_limiter.record_failure(ip)
         try:
@@ -118,7 +120,7 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
             safe_error = 'Account is temporarily locked. Try again later.'
         elif str(exc) == 'Too many failed login attempts. Try again later.':
             safe_error = 'Too many failed login attempts. Try again later.'
-        return login_page(request, safe_error, auth=auth, auth_enabled=auth_enabled)
+        return login_page(request, safe_error, return_to=data.get('return_to'), auth=auth, auth_enabled=auth_enabled)
 
     login_limiter.record_success(ip)
     try:
@@ -215,10 +217,19 @@ def logout_get():
 def logout_post(request: Request, db=Depends(get_database), auth=Depends(get_auth)):
     session = require_session(request)
     from app.request_helpers import write_audit_log
+    from app.middleware import _is_same_origin
+
+    # Preserve stale-token logout resilience, but do not accept a deliberately
+    # cross-origin browser POST (for example when a cookie domain is shared).
+    if request.headers.get('origin') or request.headers.get('referer'):
+        same_origin, _reason = _is_same_origin(request)
+        if not same_origin:
+            raise HTTPException(status_code=403, detail='Origin check failed.')
     # Resilient CSRF check: if the token is stale (e.g. session timed out and was
     # re-created, or the cross-tab sync overwrote the cached token), still honour
     # the user's intent to log out. A stale CSRF token should never prevent logout.
-    csrf_ok = request.headers.get(CSRF_HEADER) == session['csrf_token']
+    submitted = request.headers.get(CSRF_HEADER) or ''
+    csrf_ok = bool(submitted) and hmac.compare_digest(submitted.encode('utf-8'), str(session['csrf_token']).encode('utf-8'))
     if not csrf_ok:
         write_audit_log(request, db, 'logout', 'session', details={'csrf_mismatch': True})
     else:

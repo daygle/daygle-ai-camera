@@ -154,9 +154,11 @@ things the object detector has no class for.
 - **Recording filter:** the recordings label filter lists them as
   "Ladder (AI tag, 3)".
 - **Search:** tags are searchable, even when the sentence doesn't use the word.
-- **Tags are not detections.** They have no box or confidence and never
-  trigger alerts or recordings. A tag that repeats a detected label is
-  dropped.
+- **Tags are not detections.** They have no box or confidence and do not
+  start recordings. They trigger notifications only through an explicitly
+  configured AI tag alert rule. A tag that repeats a detected label is hidden
+  from redundant display chips, but remains available to that event's
+  **Tags only** alert matching.
 - **Detections win.** If a real detection of the same label arrives later, it
   takes over from the tag.
 - **Where they are stored:** in `ai_description.tags` on the event, and as
@@ -184,16 +186,24 @@ class for it. Set it up per area:
 How it behaves:
 
 - **Every event on that camera is described**, whatever the Describe Events
-  setting. A rule can only see described events.
+  setting. A rule can only see described events. Descriptions use the whole
+  scene on tag-rule cameras so a small-object focus crop cannot hide another
+  area's objects; the independent check then restricts evidence to the area.
 - **An event counts as in the area** when one of its detections (object or
-  motion) was in the zone, or when the zone covers the whole frame.
+  motion) geometrically matches the zone, or when the zone covers the whole
+  frame. Overlapping and renamed zones use the saved detection geometry;
+  legacy detections without usable boxes fall back to their zone name/ID.
+  A polygon's bounding rectangle is not treated as full-frame coverage.
 - **What a firing does:** it adds an alert to that event, marks it as alerted,
   and sends a notification. The notification starts with
   *"AI tag alert (unconfirmed): Ladder on Front (Gate)."*, followed by the
   description.
 - **Double-checked:** before alerting, the model is asked a separate yes/no
-  question for each matched word (*"is a real cat actually visible?"*), on a
-  close-up when the detector boxed that object. A word it then says no to
+  question for each matched word (*"is a real cat actually visible?"*).
+  For a partial area, this check receives only that area's image, with pixels
+  outside a polygon masked. For a full-frame area, detector focus crops can
+  still be used. Verdicts are reused only for identical image regions and
+  terms, not across different areas. A word it then says no to
   does not alert, and does not use up the cooldown. If that check fails or
   times out, the alert is sent anyway.
 - **Unconfirmed:** only the language model saw the object, never the object
@@ -207,8 +217,15 @@ How it behaves:
 
 **Describe Past Events** (Intelligence → AI) describes events from the last 24 hours to
 30 days that have no description yet, up to 500 at a time, so they become
-searchable. It runs in the background, one event at a time, pauses whenever an
-alert needs the model, and stops if descriptions are switched off.
+searchable. It respects the selected cameras and **Alerts only** versus
+**All events** modes, runs in the background one event at a time, pauses while
+the live AI pool is busy, and stops if descriptions are switched off.
+Already-described events are reused rather than captioned twice.
+
+Model completion calls are serialized across live verification, catch-up,
+backfill, search and tests. A live job cannot interrupt an already-running
+background request, but waits at most its configured timeout for admission;
+if the model remains busy, verification fails open.
 
 ## Plain-English search
 

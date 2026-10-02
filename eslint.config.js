@@ -178,7 +178,7 @@ const WEB_SHARED_GLOBALS = {
 
 export default [
   {
-    ignores: ['node_modules/', 'coverage/', 'data/', 'models/', '.venv/', 'app/'],
+    ignores: ['node_modules/', 'coverage/', 'data/', 'models/', '.venv/', '.audit-*/', 'app/'],
   },
   js.configs.recommended,
   {

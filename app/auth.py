@@ -328,7 +328,13 @@ class AuthService:
             return hmac.compare_digest(candidate, digest)
         if bcrypt is None:
             return False
-        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+        except ValueError:
+            # bcrypt 5 rejects >72-byte inputs and malformed stored hashes.
+            # Neither is evidence of a valid password or an HTTP 500-worthy
+            # application failure; apply the normal failed-login policy.
+            return False
 
     def create_user(self, username: str, password: str, role: str = "viewer", *, first_name: str = "", last_name: str = "", email: str = "") -> dict[str, Any]:
         username = username.strip()
@@ -718,11 +724,12 @@ class AuthService:
                     raise AuthError("Invalid username or password.")
                 token = secrets.token_urlsafe(48)
                 csrf_token = secrets.token_urlsafe(32)
-                expires_at = (now_dt + self.session_timeout).isoformat()
+                absolute_expires_at = now_dt + self.absolute_session_lifetime
+                expires_at = min(now_dt + self.session_timeout, absolute_expires_at).isoformat()
                 db.execute("UPDATE users SET failed_attempts = 0, locked_until = NULL, updated_at = ?, last_login_at = ? WHERE id = ?", (now, now, row["id"]))
                 db.execute(
                     "INSERT INTO user_sessions (session_token, user_id, csrf_token, created_at, expires_at, last_seen_at, absolute_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (token, row["id"], csrf_token, now, expires_at, now, (now_dt + self.absolute_session_lifetime).isoformat()),
+                    (token, row["id"], csrf_token, now, expires_at, now, absolute_expires_at.isoformat()),
                 )
                 success = True
                 return self.public_user(row), token, csrf_token, expires_at
@@ -757,7 +764,7 @@ class AuthService:
     # practice for sliding windows.
     _SESSION_RENEWAL_INTERVAL = timedelta(minutes=5)
 
-    def _renew_session_if_stale(self, db: sqlite3.Connection, session_token: str, current_expires_at: str, now_dt: datetime) -> str:
+    def _renew_session_if_stale(self, db: sqlite3.Connection, session_token: str, current_expires_at: str, now_dt: datetime, absolute_expires_at: str | None = None) -> str:
         """Extend ``expires_at`` by ``session_timeout`` if the session hasn't
         been touched in the last ``_SESSION_RENEWAL_INTERVAL`` minutes.
         Returns the (possibly renewed) ``expires_at`` ISO string so the
@@ -776,9 +783,14 @@ class AuthService:
         # isn't on the row, so use expires_at as the proxy: a session that
         # still has plenty of runway was almost certainly just refreshed.
         remaining = current_exp_dt - now_dt
+        absolute_dt = _parse_iso_datetime(absolute_expires_at)
+        effective_dt = min(current_exp_dt, absolute_dt) if absolute_dt else current_exp_dt
         if remaining >= self.session_timeout - self._SESSION_RENEWAL_INTERVAL:
-            return current_expires_at
-        new_expires_at = (now_dt + self.session_timeout).isoformat()
+            return effective_dt.isoformat()
+        new_exp_dt = now_dt + self.session_timeout
+        if absolute_dt is not None:
+            new_exp_dt = min(new_exp_dt, absolute_dt)
+        new_expires_at = new_exp_dt.isoformat()
         db.execute(
             "UPDATE user_sessions SET expires_at = ?, last_seen_at = ? WHERE session_token = ?",
             (new_expires_at, now_dt.isoformat(), session_token),
@@ -818,7 +830,7 @@ class AuthService:
         with self.connect() as db:
             row = db.execute(
                 """
-                SELECT s.session_token, s.csrf_token, s.expires_at, s.absolute_expires_at, u.id, u.username, u.role, u.is_active,
+                SELECT s.session_token, s.csrf_token, s.expires_at, s.absolute_expires_at, s.last_seen_at, s.created_at AS session_created_at, u.id, u.username, u.role, u.is_active,
                        u.first_name, u.last_name, u.email, u.timezone, u.date_format, u.time_format, u.theme
                 FROM user_sessions s
                 JOIN users u ON u.id = s.user_id
@@ -847,6 +859,14 @@ class AuthService:
             # and never extended, so a stolen cookie + active user still
             # loses after ``absolute_session_lifetime`` from sign-in.
             absolute_expires_at_raw = row["absolute_expires_at"] if "absolute_expires_at" in row.keys() else None
+            if not absolute_expires_at_raw:
+                # A legacy/restored null cap must not create an immortal
+                # sliding session. Derive the same hard limit from sign-in.
+                created = _parse_iso_datetime(row['session_created_at'])
+                if created is None:
+                    db.execute('DELETE FROM user_sessions WHERE session_token = ?', (session_token,))
+                    return None
+                absolute_expires_at_raw = (created + self.absolute_session_lifetime).isoformat()
             if absolute_expires_at_raw:
                 # Same tz-naive defence as ``expires_at`` above: the H2
                 # backfill historically wrote ``datetime(created_at,'+14
@@ -859,11 +879,11 @@ class AuthService:
                 if absolute_dt is None or absolute_dt <= now_dt:
                     db.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
                     return None
-            expires_at = self._renew_session_if_stale(db, row["session_token"], row["expires_at"], now_dt)
-            # Keep last_seen_at fresh regardless of whether we renewed. The
-            # ``_renew_session_if_stale`` already sets it on the renew path so
-            # only issue the no-op UPDATE when the session was just-up-to-date.
-            if expires_at == row["expires_at"]:
+            expires_at = self._renew_session_if_stale(db, row["session_token"], row["expires_at"], now_dt, absolute_expires_at_raw)
+            # Bound activity writes to the same five-minute cadence. Camera
+            # polling must not turn every read into a contended SQLite write.
+            last_seen = _parse_iso_datetime(row['last_seen_at'])
+            if last_seen is None or now_dt - last_seen >= self._SESSION_RENEWAL_INTERVAL:
                 db.execute("UPDATE user_sessions SET last_seen_at = ? WHERE session_token = ?", (now, session_token))
             return {"session_token": row["session_token"], "csrf_token": row["csrf_token"], "expires_at": expires_at, "user": self.public_user(row)}
 

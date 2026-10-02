@@ -87,7 +87,24 @@ class RecordingsMixin:
                 labels = list(dict.fromkeys(detection_labels + ([normalized_trigger] if normalized_trigger else [])))
             if labels:
                 self._insert_recording_labels(db, recording_id, labels, source='detection', confidences=label_confidences)
+            if event_id is not None:
+                # Description may finish before the asynchronous clip exists.
+                self._copy_event_ai_tags(db, int(event_id), int(recording_id))
             return recording_id
+
+    def _copy_event_ai_tags(self, db: sqlite3.Connection, event_id: int, recording_id: int) -> None:
+        row = db.execute('SELECT metadata FROM events WHERE id = ?', (event_id,)).fetchone()
+        if row is None:
+            return
+        try:
+            metadata = json.loads(row['metadata'] or '{}')
+            record = metadata.get('ai_description') or {}
+            from app.ai_verification import clean_tags
+
+            tags = clean_tags(record.get('tags'))
+        except (TypeError, ValueError, AttributeError):
+            return
+        self._insert_recording_labels(db, recording_id, tags, source='ai')
 
     @staticmethod
     def _insert_recording_labels(

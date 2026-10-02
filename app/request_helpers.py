@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from datetime import date, datetime
 from typing import Any
@@ -81,6 +82,13 @@ def _reject_non_finite(constant: str) -> Any:
     raise ValueError(f'{constant} is not valid JSON')
 
 
+def _parse_finite_float(raw: str) -> float:
+    value = float(raw)
+    if not math.isfinite(value):
+        raise ValueError('JSON number is outside the finite range')
+    return value
+
+
 async def read_json_body(request: Request) -> Any:
     """Parse the request body as strict JSON, or raise ``HTTPException(400)``.
 
@@ -91,7 +99,7 @@ async def read_json_body(request: Request) -> Any:
     settings payload.
     """
     try:
-        return json.loads(await request.body(), parse_constant=_reject_non_finite)
+        return json.loads(await request.body(), parse_constant=_reject_non_finite, parse_float=_parse_finite_float)
     except (ValueError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=400, detail='Request body must be valid JSON.') from exc
 
@@ -111,7 +119,10 @@ async def read_json_object(request: Request) -> dict[str, Any]:
 
 async def form_data(request: Request) -> dict[str, str]:
     """Parse an application/x-www-form-urlencoded (or plain text) body into a dict."""
-    body = (await request.body()).decode('utf-8')
+    try:
+        body = (await request.body()).decode('utf-8')
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail='Form body must be valid UTF-8.') from exc
     return {key: values[-1] for key, values in parse_qs(body, keep_blank_values=True).items()}
 
 
@@ -136,7 +147,7 @@ def write_audit_log(
     no longer leak plaintext secrets.
     """
     user: dict[str, Any] | None = getattr(request.state, 'user', None)
-    user_id: int | None = int(user['id']) if user else None
+    user_id: int | None = int(user['id']) if user and user.get('id') is not None else None
     username: str = str(user['username']) if user else 'anonymous'
     safe_details = _redact_audit_details(details)
     try:

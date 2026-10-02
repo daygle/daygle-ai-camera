@@ -9,6 +9,8 @@ The functions do NOT import app.main - they use direct imports only.
 from __future__ import annotations
 
 import secrets
+import math
+from datetime import datetime, timezone
 from html import escape
 
 from fastapi.responses import HTMLResponse, Response
@@ -68,12 +70,21 @@ def auth_page(title: str, body: str) -> HTMLResponse:
     )
 
 
+def _secure_request(request: Request) -> bool:
+    if request.url.scheme == 'https':
+        return True
+    from app.auth_gates import is_trusted_proxy
+
+    peer = request.client.host if getattr(request, 'client', None) else None
+    return is_trusted_proxy(peer) and request.headers.get('x-forwarded-proto', '').split(',')[0].strip().lower() == 'https'
+
+
 def set_csrf_cookie(response: Response, token: str, request: Request) -> None:
     """Set the CSRF cookie on *response*."""
     response.set_cookie(
         CSRF_COOKIE, token,
         httponly=True,
-        secure=request.url.scheme == 'https',
+        secure=_secure_request(request),
         samesite='lax',
         max_age=3600,
         domain=_get_cookie_domain(),
@@ -89,7 +100,7 @@ def csrf_token_response(
 ) -> HTMLResponse:
     """Generate a CSRF token, set the cookie, and return the auth page."""
     token = secrets.token_urlsafe(32)
-    response = auth_page(title, body_template.format(csrf=escape(token)))
+    response = auth_page(title, body_template.replace('{csrf}', escape(token)))
     response.status_code = status_code
     set_csrf_cookie(response, token, request)
     return response
@@ -126,10 +137,13 @@ def set_session_cookie(
     response.set_cookie(
         str(config.get('cookie_name', SESSION_COOKIE)), token,
         httponly=True,
-        secure=request.url.scheme == 'https',
+        secure=_secure_request(request),
         samesite='lax',
         expires=expires_dt if expires_dt is not None else None,
-        max_age=int(session_hours * 3600),
+        # Max-Age takes precedence over Expires in browsers; it must
+        # match the actual (possibly absolute-capped) server deadline.
+        max_age=max(0, math.ceil((expires_dt - datetime.now(timezone.utc)).total_seconds()))
+        if expires_dt is not None else int(session_hours * 3600),
         # M1 (round-7): bound the cookie to an explicit host if the
         # operator has set ``auth.cookie_domain``. Same domain as the
         # CSRF cookie so neither can be subdomain-tossed separately.

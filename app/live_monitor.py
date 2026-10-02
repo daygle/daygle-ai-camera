@@ -304,9 +304,17 @@ def _scheduler_report_timing(camera_id: str, timing: dict[str, Any]) -> None:
 # rather than on every camera of every monitor cycle.
 _SCHEDULER_WORKERS_REFRESH_SECONDS = 5.0
 _scheduler_workers_refreshed_at = 0.0
+_scheduler_creation_lock = threading.Lock()
 
 
 def get_live_inference_scheduler() -> LiveInferenceScheduler:
+    # Foreground HTTP requests and the background monitor can arrive together
+    # on first use. Publish exactly one shared pool and concurrency budget.
+    with _scheduler_creation_lock:
+        return _get_live_inference_scheduler_locked()
+
+
+def _get_live_inference_scheduler_locked() -> LiveInferenceScheduler:
     """Return the process-wide scheduler, creating and starting it on demand.
 
     Created lazily (rather than at monitor start) so the Live page's

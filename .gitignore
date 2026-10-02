@@ -1,6 +1,12 @@
 __pycache__/
 *.py[cod]
 .venv/
+.audit-venv/
+.audit-python/
+.audit-cache/
+.audit-reports/
+.audit-tmp/
+.ruff_cache/
 .env
 config.yaml
 .pytest_cache/

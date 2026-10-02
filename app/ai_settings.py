@@ -901,6 +901,8 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         else:
             updated['gpu_mem_limit'] = 0
     for field, min_val, max_val in (('inference_threads', 1, 32), ('max_concurrent_inferences', 1, 16)):
+        if field not in payload:
+            continue  # partial model/settings saves must preserve runtime tuning
         raw = payload.get(field)
         if raw is not None and raw != '':
             try:

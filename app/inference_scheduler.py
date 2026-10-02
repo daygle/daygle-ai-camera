@@ -159,15 +159,17 @@ class LiveInferenceScheduler:
             # Nothing queued can be served any more: drop it rather than let a
             # worker pick up a request whose camera has since been removed.
             dropped = list(self._pending)
+            releasable = [camera_id for camera_id in dropped if camera_id not in self._running]
             self._pending.clear()
             self._stats['dropped'] += len(dropped)
             self._condition.notify_all()
         # A dropped job never reaches a worker, so release its camera here or
         # the caller would consider it scheduled forever.
-        for camera_id in dropped:
+        for camera_id in releasable:
             self._release(camera_id)
+        deadline = time.monotonic() + max(0.0, timeout)
         for thread in list(self._threads):
-            thread.join(timeout=timeout)
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
         with self._condition:
             self._threads = [t for t in self._threads if t.is_alive()]
 
@@ -216,19 +218,22 @@ class LiveInferenceScheduler:
             )
             if camera_id in self._pending:
                 self._stats['superseded'] += 1
+                # Replace the payload, not its place in line. Frequent frame
+                # refreshes must not starve a camera that is already waiting.
+                previous = self._pending[camera_id]
+                job.submitted_at = previous.submitted_at
+                job.sequence = previous.sequence
             self._pending[camera_id] = job
             self._stats['submitted'] += 1
+            # Publish the caller's busy flag before any worker can complete
+            # and release it. Hooks must remain short and non-blocking.
+            if self._on_claim is not None:
+                try:
+                    self._on_claim(camera_id)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug('Scheduler claim hook failed for %s: %s', camera_id, exc)
             self._ensure_threads_locked()
-            self._condition.notify()
-        # Claim the camera as soon as it is scheduled, not when a worker picks
-        # it up: between submit and pick the camera is still "busy" for the
-        # caller's duplicate-suppression check, exactly as when every camera
-        # had its own thread.
-        if self._on_claim is not None:
-            try:
-                self._on_claim(camera_id)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.debug('Scheduler claim hook failed for %s: %s', camera_id, exc)
+            self._condition.notify_all()
         return True
 
     def _release(self, camera_id: str) -> None:
@@ -282,7 +287,10 @@ class LiveInferenceScheduler:
 
     def _take_next(self) -> tuple[InferenceJob, int] | None:
         with self._condition:
-            if not self._pending:
+            if self._stopping.is_set() or not self._started:
+                return None
+            eligible = [job for job in self._pending.values() if job.camera_id not in self._running]
+            if not eligible:
                 return None
             depth = len(self._pending)
             # Highest priority first, then oldest request first: that is the
@@ -290,7 +298,7 @@ class LiveInferenceScheduler:
             # a rotating cursor, so a camera that keeps submitting cannot push
             # itself ahead of one that has been waiting longer.
             best = min(
-                self._pending.values(),
+                eligible,
                 key=lambda job: (-self._priority(job), job.submitted_at, job.sequence),
             )
             del self._pending[best.camera_id]
@@ -334,7 +342,11 @@ class LiveInferenceScheduler:
                 with self._condition:
                     self._running.discard(job.camera_id)
                     self._last_finished[job.camera_id] = self._clock()
-                self._release(job.camera_id)
+                    # A replacement queued during execution still owns the
+                    # claim; release only after the camera is truly idle.
+                    if job.camera_id not in self._pending:
+                        self._release(job.camera_id)
+                    self._condition.notify_all()
 
     def _run_job(self, job: InferenceJob, depth: int) -> None:
         started = self._clock()

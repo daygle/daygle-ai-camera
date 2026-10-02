@@ -58,6 +58,7 @@ DATABASE_RESTORE_LOCK: threading.Lock = threading.Lock()
 FULL_BACKUP_FORMAT = 'daygle-full-backup'
 FULL_BACKUP_VERSION = 2
 SUPPORTED_FULL_BACKUP_VERSIONS = {1, FULL_BACKUP_VERSION}
+FULL_BACKUP_MAX_MANIFEST_BYTES = 1024 * 1024
 FULL_BACKUP_MAX_MEMBERS = 200_000
 FULL_BACKUP_MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024 * 1024
 
@@ -361,9 +362,11 @@ def _validate_full_backup_archive(path: Path) -> tuple[dict[str, Any], str]:
                 raise HTTPException(status_code=400, detail='Full backup is too large to restore safely.')
         if 'manifest.json' not in names:
             raise HTTPException(status_code=400, detail='Full backup is missing manifest.json.')
+        if archive.getinfo('manifest.json').file_size > FULL_BACKUP_MAX_MANIFEST_BYTES:
+            raise HTTPException(status_code=400, detail='Full backup manifest is too large.')
         try:
             manifest = json.loads(archive.read('manifest.json'))
-        except (OSError, ValueError, UnicodeDecodeError) as exc:
+        except (OSError, ValueError, UnicodeDecodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
             raise HTTPException(status_code=400, detail='Full backup manifest is invalid.') from exc
         if not isinstance(manifest, dict) or manifest.get('format') != FULL_BACKUP_FORMAT:
             raise HTTPException(status_code=400, detail='Uploaded ZIP is not a Daygle full backup.')
@@ -551,10 +554,39 @@ def restore_full_backup(path: Path) -> dict[str, Any]:
     return {'version': manifest.get('version'), 'copied': copied}
 
 
+def _validate_restore_schema(source: sqlite3.Connection) -> None:
+    """Reject executable schema before inspecting or rewriting uploaded rows."""
+    try:
+        source.enable_load_extension(False)
+    except (AttributeError, sqlite3.NotSupportedError):
+        pass
+    rows = source.execute(
+        "SELECT type, name, sql FROM sqlite_master "
+        "WHERE (type IN ('view', 'trigger') "
+        "OR (type = 'table' AND UPPER(sql) LIKE 'CREATE VIRTUAL TABLE%')) "
+        "AND sql IS NOT NULL AND sql <> ''"
+    ).fetchall()
+    offending = [
+        (row[0] if row[0] != 'table' else 'virtual table', row[1])
+        for row in rows
+        if not (
+            (row[0] == 'trigger' and _ALLOWED_TRIGGER_DDL.get(row[1]) == _normalize_ddl(row[2]))
+            or (row[0] == 'table' and _ALLOWED_VIRTUAL_TABLE_DDL.get(row[1]) == _normalize_ddl(row[2]))
+        )
+    ]
+    if offending:
+        sample = ', '.join(f'{typ}:{name}' for typ, name in offending[:5])
+        raise HTTPException(
+            status_code=400,
+            detail=f'Restored database contains unexpected views or triggers ({sample}); restore rejected.',
+        )
+
+
 def validate_restore_database(path: Path) -> None:
     try:
         db = sqlite3.connect(path)
         try:
+            _validate_restore_schema(db)
             integrity = db.execute('PRAGMA integrity_check').fetchone()
             if not integrity or str(integrity[0]).lower() != 'ok':
                 raise HTTPException(status_code=400, detail='Uploaded database failed SQLite integrity check.')
@@ -613,38 +645,7 @@ def overwrite_database_from_file(restore_source: Path) -> None:
     # checks pass, so the destination receives the still-validated schema.
     source = sqlite3.connect(str(restore_source))
     try:
-        try:
-            source.enable_load_extension(False)
-        except (AttributeError, sqlite3.NotSupportedError):
-            # Python <3.12 on some SQLite builds exposes no
-            # enable_load_extension; those builds default to False already,
-            # so the no-op is safe.
-            pass
-        rows = source.execute(
-            "SELECT type, name, sql FROM sqlite_master "
-            "WHERE (type IN ('view', 'trigger') "
-            "OR (type = 'table' AND UPPER(sql) LIKE 'CREATE VIRTUAL TABLE%')) "
-            "AND sql IS NOT NULL AND sql <> ''"
-        ).fetchall()
-        offending = [
-            (row[0] if row[0] != 'table' else 'virtual table', row[1])
-            for row in rows
-            if not (
-                (row[0] == 'trigger' and _ALLOWED_TRIGGER_DDL.get(row[1]) == _normalize_ddl(row[2]))
-                or (row[0] == 'table' and _ALLOWED_VIRTUAL_TABLE_DDL.get(row[1]) == _normalize_ddl(row[2]))
-            )
-        ]
-        if offending:
-            sample = ', '.join(f'{typ}:{name}' for typ, name in offending[:5])
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Restored database contains unexpected views or triggers ({sample}"
-                    f"{'...' if len(offending) > 5 else ''}); restore rejected. "
-                    f"Only plain-table backups (plus this application's own "
-                    f"immutable audit-log triggers) are accepted."
-                ),
-            )
+        _validate_restore_schema(source)
         destination = sqlite3.connect(str(_state.database.database_path))
         try:
             source.backup(destination)
