@@ -39,6 +39,8 @@ TOKEN_FILE_NAME = "cloudflare_tunnel.token"
 # that exit used to leave a dead tunnel (Cloudflare error 1033) until a human
 # noticed. ``--no-autoupdate`` stops cloudflared rewriting itself underneath a
 # supervisor we control; version changes are handled by install_cloudflared.sh.
+# It is a flag of ``tunnel``, not of ``run``: ``tunnel run --no-autoupdate``
+# fails with "flag provided but not defined" and exits 0 straight away.
 NO_AUTOUPDATE_FLAG = "--no-autoupdate"
 
 # How often the supervisor checks a connector that should be alive, and the
@@ -211,7 +213,7 @@ class SubprocessCloudflared:
         child_env = os.environ.copy()
         child_env["TUNNEL_TOKEN"] = token
         self._process = subprocess.Popen(
-            [self.binary, "tunnel", "run", NO_AUTOUPDATE_FLAG],
+            [self.binary, "tunnel", NO_AUTOUPDATE_FLAG, "run"],
             env=child_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -246,7 +248,11 @@ class SubprocessCloudflared:
         # EOF means the connector exited. Log the status: a deliberate
         # self-update exit reports a small non-zero code, while a signal death
         # reports a negative value, and the two need different responses.
-        exit_code = process.poll() if process is not None else None
+        exit_code = None
+        if process is not None:
+            # The pipe can close a moment before the process is reaped.
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                exit_code = process.wait(timeout=5)
         if exit_code is not None:
             logger.warning("cloudflared exited with status %s.", exit_code)
 
@@ -296,7 +302,9 @@ class CloudflareTunnelManager:
         # and a deliberate shutdown does not fight a restart.
         self._desired_running = False
         self._supervisor_interval = supervisor_interval
-        self._supervisor_stop = threading.Event()
+        # Each supervisor thread gets its own stop event, so a restart (stop then
+        # start) cannot clear the event a still-running old thread is waiting on.
+        self._supervisor_stop: threading.Event | None = None
         self._supervisor_thread: threading.Thread | None = None
         self._restart_backoff = TUNNEL_RESTART_BACKOFF_MIN_SECONDS
         self._restart_attempts = 0
@@ -325,8 +333,11 @@ class CloudflareTunnelManager:
             self._restart_backoff = TUNNEL_RESTART_BACKOFF_MIN_SECONDS
             self._restart_attempts = 0
             self._next_restart_at = 0.0
-            started = self._start_locked()
-            if started:
+            if not self._start_locked() and self._token:
+                # A failed first start (e.g. the binary is briefly missing
+                # during an upgrade) is retried by the supervisor too.
+                self._schedule_retry_locked(time.monotonic())
+            if self._token:
                 self._ensure_supervisor_locked()
             return self.status()
 
@@ -356,7 +367,15 @@ class CloudflareTunnelManager:
         self._started_at = time.monotonic()
         return True
 
-    def _supervise(self) -> None:
+    def _schedule_retry_locked(self, now: float) -> float:
+        """Push the next restart out by the current backoff, then widen it."""
+        delay = self._restart_backoff
+        self._restart_attempts += 1
+        self._next_restart_at = now + delay
+        self._restart_backoff = min(delay * 2, TUNNEL_RESTART_BACKOFF_MAX_SECONDS)
+        return delay
+
+    def _supervise(self, stop_event: threading.Event) -> None:
         """Respawn the connector whenever it dies while it should be running.
 
         cloudflared exits on its own in several normal situations -- most
@@ -364,7 +383,7 @@ class CloudflareTunnelManager:
         expecting a supervisor. Without this loop every one of those exits left
         Cloudflare reporting error 1033 indefinitely.
         """
-        while not self._supervisor_stop.wait(self._supervisor_interval):
+        while not stop_event.wait(self._supervisor_interval):
             try:
                 self._supervise_once()
             except Exception as exc:  # pragma: no cover - defensive
@@ -386,51 +405,65 @@ class CloudflareTunnelManager:
                     and time.monotonic() - self._started_at >= TUNNEL_HEALTHY_UPTIME_SECONDS
                 ):
                     self._restart_backoff = TUNNEL_RESTART_BACKOFF_MIN_SECONDS
+                    self._restart_attempts = 0
                 return
             now = time.monotonic()
-            if now < self._next_restart_at:
-                return
             if self._process is not None:
                 # Drop the exited child so repeated restarts do not accumulate
                 # unreaped zombies; the connector's own exit status has already
                 # been logged by its output pump.
+                died_early = (
+                    self._started_at is not None
+                    and now - self._started_at < TUNNEL_HEALTHY_UPTIME_SECONDS
+                )
                 self._process = None
+                self._started_at = None
+                if died_early:
+                    # Spawning works but the connector dies at once (rejected
+                    # token, bad arguments, no network): that is a failed
+                    # attempt too, so it backs off instead of respawning on
+                    # every tick, and the status card says why.
+                    delay = self._schedule_retry_locked(now)
+                    self._last_error = "cloudflared keeps exiting shortly after it starts; see app.log."
+                    logger.warning(
+                        "Cloudflare Tunnel connector exited soon after starting; next restart attempt in %.0fs.",
+                        delay,
+                    )
+                    return
+            if now < self._next_restart_at:
+                return
             logger.warning(
                 "Cloudflare Tunnel connector exited; restarting it (attempt %d).",
                 self._restart_attempts + 1,
             )
-            if self._start_locked():
-                self._restart_attempts = 0
-                self._restart_backoff = TUNNEL_RESTART_BACKOFF_MIN_SECONDS
-                self._next_restart_at = 0.0
-            else:
+            # A successful spawn does not reset the backoff: only a connector
+            # that stays up (see above) proves the setup healthy again.
+            if not self._start_locked():
                 # Still down: schedule the next attempt on a widening backoff
                 # so a permanently broken setup (expired token, missing binary,
                 # blocked egress) cannot spin the respawn loop.
-                self._restart_attempts += 1
-                self._restart_backoff = min(
-                    self._restart_backoff * 2, TUNNEL_RESTART_BACKOFF_MAX_SECONDS
-                )
-                self._next_restart_at = time.monotonic() + self._restart_backoff
+                delay = self._schedule_retry_locked(time.monotonic())
                 logger.info(
-                    "Cloudflare Tunnel still unavailable; next restart attempt in %.0fs.",
-                    self._restart_backoff,
+                    "Cloudflare Tunnel still unavailable; next restart attempt in %.0fs.", delay,
                 )
 
     def _ensure_supervisor_locked(self) -> None:
         if self._supervisor_thread is not None and self._supervisor_thread.is_alive():
             return
-        self._supervisor_stop.clear()
+        self._supervisor_stop = threading.Event()
         self._supervisor_thread = threading.Thread(
-            target=self._supervise, name="cloudflare-tunnel-supervisor", daemon=True
+            target=self._supervise, args=(self._supervisor_stop,),
+            name="cloudflare-tunnel-supervisor", daemon=True,
         )
         self._supervisor_thread.start()
 
     def _shutdown_supervisor_locked(self) -> None:
         # Never join here: this runs while holding ``self._lock``, which the
-        # supervisor thread also acquires. The thread waits on an Event, so
-        # setting the flag is enough for it to exit on its own.
-        self._supervisor_stop.set()
+        # supervisor thread also acquires. The thread waits on its own Event, so
+        # setting it is enough for the thread to exit on its own.
+        if self._supervisor_stop is not None:
+            self._supervisor_stop.set()
+        self._supervisor_stop = None
         self._supervisor_thread = None
 
     def stop(self) -> dict[str, Any]:

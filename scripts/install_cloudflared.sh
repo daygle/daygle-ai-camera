@@ -3,7 +3,7 @@
 set -euo pipefail
 
 INSTALL_PATH="${DAYGLE_CLOUDFLARED_PATH:-/usr/local/bin/cloudflared}"
-VERSION="${DAYGLE_CLOUDFLARED_VERSION:-2026.8.3}"
+VERSION="${DAYGLE_CLOUDFLARED_VERSION:-2026.9.3}"
 
 # Reinstall when the installed binary does not match the pinned version, so
 # running the updater moves existing deployments forward instead of leaving an
@@ -22,11 +22,11 @@ fi
 case "$(uname -m)" in
   x86_64|amd64)
     ASSET="cloudflared-linux-amd64"
-    DEFAULT_SHA256="f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e"
+    DEFAULT_SHA256="77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2"
     ;;
   aarch64|arm64)
     ASSET="cloudflared-linux-arm64"
-    DEFAULT_SHA256="4bcfd35521a7cbc545ebfd5d57334a71ee180e2a64874981f374c81472118391"
+    DEFAULT_SHA256="aaeb2d7d0da3614634c7e03ab13487a1522c2e79165ed2929cfe23d5e95b326d"
     ;;
   *)
     echo "ERROR: unsupported architecture for bundled cloudflared: $(uname -m)" >&2
@@ -36,7 +36,7 @@ esac
 
 # A custom release must provide its checksum explicitly. This prevents an
 # apparently convenient version override from silently disabling verification.
-if [[ "${VERSION}" == "2026.8.3" ]]; then
+if [[ "${VERSION}" == "2026.9.3" ]]; then
   EXPECTED_SHA256="${DAYGLE_CLOUDFLARED_SHA256:-${DEFAULT_SHA256}}"
 elif [[ -n "${DAYGLE_CLOUDFLARED_SHA256:-}" ]]; then
   EXPECTED_SHA256="${DAYGLE_CLOUDFLARED_SHA256}"

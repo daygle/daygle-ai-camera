@@ -7,6 +7,7 @@ import time
 
 from app.cloudflare_tunnel import (
     NO_AUTOUPDATE_FLAG,
+    TUNNEL_HEALTHY_UPTIME_SECONDS,
     TUNNEL_RESTART_BACKOFF_MIN_SECONDS,
     CloudflareTunnelManager,
     CloudflareTunnelSecretStore,
@@ -141,9 +142,9 @@ def test_spawn_passes_no_autoupdate_and_captures_output(monkeypatch) -> None:
     connector = SubprocessCloudflared("cloudflared")
     connector.start("secret-token")
 
-    args = recorded["args"]
-    assert args[:3] == ["cloudflared", "tunnel", "run"]
-    assert NO_AUTOUPDATE_FLAG in args
+    # --no-autoupdate belongs to ``tunnel``: after ``run`` cloudflared rejects
+    # it ("flag provided but not defined") and exits before connecting.
+    assert recorded["args"] == ["cloudflared", "tunnel", NO_AUTOUPDATE_FLAG, "run"]
     kwargs = recorded["kwargs"]
     # Output must be piped, never discarded to DEVNULL.
     assert kwargs["stdout"] is subprocess.PIPE
@@ -163,6 +164,9 @@ def test_connector_output_is_logged_with_token_redacted(caplog) -> None:
         stdout = stream
 
         def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
             return 0
 
     connector._process = Stub()  # type: ignore[assignment]
@@ -193,7 +197,9 @@ def test_supervisor_restarts_a_dead_connector() -> None:
         assert len(created) == 1
         first = created[0]
 
-        # Simulate the self-update exit that caused the original outage.
+        # Simulate the self-update exit that caused the original outage, which
+        # comes after the connector has been up for a while.
+        manager._started_at = time.monotonic() - TUNNEL_HEALTHY_UPTIME_SECONDS
         first.running = False
         manager._supervise_once()
 
@@ -295,3 +301,88 @@ def test_supervisor_thread_exits_promptly_on_stop() -> None:
     assert not thread.is_alive(), "supervisor must not linger after stop()"
     # Allow the supervisor thread's own wait to be interruptible.
     assert time.monotonic() >= 0
+
+
+def test_connector_that_dies_at_once_backs_off() -> None:
+    """Spawning succeeds but the connector exits straight away (bad token,
+    bad arguments): that must back off, not respawn on every tick."""
+    created: list[FakeProcess] = []
+
+    def factory() -> FakeProcess:
+        process = FakeProcess()
+        created.append(process)
+        return process
+
+    manager = CloudflareTunnelManager(
+        CloudflareTunnelSettings("secret-token", "environment", True, "cloudflared"),
+        process_factory=factory,
+        supervisor_interval=30.0,
+    )
+    try:
+        manager.start()
+        created[-1].running = False
+        manager._supervise_once()
+        assert len(created) == 1, "an early exit waits out the backoff"
+        assert manager._restart_backoff == TUNNEL_RESTART_BACKOFF_MIN_SECONDS * 2
+        assert "exiting shortly after it starts" in manager.status()["error"]
+
+        manager._next_restart_at = 0.0  # backoff elapsed
+        manager._supervise_once()
+        assert len(created) == 2
+        created[-1].running = False
+        manager._supervise_once()
+        assert len(created) == 2
+        assert manager._restart_backoff == TUNNEL_RESTART_BACKOFF_MIN_SECONDS * 4
+
+        # A connector that stays up resets the backoff.
+        manager._next_restart_at = 0.0
+        manager._supervise_once()
+        manager._started_at = time.monotonic() - TUNNEL_HEALTHY_UPTIME_SECONDS
+        manager._supervise_once()
+        assert manager._restart_backoff == TUNNEL_RESTART_BACKOFF_MIN_SECONDS
+    finally:
+        manager.stop()
+
+
+def test_failed_first_start_is_still_supervised() -> None:
+    attempts = {"count": 0}
+
+    class FailsOnce(FakeProcess):
+        def start(self, token: str) -> None:
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise OSError("binary briefly missing")
+            super().start(token)
+
+    manager = CloudflareTunnelManager(
+        CloudflareTunnelSettings("secret-token", "environment", True, "cloudflared"),
+        process_factory=FailsOnce,
+        supervisor_interval=30.0,
+    )
+    try:
+        assert manager.start()["running"] is False
+        assert manager._supervisor_thread is not None and manager._supervisor_thread.is_alive()
+        manager._next_restart_at = 0.0
+        manager._supervise_once()
+        assert manager.status()["running"] is True
+    finally:
+        manager.stop()
+
+
+def test_restart_leaves_one_supervisor_thread() -> None:
+    manager = CloudflareTunnelManager(
+        CloudflareTunnelSettings("secret-token", "environment", True, "cloudflared"),
+        process_factory=FakeProcess,
+        supervisor_interval=30.0,
+    )
+    manager.start()
+    old = manager._supervisor_thread
+    with manager._lock:
+        # The old thread may be blocked on the lock mid-check while the
+        # restart runs; its own stop event must still end it afterwards.
+        manager.restart()
+    assert old is not None
+    old.join(timeout=2.0)
+    assert not old.is_alive()
+    assert manager._supervisor_thread is not None and manager._supervisor_thread.is_alive()
+    manager.stop()
