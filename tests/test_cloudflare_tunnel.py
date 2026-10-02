@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 import sys
+import time
 
 from app.cloudflare_tunnel import (
+    NO_AUTOUPDATE_FLAG,
+    TUNNEL_RESTART_BACKOFF_MIN_SECONDS,
     CloudflareTunnelManager,
     CloudflareTunnelSecretStore,
     CloudflareTunnelSettings,
+    SubprocessCloudflared,
     resolve_cloudflare_tunnel_settings,
 )
 
@@ -111,3 +116,182 @@ def test_failed_process_start_is_nonfatal() -> None:
     assert status["running"] is False
     assert status["configured"] is True
     assert "secret-token" not in str(status)
+    manager.stop()
+
+
+def test_spawn_passes_no_autoupdate_and_captures_output(monkeypatch) -> None:
+    """cloudflared must not rewrite its own binary underneath the supervisor.
+
+    The self-update replaces the binary and exits, which is what produced a
+    dead tunnel (error 1033) on the host this was diagnosed from.
+    """
+    recorded: dict[str, object] = {}
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            recorded["args"] = args
+            recorded["kwargs"] = kwargs
+            self.stdout = None
+            self.returncode = 0
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    connector = SubprocessCloudflared("cloudflared")
+    connector.start("secret-token")
+
+    args = recorded["args"]
+    assert args[:3] == ["cloudflared", "tunnel", "run"]
+    assert NO_AUTOUPDATE_FLAG in args
+    kwargs = recorded["kwargs"]
+    # Output must be piped, never discarded to DEVNULL.
+    assert kwargs["stdout"] is subprocess.PIPE
+    assert kwargs["stderr"] is subprocess.STDOUT
+    assert kwargs["env"]["TUNNEL_TOKEN"] == "secret-token"
+
+
+def test_connector_output_is_logged_with_token_redacted(caplog) -> None:
+    """Connector output reaches app.log, but never the tunnel token."""
+    import io
+
+    connector = SubprocessCloudflared("cloudflared")
+    stream = io.BytesIO(b"Registered tunnel connection\nleaked secret-token here\n")
+    stream.close = lambda: None  # type: ignore[method-assign]
+
+    class Stub:
+        stdout = stream
+
+        def poll(self):
+            return 0
+
+    connector._process = Stub()  # type: ignore[assignment]
+    with caplog.at_level(logging.INFO):
+        connector._drain_output("secret-token")
+
+    assert "Registered tunnel connection" in caplog.text
+    assert "secret-token" not in caplog.text
+    assert "<redacted>" in caplog.text
+
+
+def test_supervisor_restarts_a_dead_connector() -> None:
+    """A connector that exits on its own is respawned without operator action."""
+    created: list[FakeProcess] = []
+
+    def factory() -> FakeProcess:
+        process = FakeProcess()
+        created.append(process)
+        return process
+
+    manager = CloudflareTunnelManager(
+        CloudflareTunnelSettings("secret-token", "environment", True, "cloudflared"),
+        process_factory=factory,
+        supervisor_interval=0.01,
+    )
+    try:
+        manager.start()
+        assert len(created) == 1
+        first = created[0]
+
+        # Simulate the self-update exit that caused the original outage.
+        first.running = False
+        manager._supervise_once()
+
+        assert len(created) == 2, "a dead connector must be respawned"
+        assert created[1].running is True
+        assert manager.status()["running"] is True
+    finally:
+        manager.stop()
+
+
+def test_supervisor_does_not_resurrect_after_explicit_stop() -> None:
+    """An operator stop must stick; the watchdog cannot undo it."""
+    created: list[FakeProcess] = []
+
+    def factory() -> FakeProcess:
+        process = FakeProcess()
+        created.append(process)
+        return process
+
+    manager = CloudflareTunnelManager(
+        CloudflareTunnelSettings("secret-token", "environment", True, "cloudflared"),
+        process_factory=factory,
+        supervisor_interval=0.01,
+    )
+    try:
+        manager.start()
+        manager.stop()
+        count_after_stop = len(created)
+        manager._supervise_once()
+        assert len(created) == count_after_stop
+        assert manager.status()["running"] is False
+    finally:
+        manager.stop()
+
+
+def test_clearing_the_token_stops_supervision() -> None:
+    created: list[FakeProcess] = []
+
+    def factory() -> FakeProcess:
+        process = FakeProcess()
+        created.append(process)
+        return process
+
+    manager = CloudflareTunnelManager(
+        CloudflareTunnelSettings("secret-token", "database", True, "cloudflared"),
+        process_factory=factory,
+        supervisor_interval=0.01,
+    )
+    try:
+        manager.start()
+        manager.configure(None, source="database", autostart=False)
+        count = len(created)
+        manager._supervise_once()
+        assert len(created) == count
+        assert manager.status()["running"] is False
+    finally:
+        manager.stop()
+
+
+def test_repeated_restart_failures_back_off() -> None:
+    """A permanently broken setup must not spin the respawn loop forever."""
+    attempts = {"count": 0}
+
+    class AlwaysFailing(FakeProcess):
+        def start(self, token: str) -> None:
+            attempts["count"] += 1
+            raise OSError("binary unavailable")
+
+    manager = CloudflareTunnelManager(
+        CloudflareTunnelSettings("secret-token", "environment", True, "cloudflared"),
+        process_factory=AlwaysFailing,
+        supervisor_interval=0.01,
+    )
+    try:
+        manager._desired_running = True
+        first = attempts["count"]
+        manager._supervise_once()
+        assert attempts["count"] == first + 1
+        assert manager._restart_backoff == TUNNEL_RESTART_BACKOFF_MIN_SECONDS * 2
+
+        # A backoff window must suppress the next attempt entirely.
+        manager._supervise_once()
+        assert attempts["count"] == first + 1
+    finally:
+        manager.stop()
+
+
+def test_supervisor_thread_exits_promptly_on_stop() -> None:
+    manager = CloudflareTunnelManager(
+        CloudflareTunnelSettings("secret-token", "environment", True, "cloudflared"),
+        process_factory=FakeProcess,
+        supervisor_interval=30.0,
+    )
+    manager.start()
+    thread = manager._supervisor_thread
+    assert thread is not None and thread.is_alive()
+    manager.stop()
+    thread.join(timeout=2.0)
+    assert not thread.is_alive(), "supervisor must not linger after stop()"
+    # Allow the supervisor thread's own wait to be interruptible.
+    assert time.monotonic() >= 0
