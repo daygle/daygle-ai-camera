@@ -160,25 +160,18 @@ def extend_active_rtsp_recording(
     with _state.active_rtsp_recordings_lock:
         session = _state.active_rtsp_recordings.get(camera_id)
         if not session:
-            # No clip is capturing for this camera, so nothing can be extended
-            # (the caller may start a fresh capture instead). This is routine -
-            # the suppressed-duplicate path calls in every detection cycle (~4 Hz)
-            # on alert-only cameras and after a clip closes - so it stays at
-            # DEBUG, EXCEPT when the event falls inside footage an already-closed
-            # clip covered: the detection landed in that clip's window yet could
-            # not extend it, which is the failure this log exists to catch, and
-            # it cannot recur at cycle rate once the clip's end is in the past.
+            # Routine when no clip is capturing (the suppressed-duplicate path
+            # calls in every detection cycle), so log only the failure case: the
+            # event falls inside footage an already-closed clip covered, i.e. it
+            # landed in that clip's window yet could not extend it. That cannot
+            # recur at cycle rate, because new detections arrive after the clip's end.
             previous_capture_end_ts = _state.last_rtsp_capture_end.get(camera_id)
-            inside_closed_clip = (
-                previous_capture_end_ts is not None
-                and event_dt.timestamp() < float(previous_capture_end_ts)
-            )
-            logger.log(
-                logging.INFO if inside_closed_clip else logging.DEBUG,
-                'Recording extension skipped for camera %s at %s: reason=no_active_session '
-                'inside_closed_clip=%s',
-                camera_id, event_time, inside_closed_clip,
-            )
+            if previous_capture_end_ts is not None and event_dt.timestamp() < float(previous_capture_end_ts):
+                logger.info(
+                    'Recording extension skipped for camera %s at %s: reason=no_active_session '
+                    'inside_closed_clip=True',
+                    camera_id, event_time,
+                )
             return None
         current_deadline = float(session.get('capture_deadline_ts') or 0)
         max_deadline = float(session.get('max_capture_deadline_ts') or current_deadline)
@@ -190,42 +183,9 @@ def extend_active_rtsp_recording(
             # every new recording for the camera, so retire it and let the
             # caller start a fresh capture.
             _state.active_rtsp_recordings.pop(camera_id, None)
-            # Always INFO: a retired session is a real failure and rare by
-            # construction (at most once per abandoned capture).
-            logger.info(
-                'Recording extension skipped for camera %s at %s: reason=stale_session_retired '
-                'recording_id=%s past_max_deadline=%.1fs',
-                camera_id, event_time, session.get('recording_id'), time.time() - max_deadline,
-            )
             return None
-        if session.get('deadline_frozen'):
-            # The capture already stopped waiting on its deadline, so this event
-            # is linked to the clip but cannot extend it, and no new clip starts
-            # while the session lingers through the render. Recorded for the one
-            # INFO summary the capture logs when it retires the session.
-            session['late_event_count'] = int(session.get('late_event_count') or 0) + 1
-            session['late_event_horizon_ts'] = max(
-                float(session.get('late_event_horizon_ts') or 0.0), extend_until,
-            )
-            logger.debug(
-                'Recording extension after deadline froze for camera %s at %s: '
-                'reason=after_deadline_frozen recording_id=%s',
-                camera_id, event_time, session.get('recording_id'),
-            )
         new_deadline = min(max_deadline, max(current_deadline, extend_until))
         if new_deadline <= current_deadline:
-            # Not a failure: the event stays attached to this clip, the deadline
-            # just does not move. ``already_covered`` means an earlier extension
-            # already reaches past this event's horizon (the normal case while
-            # an object stays in view); ``max_clip_reached`` means the horizon
-            # would move it but Max Clip Duration caps it.
-            logger.debug(
-                'Recording extension not moved for camera %s at %s: reason=%s recording_id=%s '
-                'horizon_vs_deadline=%+.1fs',
-                camera_id, event_time,
-                'max_clip_reached' if extend_until > current_deadline else 'already_covered',
-                session.get('recording_id'), extend_until - current_deadline,
-            )
             return int(session.get('recording_id'))
         session['capture_deadline_ts'] = new_deadline
         start_ts = float(session.get('start_capture_ts') or new_deadline)
@@ -769,14 +729,9 @@ def start_rtsp_recording_capture(
                     final_deadline_ts = float(
                         session.get('capture_deadline_ts') or final_deadline_ts
                     )
-                    remaining = final_deadline_ts - time.time()
-                    if remaining <= 0:
-                        # The render reads this deadline from here on, so any
-                        # later extension cannot grow this clip. Flag it so
-                        # ``extend_active_rtsp_recording`` can count those
-                        # events for the capture's late-events summary.
-                        session['deadline_frozen'] = True
-                        break
+                remaining = final_deadline_ts - time.time()
+                if remaining <= 0:
+                    break
                 time.sleep(min(0.5, max(0.05, remaining)))
         return final_deadline_ts
 
@@ -787,29 +742,6 @@ def start_rtsp_recording_capture(
             actual_end_ts = min(max(time.time(), final_deadline_ts), max_deadline_ts)
             final_duration_seconds = max(1.0, actual_end_ts - start_capture_ts)
             dynamic_post_seconds = max(0, int(round(actual_end_ts - triggered_at.timestamp())))
-            # The capture deadline this clip actually ran to, separate from the
-            # render window end. ``extended`` says whether any later event moved
-            # the deadline: only when it is True does ``post_after_trigger`` minus
-            # the extension step give when the last extension landed (with no
-            # extension, post_after_trigger == initial_post and that subtraction
-            # is meaningless). ``render_start_lag`` is how far deadline polling
-            # and queue delay pushed the render window past the deadline; it is
-            # measured before ffmpeg runs, so it excludes render time.
-            # ``hit_max_clip`` relies on ``final_deadline_ts`` having been
-            # clamped with ``min(..., max_deadline_ts)`` above: when capped the
-            # two are the same float, so ``>=`` is an exact match, not a
-            # tolerance comparison - keep the clamp if this is ever reworked.
-            logger.info(
-                'Capture deadline for recording %s: post_after_trigger=%.1fs initial_post=%.1fs '
-                'extended=%s hit_max_clip=%s render_start_lag=%.1fs window_post=%ds',
-                recording_id,
-                final_deadline_ts - triggered_at.timestamp(),
-                initial_deadline_ts - triggered_at.timestamp(),
-                final_deadline_ts > min(max_deadline_ts, initial_deadline_ts),
-                final_deadline_ts >= max_deadline_ts,
-                actual_end_ts - final_deadline_ts,
-                dynamic_post_seconds,
-            )
             # Every RTSP camera event renders from the rolling prebuffer, which
             # runs continuously for the camera and therefore holds footage
             # spanning the trigger -- even when ``pre_event_seconds`` is 0.
@@ -872,26 +804,11 @@ def start_rtsp_recording_capture(
             if camera_id:
                 with _state.active_rtsp_recordings_lock:
                     session = _state.active_rtsp_recordings.get(camera_id)
-                    retired_session = None
                     if session and int(session.get('recording_id', -1)) == int(recording_id):
-                        retired_session = _state.active_rtsp_recordings.pop(camera_id, None)
+                        _state.active_rtsp_recordings.pop(camera_id, None)
                     captured_end_ts = captured_end_ts_holder.get('ts')
                     if captured_end_ts is not None:
                         _state.last_rtsp_capture_end[camera_id] = captured_end_ts
-                late_event_count = int((retired_session or {}).get('late_event_count') or 0)
-                if late_event_count:
-                    # Events that arrived after the deadline froze were linked to
-                    # this clip without extending it. ``uncovered_horizon`` is how
-                    # far past the written footage their extension horizon reached:
-                    # footage no clip recorded. 0 means the render window (which
-                    # runs to the render start) still covered them.
-                    footage_end_ts = captured_end_ts if captured_end_ts is not None else start_capture_ts
-                    logger.info(
-                        'Late events after capture deadline for recording %s (camera %s): '
-                        'count=%d uncovered_horizon=%.1fs',
-                        recording_id, camera_id, late_event_count,
-                        max(0.0, float(retired_session.get('late_event_horizon_ts') or 0.0) - footage_end_ts),
-                    )
     def release_unqueued_capture() -> None:
         """Undo the capture registration for a clip that will never render."""
         logger.warning(

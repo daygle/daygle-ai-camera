@@ -33,6 +33,13 @@ jobs:
       uses: actions/setup-python@v7
       with:
         python-version: ${{ matrix.python-version }}
+    - name: Install ffmpeg
+      # Real ffmpeg/ffprobe for the end-to-end prebuffer render regression
+      # (tests/test_prebuffer_segment_durations.py), which fails rather than
+      # skips under CI when they are missing.
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends ffmpeg
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip

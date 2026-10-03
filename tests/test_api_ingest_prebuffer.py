@@ -292,9 +292,6 @@ def test_prebuffer_first_segment_uses_full_segment_length(tmp_path):
     # First segment has no predecessor, so its content start = end - segment length.
     assert content_start == pytest.approx((now - 4) - service.PREBUFFER_SEGMENT_SECONDS, abs=0.2)
 
-    durations = service._prebuffer_segment_durations(key, segments)
-    assert durations[segments[0]] == pytest.approx(service.PREBUFFER_SEGMENT_SECONDS, abs=0.2)
-
 
 def test_collect_prebuffer_segments_selects_by_content_overlap(tmp_path):
     """A prebuffer segment's mtime marks when its content ENDS; selection must
@@ -375,6 +372,10 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     commands = []
 
     def fake_run(command, *_args, **_kwargs):
+        if 'format=duration' in command:
+            # Segment-duration probe: the placeholder segments are unreadable,
+            # so the timeline keeps its contiguous-segment estimate.
+            return subprocess.CompletedProcess(command, 1, stdout='', stderr='invalid data')
         commands.append(command)
         Path(command[-1]).write_bytes(b'clip-bytes')
         return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
@@ -472,6 +473,9 @@ def test_degenerate_prebuffer_render_keeps_partial_clip_instead_of_late_live_cap
         os.utime(segment, (end_ts, end_ts))
 
     def fake_run(command, *_args, **_kwargs):
+        if 'format=duration' in command:
+            # Segment-duration probe of a placeholder segment: unreadable.
+            return subprocess.CompletedProcess(command, 1, stdout='', stderr='invalid data')
         Path(command[-1]).write_bytes(b'partial-prebuffer')
         return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
 
@@ -528,6 +532,9 @@ def test_prebuffer_concat_list_uses_ffmpeg_safe_absolute_paths(tmp_path, monkeyp
 
     def fake_run(command, *_args, **_kwargs):
         nonlocal concat_text
+        if 'format=duration' in command:
+            # Segment-duration probe of a placeholder segment: unreadable.
+            return subprocess.CompletedProcess(command, 1, stdout='', stderr='invalid data')
         list_path = Path(command[command.index('-i') + 1])
         concat_text = list_path.read_text(encoding='utf-8')
         Path(command[-1]).write_bytes(b'clip-bytes')
@@ -551,10 +558,10 @@ def test_prebuffer_concat_list_uses_ffmpeg_safe_absolute_paths(tmp_path, monkeyp
 
     assert concat_text
     file_lines = [line for line in concat_text.splitlines() if line.startswith("file '")]
-    duration_lines = [line for line in concat_text.splitlines() if line.startswith('duration ')]
     assert file_lines
-    assert len(duration_lines) == len(file_lines)
-    assert all(float(line.split()[1]) > 0 for line in duration_lines)
+    # No estimated ``duration`` directives: ffmpeg must read each segment's real
+    # timestamps (a declared duration shorter than the file compresses the clip).
+    assert not [line for line in concat_text.splitlines() if line.startswith('duration ')]
     for line in file_lines:
         assert '\\' not in line
         listed_path = line[len("file '"):-1]
