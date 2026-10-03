@@ -528,8 +528,9 @@ def test_late_event_after_capture_timing_write_keeps_rendered_duration(tmp_path,
             break
         time.sleep(0.05)
 
-    # Still linked to the clip, as before.
-    assert late_results == [recording_id]
+    # The capture's deadline had frozen, so the late extension is refused (its
+    # caller would open a new clip) instead of being absorbed by this one.
+    assert late_results == [None]
     recording = main.database.get_recording(recording_id)
     assert recording['duration_seconds'] == pytest.approx(25.0)
     assert datetime.fromisoformat(recording['started_at']).timestamp() == pytest.approx(now - 30.0, abs=0.01)
@@ -587,6 +588,206 @@ def test_extension_still_writes_provisional_timing_before_capture_writes(tmp_pat
     assert main.database.get_recording(recording_id)['duration_seconds'] == pytest.approx(40.0)
     with main._state.active_rtsp_recordings_lock:
         main._state.active_rtsp_recordings.pop('camera-1', None)
+
+
+def test_extend_refuses_a_session_whose_deadline_has_frozen(tmp_path, monkeypatch):
+    """Once the capture has stopped waiting on its deadline, its window can no
+    longer grow: an extension must refuse (so the caller starts a new clip)
+    without moving the deadline or touching the old clip's row."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    now = datetime.now(timezone.utc)
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=(now - timedelta(seconds=10)).isoformat(),
+        ended_at=now.isoformat(),
+        duration_seconds=10.0,
+        file_path=str(tmp_path / 'data' / 'recordings' / 'frozen.mp4'),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=now.isoformat(),
+    )
+    with main._state.active_rtsp_recordings_lock:
+        main._state.active_rtsp_recordings['camera-1'] = {
+            'recording_id': recording_id,
+            'start_capture_ts': now.timestamp() - 10,
+            'capture_deadline_ts': now.timestamp(),
+            'max_capture_deadline_ts': now.timestamp() + 300,
+            'deadline_frozen': True,
+        }
+
+    assert mods.recording_extension.extend_active_rtsp_recording(
+        camera_id='camera-1',
+        event_time=now.isoformat(),
+        recording_config={'extension_step_seconds': 30},
+        detections=[{'label': 'person', 'confidence': 0.9}],
+    ) is None
+    with main._state.active_rtsp_recordings_lock:
+        assert main._state.active_rtsp_recordings['camera-1']['capture_deadline_ts'] == now.timestamp()
+        main._state.active_rtsp_recordings.pop('camera-1', None)
+    assert main.database.get_recording(recording_id)['duration_seconds'] == pytest.approx(10.0)
+
+
+class _LateEventHarness:
+    """Drive a first clip's capture and deliver a second, fresh event through
+    ``attach_event_recording`` at a chosen point after the first clip's
+    deadline wait has ended."""
+
+    CONFIG = {'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': 60}
+    # No post-roll for the late event so its own clip renders without waiting.
+    LATE_CONFIG = {'pre_event_seconds': 5, 'post_event_seconds': 0, 'max_clip_seconds': 60}
+
+    def __init__(self, tmp_path, monkeypatch):
+        _load_app(tmp_path, monkeypatch)
+        import app.main as main
+        import app.utils
+        self.main = main
+        self.mods = _m()
+        self.tmp_path = tmp_path
+        self.renders: list[dict] = []
+        self.late: dict = {}
+        harness = self
+
+        class FakeRecordingService:
+            def prebuffer_window_seconds(self, _config=None):
+                return 70
+
+            def event_recording_metadata(
+                self, event_id, event_time, source, detections, write_clip=False, recording_config=None,
+            ):
+                return {
+                    'event_id': event_id,
+                    'camera_id': 'camera-1',
+                    'started_at': event_time,
+                    'ended_at': event_time,
+                    'duration_seconds': 15,
+                    'file_path': str(tmp_path / 'data' / 'recordings' / f'clip_{event_id}.mp4'),
+                    'thumbnail_path': None,
+                    'source': source,
+                    'trigger_type': 'motion',
+                }
+
+            def should_record(self, detections, config):
+                return False, 'motion', None
+
+            def write_rtsp_clip_with_prebuffer(self, **kwargs):
+                harness.renders.append(kwargs)
+                if harness.deliver_at == 'render' and len(harness.renders) == 1:
+                    harness.deliver_late_event()
+                path = Path(kwargs['file_path'])
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'clip')
+                return time.time() - 20.0, 15.0
+
+        monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+        monkeypatch.setattr(app.utils, 'build_stream_url', lambda _cfg: 'rtsp://example/stream')
+        main._state.active_rtsp_recordings.clear()
+        main._state.last_rtsp_capture_end.pop('camera-1', None)
+
+    def deliver_late_event(self):
+        event_id = self.main.database.add_event_with_alerts(
+            created_at=self.main.utc_now(), source='rtsp', snapshot_path=None, thumbnail_path=None,
+            detections=[], alerts=[], alert_triggered=False, metadata={'camera_id': 'camera-1'},
+        )
+        self.late['event_id'] = event_id
+        self.late['recording_id'] = self.mods.recording_extension.attach_event_recording(
+            event_id, datetime.now(timezone.utc).isoformat(), 'rtsp',
+            [{'label': 'person', 'confidence': 0.9}], camera_id='camera-1',
+            recording_config=self.LATE_CONFIG,
+        )
+
+    def run_first_clip(self, deliver_at: str) -> int:
+        self.deliver_at = deliver_at
+        now = time.time()
+        clip = self.tmp_path / 'data' / 'recordings' / 'clip_first.mp4'
+        recording_id = self.main.database.add_recording(
+            event_id=None,
+            camera_id='camera-1',
+            started_at=datetime.fromtimestamp(now - 30, tz=timezone.utc).isoformat(),
+            ended_at=datetime.fromtimestamp(now - 15, tz=timezone.utc).isoformat(),
+            duration_seconds=15.0,
+            file_path=str(clip),
+            thumbnail_path=None,
+            source='rtsp',
+            created_at=self.main.utc_now(),
+        )
+        # Trigger 25s ago with a 10s post window: the deadline has passed, so
+        # the wait ends (and freezes) straight away.
+        self.mods.recording_extension.start_rtsp_recording_capture(
+            'rtsp://example/stream',
+            {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
+            1,
+            [],
+            recording_id=recording_id,
+            camera_id='camera-1',
+            event_time=datetime.fromtimestamp(now - 25, tz=timezone.utc).isoformat(),
+            recording_config=self.CONFIG,
+        )
+        return recording_id
+
+    def wait_for_renders(self, count: int) -> None:
+        deadline = time.time() + 5
+        while time.time() < deadline and len(self.renders) < count:
+            time.sleep(0.05)
+
+    def cleanup(self):
+        with self.main._state.active_rtsp_recordings_lock:
+            self.main._state.active_rtsp_recordings.clear()
+
+
+def test_event_arriving_while_previous_clip_renders_gets_its_own_clip(tmp_path, monkeypatch):
+    """Render phase: the first clip's window is already fixed. The late event
+    used to be linked to that clip (which does not contain it) and no capture
+    started, losing its footage; it must open its own clip instead."""
+    harness = _LateEventHarness(tmp_path, monkeypatch)
+    first_id = harness.run_first_clip(deliver_at='render')
+    harness.wait_for_renders(2)
+
+    late_id = harness.late.get('recording_id')
+    assert late_id is not None and late_id != first_id
+    assert harness.main.database.get_event(harness.late['event_id'])['recording_id'] == late_id
+    assert len(harness.renders) == 2
+    assert Path(harness.renders[1]['file_path']).name == f"clip_{harness.late['event_id']}.mp4"
+    harness.cleanup()
+
+
+def test_event_arriving_while_previous_clip_waits_in_render_queue_gets_its_own_clip(tmp_path, monkeypatch):
+    """Queue phase: the deadline wait has ended but the render has not started.
+    The late event used to be absorbed into the first clip with its post-roll
+    cut off at the render start; it must open its own clip instead, and the
+    first clip's render is unaffected."""
+    harness = _LateEventHarness(tmp_path, monkeypatch)
+    import app.postprocess_pool as postprocess_pool
+    real_pool = postprocess_pool.clip_pool()
+    frozen_at_submit: list[bool] = []
+
+    class QueueDelayingPool:
+        def submit(self, fn, *args, **kwargs):
+            if not harness.late:
+                # The first clip is now queued: its wait has ended (frozen) and
+                # its render has not started. Deliver the late event here.
+                with harness.main._state.active_rtsp_recordings_lock:
+                    session = harness.main._state.active_rtsp_recordings.get('camera-1') or {}
+                    frozen_at_submit.append(bool(session.get('deadline_frozen')))
+                harness.deliver_late_event()
+            return real_pool.submit(fn, *args, **kwargs)
+
+    monkeypatch.setattr(postprocess_pool, 'clip_pool', lambda: QueueDelayingPool())
+    first_id = harness.run_first_clip(deliver_at='queue')
+    harness.wait_for_renders(2)
+
+    # The freeze happens in wait_for_deadline, before the clip is queued.
+    assert frozen_at_submit == [True]
+    late_id = harness.late.get('recording_id')
+    assert late_id is not None and late_id != first_id
+    assert harness.main.database.get_event(harness.late['event_id'])['recording_id'] == late_id
+    assert len(harness.renders) == 2
+    rendered_files = sorted(Path(r['file_path']).name for r in harness.renders)
+    assert rendered_files == sorted(['clip_first.mp4', f"clip_{harness.late['event_id']}.mp4"])
+    harness.cleanup()
 
 
 def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):

@@ -190,6 +190,15 @@ def extend_active_rtsp_recording(
             # caller start a fresh capture.
             _state.active_rtsp_recordings.pop(camera_id, None)
             return None
+        if session.get('deadline_frozen'):
+            # The capture has stopped waiting on its deadline (see
+            # ``wait_for_deadline``), so its window can no longer grow: an event
+            # now would be linked to a clip that does not contain it, or contains
+            # it without its post-roll. Refuse, so the caller starts a fresh
+            # capture for it. The old capture keeps rendering and still owns
+            # this slot only until the new session replaces it; every step of
+            # the old capture checks its recording_id before touching the slot.
+            return None
         new_deadline = min(max_deadline, max(current_deadline, extend_until))
         if new_deadline <= current_deadline:
             return int(session.get('recording_id'))
@@ -741,9 +750,15 @@ def start_rtsp_recording_capture(
                     final_deadline_ts = float(
                         session.get('capture_deadline_ts') or final_deadline_ts
                     )
-                remaining = final_deadline_ts - time.time()
-                if remaining <= 0:
-                    break
+                    remaining = final_deadline_ts - time.time()
+                    if remaining <= 0:
+                        # Freeze in the same lock hold as the last deadline read:
+                        # from here the render's window is decided, so no later
+                        # extension may claim this clip (it would be dropped or
+                        # lose its post-roll). ``extend_active_rtsp_recording``
+                        # refuses a frozen session and the event gets its own clip.
+                        session['deadline_frozen'] = True
+                        break
                 time.sleep(min(0.5, max(0.05, remaining)))
         return final_deadline_ts
 
