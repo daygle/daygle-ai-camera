@@ -236,3 +236,66 @@ def test_short_preroll_silent_when_buffer_is_full(tmp_path, monkeypatch):
     assert not [d for d in diagnostics if d[0] == 'prebuffer_short_preroll'], (
         f'full buffer must not emit a short-preroll diagnostic, got {diagnostics}'
     )
+
+
+def test_render_logs_requested_vs_rendered_clip_window(tmp_path, monkeypatch, caplog):
+    """The clip-window audit line must report playback-relative trigger and
+    window-end positions, the requested ``-t`` window, the footage the selected
+    segments held, and the probed rendered duration - the fields used to tell an
+    early capture deadline apart from a buffer or ffmpeg shortfall."""
+    service = _service(tmp_path)
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_ensure_prebuffer_worker', lambda *a, **k: None)
+
+    triggered_at = datetime.now(timezone.utc).replace(microsecond=0)
+    triggered_ts = triggered_at.timestamp()
+    monkeypatch.setattr(recordings_module.time, 'time', lambda: triggered_ts + 100)
+
+    fake_segment = tmp_path / 'segment-x.mp4'
+    fake_segment.write_bytes(b'\x00\x01')
+    # Keyframe lead-in: content begins 11s before the trigger for a 10s pre-roll.
+    content_start = triggered_ts - 11
+    monkeypatch.setattr(
+        service, '_collect_prebuffer_segments',
+        lambda camera_key, start_ts, end_ts: ([fake_segment], content_start),
+    )
+    monkeypatch.setattr(
+        service, '_prebuffer_segment_durations',
+        lambda camera_key, segments: {fake_segment: 35.5, fake_segment.resolve(): 35.5},
+    )
+    monkeypatch.setattr(service, '_mux_prebuffer_audio', lambda *a, **k: False)
+    monkeypatch.setattr(service, 'clip_has_video_stream', lambda file_path: True)
+    monkeypatch.setattr(service, 'clip_duration_seconds', lambda file_path: 30.0)
+
+    class _FakeCompleted:
+        returncode = 0
+        stderr = ''
+
+    def fake_run(command, *args, **kwargs):
+        Path(command[-1]).write_bytes(b'\x00\x01\x02\x03')
+        return _FakeCompleted()
+
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+
+    with caplog.at_level('INFO', logger='daygle.ai'):
+        service.write_rtsp_clip_with_prebuffer(
+            stream_url='rtsp://cam/stream',
+            camera_id='cam-1',
+            file_path=tmp_path / 'clip.mp4',
+            triggered_at=triggered_at,
+            pre_seconds=10,
+            post_seconds=30,
+            max_duration_seconds=40,
+        )
+
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith('Clip window for ')]
+    assert len(lines) == 1, caplog.text
+    line = lines[0]
+    assert 'trigger_at=11.0s' in line
+    assert 'window_end_at=41.0s' in line
+    assert 'pre=10s post=30s' in line
+    assert 'requested_seconds=41.0' in line
+    # Summed once per selected segment, not per path spelling in the map.
+    assert 'buffered_seconds=35.5' in line
+    assert 'rendered_seconds=30.0' in line
+    assert 'segments=1' in line

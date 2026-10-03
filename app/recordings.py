@@ -1167,16 +1167,18 @@ class RecordingService:
             )
 
         effective_seconds = rendered_seconds if rendered_seconds is not None else content_seconds
-        # Requested-vs-rendered audit for the clip window. ``trigger``/``deadline``
-        # are relative to ``content_start`` (i.e. clip playback time), so a short
-        # tail can be attributed to: an early capture deadline (deadline_at small,
-        # i.e. no late extensions), a buffer that did not yet hold footage up to
-        # the deadline (buffered_seconds < requested_seconds), or ffmpeg emitting
-        # less than ``-t`` (rendered_seconds < requested_seconds with a full
-        # buffer).
+        # Requested-vs-rendered audit for the clip window. ``trigger_at`` and
+        # ``window_end_at`` are relative to ``content_start`` (i.e. clip playback
+        # time). ``window_end_at`` is the selected window end, which the caller
+        # may push past the final capture deadline by render-queue delay; the
+        # true deadline is logged separately by the caller. A short tail can then
+        # be attributed to: an early window end, a buffer that did not yet hold
+        # footage up to it (buffered_seconds < requested_seconds), or ffmpeg
+        # emitting less than ``-t`` (rendered_seconds < requested_seconds with a
+        # full buffer).
         buffered_seconds = sum(segment_durations.get(segment) or 0.0 for segment in segments)
         logger.info(
-            'Clip window for %s: trigger_at=%.1fs deadline_at=%.1fs pre=%ds post=%ds '
+            'Clip window for %s: trigger_at=%.1fs window_end_at=%.1fs pre=%ds post=%ds '
             'requested_seconds=%.1f buffered_seconds=%.1f rendered_seconds=%s segments=%d',
             camera_key,
             triggered_at.timestamp() - content_start_ts,

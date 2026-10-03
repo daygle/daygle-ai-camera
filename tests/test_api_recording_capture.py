@@ -411,6 +411,79 @@ def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, 
     main._state.active_rtsp_recordings.clear()
 
 
+def test_rtsp_capture_logs_true_deadline_separately_from_render_window(tmp_path, monkeypatch, caplog):
+    """The capture-deadline audit line must report the deadline the capture ran
+    to (trigger + post, plus any extensions), independent of how far render
+    delay pushed the window end past it."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    now = time.time()
+    clip = tmp_path / 'data' / 'recordings' / 'event_deadline_log.mp4'
+    render_kwargs: dict = {}
+
+    class FakeRecordingService:
+        def prebuffer_window_seconds(self, _config=None):
+            return 70
+
+        def write_rtsp_clip_with_prebuffer(self, **kwargs):
+            render_kwargs.update(kwargs)
+            path = Path(kwargs['file_path'])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'clip')
+            return now - 30.0, 25.0
+
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+    main._state.active_rtsp_recordings.clear()
+    main._state.last_rtsp_capture_end.pop('camera-1', None)
+
+    # Trigger 25s ago with a 10s post window: the deadline passed 15s ago, so
+    # the render window runs ~15s past it.
+    triggered_iso = datetime.fromtimestamp(now - 25, tz=timezone.utc).isoformat()
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=datetime.fromtimestamp(now - 30, tz=timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now - 15, tz=timezone.utc).isoformat(),
+        duration_seconds=15.0,
+        file_path=str(clip),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=main.utc_now(),
+    )
+    with caplog.at_level('INFO', logger='daygle.ai'):
+        mods.recording_extension.start_rtsp_recording_capture(
+            'rtsp://example/stream',
+            {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
+            1,
+            [],
+            recording_id=recording_id,
+            camera_id='camera-1',
+            event_time=triggered_iso,
+            recording_config={'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': 60},
+        )
+        wait_until = time.time() + 3
+        while not render_kwargs and time.time() < wait_until:
+            time.sleep(0.05)
+
+    lines = [
+        r.getMessage() for r in caplog.records
+        if r.getMessage().startswith(f'Capture deadline for recording {recording_id}:')
+    ]
+    assert len(lines) == 1, caplog.text
+    line = lines[0]
+    assert 'post_after_trigger=10.0s' in line
+    assert 'initial_post=10.0s' in line
+    assert 'hit_max_clip=False' in line
+    # The render window was pushed past the deadline by the delay; the deadline
+    # itself is unaffected.
+    assert render_kwargs['post_seconds'] >= 24
+    render_lag = float(line.split('render_lag=')[1].split('s')[0])
+    assert render_lag == pytest.approx(15.0, abs=2.0)
+    main._state.active_rtsp_recordings.clear()
+
+
 def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
     # ffmpeg can exit 0 while discarding every corrupt frame, leaving a non-empty
     # file with no video stream. write_rtsp_clip must reject it (so the caller

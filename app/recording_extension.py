@@ -730,6 +730,20 @@ def start_rtsp_recording_capture(
             actual_end_ts = min(max(time.time(), final_deadline_ts), max_deadline_ts)
             final_duration_seconds = max(1.0, actual_end_ts - start_capture_ts)
             dynamic_post_seconds = max(0, int(round(actual_end_ts - triggered_at.timestamp())))
+            # The capture deadline this clip actually ran to, separate from the
+            # render window end: ``post_after_trigger`` minus the extension step
+            # is when the last extension landed, and ``render_lag`` is how far
+            # queue/render delay pushed the window past that deadline.
+            logger.info(
+                'Capture deadline for recording %s: post_after_trigger=%.1fs initial_post=%.1fs '
+                'hit_max_clip=%s render_lag=%.1fs window_post=%ds',
+                recording_id,
+                final_deadline_ts - triggered_at.timestamp(),
+                initial_deadline_ts - triggered_at.timestamp(),
+                final_deadline_ts >= max_deadline_ts,
+                actual_end_ts - final_deadline_ts,
+                dynamic_post_seconds,
+            )
             # Every RTSP camera event renders from the rolling prebuffer, which
             # runs continuously for the camera and therefore holds footage
             # spanning the trigger -- even when ``pre_event_seconds`` is 0.
