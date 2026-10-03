@@ -136,6 +136,12 @@ CLIP_SUBMIT_TIMEOUT_SECONDS = 2.0
 # healthy capture retires its session once its clip is rendered, which can run
 # a little past the deadline (queue wait, render, audio mux).
 STALE_CAPTURE_SESSION_GRACE_SECONDS = 120.0
+# Orders an extension's provisional timing write against the capture's final
+# one. ``capture()`` sets the session's ``timing_written`` flag under this lock
+# before writing the rendered timing; an extension checks the flag and writes
+# under it too, so its write either lands first (and is then overwritten) or is
+# skipped. Held only around one UPDATE, never across a render.
+_recording_timing_write_lock = threading.Lock()
 
 
 def extend_active_rtsp_recording(
@@ -192,9 +198,15 @@ def extend_active_rtsp_recording(
         ended_at = datetime.fromtimestamp(new_deadline, tz=timezone.utc).isoformat()
         duration_seconds = max(1.0, new_deadline - start_ts)
         recording_id = int(session.get('recording_id'))
-    _state.database.update_recording_timing(
-        recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
-    )
+    # Provisional timing so a clip whose capture dies still lists a plausible
+    # duration. Skipped once the capture has written the real timing from the
+    # rendered media: a late write would otherwise win and leave the row
+    # claiming a longer clip than the file.
+    with _recording_timing_write_lock:
+        if not session.get('timing_written'):
+            _state.database.update_recording_timing(
+                recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
+            )
     # Re-check that this recording is still the active one for this camera before
     # writing labels/trigger - a new capture may have started between lock release
     # and here, in which case these updates belong to a now-closed recording.
@@ -771,6 +783,12 @@ def start_rtsp_recording_capture(
                 content_start_ts = time.time()
                 _state.recording_service.write_rtsp_clip(stream_url, file_path, final_duration_seconds)
                 content_seconds = final_duration_seconds
+            if camera_id:
+                with _recording_timing_write_lock:
+                    with _state.active_rtsp_recordings_lock:
+                        session = _state.active_rtsp_recordings.get(camera_id)
+                        if session and int(session.get('recording_id', -1)) == int(recording_id):
+                            session['timing_written'] = True
             _state.database.update_recording_timing(
                 recording_id,
                 started_at=datetime.fromtimestamp(content_start_ts, tz=timezone.utc).isoformat(),

@@ -456,6 +456,139 @@ def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, 
     main._state.active_rtsp_recordings.clear()
 
 
+def test_late_event_after_capture_timing_write_keeps_rendered_duration(tmp_path, monkeypatch):
+    """A late event that lands after the capture saved the rendered timing (but
+    before it retired the session) must not rewrite started/ended/duration: the
+    row has to keep describing the file, not the extension horizon."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    now = time.time()
+    clip = tmp_path / 'data' / 'recordings' / 'event_late_timing.mp4'
+    late_results: list = []
+
+    class FakeRecordingService:
+        def prebuffer_window_seconds(self, _config=None):
+            return 70
+
+        def write_rtsp_clip_with_prebuffer(self, **kwargs):
+            path = Path(kwargs['file_path'])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'clip')
+            return now - 30.0, 25.0
+
+        def should_record(self, detections, config):
+            return False, 'motion', None
+
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+    real_track_writer = mods.recording_extension.write_live_history_detection_track
+
+    def track_writer_with_late_event(*args, **kwargs):
+        # Runs right after capture() wrote the rendered timing and before its
+        # ``finally`` pops the session: the exact window of the race.
+        late_results.append(mods.recording_extension.extend_active_rtsp_recording(
+            camera_id='camera-1',
+            event_time=datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+            recording_config={'extension_step_seconds': 30},
+            detections=[{'label': 'person', 'confidence': 0.9}],
+        ))
+        return real_track_writer(*args, **kwargs)
+
+    monkeypatch.setattr(
+        mods.recording_extension, 'write_live_history_detection_track', track_writer_with_late_event,
+    )
+    main._state.active_rtsp_recordings.clear()
+    main._state.last_rtsp_capture_end.pop('camera-1', None)
+
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=datetime.fromtimestamp(now - 30, tz=timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now - 15, tz=timezone.utc).isoformat(),
+        duration_seconds=15.0,
+        file_path=str(clip),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=main.utc_now(),
+    )
+    mods.recording_extension.start_rtsp_recording_capture(
+        'rtsp://example/stream',
+        {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
+        1,
+        [],
+        recording_id=recording_id,
+        camera_id='camera-1',
+        event_time=datetime.fromtimestamp(now - 25, tz=timezone.utc).isoformat(),
+        recording_config={'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': 60},
+    )
+    wait_until = time.time() + 3
+    while time.time() < wait_until:
+        if late_results and 'camera-1' not in main._state.active_rtsp_recordings:
+            break
+        time.sleep(0.05)
+
+    # Still linked to the clip, as before.
+    assert late_results == [recording_id]
+    recording = main.database.get_recording(recording_id)
+    assert recording['duration_seconds'] == pytest.approx(25.0)
+    assert datetime.fromisoformat(recording['started_at']).timestamp() == pytest.approx(now - 30.0, abs=0.01)
+    assert datetime.fromisoformat(recording['ended_at']).timestamp() == pytest.approx(now - 5.0, abs=0.01)
+    main._state.active_rtsp_recordings.clear()
+
+
+
+
+
+def test_extension_still_writes_provisional_timing_before_capture_writes(tmp_path, monkeypatch):
+    """Until the capture has written the rendered timing, an extension keeps
+    writing its provisional ended_at/duration - that is what leaves a plausible
+    duration on the row if the capture later dies."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    now = datetime.now(timezone.utc)
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=(now - timedelta(seconds=10)).isoformat(),
+        ended_at=now.isoformat(),
+        duration_seconds=10.0,
+        file_path=str(tmp_path / 'data' / 'recordings' / 'provisional.mp4'),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=now.isoformat(),
+    )
+    with main._state.active_rtsp_recordings_lock:
+        main._state.active_rtsp_recordings['camera-1'] = {
+            'recording_id': recording_id,
+            'start_capture_ts': now.timestamp() - 10,
+            'capture_deadline_ts': now.timestamp(),
+            'max_capture_deadline_ts': now.timestamp() + 300,
+        }
+
+    assert mods.recording_extension.extend_active_rtsp_recording(
+        camera_id='camera-1',
+        event_time=now.isoformat(),
+        recording_config={'extension_step_seconds': 30},
+    ) == recording_id
+    assert main.database.get_recording(recording_id)['duration_seconds'] == pytest.approx(40.0)
+
+    # Once the capture flags its final write, the extension stops touching timing.
+    with main._state.active_rtsp_recordings_lock:
+        main._state.active_rtsp_recordings['camera-1']['timing_written'] = True
+    later = now + timedelta(seconds=20)
+    assert mods.recording_extension.extend_active_rtsp_recording(
+        camera_id='camera-1',
+        event_time=later.isoformat(),
+        recording_config={'extension_step_seconds': 30},
+    ) == recording_id
+    assert main.database.get_recording(recording_id)['duration_seconds'] == pytest.approx(40.0)
+    with main._state.active_rtsp_recordings_lock:
+        main._state.active_rtsp_recordings.pop('camera-1', None)
+
+
 def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
     # ffmpeg can exit 0 while discarding every corrupt frame, leaving a non-empty
     # file with no video stream. write_rtsp_clip must reject it (so the caller
