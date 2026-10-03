@@ -170,7 +170,15 @@ window.daygleAuthReady = (async () => {
       return null;
     }
     const payload = await response.json();
-    const user = payload.user || {};
+    // Normalise a missing user to ``null`` - exactly what utils.js's
+    // refreshDaygleAuthOnce does. It must NOT be ``{}``: an empty object is
+    // TRUTHY, so it would satisfy onReturnToForeground's signed-in check, and
+    // the account control would wedge at the "Sign in" skeleton
+    // (renderNavAccount requires user.username) while the foreground refresh
+    // believed it still had a user and skipped re-verifying. The session was
+    // never lost - only the cached user object was unusable - so it stayed
+    // "signed out" until an unrelated click fired a request that repainted it.
+    const user = payload?.user || null;
     const csrfToken = payload.csrf_token || '';
     const expiresAt = payload.expires_at || '';
     // Pipe into the shared holder. By the time we reach here the fetch has
@@ -188,8 +196,8 @@ window.daygleAuthReady = (async () => {
     // implemented their own local formatters.
     if (typeof window.setDaygleDatePrefs === 'function') {
       window.setDaygleDatePrefs({
-        date_format: user.date_format || 'locale',
-        time_format: user.time_format || '24h',
+        date_format: user?.date_format || 'locale',
+        time_format: user?.time_format || '24h',
       });
     }
     // scheduleNextAuthRefresh is idempotent and respects the cached token -
@@ -781,7 +789,12 @@ window.daygleAuthReady = (async () => {
   let lastForegroundAt = Date.now();
   function isFreshForRefresh() {
     const exp = window.daygleAuth?.expiresAt;
-    if (!exp) return true;
+    // An unknown expiry is NOT evidence of freshness. Returning true here let
+    // `!wasIdle && isFreshForRefresh()` skip the re-verify on a tab that came
+    // back within AUTH_IDLE_REFRESH_MS (a quick window switch), which is
+    // exactly how a stale account control survived. Force a re-verify instead;
+    // the _authRefreshPending de-dup in refreshDaygleAuth keeps it to one call.
+    if (!exp) return false;
     const ms = Date.parse(exp) - Date.now();
     return !Number.isFinite(ms) || ms > AUTH_FOCUS_REFRESH_MARGIN_MS;
   }
@@ -792,7 +805,12 @@ window.daygleAuthReady = (async () => {
     if (typeof window.refreshDaygleAuth !== 'function') return;
     // A real session-loss redirect is already in flight - don't race it.
     if (window.daygleAuth?.redirecting) return;
-    if (!window.daygleAuth?.user) {
+    // A truthy-but-empty user is NOT a signed-in state: renderNavAccount keys
+    // off user.username, so {} renders the "Sign in" skeleton. Testing the
+    // username (not just the object's truthiness) is what stops that wedged
+    // state from skipping this re-verify.
+    const authUser = window.daygleAuth?.user;
+    if (!authUser || !authUser.username) {
       // The account renders as the static "Sign in" skeleton, but on a tab
       // that was frozen, discarded, or restored from bfcache this is usually
       // STALE client state while the server session is still valid: the

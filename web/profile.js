@@ -14,29 +14,35 @@ function setMessage(text, isError = false) {
 }
 
 function renderProfile(user) {
-  profileForm.elements.username.value = user.username || '';
-  profileForm.elements.first_name.value = user.first_name || '';
-  profileForm.elements.last_name.value = user.last_name || '';
-  profileForm.elements.email.value = user.email || '';
-  profileForm.elements.timezone.value = user.timezone || 'Australia/Sydney';
-  profileForm.elements.date_format.value = user.date_format || 'locale';
-  profileForm.elements.time_format.value = user.time_format || '24h';
-  profileForm.elements.theme.value = user.theme || 'light';
-  const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
+  // Normalise once. ``window.daygleAuth.user`` is null whenever no session is
+  // cached - nav.js's daygleAuthReady leaves it null on a non-401 error
+  // response, and every setApiAuth writer collapses falsy users to null. The
+  // field reads below are unguarded, so without this the profile page throws
+  // "Cannot read properties of null" instead of rendering its defaults.
+  const u = user || {};
+  profileForm.elements.username.value = u.username || '';
+  profileForm.elements.first_name.value = u.first_name || '';
+  profileForm.elements.last_name.value = u.last_name || '';
+  profileForm.elements.email.value = u.email || '';
+  profileForm.elements.timezone.value = u.timezone || 'Australia/Sydney';
+  profileForm.elements.date_format.value = u.date_format || 'locale';
+  profileForm.elements.time_format.value = u.time_format || '24h';
+  profileForm.elements.theme.value = u.theme || 'light';
+  const fullName = [u.first_name, u.last_name].filter(Boolean).join(' ');
   // Each row is built via ``safeHtml`` (web/utils.js) so server-supplied
   // fields (username, role, timezone, etc.) can't smuggle HTML into the
   // profile summary. Conditional rows (Name, Email) are pushed onto the
   // array separately so the optional markup is not re-escaped by an outer
   // ``safeHtml`` template.
   const rows = [
-    safeHtml`<div><span>Username</span><strong>${user.username}</strong></div>`,
+    safeHtml`<div><span>Username</span><strong>${u.username || ''}</strong></div>`,
   ];
   if (fullName) rows.push(safeHtml`<div><span>Name</span><strong>${fullName}</strong></div>`);
-  if (user.email) rows.push(safeHtml`<div><span>Email</span><strong>${user.email}</strong></div>`);
+  if (u.email) rows.push(safeHtml`<div><span>Email</span><strong>${u.email}</strong></div>`);
   rows.push(
-    safeHtml`<div><span>Role</span><strong>${user.role}</strong></div>`,
-    safeHtml`<div><span>Timezone</span><strong>${user.timezone || 'Australia/Sydney'}</strong></div>`,
-    safeHtml`<div><span>Date/Time</span><strong>${titleCase(user.date_format || 'locale')} / ${user.time_format || '24h'}</strong></div>`,
+    safeHtml`<div><span>Role</span><strong>${u.role || ''}</strong></div>`,
+    safeHtml`<div><span>Timezone</span><strong>${u.timezone || 'Australia/Sydney'}</strong></div>`,
+    safeHtml`<div><span>Date/Time</span><strong>${titleCase(u.date_format || 'locale')} / ${u.time_format || '24h'}</strong></div>`,
   );
   summaryEl.innerHTML = rows.join('');
 }

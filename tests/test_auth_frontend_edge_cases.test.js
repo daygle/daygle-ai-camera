@@ -501,3 +501,32 @@ describe('setApiAuth dispatches auth-state-changed event', () => {
       `setApiAuth(null, null, null) must dispatch event (before=${before}, after=${after})`);
   });
 });
+
+// ─── Consumers must tolerate the canonical null user ─────────────────────
+//
+// setApiAuth (web/utils.js:546) collapses any falsy user to ``null``, and
+// nav.js's daygleAuthReady now normalises a payload with no ``user`` to
+// ``null`` too. ``null`` is therefore the canonical "no cached user" value
+// that every page's render path can receive. A consumer that reads fields off
+// it unguarded throws instead of rendering its defaults.
+
+describe('cached-user consumers tolerate a null user', () => {
+  const profileSource = readFileSync(path.resolve(here, '../web/profile.js'), 'utf8');
+
+  test('renderProfile normalises its argument before reading fields', () => {
+    const start = profileSource.indexOf('function renderProfile(user)');
+    assert.ok(start !== -1, 'renderProfile should exist');
+    const end = profileSource.indexOf('\n}', start);
+    const body = profileSource.slice(start, end);
+    assert.match(body, /const u = user \|\| \{\};/,
+      'renderProfile must normalise a null user before reading its fields');
+    // No unguarded `user.<field>` read survives in the body.
+    assert.doesNotMatch(body, /[^.\w]user\.\w/,
+      'renderProfile must not read fields off a possibly-null user');
+  });
+
+  test('setApiAuth keeps null as the canonical empty user', () => {
+    // The contract the consumer test above depends on.
+    assert.match(utilsSource, /window\.daygleAuth\.user = user \|\| null;/);
+  });
+});
