@@ -731,15 +731,24 @@ def start_rtsp_recording_capture(
             final_duration_seconds = max(1.0, actual_end_ts - start_capture_ts)
             dynamic_post_seconds = max(0, int(round(actual_end_ts - triggered_at.timestamp())))
             # The capture deadline this clip actually ran to, separate from the
-            # render window end: ``post_after_trigger`` minus the extension step
-            # is when the last extension landed, and ``render_lag`` is how far
-            # queue/render delay pushed the window past that deadline.
+            # render window end. ``extended`` says whether any later event moved
+            # the deadline: only when it is True does ``post_after_trigger`` minus
+            # the extension step give when the last extension landed (with no
+            # extension, post_after_trigger == initial_post and that subtraction
+            # is meaningless). ``render_start_lag`` is how far deadline polling
+            # and queue delay pushed the render window past the deadline; it is
+            # measured before ffmpeg runs, so it excludes render time.
+            # ``hit_max_clip`` relies on ``final_deadline_ts`` having been
+            # clamped with ``min(..., max_deadline_ts)`` above: when capped the
+            # two are the same float, so ``>=`` is an exact match, not a
+            # tolerance comparison - keep the clamp if this is ever reworked.
             logger.info(
                 'Capture deadline for recording %s: post_after_trigger=%.1fs initial_post=%.1fs '
-                'hit_max_clip=%s render_lag=%.1fs window_post=%ds',
+                'extended=%s hit_max_clip=%s render_start_lag=%.1fs window_post=%ds',
                 recording_id,
                 final_deadline_ts - triggered_at.timestamp(),
                 initial_deadline_ts - triggered_at.timestamp(),
+                final_deadline_ts > min(max_deadline_ts, initial_deadline_ts),
                 final_deadline_ts >= max_deadline_ts,
                 actual_end_ts - final_deadline_ts,
                 dynamic_post_seconds,

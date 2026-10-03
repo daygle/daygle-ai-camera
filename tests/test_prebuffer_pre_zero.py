@@ -88,7 +88,7 @@ def test_pre_zero_consults_prebuffer_at_floor_not_live_capture(tmp_path, monkeyp
     )
 
 
-def test_pre_zero_renders_from_buffer_when_segments_exist(tmp_path, monkeypatch):
+def test_pre_zero_renders_from_buffer_when_segments_exist(tmp_path, monkeypatch, caplog):
     """When the prebuffer holds usable segments spanning the trigger, a
     ``pre_seconds=0`` event renders from them and does NOT fall back to a live
     capture (which would record the post-event aftermath)."""
@@ -131,15 +131,16 @@ def test_pre_zero_renders_from_buffer_when_segments_exist(tmp_path, monkeypatch)
     monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
 
     file_path = tmp_path / 'clip.mp4'
-    content_start_ts, content_seconds = service.write_rtsp_clip_with_prebuffer(
-        stream_url='rtsp://cam/stream',
-        camera_id='cam-1',
-        file_path=file_path,
-        triggered_at=triggered_at,
-        pre_seconds=0,
-        post_seconds=5,
-        max_duration_seconds=5,
-    )
+    with caplog.at_level('INFO', logger='daygle.ai'):
+        content_start_ts, content_seconds = service.write_rtsp_clip_with_prebuffer(
+            stream_url='rtsp://cam/stream',
+            camera_id='cam-1',
+            file_path=file_path,
+            triggered_at=triggered_at,
+            pre_seconds=0,
+            post_seconds=5,
+            max_duration_seconds=5,
+        )
 
     assert not live_calls, 'must render from the prebuffer, not fall back to live capture'
     assert file_path.exists(), 'the rendered clip should be moved into place'
@@ -147,6 +148,11 @@ def test_pre_zero_renders_from_buffer_when_segments_exist(tmp_path, monkeypatch)
     # which is before the trigger (the floored pre-roll).
     assert content_start_ts == pytest.approx(content_start, abs=0.01)
     assert content_seconds > 0
+    # The duration scan found no entry for the selected segment, so the audit
+    # line must flag it rather than report 0s of buffer as an unfilled buffer.
+    window_lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith('Clip window for ')]
+    assert len(window_lines) == 1, caplog.text
+    assert 'buffered_seconds=0.0 unknown_durations=1' in window_lines[0]
 
 
 def _render_capturing_diagnostics(tmp_path, monkeypatch, *, pre_seconds, buffered_pre_seconds):
@@ -297,5 +303,6 @@ def test_render_logs_requested_vs_rendered_clip_window(tmp_path, monkeypatch, ca
     assert 'requested_seconds=41.0' in line
     # Summed once per selected segment, not per path spelling in the map.
     assert 'buffered_seconds=35.5' in line
+    assert 'unknown_durations=0' in line
     assert 'rendered_seconds=30.0' in line
     assert 'segments=1' in line

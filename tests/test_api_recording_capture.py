@@ -475,11 +475,12 @@ def test_rtsp_capture_logs_true_deadline_separately_from_render_window(tmp_path,
     line = lines[0]
     assert 'post_after_trigger=10.0s' in line
     assert 'initial_post=10.0s' in line
+    assert 'extended=False' in line
     assert 'hit_max_clip=False' in line
     # The render window was pushed past the deadline by the delay; the deadline
     # itself is unaffected.
     assert render_kwargs['post_seconds'] >= 24
-    render_lag = float(line.split('render_lag=')[1].split('s')[0])
+    render_lag = float(line.split('render_start_lag=')[1].split('s')[0])
     assert render_lag == pytest.approx(15.0, abs=2.0)
     main._state.active_rtsp_recordings.clear()
 
