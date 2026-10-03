@@ -686,6 +686,8 @@ class _LateEventHarness:
         monkeypatch.setattr(app.utils, 'build_stream_url', lambda _cfg: 'rtsp://example/stream')
         main._state.active_rtsp_recordings.clear()
         main._state.last_rtsp_capture_end.pop('camera-1', None)
+        import app.postprocess_pool as postprocess_pool
+        self.pool = postprocess_pool.clip_pool()
 
     def deliver_late_event(self):
         event_id = self.main.database.add_event_with_alerts(
@@ -729,9 +731,17 @@ class _LateEventHarness:
         return recording_id
 
     def wait_for_renders(self, count: int) -> None:
+        """Wait until ``count`` renders have started AND every clip job has
+        finished (render, timing write, session retirement), so assertions and
+        cleanup never race a still-running capture."""
         deadline = time.time() + 5
         while time.time() < deadline and len(self.renders) < count:
             time.sleep(0.05)
+        assert self.pool.wait_until_idle(timeout=5), 'clip jobs did not finish'
+        with self.main._state.active_rtsp_recordings_lock:
+            assert 'camera-1' not in self.main._state.active_rtsp_recordings, 'a session was not retired'
+        for render in self.renders:
+            assert Path(render['file_path']).exists(), f"{render['file_path']} was not written"
 
     def cleanup(self):
         with self.main._state.active_rtsp_recordings_lock:
@@ -761,7 +771,7 @@ def test_event_arriving_while_previous_clip_waits_in_render_queue_gets_its_own_c
     first clip's render is unaffected."""
     harness = _LateEventHarness(tmp_path, monkeypatch)
     import app.postprocess_pool as postprocess_pool
-    real_pool = postprocess_pool.clip_pool()
+    real_pool = harness.pool
     frozen_at_submit: list[bool] = []
 
     class QueueDelayingPool:
@@ -788,6 +798,67 @@ def test_event_arriving_while_previous_clip_waits_in_render_queue_gets_its_own_c
     rendered_files = sorted(Path(r['file_path']).name for r in harness.renders)
     assert rendered_files == sorted(['clip_first.mp4', f"clip_{harness.late['event_id']}.mp4"])
     harness.cleanup()
+
+
+def test_capture_end_boundary_never_moves_backwards(tmp_path, monkeypatch):
+    """Two captures for one camera can render at once (a late event opens a new
+    clip while the frozen one finishes). If the older finishes last, it must not
+    move ``last_rtsp_capture_end`` backwards: the next clip's pre-roll clamp
+    would re-record footage the newer clip already captured."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.postprocess_pool as postprocess_pool
+    mods = _m()
+
+    now = time.time()
+    clip = tmp_path / 'data' / 'recordings' / 'older_clip.mp4'
+
+    class FakeRecordingService:
+        def prebuffer_window_seconds(self, _config=None):
+            return 70
+
+        def write_rtsp_clip_with_prebuffer(self, **kwargs):
+            path = Path(kwargs['file_path'])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'clip')
+            # The older clip's footage ends 5s ago...
+            return now - 30.0, 25.0
+
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+    main._state.active_rtsp_recordings.clear()
+    # ...but a newer clip for the same camera already finished, ending later.
+    newer_end = now + 10.0
+    main._state.last_rtsp_capture_end['camera-1'] = newer_end
+
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=datetime.fromtimestamp(now - 30, tz=timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now - 15, tz=timezone.utc).isoformat(),
+        duration_seconds=15.0,
+        file_path=str(clip),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=main.utc_now(),
+    )
+    mods.recording_extension.start_rtsp_recording_capture(
+        'rtsp://example/stream',
+        {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
+        1,
+        [],
+        recording_id=recording_id,
+        camera_id='camera-1',
+        event_time=datetime.fromtimestamp(now - 25, tz=timezone.utc).isoformat(),
+        recording_config={'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': 60},
+    )
+    wait_until = time.time() + 5
+    while time.time() < wait_until and not clip.exists():
+        time.sleep(0.05)
+    assert postprocess_pool.clip_pool().wait_until_idle(timeout=5)
+
+    assert main._state.last_rtsp_capture_end['camera-1'] == pytest.approx(newer_end, abs=0.001)
+    main._state.last_rtsp_capture_end.pop('camera-1', None)
+    main._state.active_rtsp_recordings.clear()
 
 
 def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
