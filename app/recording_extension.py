@@ -841,7 +841,16 @@ def start_rtsp_recording_capture(
                         _state.active_rtsp_recordings.pop(camera_id, None)
                     captured_end_ts = captured_end_ts_holder.get('ts')
                     if captured_end_ts is not None:
-                        _state.last_rtsp_capture_end[camera_id] = captured_end_ts
+                        # Monotonic: two captures for one camera can render at
+                        # once (a late event opens a new clip while the frozen
+                        # one finishes), and the older may finish last. Moving
+                        # the boundary backwards would let the next clip's
+                        # pre-roll clamp re-record footage already captured.
+                        previous_end_ts = _state.last_rtsp_capture_end.get(camera_id)
+                        _state.last_rtsp_capture_end[camera_id] = (
+                            captured_end_ts if previous_end_ts is None
+                            else max(float(previous_end_ts), captured_end_ts)
+                        )
     def release_unqueued_capture() -> None:
         """Undo the capture registration for a clip that will never render."""
         logger.warning(
