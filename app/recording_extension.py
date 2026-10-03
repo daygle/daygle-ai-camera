@@ -160,11 +160,24 @@ def extend_active_rtsp_recording(
     with _state.active_rtsp_recordings_lock:
         session = _state.active_rtsp_recordings.get(camera_id)
         if not session:
-            # Failure: no clip is capturing for this camera, so nothing can be
-            # extended (the caller may start a fresh capture instead).
-            logger.debug(
-                'Recording extension skipped for camera %s at %s: reason=no_active_session',
-                camera_id, event_time,
+            # No clip is capturing for this camera, so nothing can be extended
+            # (the caller may start a fresh capture instead). This is routine -
+            # the suppressed-duplicate path calls in every detection cycle (~4 Hz)
+            # on alert-only cameras and after a clip closes - so it stays at
+            # DEBUG, EXCEPT when the event falls inside footage an already-closed
+            # clip covered: the detection landed in that clip's window yet could
+            # not extend it, which is the failure this log exists to catch, and
+            # it cannot recur at cycle rate once the clip's end is in the past.
+            previous_capture_end_ts = _state.last_rtsp_capture_end.get(camera_id)
+            inside_closed_clip = (
+                previous_capture_end_ts is not None
+                and event_dt.timestamp() < float(previous_capture_end_ts)
+            )
+            logger.log(
+                logging.INFO if inside_closed_clip else logging.DEBUG,
+                'Recording extension skipped for camera %s at %s: reason=no_active_session '
+                'inside_closed_clip=%s',
+                camera_id, event_time, inside_closed_clip,
             )
             return None
         current_deadline = float(session.get('capture_deadline_ts') or 0)
@@ -177,7 +190,9 @@ def extend_active_rtsp_recording(
             # every new recording for the camera, so retire it and let the
             # caller start a fresh capture.
             _state.active_rtsp_recordings.pop(camera_id, None)
-            logger.debug(
+            # Always INFO: a retired session is a real failure and rare by
+            # construction (at most once per abandoned capture).
+            logger.info(
                 'Recording extension skipped for camera %s at %s: reason=stale_session_retired '
                 'recording_id=%s past_max_deadline=%.1fs',
                 camera_id, event_time, session.get('recording_id'), time.time() - max_deadline,

@@ -153,21 +153,28 @@ def test_extend_active_rtsp_recording_updates_trigger_label_to_specific_object(t
 
 
 @pytest.mark.parametrize(
-    ('session_offsets', 'expected_result', 'expected_reason'),
+    ('session_offsets', 'previous_end_offset', 'expected_result', 'expected_reason', 'expected_level'),
     [
-        # (capture_deadline, max_capture_deadline) relative to the event time.
-        (None, None, 'no_active_session'),
-        ((-300.0, -200.0), None, 'stale_session_retired'),
-        ((60.0, 300.0), 'recording', 'already_covered'),
-        ((5.0, 5.0), 'recording', 'max_clip_reached'),
+        # session_offsets: (capture_deadline, max_capture_deadline) relative to
+        # the event time; previous_end_offset: last closed clip's footage end.
+        # Routine: no clip ever ran, or the event is after the last clip ended.
+        (None, None, None, 'no_active_session', 'DEBUG'),
+        (None, -5.0, None, 'no_active_session', 'DEBUG'),
+        # Failure: the event lies inside footage of a clip that already closed.
+        (None, 5.0, None, 'no_active_session', 'INFO'),
+        ((-300.0, -200.0), None, None, 'stale_session_retired', 'INFO'),
+        ((60.0, 300.0), None, 'recording', 'already_covered', 'DEBUG'),
+        ((5.0, 5.0), None, 'recording', 'max_clip_reached', 'DEBUG'),
     ],
 )
 def test_extend_active_rtsp_recording_logs_why_deadline_did_not_move(
-    tmp_path, monkeypatch, caplog, session_offsets, expected_result, expected_reason,
+    tmp_path, monkeypatch, caplog,
+    session_offsets, previous_end_offset, expected_result, expected_reason, expected_level,
 ):
     """Every way an extension can leave the deadline unmoved logs a distinct
-    DEBUG reason with the camera and event time, so it can be correlated with
-    the clip's INFO capture-deadline line. The two non-failures
+    reason with the camera and event time, so it can be correlated with the
+    clip's INFO capture-deadline line. Real failures log at INFO; the reasons
+    that can recur every detection cycle stay at DEBUG. The two non-failures
     (already_covered, max_clip_reached) still return the recording id."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
@@ -175,6 +182,9 @@ def test_extend_active_rtsp_recording_logs_why_deadline_did_not_move(
 
     now = datetime.now(timezone.utc)
     recording_id = 4242
+    monkeypatch.setattr(main._state, 'last_rtsp_capture_end', {})
+    if previous_end_offset is not None:
+        main._state.last_rtsp_capture_end['camera-1'] = now.timestamp() + previous_end_offset
     with main._state.active_rtsp_recordings_lock:
         main._state.active_rtsp_recordings.pop('camera-1', None)
         if session_offsets is not None:
@@ -194,11 +204,15 @@ def test_extend_active_rtsp_recording_logs_why_deadline_did_not_move(
         )
 
     assert result == (recording_id if expected_result == 'recording' else None)
-    lines = [r.getMessage() for r in caplog.records if 'Recording extension' in r.getMessage()]
-    assert len(lines) == 1, caplog.text
-    assert f'reason={expected_reason}' in lines[0]
-    assert 'camera camera-1' in lines[0]
-    assert now.isoformat() in lines[0]
+    records = [r for r in caplog.records if 'Recording extension' in r.getMessage()]
+    assert len(records) == 1, caplog.text
+    line = records[0].getMessage()
+    assert records[0].levelname == expected_level
+    assert f'reason={expected_reason}' in line
+    assert 'camera camera-1' in line
+    assert now.isoformat() in line
+    if expected_reason == 'no_active_session':
+        assert f'inside_closed_clip={expected_level == "INFO"}' in line
     if expected_reason == 'stale_session_retired':
         assert 'camera-1' not in main._state.active_rtsp_recordings
     with main._state.active_rtsp_recordings_lock:
