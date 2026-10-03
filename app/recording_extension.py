@@ -198,6 +198,20 @@ def extend_active_rtsp_recording(
                 camera_id, event_time, session.get('recording_id'), time.time() - max_deadline,
             )
             return None
+        if session.get('deadline_frozen'):
+            # The capture already stopped waiting on its deadline, so this event
+            # is linked to the clip but cannot extend it, and no new clip starts
+            # while the session lingers through the render. Recorded for the one
+            # INFO summary the capture logs when it retires the session.
+            session['late_event_count'] = int(session.get('late_event_count') or 0) + 1
+            session['late_event_horizon_ts'] = max(
+                float(session.get('late_event_horizon_ts') or 0.0), extend_until,
+            )
+            logger.debug(
+                'Recording extension after deadline froze for camera %s at %s: '
+                'reason=after_deadline_frozen recording_id=%s',
+                camera_id, event_time, session.get('recording_id'),
+            )
         new_deadline = min(max_deadline, max(current_deadline, extend_until))
         if new_deadline <= current_deadline:
             # Not a failure: the event stays attached to this clip, the deadline
@@ -755,9 +769,14 @@ def start_rtsp_recording_capture(
                     final_deadline_ts = float(
                         session.get('capture_deadline_ts') or final_deadline_ts
                     )
-                remaining = final_deadline_ts - time.time()
-                if remaining <= 0:
-                    break
+                    remaining = final_deadline_ts - time.time()
+                    if remaining <= 0:
+                        # The render reads this deadline from here on, so any
+                        # later extension cannot grow this clip. Flag it so
+                        # ``extend_active_rtsp_recording`` can count those
+                        # events for the capture's late-events summary.
+                        session['deadline_frozen'] = True
+                        break
                 time.sleep(min(0.5, max(0.05, remaining)))
         return final_deadline_ts
 
@@ -853,11 +872,26 @@ def start_rtsp_recording_capture(
             if camera_id:
                 with _state.active_rtsp_recordings_lock:
                     session = _state.active_rtsp_recordings.get(camera_id)
+                    retired_session = None
                     if session and int(session.get('recording_id', -1)) == int(recording_id):
-                        _state.active_rtsp_recordings.pop(camera_id, None)
+                        retired_session = _state.active_rtsp_recordings.pop(camera_id, None)
                     captured_end_ts = captured_end_ts_holder.get('ts')
                     if captured_end_ts is not None:
                         _state.last_rtsp_capture_end[camera_id] = captured_end_ts
+                late_event_count = int((retired_session or {}).get('late_event_count') or 0)
+                if late_event_count:
+                    # Events that arrived after the deadline froze were linked to
+                    # this clip without extending it. ``uncovered_horizon`` is how
+                    # far past the written footage their extension horizon reached:
+                    # footage no clip recorded. 0 means the render window (which
+                    # runs to the render start) still covered them.
+                    footage_end_ts = captured_end_ts if captured_end_ts is not None else start_capture_ts
+                    logger.info(
+                        'Late events after capture deadline for recording %s (camera %s): '
+                        'count=%d uncovered_horizon=%.1fs',
+                        recording_id, camera_id, late_event_count,
+                        max(0.0, float(retired_session.get('late_event_horizon_ts') or 0.0) - footage_end_ts),
+                    )
     def release_unqueued_capture() -> None:
         """Undo the capture registration for a clip that will never render."""
         logger.warning(

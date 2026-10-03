@@ -552,6 +552,141 @@ def test_rtsp_capture_logs_true_deadline_separately_from_render_window(tmp_path,
     main._state.active_rtsp_recordings.clear()
 
 
+def test_rtsp_capture_logs_late_events_that_arrive_during_render(tmp_path, monkeypatch, caplog):
+    """An event arriving after the capture deadline froze is linked to the clip
+    but cannot extend it. The capture must log one INFO summary when it retires
+    the session, with how far the lost extension reached past the footage."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    now = time.time()
+    clip = tmp_path / 'data' / 'recordings' / 'event_late.mp4'
+    late_results: list = []
+
+    class FakeRecordingService:
+        def prebuffer_window_seconds(self, _config=None):
+            return 70
+
+        def write_rtsp_clip_with_prebuffer(self, **kwargs):
+            # An event arrives mid-render: the deadline has already frozen.
+            late_results.append(mods.recording_extension.extend_active_rtsp_recording(
+                camera_id='camera-1',
+                event_time=datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+                recording_config={'extension_step_seconds': 30},
+            ))
+            path = Path(kwargs['file_path'])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'clip')
+            # Footage ends 5s before the late event.
+            return now - 30.0, 25.0
+
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+    main._state.active_rtsp_recordings.clear()
+    main._state.last_rtsp_capture_end.pop('camera-1', None)
+
+    triggered_iso = datetime.fromtimestamp(now - 25, tz=timezone.utc).isoformat()
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=datetime.fromtimestamp(now - 30, tz=timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now - 15, tz=timezone.utc).isoformat(),
+        duration_seconds=15.0,
+        file_path=str(clip),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=main.utc_now(),
+    )
+    with caplog.at_level('INFO', logger='daygle.ai'):
+        mods.recording_extension.start_rtsp_recording_capture(
+            'rtsp://example/stream',
+            {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
+            1,
+            [],
+            recording_id=recording_id,
+            camera_id='camera-1',
+            event_time=triggered_iso,
+            recording_config={'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': 60},
+        )
+        wait_until = time.time() + 3
+        while time.time() < wait_until:
+            if 'camera-1' not in main._state.active_rtsp_recordings and late_results:
+                break
+            time.sleep(0.05)
+
+    # The late event is still linked to this clip (behaviour unchanged).
+    assert late_results == [recording_id]
+    lines = [
+        r.getMessage() for r in caplog.records
+        if r.getMessage().startswith(f'Late events after capture deadline for recording {recording_id} ')
+    ]
+    assert len(lines) == 1, caplog.text
+    assert 'camera camera-1' in lines[0]
+    assert 'count=1' in lines[0]
+    # Horizon now+30 vs footage end now-5.
+    uncovered = float(lines[0].split('uncovered_horizon=')[1].split('s')[0])
+    assert uncovered == pytest.approx(35.0, abs=0.5)
+    main._state.active_rtsp_recordings.clear()
+
+
+def test_rtsp_capture_without_late_events_logs_no_late_summary(tmp_path, monkeypatch, caplog):
+    """No late events, no summary line: the INFO line must only appear when an
+    event was actually absorbed after the deadline froze."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    now = time.time()
+    clip = tmp_path / 'data' / 'recordings' / 'event_no_late.mp4'
+    rendered: list = []
+
+    class FakeRecordingService:
+        def prebuffer_window_seconds(self, _config=None):
+            return 70
+
+        def write_rtsp_clip_with_prebuffer(self, **kwargs):
+            rendered.append(True)
+            path = Path(kwargs['file_path'])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'clip')
+            return now - 30.0, 25.0
+
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+    main._state.active_rtsp_recordings.clear()
+    main._state.last_rtsp_capture_end.pop('camera-1', None)
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=datetime.fromtimestamp(now - 30, tz=timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now - 15, tz=timezone.utc).isoformat(),
+        duration_seconds=15.0,
+        file_path=str(clip),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=main.utc_now(),
+    )
+    with caplog.at_level('INFO', logger='daygle.ai'):
+        mods.recording_extension.start_rtsp_recording_capture(
+            'rtsp://example/stream',
+            {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
+            1,
+            [],
+            recording_id=recording_id,
+            camera_id='camera-1',
+            event_time=datetime.fromtimestamp(now - 25, tz=timezone.utc).isoformat(),
+            recording_config={'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': 60},
+        )
+        wait_until = time.time() + 3
+        while time.time() < wait_until:
+            if rendered and 'camera-1' not in main._state.active_rtsp_recordings:
+                break
+            time.sleep(0.05)
+
+    assert rendered
+    assert 'Late events after capture deadline' not in caplog.text
+    main._state.active_rtsp_recordings.clear()
+
+
 def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
     # ffmpeg can exit 0 while discarding every corrupt frame, leaving a non-empty
     # file with no video stream. write_rtsp_clip must reject it (so the caller
