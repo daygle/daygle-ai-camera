@@ -1167,36 +1167,6 @@ class RecordingService:
             )
 
         effective_seconds = rendered_seconds if rendered_seconds is not None else content_seconds
-        # Requested-vs-rendered audit for the clip window. ``trigger_at`` and
-        # ``window_end_at`` are relative to ``content_start`` (i.e. clip playback
-        # time). ``window_end_at`` is the selected window end, which the caller
-        # may push past the final capture deadline by render-queue delay; the
-        # true deadline is logged separately by the caller. A short tail can then
-        # be attributed to: an early window end, a buffer that did not yet hold
-        # footage up to it (buffered_seconds < requested_seconds), or ffmpeg
-        # emitting less than ``-t`` (rendered_seconds < requested_seconds with a
-        # full buffer). A selected segment the timeline no longer lists (pruned
-        # between selection and the duration scan) contributes 0s to
-        # ``buffered_seconds`` - matching the concat, which then gets no duration
-        # directive for it - so ``unknown_durations`` counts those, to tell a
-        # scan miss apart from a genuinely unfilled buffer.
-        known_durations = [segment_durations.get(segment) for segment in segments]
-        buffered_seconds = sum(duration or 0.0 for duration in known_durations)
-        unknown_durations = sum(1 for duration in known_durations if not duration)
-        logger.info(
-            'Clip window for %s: trigger_at=%.1fs window_end_at=%.1fs pre=%ds post=%ds '
-            'requested_seconds=%.1f buffered_seconds=%.1f unknown_durations=%d rendered_seconds=%s segments=%d',
-            camera_key,
-            triggered_at.timestamp() - content_start_ts,
-            end_ts - content_start_ts,
-            pre_seconds,
-            post_seconds,
-            content_seconds,
-            buffered_seconds,
-            unknown_durations,
-            f'{rendered_seconds:.1f}' if rendered_seconds is not None else 'unknown',
-            len(segments),
-        )
         try:
             self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, effective_seconds, camera_id=camera_id)
         except Exception as exc:

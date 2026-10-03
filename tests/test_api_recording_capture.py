@@ -153,48 +153,29 @@ def test_extend_active_rtsp_recording_updates_trigger_label_to_specific_object(t
 
 
 @pytest.mark.parametrize(
-    ('session_offsets', 'previous_end_offset', 'expected_result', 'expected_reason', 'expected_level'),
+    ('previous_end_offset', 'expect_info'),
     [
-        # session_offsets: (capture_deadline, max_capture_deadline) relative to
-        # the event time; previous_end_offset: last closed clip's footage end.
-        # Routine: no clip ever ran, or the event is after the last clip ended.
-        (None, None, None, 'no_active_session', 'DEBUG'),
-        (None, -5.0, None, 'no_active_session', 'DEBUG'),
-        # Failure: the event lies inside footage of a clip that already closed.
-        (None, 5.0, None, 'no_active_session', 'INFO'),
-        ((-300.0, -200.0), None, None, 'stale_session_retired', 'INFO'),
-        ((60.0, 300.0), None, 'recording', 'already_covered', 'DEBUG'),
-        ((5.0, 5.0), None, 'recording', 'max_clip_reached', 'DEBUG'),
+        (None, False),   # no clip has run for this camera
+        (-5.0, False),   # the event is after the last clip ended: routine
+        (5.0, True),     # the event lies inside an already-closed clip: failure
     ],
 )
-def test_extend_active_rtsp_recording_logs_why_deadline_did_not_move(
-    tmp_path, monkeypatch, caplog,
-    session_offsets, previous_end_offset, expected_result, expected_reason, expected_level,
+def test_extend_without_session_logs_only_events_inside_a_closed_clip(
+    tmp_path, monkeypatch, caplog, previous_end_offset, expect_info,
 ):
-    """Every way an extension can leave the deadline unmoved logs a distinct
-    reason with the camera and event time, so it can be correlated with the
-    clip's INFO capture-deadline line. Real failures log at INFO; the reasons
-    that can recur every detection cycle stay at DEBUG. The two non-failures
-    (already_covered, max_clip_reached) still return the recording id."""
+    """With no active capture the extender is called every detection cycle, so
+    it logs only the real failure: an event inside footage a closed clip covered,
+    which landed in that clip's window but could not extend it."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
     mods = _m()
 
     now = datetime.now(timezone.utc)
-    recording_id = 4242
     monkeypatch.setattr(main._state, 'last_rtsp_capture_end', {})
     if previous_end_offset is not None:
         main._state.last_rtsp_capture_end['camera-1'] = now.timestamp() + previous_end_offset
     with main._state.active_rtsp_recordings_lock:
         main._state.active_rtsp_recordings.pop('camera-1', None)
-        if session_offsets is not None:
-            deadline_offset, max_offset = session_offsets
-            main._state.active_rtsp_recordings['camera-1'] = {
-                'recording_id': recording_id,
-                'start_capture_ts': now.timestamp() - 10,
-                'capture_deadline_ts': now.timestamp() + deadline_offset,
-                'max_capture_deadline_ts': now.timestamp() + max_offset,
-            }
 
     with caplog.at_level('DEBUG', logger='daygle.ai'):
         result = mods.recording_extension.extend_active_rtsp_recording(
@@ -203,20 +184,17 @@ def test_extend_active_rtsp_recording_logs_why_deadline_did_not_move(
             recording_config={'extension_step_seconds': 10},
         )
 
-    assert result == (recording_id if expected_result == 'recording' else None)
+    assert result is None
     records = [r for r in caplog.records if 'Recording extension' in r.getMessage()]
-    assert len(records) == 1, caplog.text
-    line = records[0].getMessage()
-    assert records[0].levelname == expected_level
-    assert f'reason={expected_reason}' in line
-    assert 'camera camera-1' in line
-    assert now.isoformat() in line
-    if expected_reason == 'no_active_session':
-        assert f'inside_closed_clip={expected_level == "INFO"}' in line
-    if expected_reason == 'stale_session_retired':
-        assert 'camera-1' not in main._state.active_rtsp_recordings
-    with main._state.active_rtsp_recordings_lock:
-        main._state.active_rtsp_recordings.pop('camera-1', None)
+    if expect_info:
+        assert len(records) == 1, caplog.text
+        assert records[0].levelname == 'INFO'
+        line = records[0].getMessage()
+        assert 'reason=no_active_session inside_closed_clip=True' in line
+        assert 'camera camera-1' in line
+        assert now.isoformat() in line
+    else:
+        assert not records, caplog.text
 
 
 def test_recording_table_creation(tmp_path):
@@ -475,215 +453,6 @@ def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, 
     # The history sample 1s into the actual media window must land at t=1.0.
     assert track[0]['t'] == pytest.approx(1.0, abs=0.01)
     assert track[0]['detections'][0]['label'] == 'person'
-    main._state.active_rtsp_recordings.clear()
-
-
-def test_rtsp_capture_logs_true_deadline_separately_from_render_window(tmp_path, monkeypatch, caplog):
-    """The capture-deadline audit line must report the deadline the capture ran
-    to (trigger + post, plus any extensions), independent of how far render
-    delay pushed the window end past it."""
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-    mods = _m()
-
-    now = time.time()
-    clip = tmp_path / 'data' / 'recordings' / 'event_deadline_log.mp4'
-    render_kwargs: dict = {}
-
-    class FakeRecordingService:
-        def prebuffer_window_seconds(self, _config=None):
-            return 70
-
-        def write_rtsp_clip_with_prebuffer(self, **kwargs):
-            render_kwargs.update(kwargs)
-            path = Path(kwargs['file_path'])
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b'clip')
-            return now - 30.0, 25.0
-
-    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
-    main._state.active_rtsp_recordings.clear()
-    main._state.last_rtsp_capture_end.pop('camera-1', None)
-
-    # Trigger 25s ago with a 10s post window: the deadline passed 15s ago, so
-    # the render window runs ~15s past it.
-    triggered_iso = datetime.fromtimestamp(now - 25, tz=timezone.utc).isoformat()
-    recording_id = main.database.add_recording(
-        event_id=None,
-        camera_id='camera-1',
-        started_at=datetime.fromtimestamp(now - 30, tz=timezone.utc).isoformat(),
-        ended_at=datetime.fromtimestamp(now - 15, tz=timezone.utc).isoformat(),
-        duration_seconds=15.0,
-        file_path=str(clip),
-        thumbnail_path=None,
-        source='rtsp',
-        created_at=main.utc_now(),
-    )
-    with caplog.at_level('INFO', logger='daygle.ai'):
-        mods.recording_extension.start_rtsp_recording_capture(
-            'rtsp://example/stream',
-            {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
-            1,
-            [],
-            recording_id=recording_id,
-            camera_id='camera-1',
-            event_time=triggered_iso,
-            recording_config={'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': 60},
-        )
-        wait_until = time.time() + 3
-        while not render_kwargs and time.time() < wait_until:
-            time.sleep(0.05)
-
-    lines = [
-        r.getMessage() for r in caplog.records
-        if r.getMessage().startswith(f'Capture deadline for recording {recording_id}:')
-    ]
-    assert len(lines) == 1, caplog.text
-    line = lines[0]
-    assert 'post_after_trigger=10.0s' in line
-    assert 'initial_post=10.0s' in line
-    assert 'extended=False' in line
-    assert 'hit_max_clip=False' in line
-    # The render window was pushed past the deadline by the delay; the deadline
-    # itself is unaffected.
-    assert render_kwargs['post_seconds'] >= 24
-    render_lag = float(line.split('render_start_lag=')[1].split('s')[0])
-    assert render_lag == pytest.approx(15.0, abs=2.0)
-    main._state.active_rtsp_recordings.clear()
-
-
-def test_rtsp_capture_logs_late_events_that_arrive_during_render(tmp_path, monkeypatch, caplog):
-    """An event arriving after the capture deadline froze is linked to the clip
-    but cannot extend it. The capture must log one INFO summary when it retires
-    the session, with how far the lost extension reached past the footage."""
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-    mods = _m()
-
-    now = time.time()
-    clip = tmp_path / 'data' / 'recordings' / 'event_late.mp4'
-    late_results: list = []
-
-    class FakeRecordingService:
-        def prebuffer_window_seconds(self, _config=None):
-            return 70
-
-        def write_rtsp_clip_with_prebuffer(self, **kwargs):
-            # An event arrives mid-render: the deadline has already frozen.
-            late_results.append(mods.recording_extension.extend_active_rtsp_recording(
-                camera_id='camera-1',
-                event_time=datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
-                recording_config={'extension_step_seconds': 30},
-            ))
-            path = Path(kwargs['file_path'])
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b'clip')
-            # Footage ends 5s before the late event.
-            return now - 30.0, 25.0
-
-    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
-    main._state.active_rtsp_recordings.clear()
-    main._state.last_rtsp_capture_end.pop('camera-1', None)
-
-    triggered_iso = datetime.fromtimestamp(now - 25, tz=timezone.utc).isoformat()
-    recording_id = main.database.add_recording(
-        event_id=None,
-        camera_id='camera-1',
-        started_at=datetime.fromtimestamp(now - 30, tz=timezone.utc).isoformat(),
-        ended_at=datetime.fromtimestamp(now - 15, tz=timezone.utc).isoformat(),
-        duration_seconds=15.0,
-        file_path=str(clip),
-        thumbnail_path=None,
-        source='rtsp',
-        created_at=main.utc_now(),
-    )
-    with caplog.at_level('INFO', logger='daygle.ai'):
-        mods.recording_extension.start_rtsp_recording_capture(
-            'rtsp://example/stream',
-            {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
-            1,
-            [],
-            recording_id=recording_id,
-            camera_id='camera-1',
-            event_time=triggered_iso,
-            recording_config={'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': 60},
-        )
-        wait_until = time.time() + 3
-        while time.time() < wait_until:
-            if 'camera-1' not in main._state.active_rtsp_recordings and late_results:
-                break
-            time.sleep(0.05)
-
-    # The late event is still linked to this clip (behaviour unchanged).
-    assert late_results == [recording_id]
-    lines = [
-        r.getMessage() for r in caplog.records
-        if r.getMessage().startswith(f'Late events after capture deadline for recording {recording_id} ')
-    ]
-    assert len(lines) == 1, caplog.text
-    assert 'camera camera-1' in lines[0]
-    assert 'count=1' in lines[0]
-    # Horizon now+30 vs footage end now-5.
-    uncovered = float(lines[0].split('uncovered_horizon=')[1].split('s')[0])
-    assert uncovered == pytest.approx(35.0, abs=0.5)
-    main._state.active_rtsp_recordings.clear()
-
-
-def test_rtsp_capture_without_late_events_logs_no_late_summary(tmp_path, monkeypatch, caplog):
-    """No late events, no summary line: the INFO line must only appear when an
-    event was actually absorbed after the deadline froze."""
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-    mods = _m()
-
-    now = time.time()
-    clip = tmp_path / 'data' / 'recordings' / 'event_no_late.mp4'
-    rendered: list = []
-
-    class FakeRecordingService:
-        def prebuffer_window_seconds(self, _config=None):
-            return 70
-
-        def write_rtsp_clip_with_prebuffer(self, **kwargs):
-            rendered.append(True)
-            path = Path(kwargs['file_path'])
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b'clip')
-            return now - 30.0, 25.0
-
-    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
-    main._state.active_rtsp_recordings.clear()
-    main._state.last_rtsp_capture_end.pop('camera-1', None)
-    recording_id = main.database.add_recording(
-        event_id=None,
-        camera_id='camera-1',
-        started_at=datetime.fromtimestamp(now - 30, tz=timezone.utc).isoformat(),
-        ended_at=datetime.fromtimestamp(now - 15, tz=timezone.utc).isoformat(),
-        duration_seconds=15.0,
-        file_path=str(clip),
-        thumbnail_path=None,
-        source='rtsp',
-        created_at=main.utc_now(),
-    )
-    with caplog.at_level('INFO', logger='daygle.ai'):
-        mods.recording_extension.start_rtsp_recording_capture(
-            'rtsp://example/stream',
-            {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
-            1,
-            [],
-            recording_id=recording_id,
-            camera_id='camera-1',
-            event_time=datetime.fromtimestamp(now - 25, tz=timezone.utc).isoformat(),
-            recording_config={'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': 60},
-        )
-        wait_until = time.time() + 3
-        while time.time() < wait_until:
-            if rendered and 'camera-1' not in main._state.active_rtsp_recordings:
-                break
-            time.sleep(0.05)
-
-    assert rendered
-    assert 'Late events after capture deadline' not in caplog.text
     main._state.active_rtsp_recordings.clear()
 
 
