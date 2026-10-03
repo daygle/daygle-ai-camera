@@ -63,7 +63,12 @@ def _fake_ffprobe(monkeypatch, durations: dict[str, str], calls: list[str] | Non
     monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
 
 
-def test_timeline_uses_probed_duration_when_spacing_exceeds_estimate_threshold(tmp_path, monkeypatch):
+def _refined(service, camera_dir, start_ts, end_ts):
+    timed = service._segment_timeline(camera_dir, service.PREBUFFER_SEGMENT_GLOB, service.PREBUFFER_SEGMENT_SECONDS)
+    return service._probe_window_segment_starts(camera_dir, timed, start_ts, end_ts)
+
+
+def test_window_segments_use_probed_duration_when_spacing_exceeds_estimate_threshold(tmp_path, monkeypatch):
     """6s segments spaced fractionally above 6.0s: the estimate falls back to
     ``end - 4`` for each, the probe gives the real 6s."""
     service = _service(tmp_path)
@@ -77,10 +82,7 @@ def test_timeline_uses_probed_duration_when_spacing_exceeds_estimate_threshold(t
     assert [round(end - start, 2) for _, start, end in estimated] == [4.0] * 5
 
     _fake_ffprobe(monkeypatch, {f'segment-{i:03d}.mp4': '6.000000' for i in range(5)})
-    service._invalidate_segment_timeline_cache()
-    probed = service._segment_timeline(
-        camera_dir, service.PREBUFFER_SEGMENT_GLOB, service.PREBUFFER_SEGMENT_SECONDS, probe_durations=True,
-    )
+    probed = _refined(service, camera_dir, ends[0] - 10, now)
     assert [round(end - start, 2) for _, start, end in probed] == [6.0] * 5
     assert [end for _, _, end in probed] == pytest.approx(ends, abs=0.01)
 
@@ -99,9 +101,9 @@ def test_collect_reports_content_start_from_probed_duration(tmp_path, monkeypatc
     assert content_start == pytest.approx(ends[0] - 6.0, abs=0.01)
 
 
-def test_timeline_falls_back_to_estimate_when_probe_fails(tmp_path, monkeypatch):
+def test_probing_falls_back_to_estimate_when_probe_fails(tmp_path, monkeypatch):
     """The segment still being written (empty moov until its one fragment
-    lands) and unreadable files fall back to the gap estimate."""
+    lands) and unreadable files keep the gap estimate."""
     service = _service(tmp_path)
     camera_dir = service.prebuffer_dir / 'cam'
     now = time.time()
@@ -110,10 +112,7 @@ def test_timeline_falls_back_to_estimate_when_probe_fails(tmp_path, monkeypatch)
     # Only the first segment probes; the rest fail.
     _fake_ffprobe(monkeypatch, {'segment-000.mp4': '6.000000'})
 
-    timed = service._segment_timeline(
-        camera_dir, service.PREBUFFER_SEGMENT_GLOB, service.PREBUFFER_SEGMENT_SECONDS, probe_durations=True,
-    )
-    starts = [start for _, start, _ in timed]
+    starts = [start for _, start, _ in _refined(service, camera_dir, now - 20, now)]
     assert starts[0] == pytest.approx(ends[0] - 6.0, abs=0.01)
     # Contiguous within 1.5x nominal: chained to the previous segment's end.
     assert starts[1] == pytest.approx(ends[0], abs=0.01)
@@ -121,23 +120,41 @@ def test_timeline_falls_back_to_estimate_when_probe_fails(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize('bad_value', ['0.000000', '-1', '600.0', 'N/A'])
-def test_timeline_rejects_implausible_probe_results(tmp_path, monkeypatch, bad_value):
+def test_implausible_probe_results_keep_the_estimate(tmp_path, monkeypatch, bad_value):
     service = _service(tmp_path)
     camera_dir = service.prebuffer_dir / 'cam'
     now = time.time()
     _write_segments(camera_dir, [now])
     _fake_ffprobe(monkeypatch, {'segment-000.mp4': bad_value})
 
-    timed = service._segment_timeline(
-        camera_dir, service.PREBUFFER_SEGMENT_GLOB, service.PREBUFFER_SEGMENT_SECONDS, probe_durations=True,
-    )
-    _, start, end = timed[0]
+    _, start, end = _refined(service, camera_dir, now - 10, now)[0]
     assert end - start == pytest.approx(service.PREBUFFER_SEGMENT_SECONDS, abs=0.01)
 
 
-def test_segment_probe_is_cached_per_file_identity_and_pruned(tmp_path, monkeypatch):
+def test_cold_scan_probes_only_segments_that_can_overlap_the_window(tmp_path, monkeypatch):
+    """A long buffer (max_clip_seconds allows an hour) must not cost one ffprobe
+    per retained segment: only segments that could overlap the window are probed."""
+    service = _service(tmp_path)
+    camera_dir = service.prebuffer_dir / 'cam'
+    now = time.time()
+    ends = [now - 6 * (199 - i) for i in range(200)]  # ~20 minutes of 6s segments
+    _write_segments(camera_dir, ends)
+    calls: list[str] = []
+    _fake_ffprobe(monkeypatch, {f'segment-{i:03d}.mp4': '6.000000' for i in range(200)}, calls)
+
+    segments, content_start = service._collect_prebuffer_segments('cam', now - 40, now - 10)
+    # Window [now-40, now-10]: segments ending in (now-40, now-10+60) - the rest
+    # end before the window (cannot overlap) and are never probed.
+    assert len(calls) == sum(1 for end in ends if now - 40 < end < now + 50)
+    assert len(calls) <= 15
+    assert content_start == pytest.approx(min(e for e in ends if e > now - 40) - 6.0, abs=0.01)
+    assert len(segments) == 6
+
+
+def test_probe_is_cached_per_file_identity_and_pruned(tmp_path, monkeypatch):
     """A finished segment is probed once for its life in the buffer; a segment
-    whose size/mtime changes is re-probed; deleted segments are forgotten."""
+    that grows or closes after the (memoised) timeline was built is re-probed,
+    not read from a stale entry; deleted segments are forgotten."""
     service = _service(tmp_path)
     camera_dir = service.prebuffer_dir / 'cam'
     now = time.time()
@@ -145,31 +162,35 @@ def test_segment_probe_is_cached_per_file_identity_and_pruned(tmp_path, monkeypa
     calls: list[str] = []
     _fake_ffprobe(monkeypatch, {p.name: '6.000000' for p in paths}, calls)
 
-    def scan():
-        service._invalidate_segment_timeline_cache()
-        return service._segment_timeline(
-            camera_dir, service.PREBUFFER_SEGMENT_GLOB, service.PREBUFFER_SEGMENT_SECONDS, probe_durations=True,
-        )
-
-    scan()
-    scan()
+    service._collect_prebuffer_segments('cam', now - 20, now)
+    service._collect_prebuffer_segments('cam', now - 20, now)
     assert sorted(calls) == ['segment-000.mp4', 'segment-001.mp4']
 
-    # The newest segment grows (a fragment landed): only it is re-probed.
+    # The newest segment grows (a fragment landed) WITHOUT invalidating the
+    # memoised timeline (a file write does not change the directory mtime):
+    # only it is re-probed, and its fresh end is used.
     paths[1].write_bytes(b'segment-with-a-fragment')
     os.utime(paths[1], (now + 1, now + 1))
     calls.clear()
-    scan()
+    refined = service._probe_window_segment_starts(
+        camera_dir,
+        service._segment_timeline(camera_dir, service.PREBUFFER_SEGMENT_GLOB, service.PREBUFFER_SEGMENT_SECONDS),
+        now - 20, now + 1,
+    )
     assert calls == ['segment-001.mp4']
+    assert refined[1][2] == pytest.approx(now + 1, abs=0.01)
+    assert refined[1][1] == pytest.approx(now + 1 - 6.0, abs=0.01)
 
     paths[0].unlink()
-    scan()
+    service._invalidate_segment_timeline_cache()
+    service._collect_prebuffer_segments('cam', now - 20, now + 1)
     assert str(paths[0]) not in service._segment_duration_cache
     assert str(paths[1]) in service._segment_duration_cache
 
 
-def test_audio_timeline_is_not_probed(tmp_path, monkeypatch):
-    """Only the video prebuffer probes; other timelines keep the estimate."""
+def test_segment_timeline_itself_never_probes(tmp_path, monkeypatch):
+    """The memoised timeline stays a cheap stat-only estimate (also used for
+    audio); probing happens only for the window being rendered."""
     service = _service(tmp_path)
     camera_dir = service.prebuffer_dir / 'cam'
     _write_segments(camera_dir, [time.time()])
@@ -180,15 +201,19 @@ def test_audio_timeline_is_not_probed(tmp_path, monkeypatch):
     assert calls == []
 
 
-@pytest.mark.skipif(
-    not (shutil.which('ffmpeg') and shutil.which('ffprobe')),
-    reason='needs real ffmpeg/ffprobe',
-)
 def test_render_of_six_second_keyframe_segments_keeps_full_window(tmp_path, monkeypatch):
     """End to end with real ffmpeg: segments written exactly like the ingest
     (4s segment_time, fragmented MP4, -c copy) from a 6s-keyframe source come
     out 6s long; the rendered clip must cover the full requested window instead
-    of a compressed, truncated one."""
+    of a compressed, truncated one.
+
+    CI installs ffmpeg for this test, so there a missing binary is a failure,
+    not a skip - otherwise the one test guarding this regression could go
+    silently dead. Local runs without ffmpeg skip."""
+    if not (shutil.which('ffmpeg') and shutil.which('ffprobe')):
+        if os.environ.get('CI'):
+            pytest.fail('ffmpeg/ffprobe must be installed in CI for this regression test')
+        pytest.skip('needs real ffmpeg/ffprobe')
     ffmpeg = shutil.which('ffmpeg')
     source = tmp_path / 'source.mp4'
     subprocess.run(

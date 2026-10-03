@@ -1795,9 +1795,8 @@ class RecordingService:
         the baked detection track all late together. Select by content overlap
         and report the first selected segment's content START.
         """
-        timed = self._segment_timeline(
-            camera_dir, self.PREBUFFER_SEGMENT_GLOB, self.PREBUFFER_SEGMENT_SECONDS, probe_durations=True,
-        )
+        timed = self._segment_timeline(camera_dir, self.PREBUFFER_SEGMENT_GLOB, self.PREBUFFER_SEGMENT_SECONDS)
+        timed = self._probe_window_segment_starts(camera_dir, timed, start_ts, end_ts)
         selected = [item for item in timed if item[2] > start_ts and item[1] < end_ts]
         if not selected:
             return [], None
@@ -1932,37 +1931,28 @@ class RecordingService:
         out.sort(key=lambda item: item[1])
         return out
 
-    def _segment_timeline(
-        self,
-        camera_dir: Path,
-        glob_pattern: str,
-        nominal_seconds: float,
-        *,
-        probe_durations: bool = False,
-    ) -> list[tuple[Path, float, float]]:
+    def _segment_timeline(self, camera_dir: Path, glob_pattern: str, nominal_seconds: float) -> list[tuple[Path, float, float]]:
         """Return ``(path, content_start_ts, content_end_ts)`` for every segment
         in ``camera_dir``, oldest first.
 
         A segment's mtime marks when ffmpeg finished writing it - its content
-        END. With ``probe_durations`` its content START is the end minus the
-        segment's real (ffprobe'd) duration. Segments split on the first
-        keyframe AFTER the nominal length, so their real length is set by the
-        camera's keyframe interval, not by ``nominal_seconds``: a camera with a
-        6s keyframe interval writes 6s segments from a 4s ``segment_time``.
-
-        Without a probe (or when it fails, e.g. on the segment still being
-        written) the START is estimated: the previous segment's end while the
-        stream is continuous, or the nominal length after a gap. That estimate
-        breaks down when the real length sits near ``nominal_seconds * 1.5``
-        (mtime jitter flips the gap test segment by segment), which is why the
-        video prebuffer probes.
+        END. Its content START is estimated: the previous segment's content end
+        while the stream is continuous, or the nominal length after a gap
+        (worker restart). The estimate is cheap (one stat per file) but breaks
+        down when a segment's real length sits near ``nominal_seconds * 1.5``:
+        segments close on the first keyframe AFTER the nominal length, so a
+        camera with a 6s keyframe interval writes 6s segments from a 4s
+        ``segment_time``, and mtime jitter flips the gap test segment by
+        segment. The video collector therefore replaces the estimate with a
+        probed duration for the segments it is about to render (see
+        :meth:`_probe_window_segment_starts`).
 
         Each file is stat()'d exactly once inside a try/except: the rolling
         pruner deletes segments concurrently, so a check-then-stat would race and
         raise FileNotFoundError out of the sort. Missing files are skipped.
 
         The result is memoised for ``SEGMENT_TIMELINE_CACHE_SECONDS`` so the
-        three scans one render performs collapse into one. A single directory
+        scans one render performs collapse into one. A single directory
         ``stat`` invalidates the entry when ffmpeg creates/finalises a segment
         or the pruner deletes one; explicit lifecycle invalidation remains as
         an immediate safeguard (see :meth:`_invalidate_segment_timeline_cache`).
@@ -1971,7 +1961,7 @@ class RecordingService:
             directory_mtime_ns = camera_dir.stat().st_mtime_ns
         except OSError:
             return []
-        cache_key = f'{camera_dir}|{glob_pattern}|{nominal_seconds}|{probe_durations}'
+        cache_key = f'{camera_dir}|{glob_pattern}|{nominal_seconds}'
         built_at = time.monotonic()
         with self._segment_timeline_lock:
             cached = self._segment_timeline_cache.get(cache_key)
@@ -1981,29 +1971,22 @@ class RecordingService:
                 and built_at - cached[0] < self.SEGMENT_TIMELINE_CACHE_SECONDS
             ):
                 return cached[2]
-        stamped: list[tuple[Path, os.stat_result]] = []
+        stamped: list[tuple[Path, float]] = []
         for segment in camera_dir.glob(glob_pattern):
             try:
-                stamped.append((segment, segment.stat()))
+                stamped.append((segment, segment.stat().st_mtime))
             except OSError:
                 continue
-        stamped.sort(key=lambda item: item[1].st_mtime)
-        if probe_durations:
-            self._prune_segment_duration_cache(camera_dir, {segment for segment, _ in stamped})
+        stamped.sort(key=lambda item: item[1])
         timed: list[tuple[Path, float, float]] = []
         prev_end: float | None = None
-        for segment, stat_result in stamped:
-            end = stat_result.st_mtime
-            probed = self._segment_duration_seconds(segment, stat_result) if probe_durations else None
-            if probed is not None:
-                start = end - probed
-            else:
-                # A small timing variance is normal at keyframe boundaries, but a
-                # gap materially larger than the segment's nominal duration means
-                # the worker missed one or more files. Keep that gap in the
-                # timeline instead of making later audio catch up to video.
-                gap = end - prev_end if prev_end is not None else None
-                start = prev_end if gap is not None and 0 < gap <= nominal_seconds * 1.5 else end - nominal_seconds
+        for segment, end in stamped:
+            # A small timing variance is normal at keyframe boundaries, but a
+            # gap materially larger than the segment's nominal duration means
+            # the worker missed one or more files. Keep that gap in the timeline
+            # instead of making later audio catch up to video.
+            gap = end - prev_end if prev_end is not None else None
+            start = prev_end if gap is not None and 0 < gap <= nominal_seconds * 1.5 else end - nominal_seconds
             timed.append((segment, start, end))
             prev_end = end
         with self._segment_timeline_lock:
@@ -2018,6 +2001,41 @@ class RecordingService:
         """Drop memoised segment timelines after a deletion or worker restart."""
         with self._segment_timeline_lock:
             self._segment_timeline_cache.clear()
+
+    def _probe_window_segment_starts(
+        self,
+        camera_dir: Path,
+        timed: list[tuple[Path, float, float]],
+        start_ts: float,
+        end_ts: float,
+    ) -> list[tuple[Path, float, float]]:
+        """Replace the estimated START of every segment that could overlap
+        ``[start_ts, end_ts]`` with ``end - probed duration``.
+
+        Only those candidates are probed - a segment that ends before the
+        window cannot overlap it whatever its length, and one ending more than
+        ``PREBUFFER_SEGMENT_MAX_PROBED_SECONDS`` after the window cannot start
+        inside it - so a long buffer costs nothing outside the clip being
+        rendered. Each candidate is re-stat'ed here (the timeline may be up to
+        ``SEGMENT_TIMELINE_CACHE_SECONDS`` old) and its probe is looked up by
+        file identity, so a segment that grew or closed since the timeline was
+        built is re-probed rather than read from a stale entry. Segments whose
+        probe fails (e.g. the one still being written) keep the estimate.
+        """
+        self._prune_segment_duration_cache(camera_dir, {segment for segment, _, _ in timed})
+        refined: list[tuple[Path, float, float]] = []
+        for segment, start, end in timed:
+            if end > start_ts and end - self.PREBUFFER_SEGMENT_MAX_PROBED_SECONDS < end_ts:
+                try:
+                    stat_result = segment.stat()
+                except OSError:
+                    continue
+                end = stat_result.st_mtime
+                probed = self._segment_duration_seconds(segment, stat_result)
+                if probed is not None:
+                    start = end - probed
+            refined.append((segment, start, end))
+        return refined
 
     def _segment_duration_seconds(self, segment: Path, stat_result: os.stat_result) -> float | None:
         """Real duration of one prebuffer segment, or None if it can't be read.
