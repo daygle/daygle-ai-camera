@@ -108,7 +108,6 @@ def test_pre_zero_renders_from_buffer_when_segments_exist(tmp_path, monkeypatch)
         service, '_collect_prebuffer_segments',
         lambda camera_key, start_ts, end_ts: ([fake_segment], content_start),
     )
-    monkeypatch.setattr(service, '_prebuffer_segment_durations', lambda camera_key, segments: {})
     monkeypatch.setattr(service, '_mux_prebuffer_audio', lambda *a, **k: False)
     monkeypatch.setattr(service, 'clip_has_video_stream', lambda file_path: True)
     monkeypatch.setattr(service, 'clip_duration_seconds', lambda file_path: 6.0)
@@ -178,7 +177,6 @@ def _render_capturing_diagnostics(tmp_path, monkeypatch, *, pre_seconds, buffere
         service, '_collect_prebuffer_segments',
         lambda camera_key, start_ts, end_ts: ([fake_segment], content_start_ts),
     )
-    monkeypatch.setattr(service, '_prebuffer_segment_durations', lambda camera_key, segments: {})
     monkeypatch.setattr(service, '_mux_prebuffer_audio', lambda *a, **k: False)
     monkeypatch.setattr(service, 'clip_has_video_stream', lambda file_path: True)
     monkeypatch.setattr(service, 'clip_duration_seconds', lambda file_path: 6.0)
