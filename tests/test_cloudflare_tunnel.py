@@ -150,6 +150,30 @@ def test_spawn_passes_no_autoupdate_and_captures_output(monkeypatch) -> None:
     assert kwargs["stdout"] is subprocess.PIPE
     assert kwargs["stderr"] is subprocess.STDOUT
     assert kwargs["env"]["TUNNEL_TOKEN"] == "secret-token"
+    # Start-up chatter (pre-check table, per-connection lines) is info-level;
+    # warnings and errors still reach the application log.
+    assert kwargs["env"]["TUNNEL_LOGLEVEL"] == "warn"
+
+
+def test_connector_log_level_can_be_overridden_from_environment(monkeypatch) -> None:
+    """An operator debugging a tunnel can raise cloudflared's verbosity
+    without a code change."""
+    recorded: dict[str, object] = {}
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            recorded["env"] = kwargs["env"]
+            self.stdout = None
+            self.returncode = 0
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    monkeypatch.setenv("TUNNEL_LOGLEVEL", "info")
+    SubprocessCloudflared("cloudflared").start("secret-token")
+
+    assert recorded["env"]["TUNNEL_LOGLEVEL"] == "info"
 
 
 def test_connector_output_is_logged_with_token_redacted(caplog) -> None:

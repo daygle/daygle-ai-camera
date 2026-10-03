@@ -43,6 +43,16 @@ TOKEN_FILE_NAME = "cloudflare_tunnel.token"
 # fails with "flag provided but not defined" and exits 0 straight away.
 NO_AUTOUPDATE_FLAG = "--no-autoupdate"
 
+# cloudflared logs at info by default: a connectivity pre-check table, curve
+# preferences and a "Registered tunnel connection" line per edge connection on
+# every start, all forwarded into the application log. Warn keeps what is
+# needed to diagnose a dead tunnel (token rejection, DNS/edge failures, the
+# exit status logged below) without the start-up chatter. Set through
+# cloudflared's own environment variables rather than ``--loglevel`` so there
+# is no flag position to get wrong (see NO_AUTOUPDATE_FLAG); an operator can
+# still override them, e.g. TUNNEL_LOGLEVEL=info, when debugging a tunnel.
+CLOUDFLARED_LOG_LEVEL_ENV = {"TUNNEL_LOGLEVEL": "warn"}
+
 # How often the supervisor checks a connector that should be alive, and the
 # bounded backoff applied between restart attempts when a respawn keeps dying
 # (a bad token, a missing binary, or a blocked network all look like this).
@@ -212,6 +222,8 @@ class SubprocessCloudflared:
     def start(self, token: str) -> None:
         child_env = os.environ.copy()
         child_env["TUNNEL_TOKEN"] = token
+        for name, value in CLOUDFLARED_LOG_LEVEL_ENV.items():
+            child_env.setdefault(name, value)
         self._process = subprocess.Popen(
             [self.binary, "tunnel", NO_AUTOUPDATE_FLAG, "run"],
             env=child_env,
