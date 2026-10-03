@@ -150,6 +150,30 @@ def test_spawn_passes_no_autoupdate_and_captures_output(monkeypatch) -> None:
     assert kwargs["stdout"] is subprocess.PIPE
     assert kwargs["stderr"] is subprocess.STDOUT
     assert kwargs["env"]["TUNNEL_TOKEN"] == "secret-token"
+    # Start-up chatter (pre-check table, per-connection lines) is info-level;
+    # warnings and errors still reach the application log.
+    assert kwargs["env"]["TUNNEL_LOGLEVEL"] == "warn"
+
+
+def test_connector_log_level_can_be_overridden_from_environment(monkeypatch) -> None:
+    """An operator debugging a tunnel can raise cloudflared's verbosity
+    without a code change."""
+    recorded: dict[str, object] = {}
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            recorded["env"] = kwargs["env"]
+            self.stdout = None
+            self.returncode = 0
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    monkeypatch.setenv("TUNNEL_LOGLEVEL", "info")
+    SubprocessCloudflared("cloudflared").start("secret-token")
+
+    assert recorded["env"]["TUNNEL_LOGLEVEL"] == "info"
 
 
 def test_connector_output_is_logged_with_token_redacted(caplog) -> None:
@@ -176,6 +200,45 @@ def test_connector_output_is_logged_with_token_redacted(caplog) -> None:
     assert "Registered tunnel connection" in caplog.text
     assert "secret-token" not in caplog.text
     assert "<redacted>" in caplog.text
+
+
+def test_client_closed_stream_errors_are_not_forwarded_at_info(caplog) -> None:
+    """A viewer closing a streamed response logs ERR "stream N canceled by
+    remote with error code 0" (plus a matching "Request failed"); that normal
+    close stays out of the application log, while other errors still reach it."""
+    import io
+
+    output = (
+        b'2026-10-03T13:11:12Z ERR error="stream 29 canceled by remote with error code 0" '
+        b'connIndex=0 event=1 ingressRule=0 originService=http://127.0.0.1:8080\n'
+        b'2026-10-03T13:11:12Z ERR Request failed error="stream 29 canceled by remote with error code 0" '
+        b'connIndex=0 dest=https://example.test/api/application-log/stream event=0 type=http\n'
+        b'2026-10-03T13:11:13Z ERR error="stream 31 canceled by remote with error code 2" connIndex=0\n'
+        b'2026-10-03T13:11:14Z ERR Failed to dial a quic connection error="timeout"\n'
+    )
+    connector = SubprocessCloudflared("cloudflared")
+    stream = io.BytesIO(output)
+    stream.close = lambda: None  # type: ignore[method-assign]
+
+    class Stub:
+        stdout = stream
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    connector._process = Stub()  # type: ignore[assignment]
+    with caplog.at_level(logging.DEBUG):
+        connector._drain_output("secret-token")
+
+    forwarded = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
+    debug = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
+    assert not any("error code 0" in line for line in forwarded)
+    assert len([line for line in debug if "error code 0" in line]) == 2
+    assert any("error code 2" in line for line in forwarded)
+    assert any("Failed to dial a quic connection" in line for line in forwarded)
 
 
 def test_supervisor_restarts_a_dead_connector() -> None:

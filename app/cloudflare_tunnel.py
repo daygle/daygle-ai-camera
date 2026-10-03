@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,23 @@ TOKEN_FILE_NAME = "cloudflare_tunnel.token"
 # It is a flag of ``tunnel``, not of ``run``: ``tunnel run --no-autoupdate``
 # fails with "flag provided but not defined" and exits 0 straight away.
 NO_AUTOUPDATE_FLAG = "--no-autoupdate"
+
+# cloudflared logs at info by default: a connectivity pre-check table, curve
+# preferences and a "Registered tunnel connection" line per edge connection on
+# every start, all forwarded into the application log. Warn keeps what is
+# needed to diagnose a dead tunnel (token rejection, DNS/edge failures, the
+# exit status logged below) without the start-up chatter. Set through
+# cloudflared's own environment variables rather than ``--loglevel`` so there
+# is no flag position to get wrong (see NO_AUTOUPDATE_FLAG); an operator can
+# still override them, e.g. TUNNEL_LOGLEVEL=info, when debugging a tunnel.
+CLOUDFLARED_LOG_LEVEL_ENV = {"TUNNEL_LOGLEVEL": "warn"}
+
+# A viewer closing a streamed response (e.g. leaving the live application-log
+# page) makes cloudflared log two ERR lines - "stream N canceled by remote with
+# error code 0" and a matching "Request failed" - even at warn level. Error
+# code 0 is a normal close, not a fault, so these go to DEBUG instead of the
+# application log. Any other cancel code or error is still forwarded.
+CLIENT_CLOSED_STREAM_PATTERN = re.compile(r"\bstream \d+ canceled by remote with error code 0\b")
 
 # How often the supervisor checks a connector that should be alive, and the
 # bounded backoff applied between restart attempts when a respawn keeps dying
@@ -212,6 +230,8 @@ class SubprocessCloudflared:
     def start(self, token: str) -> None:
         child_env = os.environ.copy()
         child_env["TUNNEL_TOKEN"] = token
+        for name, value in CLOUDFLARED_LOG_LEVEL_ENV.items():
+            child_env.setdefault(name, value)
         self._process = subprocess.Popen(
             [self.binary, "tunnel", NO_AUTOUPDATE_FLAG, "run"],
             env=child_env,
@@ -237,7 +257,8 @@ class SubprocessCloudflared:
             for raw in iter(stream.readline, b""):
                 line = _redact_token(raw.decode("utf-8", "replace").strip(), token)
                 if line:
-                    logger.info("cloudflared: %s", line)
+                    level = logging.DEBUG if CLIENT_CLOSED_STREAM_PATTERN.search(line) else logging.INFO
+                    logger.log(level, "cloudflared: %s", line)
         except (OSError, ValueError):
             # The pipe closes on terminate/kill; a read failure here is the
             # normal end of a connector shutdown, not an application error.
