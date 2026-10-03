@@ -160,6 +160,12 @@ def extend_active_rtsp_recording(
     with _state.active_rtsp_recordings_lock:
         session = _state.active_rtsp_recordings.get(camera_id)
         if not session:
+            # Failure: no clip is capturing for this camera, so nothing can be
+            # extended (the caller may start a fresh capture instead).
+            logger.debug(
+                'Recording extension skipped for camera %s at %s: reason=no_active_session',
+                camera_id, event_time,
+            )
             return None
         current_deadline = float(session.get('capture_deadline_ts') or 0)
         max_deadline = float(session.get('max_capture_deadline_ts') or current_deadline)
@@ -171,9 +177,26 @@ def extend_active_rtsp_recording(
             # every new recording for the camera, so retire it and let the
             # caller start a fresh capture.
             _state.active_rtsp_recordings.pop(camera_id, None)
+            logger.debug(
+                'Recording extension skipped for camera %s at %s: reason=stale_session_retired '
+                'recording_id=%s past_max_deadline=%.1fs',
+                camera_id, event_time, session.get('recording_id'), time.time() - max_deadline,
+            )
             return None
         new_deadline = min(max_deadline, max(current_deadline, extend_until))
         if new_deadline <= current_deadline:
+            # Not a failure: the event stays attached to this clip, the deadline
+            # just does not move. ``already_covered`` means an earlier extension
+            # already reaches past this event's horizon (the normal case while
+            # an object stays in view); ``max_clip_reached`` means the horizon
+            # would move it but Max Clip Duration caps it.
+            logger.debug(
+                'Recording extension not moved for camera %s at %s: reason=%s recording_id=%s '
+                'horizon_vs_deadline=%+.1fs',
+                camera_id, event_time,
+                'max_clip_reached' if extend_until > current_deadline else 'already_covered',
+                session.get('recording_id'), extend_until - current_deadline,
+            )
             return int(session.get('recording_id'))
         session['capture_deadline_ts'] = new_deadline
         start_ts = float(session.get('start_capture_ts') or new_deadline)
