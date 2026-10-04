@@ -390,6 +390,18 @@ def test_persistent_immature_track_biases_to_still():
     assert os.detection_motion_state(persistent, _mask_changed_inside_box(), None) == 'still'
 
 
+def test_persistent_immature_track_that_stepped_across_the_frame_is_moving():
+    """The still bias guards a parked car's flapping mask, not a subject the
+    tracker followed across the frame: a walker matched by motion at age 2 has
+    a two-point step far beyond detector jitter, and must survive Moving Only."""
+    walker = {**_det('person'), 'track_id': 7, 'track_age': 2,
+              'track_prev_center': (0.115, 0.375), 'track_center': (0.170, 0.375)}
+    assert os.detection_motion_state(walker, _mask_none_changed(), None) == 'moving'
+    jitter = {**_det('car'), 'track_id': 5, 'track_age': 2,
+              'track_prev_center': (0.500, 0.500), 'track_center': (0.504, 0.498)}
+    assert os.detection_motion_state(jitter, _mask_all_changed(), None) == 'still'
+
+
 def test_brand_new_track_still_uses_mask_so_fast_cars_are_not_lost():
     """A brand-new (age 1) detection keeps the mask verdict. This is critical:
     a fast car moves too far to IoU-match its own prior box, so it opens a new

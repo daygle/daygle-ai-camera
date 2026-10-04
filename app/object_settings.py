@@ -114,6 +114,10 @@ _MOVING_MIN_CHANGED_PIXELS = 2
 # box jitter for a parked subject and far below any real traverse, so the
 # override only fires on clear-cut cases and the mask keeps everything else.
 _TRACK_DISPLACEMENT_STILL = 0.01
+# A single cycle-to-cycle center step that cannot be detector jitter on a
+# stationary box (that wobble is well under 1% of the frame). Used only for
+# age-2 tracks, before the windowed displacement is available.
+_TRACK_STEP_MOVING = 0.03
 _TRACK_DISPLACEMENT_MIN_AGE = 3
 
 
@@ -423,6 +427,15 @@ def update_still_dwell_alerts(
         return emitted
 
 
+def _two_point_step(detection: dict[str, Any]) -> float | None:
+    """Larger-axis distance between a track's previous and current centers."""
+    current, previous = detection.get('track_center'), detection.get('track_prev_center')
+    try:
+        return max(abs(float(current[0]) - float(previous[0])), abs(float(current[1]) - float(previous[1])))
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
 def detection_motion_state(
     detection: dict[str, Any],
     diff_mask: Any,
@@ -472,6 +485,14 @@ def detection_motion_state(
         except (TypeError, ValueError):
             track_age = 0
         if detection.get('track_id') is not None and 2 <= track_age < _TRACK_DISPLACEMENT_MIN_AGE:
+            # Exception: a track whose box stepped clearly across the frame
+            # since its first sighting is moving, not a flapping parked car. The
+            # tracker matches a walking subject by its motion once its box no
+            # longer overlaps the previous one, so without this the second
+            # sighting of every walker would be dropped under Moving Only.
+            step = _two_point_step(detection)
+            if step is not None and step >= _TRACK_STEP_MOVING:
+                return MODE_MOVING
             return MODE_STILL
     if diff_mask is None:
         return MODE_STILL

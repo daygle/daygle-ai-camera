@@ -173,6 +173,34 @@ test('sampleTrackAtTime bridges two consecutive missed samples', () => {
 });
 
 
+test('matchDetection falls back to geometry when the target id is absent (churned id)', () => {
+  const previous = { label: 'person', track_id: 550, box: box(0.40) };
+  const target = { label: 'person', track_id: 554, box: box(0.45) };
+  assert.equal(sandbox.matchDetection([previous], target).track_id, 550);
+});
+
+
+test('matchDetection still refuses a closer box with a different id when the target id is present', () => {
+  // Two people crossing: the target's own track is in the candidate list, so
+  // the nearer box belonging to someone else must not be chosen.
+  const own = { label: 'person', track_id: 9, box: box(0.60) };
+  const other = { label: 'person', track_id: 4, box: box(0.50) };
+  const target = { label: 'person', track_id: 9, box: box(0.51) };
+  assert.equal(sandbox.matchDetection([own, other], target).track_id, 9);
+});
+
+
+test('sampleTrackAtTime interpolates across samples whose track ids churned', () => {
+  const churned = [
+    { t: 30.91, detections: [{ label: 'person', track_id: 550, confidence: 0.9, box: box(0.40) }] },
+    { t: 32.32, detections: [{ label: 'person', track_id: 554, confidence: 0.9, box: box(0.50) }] },
+  ];
+  const sampled = sandbox.sampleTrackAtTime(churned, 31.615);
+  assert.equal(sampled.length, 1);
+  assert.ok(Math.abs(sampled[0].box.x - 0.45) < 1e-6, String(sampled[0].box.x));
+});
+
+
 test('normalizeDetectionBox maps pixel boxes into normalized coordinates', () => {
   assert.deepEqual(
     JSON.parse(JSON.stringify(sandbox.normalizeDetectionBox({ x: 320, y: 180, width: 160, height: 90 }, 1280, 720))),

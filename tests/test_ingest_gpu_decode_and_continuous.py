@@ -98,6 +98,8 @@ def ingest(tmp_path, monkeypatch):
     service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
     monkeypatch.setattr(recordings_module.time, 'sleep', lambda _s: None)
+    # Fake ffmpeg: keep the frame-clock capability probe off the patched Popen.
+    monkeypatch.setattr(recordings_module, 'stream_frame_stats_supported', lambda _ffmpeg: False)
     commands: list[list[str]] = []
     diagnostics: list[str] = []
     monkeypatch.setattr(service, '_emit_diagnostic', lambda _cam, kind, *_a, **_k: diagnostics.append(kind))

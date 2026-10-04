@@ -18,6 +18,12 @@ from typing import Any, Callable
 import app.state as _state
 from app.camera_id import camera_storage_key
 from app.detection_status import json_safe_detections
+from app.frame_capture_clock import (
+    FrameCaptureClock,
+    detection_frame_output_args,
+    segment_list_args,
+    stream_frame_stats_supported,
+)
 from app.video_decode import (
     hwaccel_input_args,
     is_gpu_decode_error,
@@ -223,6 +229,9 @@ class RecordingService:
         self._shared_continuous: dict[str, dict[str, Any]] = {}
         # Decoder each camera's ingest is using ('gpu' / 'cpu'), for status.
         self._ingest_decode: dict[str, dict[str, Any]] = {}
+        # Maps each camera's decoded detection frames onto the clip clock (see
+        # app.frame_capture_clock); latest_frame_jpeg reads it.
+        self._frame_clock = FrameCaptureClock()
         self._missing_ffmpeg_warnings: set[str] = set()
         # Final audio muxes are serialized because each operation creates a
         # second copy of a clip on the recordings filesystem. Concurrent
@@ -1414,6 +1423,12 @@ class RecordingService:
             _live_config = effective_camera_live_settings(camera_config, _live_config)
             _ingest_fps = int(_live_config.get('ingest_frame_fps', self.INGEST_FRAME_FPS))
             _snapshot_quality = int(_live_config.get('snapshot_quality', self.SNAPSHOT_QUALITY))
+            # Pipe for the detection frames' stream times (see
+            # app.frame_capture_clock); without it frames keep the mtime stamp.
+            stats_read_fd: int | None = None
+            stats_write_fd: int | None = None
+            if stream_frame_stats_supported(ffmpeg):
+                stats_read_fd, stats_write_fd = os.pipe()
             command = [
                 ffmpeg,
                 '-nostdin',
@@ -1449,14 +1464,16 @@ class RecordingService:
                 'movflags=+frag_keyframe+empty_moov+default_base_moof',
                 '-strftime',
                 '1',
+                *(segment_list_args(camera_dir) if stats_write_fd is not None else []),
                 str(output_pattern),
                 # Output 2: latest decoded frame for object detection + snapshots.
                 # Written to a temp name then atomically renamed so a reader never
                 # sees a half-written JPEG. -update overwrites the same target.
                 '-map',
                 '0:v:0',
-                '-vf',
-                f'fps={_ingest_fps}',
+                # fps-limited frames; with a stats pipe they keep their own
+                # timestamps and report them for the capture clock.
+                *detection_frame_output_args(_ingest_fps, stats_write_fd),
                 # JPEG quality on mjpeg's 2-31 scale (lower=better) so the live
                 # snapshot matches the old OpenCV-encoded quality; ffmpeg's mjpeg
                 # default is noticeably more compressed. Operator-overridable via
@@ -1545,8 +1562,14 @@ class RecordingService:
             stderr_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
             stderr_path = Path(stderr_file.name)
             try:
-                process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr_file)
+                process = subprocess.Popen(
+                    command, stdout=subprocess.DEVNULL, stderr=stderr_file,
+                    pass_fds=(stats_write_fd,) if stats_write_fd is not None else (),
+                )
             except OSError as exc:
+                for fd in (stats_read_fd, stats_write_fd):
+                    if fd is not None:
+                        os.close(fd)
                 # ffmpeg vanished between the which() guard and exec (binary
                 # removed/upgraded mid-run). Mirror the dead-link path: close
                 # the log, count the failure, throttle the warning, back off.
@@ -1570,6 +1593,13 @@ class RecordingService:
                 stop_event.wait(self.PREBUFFER_RECONNECT_BACKOFF_BASE_SECONDS)
                 continue
             stderr_file.close()
+            if stats_write_fd is not None and stats_read_fd is not None:
+                # ffmpeg holds its own copy; closing ours lets the reader see
+                # EOF when ffmpeg exits.
+                os.close(stats_write_fd)
+                self._frame_clock.attach(camera_key, stats_read_fd, camera_dir)
+            else:
+                self._frame_clock.detach(camera_key)
             ffmpeg_started_at = time.time()
             restart_reason = 'process_exit'
             try:
@@ -1860,10 +1890,13 @@ class RecordingService:
 
     def latest_frame_jpeg(self, camera_id: str, *, max_age_seconds: float = 30.0) -> tuple[bytes, float] | None:
         """Most recent decoded frame the ingest wrote for this camera, as
-        (jpeg_bytes, captured_ts). ``captured_ts`` is the file mtime - when
-        ffmpeg wrote the frame - so detection samples and playback overlays stay
-        aligned. Returns None when no fresh frame is available (ingest warming
-        up, camera offline, or ffmpeg unavailable)."""
+        (jpeg_bytes, captured_ts). ``captured_ts`` is the frame's place on the
+        clip clock (see app.frame_capture_clock) so detection samples line up
+        with recorded footage; until that is known it is the file mtime - when
+        ffmpeg finished decoding and wrote the frame, which trails capture.
+        Never decreases per camera. Returns
+        None when no fresh frame is available (ingest warming up, camera
+        offline, or ffmpeg unavailable)."""
         path = self.frames_dir / self._camera_key(camera_id) / 'latest.jpg'
         # Open once and use fstat so the mtime and bytes come from the same
         # inode - eliminates the TOCTOU race between a separate stat() and
@@ -1900,7 +1933,7 @@ class RecordingService:
             os.close(fd)
         if not data:
             return None
-        return data, mtime
+        return data, self._frame_clock.stamp(self._camera_key(camera_id), mtime)
 
     def audio_segments_after(self, camera_id: str, after_ts: float) -> list[tuple[Path, float]]:
         """Audio WAV segments written strictly after ``after_ts``, oldest first,
