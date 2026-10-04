@@ -55,16 +55,20 @@ import app.state as _state
 TRACK_DISPLACEMENT_HISTORY = 8
 TRACK_DISPLACEMENT_MIN_AGE = 3
 TRACK_STILL_DISPLACEMENT = 0.01
-# Detector box-size jitter, as a fraction of the box's own larger side, below
-# which a scale change is not evidence of motion. Edge jitter is proportional to
-# box size, so an absolute threshold alone is size-dependent: a large parked box
-# (a car close to the lens) crossing the threshold while a small one does not.
-# Both a real depth-axis subject and the noise scale with the box, so the
-# discriminator has to be RELATIVE. Measured: a head-on approach in the
-# detectable band is ~13% relative growth over the half window, and distant
-# approaches that remain unreadable sit at ~2.5% -- the same order as jitter, so
-# they cannot be separated from it no matter the threshold.
+# Detector box-size jitter, as a fraction of the box's own larger side. Edge
+# jitter is proportional to box size, so a fixed threshold on an absolute size
+# change is size-dependent: a large parked box (a car close to the lens) crosses
+# it while a small one does not. Both a real depth-axis subject and the detector
+# noise scale with the box, so the scale term is measured and thresholded in
+# RELATIVE units -- see ``TRACK_SIZE_REFERENCE``.
 TRACK_SIZE_JITTER_FRACTION = 0.05
+# Converts a RELATIVE size change into the normalized-frame units the still
+# threshold uses: ``TRACK_SIZE_JITTER_FRACTION`` of relative growth is exactly
+# ``TRACK_STILL_DISPLACEMENT`` of signal. This keeps the verdict independent of
+# how large the box happens to be -- a subject that moves 5% closer grows its
+# box 5% whether it is 3 m or 20 m away -- and keeps the noise band (a few
+# percent of the box) below the threshold without a separate gate.
+TRACK_SIZE_REFERENCE = TRACK_STILL_DISPLACEMENT / TRACK_SIZE_JITTER_FRACTION
 
 # Motion-gated fallback for detections no track overlaps. At a 0.5-1.5s cycle a
 # walking person (a narrow box) moves further than its own width between
@@ -128,9 +132,8 @@ def _recent_displacement(track: dict[str, Any]) -> float | None:
     subject below the still threshold and the classifier *overrode* the motion
     mask to call it still.
 
-    A scale change smaller than ``TRACK_SIZE_JITTER_FRACTION`` of the box's own
-    size is discarded as detector noise, so the verdict is independent of how
-    large the box happens to be.
+    The scale term is thresholded in relative units (``TRACK_SIZE_REFERENCE``),
+    so the verdict is independent of how large the box happens to be.
 
     Comparing the two halves' *means* rejects per-cycle detector jitter: a
     stationary box wobbles symmetrically around its true center and size, so
@@ -182,14 +185,16 @@ def _recent_displacement(track: dict[str, Any]) -> float | None:
     except (TypeError, ValueError):
         return None
     translation = max(abs(newer_x - older_x), abs(newer_y - older_y))
-    scale_change = abs(newer_size - older_size)
     mean_size = (newer_size + older_size) / 2.0
-    # Reject scale change inside this box's own jitter band. Comparing against
-    # the box's size rather than a fixed absolute amount is what keeps a large
-    # parked box and a small one equally immune to the same relative noise.
-    if mean_size > 0.0 and scale_change <= TRACK_SIZE_JITTER_FRACTION * mean_size:
-        scale_change = 0.0
-    return max(translation, scale_change)
+    # The scale term is compared in RELATIVE units: growth divided by the box's
+    # own size, rescaled so that TRACK_SIZE_JITTER_FRACTION of relative growth
+    # is exactly TRACK_STILL_DISPLACEMENT of signal. An absolute measure would
+    # make a small object's identical relative growth read as no motion at all,
+    # and would let a large parked box cross the threshold on detector drift.
+    if mean_size <= 0.0:
+        return translation
+    scale_signal = (abs(newer_size - older_size) / mean_size) * TRACK_SIZE_REFERENCE
+    return max(translation, scale_signal)
 
 
 def _iou(box_a: dict[str, Any], box_b: dict[str, Any]) -> float:

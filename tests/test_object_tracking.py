@@ -217,31 +217,40 @@ def test_approaching_subject_reports_motion_from_scale_alone():
     assert os_.detection_motion_state(out[0], quiet, out[0]['track_displacement']) == os_.MODE_MOVING
 
 
-def test_scale_term_is_only_visible_on_boxes_above_a_tenth_of_frame():
-    """DOCUMENTED LIMITATION, not a desired behaviour -- pinned so it cannot
-    change silently.
+def test_scale_term_verdict_is_independent_of_box_size():
+    """The same relative growth must give the same verdict whatever the box size.
 
-    The jitter gate is RELATIVE (noise scales with the box) but the still
-    threshold the result is compared against is ABSOLUTE (0.01 of frame), so a
-    small object's genuinely large relative growth produces a small absolute
-    number and is rejected. Measured: an approach with identical ~13% relative
-    growth per half window is visible only once the box exceeds ~0.11 of frame.
-
-    Fixing this properly means the scale term's threshold has to be relative
-    too, which changes the meaning of ``track_displacement``. That is a design
-    decision to be taken deliberately, not smuggled into this PR.
+    Previously the scale term was thresholded in ABSOLUTE units while its noise
+    is proportional to the box, so a small object's identical relative growth
+    read as no motion and a large parked box cleared the bar on detector drift
+    alone -- measured at the time as a hard visibility floor around 0.11 of
+    frame. Thresholding the term in relative units removes both halves of that.
     """
-    for size, expect in ((0.05, os_.MODE_STILL), (0.20, os_.MODE_MOVING)):
-        cam = f'trk-disp-sizebound-{size}'
+    quiet = np.zeros((72, 128), dtype=bool)
+
+    def displacement(size, growth_per_cycle):
+        cam = f'trk-disp-sizeinv-{size}-{growth_per_cycle}'
         _reset(cam)
         out = None
         for step in range(8):
-            grown = size * (1 + 0.16 * step / 7)
+            grown = size * (1 + growth_per_cycle * step / 7)
             out = ot.update_object_tracks(cam, [
                 _det('car', 0.50 - grown / 2, 0.50 - grown / 2, grown, grown)])
-        quiet = np.zeros((72, 128), dtype=bool)
-        state = os_.detection_motion_state(out[0], quiet, out[0]['track_displacement'])
-        assert state == expect, f'box side {size}: got {state}, expected {expect}'
+        return out[0]['track_displacement']
+
+    # Approaching: identical relative growth, boxes 11x apart in size. The
+    # signal is now identical too, not merely both above threshold.
+    small, large = displacement(0.05, 0.16), displacement(0.55, 0.16)
+    assert small == pytest.approx(large, abs=1e-9)
+    assert small > ot.TRACK_STILL_DISPLACEMENT
+    assert os_.detection_motion_state(_det('car', 0.3, 0.3), quiet, small) == os_.MODE_MOVING
+
+    # Drifting: identical relative detector noise, again 11x apart. Both must
+    # stay still -- the large box used to be the exposed one.
+    small, large = displacement(0.05, 0.04), displacement(0.55, 0.04)
+    assert small == pytest.approx(large, abs=1e-9)
+    assert small <= ot.TRACK_STILL_DISPLACEMENT
+    assert os_.detection_motion_state(_det('car', 0.3, 0.3), quiet, small) == os_.MODE_STILL
 
 
 def test_distant_approach_is_still_still_under_both_measures():
@@ -383,8 +392,12 @@ def test_approaching_subject_size_annotations_are_exposed():
     second = ot.update_object_tracks(cam, [_det('person', 0.50, 0.57, 0.06, 0.06)])[0]
     assert second['track_size'] == pytest.approx(0.06)
     assert second['track_prev_size'] == pytest.approx(0.04)
-    # Center barely moved, but the box grew 0.02 -- a real single-cycle step.
-    assert os_._two_point_step(second) == pytest.approx(0.02, abs=1e-6)
+    # The box grew 0.02 on a mean size of 0.05 -- 40% relative, far above the
+    # 5% jitter band. The step is reported in the units ``_TRACK_STEP_MOVING``
+    # is expressed in, so 40% of jitter-band reference == 0.24, and it clears
+    # the age-2 threshold regardless of the box's absolute size.
+    assert os_._two_point_step(second) == pytest.approx(0.24, abs=1e-9)
+    assert os_._two_point_step(second) >= os_._TRACK_STEP_MOVING
 
 
 def test_approaching_person_survives_the_age_two_bias():
