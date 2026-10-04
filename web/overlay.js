@@ -184,6 +184,15 @@ function matchDetection(candidates, target) {
   let bestHasTrackMatch = false;
   let nearest = null;
   let nearestDist = Infinity;
+  // The id guard below only applies when the target's own id is among the
+  // candidates. If it is absent, the tracker re-identified the object between
+  // samples (older tracks churned a new id whenever a subject outran its own
+  // box), so a differing id proves nothing and geometry has to decide;
+  // otherwise every churned sample snapped to its own box instead of
+  // interpolating.
+  const targetIdPresent = Boolean(targetTrackId) && candidates.some(
+    (candidate) => Number.isInteger(candidate?.track_id) && candidate.track_id === targetTrackId,
+  );
   for (const candidate of candidates) {
     if (String(candidate?.label || '').toLowerCase() !== targetLabel) continue;
     const candidateTrackId = Number.isInteger(candidate?.track_id) && candidate.track_id > 0 ? candidate.track_id : null;
@@ -191,7 +200,7 @@ function matchDetection(candidates, target) {
     // same-class objects cross. Without this guard interpolation can jump a
     // box from one person/car to the other, which looks like a delayed or
     // drifting overlay even when the timestamps are correct.
-    if (targetTrackId && candidateTrackId && targetTrackId !== candidateTrackId) continue;
+    if (targetIdPresent && candidateTrackId && targetTrackId !== candidateTrackId) continue;
     const hasTrackMatch = targetTrackId && candidateTrackId === targetTrackId;
     if (!candidate?.box || !targetBox) {
       if (!nearest) nearest = candidate;
