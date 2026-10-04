@@ -77,8 +77,8 @@ def test_ai_crop_and_prompt_ignore_track_and_motion_annotations(ata):
         'label': 'person', 'x': 0.30, 'y': 0.35, 'width': 0.20, 'height': 0.30,
         'track_id': 550, 'track_age': 9, 'track_new': False,
         'track_displacement': 0.042, 'track_center': (0.40, 0.50),
-        'track_prev_center': (0.38, 0.50), 'track_size': 0.30,
-        'track_prev_size': 0.26, 'motion_state': 'moving',
+        'track_prev_center': (0.38, 0.50), 'track_box': (0.30, 0.35, 0.20, 0.30),
+        'track_prev_box': (0.32, 0.36, 0.18, 0.27), 'motion_state': 'moving',
     }]
 
     # The crop handed to the model must be byte-identical.
@@ -99,8 +99,8 @@ def test_ai_verification_and_tag_alerts_never_reference_motion_verdicts():
     from app import ai_tag_alerts, ai_verification
 
     forbidden = (
-        'track_displacement', 'track_prev_center', 'track_prev_size',
-        'track_size', 'track_center', 'track_age', 'motion_state',
+        'track_displacement', 'track_prev_center', 'track_prev_box',
+        'track_box', 'track_center', 'track_age', 'motion_state',
     )
     for module in (ai_verification, ai_tag_alerts):
         source = Path(module.__file__).read_text(encoding='utf-8')

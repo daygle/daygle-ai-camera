@@ -74,6 +74,11 @@ from typing import Any
 
 import app.state as _state
 from app.label_groups import cached_label_groups
+# Shared rather than copied: the tuning constants above are duplicated in
+# app/object_tracking.py on purpose, but this is logic with real branches, and
+# two copies of it would drift. Importing is safe -- object_tracking imports
+# only app.state.
+from app.object_tracking import _extent_unstable
 from app.runtime_config import cached_snapshot
 from app.zone_schema import canonical_label
 
@@ -445,6 +450,9 @@ def update_still_dwell_alerts(
 def _two_point_step(detection: dict[str, Any]) -> float | None:
     """Largest single-cycle change in a track's box, in normalized frame units.
 
+    Returns 0.0 when the two sightings disagree about box shape while one sits
+    inside the other -- the same object drawn at two extents, not motion.
+
     The larger of the box-center move and the box's own growth/shrink. The
     scale half is what catches a subject walking toward the camera (or a car
     driving away from it) between its first and second sighting: such a box
@@ -456,12 +464,19 @@ def _two_point_step(detection: dict[str, Any]) -> float | None:
         step = max(abs(float(current[0]) - float(previous[0])), abs(float(current[1]) - float(previous[1])))
     except (TypeError, ValueError, IndexError):
         return None
-    current_size, previous_size = detection.get('track_size'), detection.get('track_prev_size')
-    if current_size is not None and previous_size is not None:
+    current_box, previous_box = detection.get('track_box'), detection.get('track_prev_box')
+    if current_box is not None and previous_box is not None:
         try:
-            current_size, previous_size = float(current_size), float(previous_size)
-        except (TypeError, ValueError):
+            current_size = max(float(current_box[2]), float(current_box[3]))
+            previous_size = max(float(previous_box[2]), float(previous_box[3]))
+        except (TypeError, ValueError, IndexError):
             return step
+        # The same object drawn at two extents is not motion: a roof-only box
+        # inside a whole-vehicle box moves the centre by far more than the step
+        # threshold, so without this a parked car is read as moving on its
+        # second sighting and survives a Moving Only rule.
+        if _extent_unstable(tuple(current_box[:4]), tuple(previous_box[:4])):
+            return 0.0
         mean_size = (current_size + previous_size) / 2.0
         # Thresholded in RELATIVE units, so a small object's identical relative
         # growth is not silently discarded and a large parked box cannot clear

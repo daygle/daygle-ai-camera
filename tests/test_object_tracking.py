@@ -258,7 +258,7 @@ def test_long_range_slow_approach_is_the_honest_remaining_miss():
     threshold and reads still.
 
     An earlier version of this test pinned the miss at 12m using a box with a
-    FIXED width while only the height grew. ``_size_of`` returns max(w, h), so
+    FIXED width while only the height grew. The measured size is max(w, h), so
     the constant width clamped the measure and zeroed the scale term -- the
     same measurement artifact that produced a wrong distance bound in the PR
     description. With a proportional box (w = 0.45 x h, as a person actually is)
@@ -314,11 +314,16 @@ def test_approaching_subject_scale_growth_without_translation():
     zero here, so anything above it came from the scale term alone."""
     cam = 'trk-disp-approach'
     _reset(cam)
-    # Center parked; height grows 0.04 -> 0.20 (walking straight at the lens).
+    # Centre parked; the box grows 0.04 -> 0.22 walking straight at the lens.
+    # Width tracks height at a fixed 0.45 aspect, as a person actually does --
+    # a fixed width would change the aspect ratio several-fold and be mistaken
+    # for the detector drawing two different extents of a stationary object.
     out = None
     for step in range(10):
         height = 0.04 + step * 0.02
-        out = ot.update_object_tracks(cam, [_det('person', 0.50, 0.60 - height / 2, 0.05, height)])
+        width = 0.45 * height
+        out = ot.update_object_tracks(
+            cam, [_det('person', 0.50 - width / 2, 0.60 - height / 2, width, height)])
     with st._object_tracks_lock:
         assert len(st._object_tracks[cam]['tracks']) == 1  # stayed one track
     assert out[0]['track_displacement'] is not None
@@ -334,7 +339,9 @@ def test_approaching_subject_is_classified_moving_despite_a_quiet_mask():
     out = None
     for step in range(10):
         height = 0.04 + step * 0.02
-        out = ot.update_object_tracks(cam, [_det('person', 0.50, 0.60 - height / 2, 0.05, height)])
+        width = 0.45 * height
+        out = ot.update_object_tracks(
+            cam, [_det('person', 0.50 - width / 2, 0.60 - height / 2, width, height)])
     quiet = np.zeros((72, 128), dtype=bool)
     assert os_.detection_motion_state(out[0], quiet, out[0]['track_displacement']) == os_.MODE_MOVING
 
@@ -348,7 +355,7 @@ def test_jittery_stationary_box_stays_still_despite_scale_wobble():
     wobble = [0.002, -0.002, 0.0015, -0.0025, 0.002, -0.0015, 0.0025, -0.002]
     out = None
     for dw in wobble:
-        # Wobble the WIDTH, which is the larger side: ``_size_of`` returns
+        # Wobble the WIDTH, which is the larger side -- the measured size is
         # max(w, h), so wobbling a smaller side would leave the measure constant
         # and make this test pass without exercising the scale term at all.
         out = ot.update_object_tracks(cam, [_det('car', 0.40, 0.40, 0.25 + dw, 0.15)])
@@ -402,16 +409,16 @@ def test_real_depth_axis_growth_survives_the_jitter_gate():
 
 
 def test_approaching_subject_size_annotations_are_exposed():
-    """The age-2 classifier path reads track_size/track_prev_size, so the
+    """The age-2 classifier path reads track_box/track_prev_box, so the
     tracker must stamp them on every detection, new tracks included."""
     cam = 'trk-disp-sizeannot'
     _reset(cam)
     first = ot.update_object_tracks(cam, [_det('person', 0.50, 0.58, 0.04, 0.04)])[0]
-    assert first['track_size'] == pytest.approx(0.04)
-    assert first['track_prev_size'] is None
+    assert tuple(first['track_box']) == pytest.approx((0.50, 0.58, 0.04, 0.04))
+    assert first['track_prev_box'] is None
     second = ot.update_object_tracks(cam, [_det('person', 0.50, 0.57, 0.06, 0.06)])[0]
-    assert second['track_size'] == pytest.approx(0.06)
-    assert second['track_prev_size'] == pytest.approx(0.04)
+    assert tuple(second['track_box']) == pytest.approx((0.50, 0.57, 0.06, 0.06))
+    assert tuple(second['track_prev_box']) == pytest.approx((0.50, 0.58, 0.04, 0.04))
     # The box grew 0.02 on a mean size of 0.05 -- 40% relative, far above the
     # 5% jitter band. The step is reported in the units ``_TRACK_STEP_MOVING``
     # is expressed in, so 40% of jitter-band reference == 0.24, and it clears
@@ -436,23 +443,106 @@ def test_approaching_person_survives_the_age_two_bias():
     assert os_.detection_motion_state(second, quiet, None) == os_.MODE_MOVING
 
 
-def test_mismatched_size_history_degrades_to_center_only():
-    """The size history is appended and trimmed in lockstep with the center
-    history, so the two windows line up positionally. A track carrying a
-    mismatched pair must pair NOTHING rather than pair a size with the wrong
-    center -- reporting another sighting's scale change would misclassify the
-    subject. It must fall back to the old center-only measure."""
+def test_malformed_box_history_degrades_gracefully():
+    """A hand-built or half-migrated track with junk in its box history must not
+    crash, and must not let a malformed entry contribute a bogus measurement."""
     cam = 'trk-disp-mismatch'
     _reset(cam)
-    # A stationary box: only a scale term could ever push this over threshold.
     for _ in range(6):
         ot.update_object_tracks(cam, [_det('car', 0.50, 0.50, 0.20, 0.20)])
     track = st._object_tracks[cam]['tracks'][0]
-    assert len(track['sizes']) == len(track['centers'])
-    # Corrupt the pairing, exactly as a hand-built or half-migrated track would.
-    track['sizes'] = track['sizes'][:1]
-    assert ot._recent_displacement(track) is not None
-    assert ot._recent_displacement(track) <= ot.TRACK_STILL_DISPLACEMENT
+    assert len(track['boxes']) == len(track['centers'])
+    # Corrupt the history the way a hand-built track would.
+    track['boxes'] = [None, 'junk', (0.5, 0.5, 0.2, 0.2)] + track['boxes'][:4]
+    value = ot._recent_displacement(track)
+    assert value is not None
+    assert value <= ot.TRACK_STILL_DISPLACEMENT
+    # A track with no box history at all simply reports no evidence.
+    track['boxes'] = []
+    assert ot._recent_displacement(track) is None
+
+
+# ---------------------------------------------------------------------------
+# Extent instability: the same object drawn at two different sizes
+# ---------------------------------------------------------------------------
+
+# These are the REAL boxes from event 47720 (Driveway, 04-10-2026 21:31),
+# recovered from the recording's .track.json. A parked car was drawn whole in
+# one cycle and as a roof-only rectangle in the next. The two boxes are 2.4x
+# apart in aspect ratio and 6.1x in area, with centres 0.178 of the frame
+# apart, and the car never moved. Both measurements read that as vigorous
+# motion, so a Moving Only "car" rule kept it.
+
+CAR_WHOLE = (0.200, 0.212, 0.506, 0.429)
+CAR_ROOF = (0.374, 0.212, 0.319, 0.111)
+
+
+def _as_det(box):
+    return {'label': 'car', 'confidence': 0.9,
+            'box': {'x': box[0], 'y': box[1], 'width': box[2], 'height': box[3]}}
+
+
+def test_extent_instability_signature_is_recognised():
+    assert ot._extent_unstable(CAR_ROOF, CAR_WHOLE) is True
+    # A genuinely translating object separates its boxes -> not the signature.
+    assert ot._extent_unstable((0.10, 0.40, 0.20, 0.12), (0.60, 0.40, 0.20, 0.12)) is False
+    # A subject approaching the camera scales uniformly -> stable aspect.
+    assert ot._extent_unstable((0.40, 0.40, 0.11, 0.20), (0.35, 0.30, 0.20, 0.36)) is False
+
+
+def test_parked_car_drawn_at_two_extents_reads_still():
+    """The age-2 path must not call a parked car moving just because the
+    detector drew it whole one cycle and as a roof the next."""
+    cam = 'trk-extent-age2'
+    _reset(cam)
+    ot.update_object_tracks(cam, [_as_det(CAR_WHOLE)])
+    second = ot.update_object_tracks(cam, [_as_det(CAR_ROOF)])[0]
+    assert second['track_age'] == 2
+    assert os_._two_point_step(second) == 0.0
+    # Production reaches the age-2 branch with NO displacement yet, so the mask
+    # is the only other signal. Make the mask say MOVING -- a passing car's
+    # headlights sweep changed pixels right across this large box -- and check
+    # the override still wins. (A quiet mask would return 'still' regardless and
+    # prove nothing.)
+    assert second['track_displacement'] is None
+    noisy = np.zeros((72, 128), dtype=bool)
+    noisy[15:24, 48:89] = True          # the roof box's own region
+    assert os_.detection_motion_state(second, noisy, None) == os_.MODE_STILL
+
+
+def test_extent_instability_does_not_fragment_the_track():
+    """The two boxes differ 6.1x in area, which used to fail
+    ``MOTION_MATCH_AREA_RATIO`` (2.5) and mint a fresh track id. A fresh id
+    means a young track, and a young track never reaches the displacement
+    override, so the pixel mask decides alone -- the actual failure chain on
+    event 47720. Extent instability is the same object, so it must stay one
+    track."""
+    cam = 'trk-extent-frag'
+    _reset(cam)
+    first = ot.update_object_tracks(cam, [_as_det(CAR_WHOLE)])[0]
+    second = ot.update_object_tracks(cam, [_as_det(CAR_ROOF)])[0]
+    assert second['track_id'] == first['track_id'], (
+        'extent change minted a new track id, which strands the detection in '
+        'the mask-only young-track path'
+    )
+    assert second['track_age'] == 2
+
+
+def test_genuinely_different_objects_are_still_kept_apart():
+    """The area-ratio bypass must not merge two real cars. Two same-label
+    boxes that separate in space still fail the containment test and keep
+    their own tracks."""
+    cam = 'trk-extent-two'
+    _reset(cam)
+    # Two same-label boxes: 9.4x apart in area (so the ratio check is live)
+    # and close enough that the distance gate PASSES (0.252 vs gate 0.45), but
+    # they do not overlap at all. Only the containment test keeps them apart.
+    ot.update_object_tracks(cam, [_as_det((0.10, 0.30, 0.30, 0.25))])
+    out = ot.update_object_tracks(cam, [_as_det((0.45, 0.35, 0.10, 0.08))])
+    with st._object_tracks_lock:
+        ids = [t['id'] for t in st._object_tracks[cam]['tracks']]
+    assert len(ids) == 2, 'two separate cars were merged into one track'
+    assert out[0]['track_new'] is True
 
 
 def test_broken_box_chain_does_not_crash_displacement():
