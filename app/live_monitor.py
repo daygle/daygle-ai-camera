@@ -1616,15 +1616,22 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     ):
         debounce_seconds = max(resolved_cooldowns.values())
         extended_recording_id = extend_active_rtsp_recording(camera_id=camera_id, event_time=frame_capture_time, recording_config=camera_recording_config, detections=recording_detections)
-        remember_live_event(camera_id, debounced_labels, merge=True)
-        # Anchor the suppressed cycle's tracks too: the continuing presence of
-        # the SAME objects must keep refreshing their windows (otherwise the
-        # windows would expire mid-presence and emit a spurious second event
-        # for objects that never left). A NEW object's anchor is untouched.
-        _remember_track_event(camera_id, _track_ids_by_label)
-        update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
-        _telemetry_finish(_telemetry_mode)
-        return None
+        # Cooldown suppresses duplicate EVENTS, not continuing footage. A
+        # capped/frozen/missing capture cannot extend; let a recording-enabled
+        # stream create one follow-on event/clip through the normal path below.
+        # Covered cycles and alert-only cameras keep their existing debounce.
+        needs_follow_on = (
+            extended_recording_id is None
+            and _camera_has_live_alert_stream(settings)
+            and _state.recording_service.should_record(recording_detections, camera_recording_config)[0]
+        )
+        if not needs_follow_on:
+            remember_live_event(camera_id, debounced_labels, merge=True)
+            # Refresh only these same objects' cooldown anchors.
+            _remember_track_event(camera_id, _track_ids_by_label)
+            update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+            _telemetry_finish(_telemetry_mode)
+            return None
     event_time = frame_capture_time
     _event_started = time.perf_counter()
     if frame_is_numpy:

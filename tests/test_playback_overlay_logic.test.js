@@ -201,6 +201,43 @@ test('sampleTrackAtTime interpolates across samples whose track ids churned', ()
 });
 
 
+test('sampleTrackAtTime never paints a first detection into the pre-roll', () => {
+  const lateStart = [{ t: 16, detections: [detection(0.4)] }];
+  assert.equal(sandbox.sampleTrackAtTime(lateStart, 15.9).length, 0);
+  assert.equal(sandbox.sampleTrackAtTime(lateStart, 16).length, 1);
+});
+
+
+test('sampleTrackAtTime does not introduce unmatched objects before their sample', () => {
+  const arrival = [
+    { t: 0, detections: [] },
+    { t: 1, detections: [detection(0.2)] },
+  ];
+  assert.equal(sandbox.sampleTrackAtTime(arrival, 0.5).length, 0);
+  assert.equal(sandbox.sampleTrackAtTime(arrival, 1).length, 1);
+  const person = { ...detection(0.2), track_id: 9 };
+  const dog = { ...detection(0.4), label: 'dog', track_id: 10 };
+  const mixed = [
+    { t: 0, detections: [person] },
+    { t: 1, detections: [person, dog] },
+  ];
+  assert.equal(sandbox.sampleTrackAtTime(mixed, 0.5).length, 1);
+  assert.equal(sandbox.sampleTrackAtTime(mixed, 1).length, 2);
+});
+
+
+test('sampleTrackAtTime keeps backward bridging on the correct time fraction', () => {
+  const missed = [
+    { t: 30.91, detections: [detection(0.4)] },
+    { t: 31.84, detections: [] },
+    { t: 32.32, detections: [detection(0.5)] },
+  ];
+  const sample = sandbox.sampleTrackAtTime(missed, 31.9);
+  const expected = 0.4 + 0.1 * ((31.9 - 30.91) / (32.32 - 30.91));
+  assert.ok(Math.abs(sample[0].box.x - expected) < 1e-9);
+});
+
+
 test('normalizeDetectionBox maps pixel boxes into normalized coordinates', () => {
   assert.deepEqual(
     JSON.parse(JSON.stringify(sandbox.normalizeDetectionBox({ x: 320, y: 180, width: 160, height: 90 }, 1280, 720))),
