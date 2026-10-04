@@ -861,6 +861,445 @@ def test_capture_end_boundary_never_moves_backwards(tmp_path, monkeypatch):
     main._state.active_rtsp_recordings.clear()
 
 
+def _session_at_max_clip_ceiling(main, now, recording_id):
+    """Register a capture whose deadline is pinned at its Max Clip Duration
+    ceiling, with the ceiling still 20s in the future (still recording)."""
+    ceiling = now.timestamp() + 20
+    with main._state.active_rtsp_recordings_lock:
+        main._state.active_rtsp_recordings['camera-1'] = {
+            'recording_id': recording_id,
+            'start_capture_ts': ceiling - 300,
+            'capture_deadline_ts': ceiling,
+            'max_capture_deadline_ts': ceiling,
+        }
+    return ceiling
+
+
+def test_event_while_clip_sits_at_max_clip_ceiling_starts_a_follow_on_clip(tmp_path, monkeypatch):
+    """A clip whose deadline is already at max_clip_seconds cannot grow. A fresh
+    event then used to be linked to it (its post-roll past the ceiling lost)
+    and no follow-on clip started; it must start its own clip - the split at
+    Max Clip Duration the pre-roll clamp comment describes."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.utils
+    mods = _m()
+
+    now = datetime.now(timezone.utc)
+    old_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=(now - timedelta(seconds=280)).isoformat(),
+        ended_at=(now + timedelta(seconds=20)).isoformat(),
+        duration_seconds=300.0,
+        file_path=str(tmp_path / 'data' / 'recordings' / 'capped.mp4'),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=now.isoformat(),
+    )
+    _session_at_max_clip_ceiling(main, now, old_id)
+
+    class FakeRecordingService:
+        def event_recording_metadata(
+            self, event_id, event_time, source, detections, write_clip=False, recording_config=None,
+        ):
+            return {
+                'event_id': event_id,
+                'started_at': event_time,
+                'ended_at': event_time,
+                'duration_seconds': 15,
+                'file_path': str(tmp_path / 'data' / 'recordings' / f'clip_{event_id}.mp4'),
+                'thumbnail_path': None,
+                'source': source,
+                'trigger_type': 'motion',
+            }
+
+    started: list[dict] = []
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+    monkeypatch.setattr(app.utils, 'build_stream_url', lambda _cfg: 'rtsp://example/stream')
+    monkeypatch.setattr(
+        mods.recording_extension, 'start_rtsp_recording_capture',
+        lambda *args, **kwargs: started.append(kwargs),
+    )
+    event_id = main.database.add_event_with_alerts(
+        created_at=now.isoformat(), source='rtsp', snapshot_path=None, thumbnail_path=None,
+        detections=[], alerts=[], alert_triggered=False, metadata={'camera_id': 'camera-1'},
+    )
+
+    new_id = mods.recording_extension.attach_event_recording(
+        event_id, now.isoformat(), 'rtsp', [{'label': 'person', 'confidence': 0.9}],
+        camera_id='camera-1',
+        recording_config={'pre_event_seconds': 5, 'post_event_seconds': 30,
+                          'extension_step_seconds': 30, 'max_clip_seconds': 300},
+    )
+
+    assert new_id is not None and new_id != old_id
+    assert main.database.get_event(event_id)['recording_id'] == new_id
+    assert [call['recording_id'] for call in started] == [new_id]
+    # The capped clip is left as it was: still ending at its ceiling.
+    with main._state.active_rtsp_recordings_lock:
+        main._state.active_rtsp_recordings.pop('camera-1', None)
+    assert main.database.get_recording(old_id)['duration_seconds'] == pytest.approx(300.0)
+
+
+def test_extension_within_a_capped_clip_still_links_to_it(tmp_path, monkeypatch):
+    """Only an event the capped clip cannot cover is refused: one whose horizon
+    the clip already covers is linked as before, and an extension below the
+    ceiling still grows the clip up to it."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    now = datetime.now(timezone.utc)
+    recording_id = 77
+    ceiling = _session_at_max_clip_ceiling(main, now, recording_id)
+    config = {'extension_step_seconds': 10}
+
+    # Horizon now+10 is inside the clip (ceiling is now+20): already covered.
+    assert mods.recording_extension.extend_active_rtsp_recording(
+        camera_id='camera-1', event_time=now.isoformat(), recording_config=config,
+    ) == recording_id
+    # Horizon now+30 is past the ceiling the deadline already sits at: refused.
+    assert mods.recording_extension.extend_active_rtsp_recording(
+        camera_id='camera-1', event_time=(now + timedelta(seconds=20)).isoformat(), recording_config=config,
+    ) is None
+    with main._state.active_rtsp_recordings_lock:
+        assert main._state.active_rtsp_recordings['camera-1']['capture_deadline_ts'] == ceiling
+        # Below the ceiling: an extension past it still grows the clip to it.
+        main._state.active_rtsp_recordings['camera-1']['capture_deadline_ts'] = ceiling - 15
+    monkeypatch.setattr(main.database, 'update_recording_timing', lambda *a, **k: None)
+    assert mods.recording_extension.extend_active_rtsp_recording(
+        camera_id='camera-1', event_time=(now + timedelta(seconds=15)).isoformat(), recording_config=config,
+    ) == recording_id
+    with main._state.active_rtsp_recordings_lock:
+        assert main._state.active_rtsp_recordings['camera-1']['capture_deadline_ts'] == ceiling
+        main._state.active_rtsp_recordings.pop('camera-1', None)
+
+
+def test_capture_that_loses_its_slot_still_waits_out_its_deadline(tmp_path, monkeypatch):
+    """When a follow-on clip takes the camera's slot before the old capture's
+    deadline (a fresh event at the Max Clip Duration ceiling), the old capture
+    must keep waiting in its own thread and render after its deadline - not
+    queue the render at once and sleep inside a clip-pool worker."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.postprocess_pool as postprocess_pool
+    mods = _m()
+
+    now = time.time()
+    clip = tmp_path / 'data' / 'recordings' / 'replaced.mp4'
+    render_started: list[float] = []
+
+    class FakeRecordingService:
+        def prebuffer_window_seconds(self, _config=None):
+            return 70
+
+        def write_rtsp_clip_with_prebuffer(self, **kwargs):
+            render_started.append(time.time())
+            path = Path(kwargs['file_path'])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'clip')
+            return now - 5.0, 7.0
+
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+    main._state.active_rtsp_recordings.clear()
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=datetime.fromtimestamp(now - 5, tz=timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now + 2, tz=timezone.utc).isoformat(),
+        duration_seconds=7.0,
+        file_path=str(clip),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=main.utc_now(),
+    )
+    # Trigger 1s ago with a 3s post window: the deadline is 2s away.
+    mods.recording_extension.start_rtsp_recording_capture(
+        'rtsp://example/stream',
+        {'file_path': str(clip), 'duration_seconds': 7.0, 'trigger_type': 'motion'},
+        1,
+        [],
+        recording_id=recording_id,
+        camera_id='camera-1',
+        event_time=datetime.fromtimestamp(now - 1, tz=timezone.utc).isoformat(),
+        recording_config={'pre_event_seconds': 4, 'post_event_seconds': 3, 'max_clip_seconds': 60},
+    )
+    deadline = now + 2.0
+    # A follow-on clip takes the slot straight away.
+    with main._state.active_rtsp_recordings_lock:
+        main._state.active_rtsp_recordings['camera-1'] = {
+            'recording_id': recording_id + 1000,
+            'start_capture_ts': now,
+            'capture_deadline_ts': now + 60,
+            'max_capture_deadline_ts': now + 60,
+        }
+    wait_until = time.time() + 5
+    while time.time() < wait_until and not render_started:
+        time.sleep(0.05)
+    assert postprocess_pool.clip_pool().wait_until_idle(timeout=5)
+
+    assert render_started, 'the old capture never rendered'
+    assert render_started[0] >= deadline - 0.05, 'rendered before its deadline'
+    with main._state.active_rtsp_recordings_lock:
+        # The old capture never touched (froze or retired) the new session.
+        session = main._state.active_rtsp_recordings.get('camera-1')
+        assert session is not None and session['recording_id'] == recording_id + 1000
+        assert 'deadline_frozen' not in session
+        main._state.active_rtsp_recordings.clear()
+
+
+def test_displaced_capture_waits_for_an_extension_made_just_before_displacement(tmp_path, monkeypatch):
+    """An extension moves the capture's deadline and a follow-on clip takes
+    the slot before the wait loop polls again. The capture must still render
+    after the EXTENDED deadline (read from its own record), not the stale one
+    it last saw through the slot - that would drop the extension's footage."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.postprocess_pool as postprocess_pool
+    mods = _m()
+
+    now = time.time()
+    clip = tmp_path / 'data' / 'recordings' / 'extended_then_replaced.mp4'
+    render_started: list[float] = []
+
+    class FakeRecordingService:
+        def prebuffer_window_seconds(self, _config=None):
+            return 70
+
+        def write_rtsp_clip_with_prebuffer(self, **kwargs):
+            render_started.append(time.time())
+            path = Path(kwargs['file_path'])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'clip')
+            return now - 5.0, 8.0
+
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+    main._state.active_rtsp_recordings.clear()
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=datetime.fromtimestamp(now - 5, tz=timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now + 1, tz=timezone.utc).isoformat(),
+        duration_seconds=6.0,
+        file_path=str(clip),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=main.utc_now(),
+    )
+    # Trigger 1s ago, 2s post window: the deadline is 1s away; cap at 60s.
+    mods.recording_extension.start_rtsp_recording_capture(
+        'rtsp://example/stream',
+        {'file_path': str(clip), 'duration_seconds': 6.0, 'trigger_type': 'motion'},
+        1,
+        [],
+        recording_id=recording_id,
+        camera_id='camera-1',
+        event_time=datetime.fromtimestamp(now - 1, tz=timezone.utc).isoformat(),
+        recording_config={'pre_event_seconds': 4, 'post_event_seconds': 2, 'max_clip_seconds': 60},
+    )
+    time.sleep(0.1)  # let the wait loop take its first deadline reading
+    # An extension moves the deadline to now+2.5...
+    assert mods.recording_extension.extend_active_rtsp_recording(
+        camera_id='camera-1',
+        event_time=datetime.fromtimestamp(now + 0.5, tz=timezone.utc).isoformat(),
+        recording_config={'extension_step_seconds': 2},
+    ) == recording_id
+    extended_deadline = now + 2.5
+    # ...and a follow-on clip takes the slot before the loop polls again.
+    with main._state.active_rtsp_recordings_lock:
+        main._state.active_rtsp_recordings['camera-1'] = {
+            'recording_id': recording_id + 1000,
+            'start_capture_ts': now,
+            'capture_deadline_ts': now + 60,
+            'max_capture_deadline_ts': now + 60,
+        }
+    wait_until = time.time() + 6
+    while time.time() < wait_until and not render_started:
+        time.sleep(0.05)
+    assert postprocess_pool.clip_pool().wait_until_idle(timeout=5)
+
+    assert render_started, 'the displaced capture never rendered'
+    assert render_started[0] >= extended_deadline - 0.05, (
+        f'rendered {extended_deadline - render_started[0]:.2f}s before its extended deadline'
+    )
+    with main._state.active_rtsp_recordings_lock:
+        session = main._state.active_rtsp_recordings.get('camera-1')
+        assert session is not None and session['recording_id'] == recording_id + 1000
+        assert 'deadline_frozen' not in session
+        main._state.active_rtsp_recordings.clear()
+
+
+def test_timing_lock_capture_waits_for_an_extension_write_in_progress(tmp_path, monkeypatch):
+    """Extension first: an extension is mid-way through its provisional timing
+    write when the capture marks its timing final. The capture must wait for
+    that write to finish (its own write, which follows, then overwrites it);
+    it must not mark - and go on to write - while the stale write is still in
+    flight, or the stale write could land last."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    session: dict = {}
+    in_write = threading.Event()
+    release_write = threading.Event()
+    writes: list[dict] = []
+
+    def blocking_update(recording_id, **kwargs):
+        writes.append(kwargs)
+        in_write.set()
+        assert release_write.wait(5)
+
+    monkeypatch.setattr(main.database, 'update_recording_timing', blocking_update)
+    results: list[bool] = []
+    extension = threading.Thread(target=lambda: results.append(
+        mods.recording_extension._write_provisional_timing(
+            session, 1, ended_at='2026-10-04T00:01:00+00:00', duration_seconds=60.0,
+        )
+    ))
+    extension.start()
+    assert in_write.wait(5), 'extension never reached its write'
+
+    marked = threading.Event()
+    capture = threading.Thread(target=lambda: (
+        mods.recording_extension._mark_capture_timing_final(session), marked.set(),
+    ))
+    capture.start()
+    # Held behind the in-flight provisional write.
+    assert not marked.wait(0.3), 'capture marked its timing final during a provisional write'
+    assert 'timing_written' not in session
+
+    release_write.set()
+    assert marked.wait(5)
+    extension.join(5)
+    capture.join(5)
+    assert results == [True]
+    assert session['timing_written'] is True
+    assert len(writes) == 1
+
+
+def test_timing_lock_extension_skips_once_capture_marked_final(tmp_path, monkeypatch):
+    """Capture first: an extension that already decided to write (it passed
+    the session checks) reaches the lock while the capture is marking its
+    timing final. The flag must be checked INSIDE the lock, after the capture
+    releases it, so the extension skips its write instead of landing after the
+    capture's real timing."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+    ext = mods.recording_extension
+
+    session: dict = {}
+    writes: list[dict] = []
+    monkeypatch.setattr(
+        main.database, 'update_recording_timing', lambda recording_id, **kw: writes.append(kw),
+    )
+
+    # The capture is inside _mark_capture_timing_final: it holds the lock and
+    # has not yet set the flag when the extension arrives.
+    ext._recording_timing_write_lock.acquire()
+    results: list[bool] = []
+    try:
+        extension = threading.Thread(target=lambda: results.append(
+            ext._write_provisional_timing(
+                session, 1, ended_at='2026-10-04T00:01:00+00:00', duration_seconds=60.0,
+            )
+        ))
+        extension.start()
+        time.sleep(0.2)
+        assert extension.is_alive(), 'extension did not wait for the lock'
+        session['timing_written'] = True
+    finally:
+        ext._recording_timing_write_lock.release()
+    extension.join(5)
+
+    assert results == [False]
+    assert writes == []
+
+
+def test_timing_lock_extension_after_capture_marked_final_never_writes(tmp_path, monkeypatch):
+    """Capture fully first: once marked final, a later extension write is a no-op."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    writes: list[dict] = []
+    monkeypatch.setattr(
+        main.database, 'update_recording_timing', lambda recording_id, **kw: writes.append(kw),
+    )
+    session: dict = {}
+    mods.recording_extension._mark_capture_timing_final(session)
+    assert mods.recording_extension._write_provisional_timing(
+        session, 1, ended_at='2026-10-04T00:01:00+00:00', duration_seconds=60.0,
+    ) is False
+    assert writes == []
+
+
+def test_displaced_capture_marks_its_own_session_timing_final(tmp_path, monkeypatch):
+    """A capture that lost the camera's slot to a follow-on clip must still mark
+    ITS OWN session record final: an extension that read that record just
+    before the hand-over could otherwise write stale timing over the rendered
+    duration. The follow-on clip's session is left untouched."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.postprocess_pool as postprocess_pool
+    mods = _m()
+
+    now = time.time()
+    clip = tmp_path / 'data' / 'recordings' / 'displaced_mark.mp4'
+
+    class FakeRecordingService:
+        def prebuffer_window_seconds(self, _config=None):
+            return 70
+
+        def write_rtsp_clip_with_prebuffer(self, **kwargs):
+            path = Path(kwargs['file_path'])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'clip')
+            return now - 5.0, 6.0
+
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+    main._state.active_rtsp_recordings.clear()
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=datetime.fromtimestamp(now - 5, tz=timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now + 1, tz=timezone.utc).isoformat(),
+        duration_seconds=6.0,
+        file_path=str(clip),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=main.utc_now(),
+    )
+    mods.recording_extension.start_rtsp_recording_capture(
+        'rtsp://example/stream',
+        {'file_path': str(clip), 'duration_seconds': 6.0, 'trigger_type': 'motion'},
+        1,
+        [],
+        recording_id=recording_id,
+        camera_id='camera-1',
+        event_time=datetime.fromtimestamp(now - 1, tz=timezone.utc).isoformat(),
+        recording_config={'pre_event_seconds': 4, 'post_event_seconds': 2, 'max_clip_seconds': 60},
+    )
+    with main._state.active_rtsp_recordings_lock:
+        own_session = main._state.active_rtsp_recordings['camera-1']
+        follow_on = {
+            'recording_id': recording_id + 1000,
+            'start_capture_ts': now,
+            'capture_deadline_ts': now + 60,
+            'max_capture_deadline_ts': now + 60,
+        }
+        main._state.active_rtsp_recordings['camera-1'] = follow_on
+    wait_until = time.time() + 5
+    while time.time() < wait_until and not clip.exists():
+        time.sleep(0.05)
+    assert postprocess_pool.clip_pool().wait_until_idle(timeout=5)
+
+    assert own_session.get('timing_written') is True
+    assert 'timing_written' not in follow_on
+    main._state.active_rtsp_recordings.clear()
+
+
 def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
     # ffmpeg can exit 0 while discarding every corrupt frame, leaving a non-empty
     # file with no video stream. write_rtsp_clip must reject it (so the caller

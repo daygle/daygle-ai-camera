@@ -2024,6 +2024,7 @@ class RecordingService:
         """
         self._prune_segment_duration_cache(camera_dir, {segment for segment, _, _ in timed})
         refined: list[tuple[Path, float, float]] = []
+        newest = timed[-1][0] if timed else None
         for segment, start, end in timed:
             if end > start_ts and end - self.PREBUFFER_SEGMENT_MAX_PROBED_SECONDS < end_ts:
                 try:
@@ -2031,14 +2032,33 @@ class RecordingService:
                 except OSError:
                     continue
                 end = stat_result.st_mtime
-                probed = self._segment_duration_seconds(segment, stat_result)
+                probed = self._segment_duration_seconds(
+                    segment, stat_result,
+                    estimated_seconds=end - start, still_writing=segment == newest,
+                )
                 if probed is not None:
                     start = end - probed
             refined.append((segment, start, end))
         return refined
 
-    def _segment_duration_seconds(self, segment: Path, stat_result: os.stat_result) -> float | None:
+    def _segment_duration_seconds(
+        self,
+        segment: Path,
+        stat_result: os.stat_result,
+        *,
+        estimated_seconds: float | None = None,
+        still_writing: bool = False,
+    ) -> float | None:
         """Real duration of one prebuffer segment, or None if it can't be read.
+
+        A None makes the caller fall back to the mtime estimate, which is wrong
+        for any camera whose keyframe interval is not the nominal segment length
+        (see ``_segment_timeline``). So a fallback is logged at WARNING, once per
+        file identity (later lookups hit the cache), with the estimate it falls
+        back to: a probed length outside the believable range, or a closed
+        segment ffprobe cannot read. The newest segment (``still_writing``) is
+        normally unreadable until its single fragment lands, so its failure is
+        only DEBUG.
 
         Cached by inode/size/nanosecond mtime, so a finished segment is probed
         once for its whole life in the buffer while the segment still being
@@ -2066,8 +2086,21 @@ class RecordingService:
             duration = float((result.stdout or '').strip()) if result.returncode == 0 else None
         except (OSError, subprocess.SubprocessError, ValueError):
             duration = None
+        estimate = f'{estimated_seconds:.2f}s' if estimated_seconds is not None else 'the mtime estimate'
         if duration is not None and not 0 < duration <= self.PREBUFFER_SEGMENT_MAX_PROBED_SECONDS:
+            logger.warning(
+                'Prebuffer segment %s: ffprobe reported %.2fs, outside the believable 0-%.0fs range; '
+                'falling back to the estimated %s, so clips including it may be mistimed.',
+                segment.name, duration, self.PREBUFFER_SEGMENT_MAX_PROBED_SECONDS, estimate,
+            )
             duration = None
+        elif duration is None:
+            logger.log(
+                logging.DEBUG if still_writing else logging.WARNING,
+                'Prebuffer segment %s could not be probed; falling back to the estimated %s%s.',
+                segment.name, estimate,
+                ' (still being written)' if still_writing else ', so clips including it may be mistimed',
+            )
         with self._segment_duration_lock:
             self._segment_duration_cache[key] = (signature, duration)
         return duration

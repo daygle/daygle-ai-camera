@@ -144,6 +144,37 @@ STALE_CAPTURE_SESSION_GRACE_SECONDS = 120.0
 _recording_timing_write_lock = threading.Lock()
 
 
+def _write_provisional_timing(
+    session: dict[str, Any], recording_id: int, *, ended_at: str, duration_seconds: float,
+) -> bool:
+    """An extension's provisional timing write; False if skipped.
+
+    Keeps a plausible duration on the row should the capture die. Skipped once
+    the capture has marked its timing final (``_mark_capture_timing_final``):
+    checking the flag and writing happen under one lock, so this write either
+    lands before the capture's own write (which then overwrites it) or not at
+    all - it can never win after the real timing.
+    """
+    with _recording_timing_write_lock:
+        if session.get('timing_written'):
+            return False
+        _state.database.update_recording_timing(
+            recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
+        )
+        return True
+
+
+def _mark_capture_timing_final(session: dict[str, Any]) -> None:
+    """Called by the capture just before writing its rendered timing: from
+    here no extension may write provisional timing to this recording. Waits
+    for an extension write already in progress, which the capture's own write
+    then overwrites. Marks the capture's OWN session record, which an
+    extension that read it before a follow-on clip took the camera's slot may
+    still hold."""
+    with _recording_timing_write_lock:
+        session['timing_written'] = True
+
+
 def extend_active_rtsp_recording(
     *,
     camera_id: str,
@@ -201,6 +232,17 @@ def extend_active_rtsp_recording(
             return None
         new_deadline = min(max_deadline, max(current_deadline, extend_until))
         if new_deadline <= current_deadline:
+            if extend_until > current_deadline:
+                # The deadline already sits at the Max Clip Duration ceiling and
+                # this event's horizon reaches past it: the clip contains the
+                # moment but can never hold its post-roll. Refuse, so the caller
+                # starts a follow-on clip (the split at Max Clip Duration the
+                # pre-roll clamp in start_rtsp_recording_capture describes).
+                # Only at the ceiling: below it the extension above still grows
+                # the clip up to the ceiling, so refusing there would cut short
+                # a clip that suppressed detections (which never start a
+                # capture) are still extending.
+                return None
             return int(session.get('recording_id'))
         session['capture_deadline_ts'] = new_deadline
         start_ts = float(session.get('start_capture_ts') or new_deadline)
@@ -208,14 +250,10 @@ def extend_active_rtsp_recording(
         duration_seconds = max(1.0, new_deadline - start_ts)
         recording_id = int(session.get('recording_id'))
     # Provisional timing so a clip whose capture dies still lists a plausible
-    # duration. Skipped once the capture has written the real timing from the
-    # rendered media: a late write would otherwise win and leave the row
-    # claiming a longer clip than the file.
-    with _recording_timing_write_lock:
-        if not session.get('timing_written'):
-            _state.database.update_recording_timing(
-                recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
-            )
+    # duration; skipped once the capture has marked its real timing final.
+    _write_provisional_timing(
+        session, recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
+    )
     # Re-check that this recording is still the active one for this camera before
     # writing labels/trigger - a new capture may have started between lock release
     # and here, in which case these updates belong to a now-closed recording.
@@ -711,14 +749,18 @@ def start_rtsp_recording_capture(
         1, int((recording_config or effective_recording_config()).get('max_clip_seconds', 60))
     )
     max_deadline_ts = start_capture_ts + max(duration_seconds, float(max_clip_seconds))
+    # This capture's own session record. Extensions update it through the
+    # camera's slot; the capture keeps the reference so it can still read its
+    # latest deadline after a follow-on clip takes the slot.
+    capture_session: dict[str, Any] = {
+        'recording_id': recording_id,
+        'start_capture_ts': start_capture_ts,
+        'capture_deadline_ts': min(max_deadline_ts, initial_deadline_ts),
+        'max_capture_deadline_ts': max_deadline_ts,
+    }
     if camera_id:
         with _state.active_rtsp_recordings_lock:
-            _state.active_rtsp_recordings[camera_id] = {
-                'recording_id': recording_id,
-                'start_capture_ts': start_capture_ts,
-                'capture_deadline_ts': min(max_deadline_ts, initial_deadline_ts),
-                'max_capture_deadline_ts': max_deadline_ts,
-            }
+            _state.active_rtsp_recordings[camera_id] = capture_session
 
     def write_generated_fallback() -> None:
         # Strip internal ``_``-prefixed memo caches (see
@@ -744,20 +786,28 @@ def start_rtsp_recording_capture(
         if camera_id:
             while True:
                 with _state.active_rtsp_recordings_lock:
-                    session = _state.active_rtsp_recordings.get(camera_id)
-                    if not session or int(session.get('recording_id', -1)) != int(recording_id):
-                        break
+                    # Read this capture's own record, not whatever holds the
+                    # camera's slot: a follow-on clip can take the slot before
+                    # the deadline (a fresh event at the Max Clip Duration
+                    # ceiling), possibly right after an extension moved this
+                    # deadline. Keep waiting that deadline out rather than
+                    # rendering now - the render would only sleep until it inside
+                    # a clip-pool worker (see wait_then_render), and a stale
+                    # deadline would drop the extension's footage. Extensions
+                    # stop reaching this record once it loses the slot, so its
+                    # deadline is final from then on.
                     final_deadline_ts = float(
-                        session.get('capture_deadline_ts') or final_deadline_ts
+                        capture_session.get('capture_deadline_ts') or final_deadline_ts
                     )
                     remaining = final_deadline_ts - time.time()
                     if remaining <= 0:
-                        # Freeze in the same lock hold as the last deadline read:
-                        # from here the render's window is decided, so no later
-                        # extension may claim this clip (it would be dropped or
-                        # lose its post-roll). ``extend_active_rtsp_recording``
-                        # refuses a frozen session and the event gets its own clip.
-                        session['deadline_frozen'] = True
+                        # Freeze in the same lock hold as the last deadline
+                        # read: from here the render's window is decided, so no
+                        # later extension may claim this clip (it would be
+                        # dropped or lose its post-roll).
+                        # ``extend_active_rtsp_recording`` refuses a frozen
+                        # session and the event gets its own clip.
+                        capture_session['deadline_frozen'] = True
                         break
                 time.sleep(min(0.5, max(0.05, remaining)))
         return final_deadline_ts
@@ -798,12 +848,7 @@ def start_rtsp_recording_capture(
                 content_start_ts = time.time()
                 _state.recording_service.write_rtsp_clip(stream_url, file_path, final_duration_seconds)
                 content_seconds = final_duration_seconds
-            if camera_id:
-                with _recording_timing_write_lock:
-                    with _state.active_rtsp_recordings_lock:
-                        session = _state.active_rtsp_recordings.get(camera_id)
-                        if session and int(session.get('recording_id', -1)) == int(recording_id):
-                            session['timing_written'] = True
+            _mark_capture_timing_final(capture_session)
             _state.database.update_recording_timing(
                 recording_id,
                 started_at=datetime.fromtimestamp(content_start_ts, tz=timezone.utc).isoformat(),

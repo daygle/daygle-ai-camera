@@ -267,3 +267,46 @@ def test_render_of_six_second_keyframe_segments_keeps_full_window(tmp_path, monk
     assert content_seconds == pytest.approx(requested_seconds, abs=0.5)
     probed = RecordingService.clip_duration_seconds(tmp_path / 'clip.mp4')
     assert probed == pytest.approx(requested_seconds, abs=0.5)
+
+
+def test_rejected_probe_is_logged_once_with_name_and_estimate(tmp_path, monkeypatch, caplog):
+    """Falling back to the mtime estimate is falling back to logic known to be
+    wrong for some cameras, so a rejected probe must not be silent. It is
+    logged once per file, not on every clip that includes the segment."""
+    service = _service(tmp_path)
+    camera_dir = service.prebuffer_dir / 'cam'
+    now = time.time()
+    _write_segments(camera_dir, [now - 4, now])
+    _fake_ffprobe(monkeypatch, {'segment-000.mp4': '600.0', 'segment-001.mp4': '6.0'})
+
+    with caplog.at_level('DEBUG', logger='daygle.ai'):
+        _refined(service, camera_dir, now - 10, now)
+        _refined(service, camera_dir, now - 10, now)
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == 'WARNING']
+    assert len(warnings) == 1, warnings
+    assert 'segment-000.mp4' in warnings[0]
+    assert '600.00s' in warnings[0]
+    assert 'estimated 4.00s' in warnings[0]
+
+
+def test_unreadable_segment_warns_unless_it_is_still_being_written(tmp_path, monkeypatch, caplog):
+    """The newest segment is normally unreadable until its single fragment
+    lands (DEBUG); a closed segment ffprobe cannot read is a real problem."""
+    service = _service(tmp_path)
+    camera_dir = service.prebuffer_dir / 'cam'
+    now = time.time()
+    _write_segments(camera_dir, [now - 8, now - 4, now])
+    # segment-001 (closed) and segment-002 (newest) both fail to probe.
+    _fake_ffprobe(monkeypatch, {'segment-000.mp4': '4.0'})
+
+    with caplog.at_level('DEBUG', logger='daygle.ai'):
+        _refined(service, camera_dir, now - 20, now)
+
+    by_level = {
+        level: [r.getMessage() for r in caplog.records if r.levelname == level]
+        for level in ('WARNING', 'DEBUG')
+    }
+    assert len(by_level['WARNING']) == 1, by_level
+    assert 'segment-001.mp4 could not be probed' in by_level['WARNING'][0]
+    assert any('segment-002.mp4' in m and 'still being written' in m for m in by_level['DEBUG']), by_level

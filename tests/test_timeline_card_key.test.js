@@ -35,6 +35,9 @@ import vm from 'node:vm';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const utilsSource = readFileSync(path.resolve(here, '../web/utils.js'), 'utf8');
+// timeline.html loads the shared clip timeline (clip_timeline.js) before
+// timeline.js, which wires its handlers at load; mirror that order here.
+const clipTimelineSource = readFileSync(path.resolve(here, '../web/clip_timeline.js'), 'utf8');
 const timelineSource = readFileSync(path.resolve(here, '../web/timeline.js'), 'utf8');
 
 function makeKeyStub() {
@@ -97,6 +100,7 @@ sandbox.window.daygleUi = null;
 vm.createContext(sandbox);
 
 vm.runInContext(utilsSource, sandbox);
+vm.runInContext(clipTimelineSource, sandbox);
 vm.runInContext(timelineSource, sandbox);
 
 function partitionFor(recordings) {
