@@ -151,6 +151,28 @@ test('sampleTrackAtTime bridges one missed cycle at the 2s adaptive ceiling', ()
 });
 
 
+test('sampleTrackAtTime bridges two consecutive missed samples', () => {
+  const twoMisses = [
+    { t: 0, detections: [detection(0)] },
+    { t: 0.5, detections: [] },
+    { t: 1, detections: [] },
+    { t: 1.5, detections: [detection(0.1)] },
+  ];
+  const sampled = sandbox.sampleTrackAtTime(twoMisses, 0.75);
+  assert.equal(sampled.length, 1);
+  assert.ok(Math.abs(sampled[0].box.x - 0.05) < 1e-9);
+  // Detection-to-detection gap beyond the window: no bridge.
+  const wide = [
+    { t: 0, detections: [detection(0)] },
+    { t: 0.5, detections: [] },
+    { t: 1, detections: [] },
+    { t: 1.5, detections: [] },
+    { t: 2, detections: [detection(0.3)] },
+  ];
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sampleTrackAtTime(wide, 0.75))), []);
+});
+
+
 test('normalizeDetectionBox maps pixel boxes into normalized coordinates', () => {
   assert.deepEqual(
     JSON.parse(JSON.stringify(sandbox.normalizeDetectionBox({ x: 320, y: 180, width: 160, height: 90 }, 1280, 720))),

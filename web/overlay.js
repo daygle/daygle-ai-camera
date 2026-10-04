@@ -325,6 +325,18 @@ function sampleTrackAtTime(track, t) {
     for (let k = lo - 1; k >= 0 && next.t - track[k].t <= bridgeWindow; k--) {
       if ((track[k].detections || []).length) { prev = track[k]; break; }
     }
+  } else if (!(prev.detections || []).length && !(next.detections || []).length) {
+    // Two or more consecutive misses: `time` sits between two empty samples.
+    // Bridge only when the full detection-to-detection gap fits the window.
+    let before = null;
+    for (let k = lo - 1; k >= 0 && next.t - track[k].t <= bridgeWindow; k--) {
+      if ((track[k].detections || []).length) { before = track[k]; break; }
+    }
+    if (before) {
+      for (let k = hi + 1; k < track.length && track[k].t - before.t <= bridgeWindow; k++) {
+        if ((track[k].detections || []).length) { prev = before; next = track[k]; break; }
+      }
+    }
   }
   const span = next.t - prev.t;
   if (!(span > 0)) return next.detections || [];
