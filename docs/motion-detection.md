@@ -51,7 +51,12 @@ overlaps its previous box, so an unmatched detection may also claim a recently
 seen same-label track when it sits near where that track's last step predicts
 and is a similar size. A stationary track (one whose measured velocity is near
 zero) only accepts a detection within half its box size, so two cars parked side
-by side never swap identities. It annotates each detection with `track_id`,
+by side never swap identities. Once a track has stayed still for a full
+history window it is anchored to its settled box: a passing car briefly hiding
+part of it, or headlight glare reshaping its box, no longer reads as movement.
+Only a box that stays away from the anchor for several cycles in a row (and not
+while something else covers it) releases the anchor, so a car that pulls out
+still reads *moving* within a second or two. It annotates each detection with `track_id`,
 `track_age` (cycles seen), and `track_new` (first sighting). The moving/still
 classifier reads a track's age and movement: on a second sighting a box that grew
 or shrank reads *moving*, while a box that only shifted is judged by the motion
