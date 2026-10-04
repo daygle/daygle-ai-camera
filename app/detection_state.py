@@ -81,6 +81,7 @@ from itertools import islice
 from typing import Any
 
 import app.state as _state
+from app.box_geometry import box_tuple, extent_unstable
 from app.config_facades import effective_live_config
 from app.zone_schema import canonical_label
 
@@ -428,12 +429,28 @@ def confirm_object_detections(
         )
 
     def _spatially_confirmed(label: str, box: Any) -> bool:
-        """How many recent cycles hold a same-label box overlapping ``box``."""
+        """How many recent cycles hold a same-label box overlapping ``box``.
+
+        A cycle also counts when its box is the same object drawn at a
+        different EXTENT -- a roof-only box nested inside a whole-vehicle box
+        scores IoU 0.163 even though nothing moved, so a spatial gate would
+        reject the object every cycle and it would never confirm at all.
+        """
+        current = box_tuple(box)
         streak = 0
         for cycle_labels in history_cycles:
             cycle_label_boxes = cycle_labels.get(label)
-            if cycle_label_boxes and any(_box_iou(box, prior) >= loc_iou for prior in cycle_label_boxes):
-                streak += 1
+            if not cycle_label_boxes:
+                continue
+            for prior in cycle_label_boxes:
+                if _box_iou(box, prior) >= loc_iou:
+                    streak += 1
+                    break
+                if current is not None:
+                    previous = box_tuple(prior)
+                    if previous is not None and extent_unstable(current, previous):
+                        streak += 1
+                        break
         return streak >= required
 
     def _keep(detection: dict[str, Any]) -> bool:

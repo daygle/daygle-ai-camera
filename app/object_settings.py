@@ -74,11 +74,10 @@ from typing import Any
 
 import app.state as _state
 from app.label_groups import cached_label_groups
-# Shared rather than copied: the tuning constants above are duplicated in
-# app/object_tracking.py on purpose, but this is logic with real branches, and
-# two copies of it would drift. Importing is safe -- object_tracking imports
-# only app.state.
-from app.object_tracking import _extent_unstable
+# Shared rather than copied: the tuning constants above are duplicated per
+# module on purpose, but this is logic with real branches and two copies of it
+# would drift. app.box_geometry is deliberately free of app dependencies.
+from app.box_geometry import extent_unstable as _extent_unstable
 from app.runtime_config import cached_snapshot
 from app.zone_schema import canonical_label
 

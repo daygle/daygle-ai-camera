@@ -41,6 +41,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import app.box_geometry as box_geometry
 import app.state as _state
 
 
@@ -81,44 +82,13 @@ TRACK_SIZE_REFERENCE = TRACK_STILL_DISPLACEMENT / TRACK_SIZE_JITTER_FRACTION
 # the other. Neither of the two cases that legitimately move boxes has both:
 # a genuinely translating object separates its boxes (low containment), and a
 # subject approaching the camera scales its box uniformly (stable aspect).
-TRACK_ASPECT_DRIFT = 1.7
-TRACK_EXTENT_CONTAINMENT = 0.8
-
-
-def _box_tuple(box: dict[str, Any]) -> tuple[float, float, float, float] | None:
-    """Normalized ``(x, y, w, h)`` for a detection box, or None if unusable."""
-    try:
-        x = float(box.get("x") or 0.0)
-        y = float(box.get("y") or 0.0)
-        w = float(box.get("width") or 0.0)
-        h = float(box.get("height") or 0.0)
-    except (TypeError, ValueError):
-        return None
-    return (x, y, w, h)
-
-
-def _extent_unstable(
-    box_a: tuple[float, float, float, float],
-    box_b: tuple[float, float, float, float],
-) -> bool:
-    """True when two boxes disagree about SHAPE but agree about WHERE.
-
-    See ``TRACK_ASPECT_DRIFT``: a roof-only box nested inside a whole-vehicle
-    box is the same object drawn at two granularities, not an object that moved.
-    """
-    try:
-        ax, ay, aw, ah = (float(value) for value in box_a)
-        bx, by, bw, bh = (float(value) for value in box_b)
-    except (TypeError, ValueError):
-        return False
-    aw, ah, bw, bh = max(aw, 1e-9), max(ah, 1e-9), max(bw, 1e-9), max(bh, 1e-9)
-    aspect_a, aspect_b = aw / ah, bw / bh
-    if max(aspect_a, aspect_b) / min(aspect_a, aspect_b) <= TRACK_ASPECT_DRIFT:
-        return False
-    overlap_x = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
-    overlap_y = max(0.0, min(ay + ah, by + bh) - max(ay, by))
-    smaller = min(aw * ah, bw * bh)
-    return smaller > 0.0 and (overlap_x * overlap_y) / smaller >= TRACK_EXTENT_CONTAINMENT
+# The extent-instability test is shared with the detection-confirmation gate,
+# so it lives in app.box_geometry. These aliases keep the tracker's own names
+# (and the tests that read them) unchanged.
+TRACK_ASPECT_DRIFT = box_geometry.ASPECT_DRIFT
+TRACK_EXTENT_CONTAINMENT = box_geometry.EXTENT_CONTAINMENT
+_box_tuple = box_geometry.box_tuple
+_extent_unstable = box_geometry.extent_unstable
 
 # Motion-gated fallback for detections no track overlaps. At a 0.5-1.5s cycle a
 # walking person (a narrow box) moves further than its own width between
