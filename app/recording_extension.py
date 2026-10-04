@@ -722,14 +722,18 @@ def start_rtsp_recording_capture(
         1, int((recording_config or effective_recording_config()).get('max_clip_seconds', 60))
     )
     max_deadline_ts = start_capture_ts + max(duration_seconds, float(max_clip_seconds))
+    # This capture's own session record. Extensions update it through the
+    # camera's slot; the capture keeps the reference so it can still read its
+    # latest deadline after a follow-on clip takes the slot.
+    capture_session: dict[str, Any] = {
+        'recording_id': recording_id,
+        'start_capture_ts': start_capture_ts,
+        'capture_deadline_ts': min(max_deadline_ts, initial_deadline_ts),
+        'max_capture_deadline_ts': max_deadline_ts,
+    }
     if camera_id:
         with _state.active_rtsp_recordings_lock:
-            _state.active_rtsp_recordings[camera_id] = {
-                'recording_id': recording_id,
-                'start_capture_ts': start_capture_ts,
-                'capture_deadline_ts': min(max_deadline_ts, initial_deadline_ts),
-                'max_capture_deadline_ts': max_deadline_ts,
-            }
+            _state.active_rtsp_recordings[camera_id] = capture_session
 
     def write_generated_fallback() -> None:
         # Strip internal ``_``-prefixed memo caches (see
@@ -755,27 +759,28 @@ def start_rtsp_recording_capture(
         if camera_id:
             while True:
                 with _state.active_rtsp_recordings_lock:
-                    session = _state.active_rtsp_recordings.get(camera_id)
-                    owned = session is not None and int(session.get('recording_id', -1)) == int(recording_id)
-                    if owned:
-                        final_deadline_ts = float(
-                            session.get('capture_deadline_ts') or final_deadline_ts
-                        )
-                    # A follow-on clip can take this camera's slot before the
-                    # deadline (a fresh event at the Max Clip Duration ceiling).
-                    # Keep waiting out the last deadline read here rather than
-                    # rendering now: the render would only sleep until that
-                    # deadline inside a clip-pool worker (see wait_then_render).
+                    # Read this capture's own record, not whatever holds the
+                    # camera's slot: a follow-on clip can take the slot before
+                    # the deadline (a fresh event at the Max Clip Duration
+                    # ceiling), possibly right after an extension moved this
+                    # deadline. Keep waiting that deadline out rather than
+                    # rendering now - the render would only sleep until it inside
+                    # a clip-pool worker (see wait_then_render), and a stale
+                    # deadline would drop the extension's footage. Extensions
+                    # stop reaching this record once it loses the slot, so its
+                    # deadline is final from then on.
+                    final_deadline_ts = float(
+                        capture_session.get('capture_deadline_ts') or final_deadline_ts
+                    )
                     remaining = final_deadline_ts - time.time()
                     if remaining <= 0:
-                        if owned:
-                            # Freeze in the same lock hold as the last deadline
-                            # read: from here the render's window is decided, so
-                            # no later extension may claim this clip (it would be
-                            # dropped or lose its post-roll).
-                            # ``extend_active_rtsp_recording`` refuses a frozen
-                            # session and the event gets its own clip.
-                            session['deadline_frozen'] = True
+                        # Freeze in the same lock hold as the last deadline
+                        # read: from here the render's window is decided, so no
+                        # later extension may claim this clip (it would be
+                        # dropped or lose its post-roll).
+                        # ``extend_active_rtsp_recording`` refuses a frozen
+                        # session and the event gets its own clip.
+                        capture_session['deadline_frozen'] = True
                         break
                 time.sleep(min(0.5, max(0.05, remaining)))
         return final_deadline_ts

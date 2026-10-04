@@ -378,8 +378,9 @@ async def _buffer_body(response) -> bytes:
 # (``no-store``), so the version in it is always current.
 #
 # References that already carry a query string (recordings.html pins
-# ``?v=recordings-motion-fallback-1``) are left untouched -- the asset group
-# stops at ``?``, so the rewrite is idempotent.
+# ``utils.js?v=recordings-motion-fallback-1``) are left untouched -- the asset
+# group stops at ``?``, so the rewrite is idempotent. A pinned script is NOT
+# re-versioned when it changes, so only pin deliberately.
 _STATIC_REF_RE = re.compile(
     r'(?P<attr>(?:src|href)\s*=\s*)(?P<quote>["\'])/static/(?P<asset>[^"\'\s?]+)(?P=quote)'
 )

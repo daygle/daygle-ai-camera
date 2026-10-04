@@ -1049,6 +1049,87 @@ def test_capture_that_loses_its_slot_still_waits_out_its_deadline(tmp_path, monk
         main._state.active_rtsp_recordings.clear()
 
 
+def test_displaced_capture_waits_for_an_extension_made_just_before_displacement(tmp_path, monkeypatch):
+    """An extension moves the capture's deadline and a follow-on clip takes
+    the slot before the wait loop polls again. The capture must still render
+    after the EXTENDED deadline (read from its own record), not the stale one
+    it last saw through the slot - that would drop the extension's footage."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.postprocess_pool as postprocess_pool
+    mods = _m()
+
+    now = time.time()
+    clip = tmp_path / 'data' / 'recordings' / 'extended_then_replaced.mp4'
+    render_started: list[float] = []
+
+    class FakeRecordingService:
+        def prebuffer_window_seconds(self, _config=None):
+            return 70
+
+        def write_rtsp_clip_with_prebuffer(self, **kwargs):
+            render_started.append(time.time())
+            path = Path(kwargs['file_path'])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'clip')
+            return now - 5.0, 8.0
+
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+    main._state.active_rtsp_recordings.clear()
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=datetime.fromtimestamp(now - 5, tz=timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now + 1, tz=timezone.utc).isoformat(),
+        duration_seconds=6.0,
+        file_path=str(clip),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=main.utc_now(),
+    )
+    # Trigger 1s ago, 2s post window: the deadline is 1s away; cap at 60s.
+    mods.recording_extension.start_rtsp_recording_capture(
+        'rtsp://example/stream',
+        {'file_path': str(clip), 'duration_seconds': 6.0, 'trigger_type': 'motion'},
+        1,
+        [],
+        recording_id=recording_id,
+        camera_id='camera-1',
+        event_time=datetime.fromtimestamp(now - 1, tz=timezone.utc).isoformat(),
+        recording_config={'pre_event_seconds': 4, 'post_event_seconds': 2, 'max_clip_seconds': 60},
+    )
+    time.sleep(0.1)  # let the wait loop take its first deadline reading
+    # An extension moves the deadline to now+2.5...
+    assert mods.recording_extension.extend_active_rtsp_recording(
+        camera_id='camera-1',
+        event_time=datetime.fromtimestamp(now + 0.5, tz=timezone.utc).isoformat(),
+        recording_config={'extension_step_seconds': 2},
+    ) == recording_id
+    extended_deadline = now + 2.5
+    # ...and a follow-on clip takes the slot before the loop polls again.
+    with main._state.active_rtsp_recordings_lock:
+        main._state.active_rtsp_recordings['camera-1'] = {
+            'recording_id': recording_id + 1000,
+            'start_capture_ts': now,
+            'capture_deadline_ts': now + 60,
+            'max_capture_deadline_ts': now + 60,
+        }
+    wait_until = time.time() + 6
+    while time.time() < wait_until and not render_started:
+        time.sleep(0.05)
+    assert postprocess_pool.clip_pool().wait_until_idle(timeout=5)
+
+    assert render_started, 'the displaced capture never rendered'
+    assert render_started[0] >= extended_deadline - 0.05, (
+        f'rendered {extended_deadline - render_started[0]:.2f}s before its extended deadline'
+    )
+    with main._state.active_rtsp_recordings_lock:
+        session = main._state.active_rtsp_recordings.get('camera-1')
+        assert session is not None and session['recording_id'] == recording_id + 1000
+        assert 'deadline_frozen' not in session
+        main._state.active_rtsp_recordings.clear()
+
+
 def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
     # ffmpeg can exit 0 while discarding every corrupt frame, leaving a non-empty
     # file with no video stream. write_rtsp_clip must reject it (so the caller

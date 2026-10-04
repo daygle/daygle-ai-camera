@@ -26,7 +26,10 @@ def test_recordings_keep_motion_pill_on_mixed_object_clips():
     assert "const objectBadges = detections.map((d) => detectionPill" in source
     assert "motionConfidenceFor(recording) !== null" in source
     assert "/static/utils.js?v=recordings-motion-fallback-1" in html
-    assert "/static/recordings.js?v=recordings-motion-fallback-1" in html
+    # Unpinned so the middleware content-versions it: a hand-pinned URL is
+    # left alone, and a cached pre-change bundle would then redefine the
+    # shared clip_timeline.js functions with stale copies.
+    assert '<script src="/static/recordings.js"></script>' in html
 
 
 def test_shared_ui_registry_preserves_nav_helpers_when_utils_loads_after_nav():
