@@ -56,7 +56,7 @@ history window it is anchored to its settled box: a passing car briefly hiding
 part of it, or headlight glare reshaping its box, no longer reads as movement.
 Only a box that stays away from the anchor for several cycles in a row (and not
 while something else covers it) releases the anchor, so a car that pulls out
-still reads *moving* within a second or two. It annotates each detection with `track_id`,
+still reads *moving* within a few detection cycles. It annotates each detection with `track_id`,
 `track_age` (cycles seen), and `track_new` (first sighting). The moving/still
 classifier reads a track's age and movement: on a second sighting a box that grew
 or shrank reads *moving*, while a box that only shifted is judged by the motion
