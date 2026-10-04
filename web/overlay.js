@@ -254,6 +254,20 @@ function projectDetections(prevDetections, curDetections, prevTime, curTime, tar
   });
 }
 
+// Hold/bridge windows scale with sample spacing so a slow cadence still gets
+// a sensible hold, but are capped absolutely: spacing can reach 10s (an
+// operator-set detection interval; adaptive cadence alone tops out at 4x the
+// 0.5s default, i.e. 2s), and 3x that would keep a stale box on screen for 30s.
+// The bridge cap is 4s so one missed cycle at that 2s adaptive ceiling (next
+// detection 4s after the last) still bridges; slower configured cadences fall
+// back to clearing the box rather than gliding it across a long blind gap.
+const TRACK_MAX_HOLD_CAP_SECONDS = 3;
+const TRACK_BRIDGE_CAP_SECONDS = 4;
+
+function trackHoldWindow(localSpacing) {
+  return Math.min(TRACK_MAX_HOLD_CAP_SECONDS, Math.max(1, localSpacing * 3));
+}
+
 // Returns the detections for a baked detection track at playback time `t`
 // (seconds), linearly interpolating box positions between the two surrounding
 // samples so the overlay follows objects smoothly. `track` is the array
@@ -266,15 +280,17 @@ function sampleTrackAtTime(track, t) {
   const last = track[track.length - 1];
   // A truncated track (decode stopped before the end of the clip) must not
   // freeze its final box on screen for the rest of playback: hold the last
-  // sample for ~a few sample intervals only, then stop drawing.
-  const spacing = track.length > 1 ? (last.t - track[0].t) / (track.length - 1) : 0;
-  const maxHold = Math.max(1, spacing * 3);
-  if (time > last.t + maxHold) return [];
+  // sample for ~a few sample intervals only, then stop drawing. Spacing is the
+  // local interval at that end, not the track mean: one long gap elsewhere
+  // (monitor stall, slow cycle) must not stretch the hold everywhere.
+  const tailSpacing = track.length > 1 ? last.t - track[track.length - 2].t : 0;
+  if (time > last.t + trackHoldWindow(tailSpacing)) return [];
   // Symmetrically, a track whose first sample falls mid-clip (the monitor only
   // sampled around the event) must not back-fill that box over the whole
   // pre-roll: hold it for ~a few sample intervals before its time, then
   // nothing - those earlier frames were never analyzed.
-  if (time < track[0].t - maxHold) return [];
+  const headSpacing = track.length > 1 ? track[1].t - track[0].t : 0;
+  if (time < track[0].t - trackHoldWindow(headSpacing)) return [];
   if (time <= track[0].t) return track[0].detections || [];
   if (time >= last.t) {
     const prev = track.length > 1 ? track[track.length - 2] : null;
@@ -284,7 +300,7 @@ function sampleTrackAtTime(track, t) {
       Number(prev?.t),
       Number(last.t),
       time,
-      Math.max(0.25, spacing * 1.5)
+      Math.max(0.25, tailSpacing * 1.5)
     ) || [];
   }
   let lo = 0;
@@ -298,8 +314,9 @@ function sampleTrackAtTime(track, t) {
   // Detectors routinely miss an object for a single cycle. Without bridging,
   // each empty sample blinks the box off and back on, which reads as the
   // overlay "not following" the object. Bridge short gaps by interpolating
-  // straight across to the next sample that has detections again.
-  const bridgeWindow = Math.max(1.2, spacing * 3);
+  // straight across to the next sample that has detections again. The window
+  // scales off the interval being bridged, capped (see TRACK_BRIDGE_CAP_SECONDS).
+  const bridgeWindow = Math.min(TRACK_BRIDGE_CAP_SECONDS, Math.max(1.2, (next.t - prev.t) * 3));
   if (!(next.detections || []).length && (prev.detections || []).length) {
     for (let k = hi + 1; k < track.length && track[k].t - prev.t <= bridgeWindow; k++) {
       if ((track[k].detections || []).length) { next = track[k]; break; }
@@ -307,6 +324,18 @@ function sampleTrackAtTime(track, t) {
   } else if (!(prev.detections || []).length && (next.detections || []).length) {
     for (let k = lo - 1; k >= 0 && next.t - track[k].t <= bridgeWindow; k--) {
       if ((track[k].detections || []).length) { prev = track[k]; break; }
+    }
+  } else if (!(prev.detections || []).length && !(next.detections || []).length) {
+    // Two or more consecutive misses: `time` sits between two empty samples.
+    // Bridge only when the full detection-to-detection gap fits the window.
+    let before = null;
+    for (let k = lo - 1; k >= 0 && next.t - track[k].t <= bridgeWindow; k--) {
+      if ((track[k].detections || []).length) { before = track[k]; break; }
+    }
+    if (before) {
+      for (let k = hi + 1; k < track.length && track[k].t - before.t <= bridgeWindow; k++) {
+        if ((track[k].detections || []).length) { prev = before; next = track[k]; break; }
+      }
     }
   }
   const span = next.t - prev.t;
