@@ -1712,14 +1712,34 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         if thumbnail_bytes else None
     )
     _rule_by_name = {str(r.get('name') or ''): r for r in zone_rules or []}
-    alert_rows = []
-    for alert in triggered:
-        rule = _rule_by_name.get(str(alert.get('rule_name') or ''), {})
-        if rule and not rule.get('enabled', True):
-            continue
-        alert_rows.append({'created_at': datetime.now(timezone.utc).isoformat(), 'rule_name': alert['rule_name'], 'label': alert['label'], 'confidence': alert['confidence'], 'message': alert['message']})
+
+    # An event's alert (the "Alert" badge - "an alert notification was fired
+    # for this event" - read from its alert_history rows, plus the
+    # alert_triggered flag) means a notification is due NOW, as the sound and
+    # behaviour monitors already record it, not merely that a rule matched. A
+    # zone rule notifies when Email or Push is on and its notify window covers
+    # now: the window test alert_dispatch applies before delivering. Outside the window the detection is still an event (and
+    # still records); it just is not an alert. Dwell and face alerts carry
+    # their own delivery rules and keep their rows.
+    def _alert_notifies_now(alert: dict[str, Any]) -> bool:
+        rule = _rule_by_name.get(str(alert.get('rule_name') or ''))
+        if rule is None:
+            return True
+        if not rule.get('enabled', True):
+            return False
+        # Email or Push on: the same "deliverable" test zone_object_rule_matches
+        # applies when it decides a rule is an alert rule at all.
+        has_channel = bool(rule.get('push_enabled') or rule.get('email_enabled'))
+        return has_channel and _rule_notify_active_now(rule.get('schedule') or rule)
+
+    alert_rows = [
+        {'created_at': datetime.now(timezone.utc).isoformat(), 'rule_name': alert['rule_name'], 'label': alert['label'], 'confidence': alert['confidence'], 'message': alert['message']}
+        for alert in triggered
+        if _alert_notifies_now(alert)
+    ]
+    event_alerted = bool(alert_rows)
     try:
-        event_id = _state.database.add_event_with_alerts(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, thumbnail_path=thumbnail_path, detections=recording_detections, alerts=alert_rows, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream', **face_identity_metadata(recording_detections)})
+        event_id = _state.database.add_event_with_alerts(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, thumbnail_path=thumbnail_path, detections=recording_detections, alerts=alert_rows, alert_triggered=event_alerted, metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream', **face_identity_metadata(recording_detections)})
     except Exception:
         # The event row never landed, so nothing references the images just
         # written: remove them rather than leak one pair per failed cycle.
@@ -1741,11 +1761,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Alert rows were written in the same transaction as the event above. The
     # recording link is applied afterwards because clip creation is asynchronous
     # with respect to event persistence.
-    if triggered:
+    notifying = [alert for alert in triggered if _alert_notifies_now(alert)]
+    if notifying:
         # Routed through AI verification when enabled for this camera; that
-        # path fails open to the direct delivery below.
+        # path fails open to the direct delivery below. Only alerts that will
+        # notify go through it: verifying one outside its notify window spends
+        # an AI call on a notification that delivery would then skip.
         submit_alert_notification_with_verification(
-            triggered, event_id, zone_rules,
+            notifying, event_id, zone_rules,
             camera_id=camera_id, camera_name=str(settings.get('name') or ''),
         )
     else:
