@@ -638,6 +638,17 @@ textarea {
 .field-help[title] { cursor: help; }
 
 /* ─── Info-tip icon + hover tooltip ──────────────────────────────────── */
+/* Scoped under .status-panel (0,2,0) so the circle beats the shared
+   .status-panel span { display:block; color:var(--muted); font-size:12px }
+   rule (0,1,1), which would otherwise stack it onto its own line below the
+   label instead of sitting inline as it does on the settings pages. The
+   sibling .status-panel .fps-live-indicator (Stream Details card) fixes the
+   same rule for its pill. */
+.status-panel .info-tip {
+  display: inline-flex;
+  font-size: 11px;
+  margin-bottom: 0; /* cancel the shared .status-panel span margin */
+}
 .info-tip {
   position: relative;
   display: inline-flex;

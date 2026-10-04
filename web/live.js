@@ -10,7 +10,6 @@ const liveEls = {
   streamDetailResolution: document.getElementById('streamDetailResolution'),
   streamDetailFps: document.getElementById('streamDetailFps'),
   streamDetailFpsLive: document.getElementById('streamDetailFpsLive'),
-  streamDetailSource: document.getElementById('streamDetailSource'),
   streamDetailQueue: document.getElementById('streamDetailQueue'),
   detectionSubtitle: document.getElementById('liveDetectionSubtitle'),
   detectionStatus: document.getElementById('liveDetectionStatus'),
@@ -393,7 +392,6 @@ function updateFrameHeader(camera) {
   const backend = camera.backend === 'rtsp' ? 'RTSP' : 'ONVIF';
   const res = `${camera.width || 1280} × ${camera.height || 720}`;
   const fps = formatCameraFps(camera);
-  const source = 'Main stream';
   if (liveEls.streamDetailBackend) liveEls.streamDetailBackend.textContent = backend;
   if (liveEls.streamDetailResolution) liveEls.streamDetailResolution.textContent = res;
   if (liveEls.streamDetailFps) liveEls.streamDetailFps.textContent = fps;
@@ -402,7 +400,6 @@ function updateFrameHeader(camera) {
   const fpsIsLive = cameraFpsIsLive(camera);
   if (liveEls.streamDetailFps) liveEls.streamDetailFps.classList.toggle('fps-live', fpsIsLive);
   if (liveEls.streamDetailFpsLive) liveEls.streamDetailFpsLive.hidden = !fpsIsLive;
-  if (liveEls.streamDetailSource) liveEls.streamDetailSource.textContent = source;
 }
 
 function updateEmptyState() {
@@ -909,7 +906,7 @@ function renderInferenceTiming(payload) {
     return;
   }
   const format = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`);
-  el.textContent = `wait ${format(wait)} / run ${format(run)}`;
+  el.textContent = `Wait ${format(wait)} / Run ${format(run)}`;
 }
 
 function formatMotionPixelPercent(fraction) {
