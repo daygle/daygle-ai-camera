@@ -1892,8 +1892,9 @@ class RecordingService:
         """Most recent decoded frame the ingest wrote for this camera, as
         (jpeg_bytes, captured_ts). ``captured_ts`` is the frame's place on the
         clip clock (see app.frame_capture_clock) so detection samples line up
-        with recorded footage; the file mtime - when ffmpeg finished decoding
-        and wrote the frame, which trails capture - is the fallback. Returns
+        with recorded footage; until that is known it is the file mtime - when
+        ffmpeg finished decoding and wrote the frame, which trails capture.
+        Never decreases per camera. Returns
         None when no fresh frame is available (ingest warming up, camera
         offline, or ffmpeg unavailable)."""
         path = self.frames_dir / self._camera_key(camera_id) / 'latest.jpg'
@@ -1932,8 +1933,7 @@ class RecordingService:
             os.close(fd)
         if not data:
             return None
-        captured = self._frame_clock.capture_ts(self._camera_key(camera_id), mtime)
-        return data, captured if captured is not None else mtime
+        return data, self._frame_clock.stamp(self._camera_key(camera_id), mtime)
 
     def audio_segments_after(self, camera_id: str, after_ts: float) -> list[tuple[Path, float]]:
         """Audio WAV segments written strictly after ``after_ts``, oldest first,

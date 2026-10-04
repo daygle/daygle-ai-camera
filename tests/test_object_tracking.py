@@ -257,3 +257,19 @@ def test_motion_match_ignores_stale_tracks():
         ot.update_object_tracks(cam, [])
     out = ot.update_object_tracks(cam, [_det('person', 0.16, 0.30, 0.03, 0.15)])
     assert out[0]['track_id'] != first[0]['track_id']
+
+
+def test_velocity_is_per_cycle_across_intermittent_misses():
+    # Review case: steady 0.04/cycle with misses between sightings. The step
+    # observed after a miss spans two cycles; extrapolating it per cycle
+    # over-predicted and churned the id on the next intermittent miss.
+    cam = 'trk-intermittent'
+    _reset(cam)
+    ids = []
+    for x in (0.10, 0.14, None, 0.22, None, 0.30):
+        if x is None:
+            ot.update_object_tracks(cam, [])
+            continue
+        out = ot.update_object_tracks(cam, [_det('person', x, 0.30, 0.03, 0.03)])
+        ids.append(out[0]['track_id'])
+    assert len(set(ids)) == 1, ids

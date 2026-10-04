@@ -157,10 +157,12 @@ def _box_area(box: dict[str, Any]) -> float:
 def _motion_match_distance(box: dict[str, Any], track: dict[str, Any]) -> float | None:
     """Gated distance from ``box`` to where ``track`` should be now, or None.
 
-    The prediction extends the track's last observed step by one step per
-    cycle elapsed since it was seen (``misses + 1``), so a subject moving at a
-    steady pace is matched near its expected position rather than near its last
-    one. Returns None when the pair fails the gate or the size check.
+    The prediction extends the track's per-cycle velocity (its last observed
+    step divided by the cycles that step spanned, see ``update_object_tracks``)
+    by the cycles elapsed since it was seen (``misses + 1``), so a subject
+    moving at a steady pace is matched near its expected position rather than
+    near its last one, even across intermittent misses. Returns None when the
+    pair fails the gate or the size check.
     """
     center = _center_of(box)
     track_box = track.get("box") or {}
@@ -172,11 +174,10 @@ def _motion_match_distance(box: dict[str, Any], track: dict[str, Any]) -> float 
         return None
     last_x, last_y = float(centers[-1][0]), float(centers[-1][1])
     steps = int(track.get("misses") or 0) + 1
-    if len(centers) >= 2:
-        step_x = last_x - float(centers[-2][0])
-        step_y = last_y - float(centers[-2][1])
-        last_x += step_x * steps
-        last_y += step_y * steps
+    velocity = track.get("velocity")
+    if isinstance(velocity, (list, tuple)) and len(velocity) >= 2:
+        last_x += float(velocity[0]) * steps
+        last_y += float(velocity[1]) * steps
     distance = ((center[0] - last_x) ** 2 + (center[1] - last_y) ** 2) ** 0.5
     try:
         size = max(float(track_box.get("width") or 0.0), float(track_box.get("height") or 0.0))
@@ -297,6 +298,14 @@ def update_object_tracks(
                 centers = best_track.setdefault("centers", [])
                 new_center = _center_of(box) if isinstance(box, dict) else None
                 if new_center is not None:
+                    if centers:
+                        # Per-cycle velocity: this step spans the cycles missed
+                        # since the last sighting plus this one.
+                        elapsed = int(best_track.get("misses") or 0) + 1
+                        best_track["velocity"] = (
+                            (new_center[0] - float(centers[-1][0])) / elapsed,
+                            (new_center[1] - float(centers[-1][1])) / elapsed,
+                        )
                     centers.append(new_center)
                 del centers[:-TRACK_DISPLACEMENT_HISTORY]
                 best_track["hits"] += 1

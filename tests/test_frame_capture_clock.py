@@ -54,6 +54,20 @@ def _clock_with_segment(tmp_path, *, segment_end_stream_t, segment_mtime):
     return clock, write_fd
 
 
+def test_failed_probe_is_not_cached(monkeypatch):
+    import app.frame_capture_clock as clock_module
+
+    results = iter([
+        subprocess.CompletedProcess([], 1, stdout='', stderr='boom'),
+        subprocess.CompletedProcess([], 0, stdout='  -stats_mux_pre_fmt  format', stderr=''),
+    ])
+    monkeypatch.setattr(clock_module.subprocess, 'run', lambda *_a, **_k: next(results))
+    monkeypatch.setattr(clock_module, '_support_cache', {})
+    # A non-zero exit says nothing about the build: unsupported now, re-probed later.
+    assert stream_frame_stats_supported('/opt/ffmpeg-probe-test') is False
+    assert stream_frame_stats_supported('/opt/ffmpeg-probe-test') is True
+
+
 def test_frame_output_args_keep_fps_filter_without_stats():
     assert detection_frame_output_args(6, None) == ['-vf', 'fps=6']
 
@@ -79,44 +93,71 @@ def test_segment_list_is_capped_csv(tmp_path):
     assert int(args[args.index('-segment_list_size') + 1]) > 0
 
 
-def test_capture_ts_maps_stream_time_through_newest_segment(tmp_path):
+def _send(clock, write_fd, stream_t):
+    """Write one stats line and return the wall time the reader received it."""
+    before = len(clock._rings['cam'])
+    os.write(write_fd, f'{stream_t:.6f}\n'.encode())
+    assert _wait_for(lambda: len(clock._rings['cam']) > before)
+    return clock._rings['cam'][-1][1]
+
+
+def test_stamp_learns_decode_lag_from_an_unambiguous_pair(tmp_path):
     now = time.time()
     # Newest closed segment ended at stream 8.0s, written at wall `now - 1.0`.
     clock, write_fd = _clock_with_segment(tmp_path, segment_end_stream_t=8.0, segment_mtime=now - 1.0)
-    os.write(write_fd, b'8.400000\n')
-    assert _wait_for(lambda: clock.capture_ts('cam', time.time()) is not None)
-    jpeg_mtime = time.time()
-    # Stream 8.4s is 0.4s after the segment end: wall (now - 1.0) + 0.4.
-    assert clock.capture_ts('cam', jpeg_mtime) == pytest.approx(now - 0.6, abs=1e-3)
+    arrived = _send(clock, write_fd, 8.4)
+    jpeg_mtime = arrived + 0.01  # JPEG lands just after its stats line
+    # Stream 8.4s maps to wall (now - 1.0) + 0.4; the stamp is that capture time.
+    assert clock.stamp('cam', jpeg_mtime) == pytest.approx(now - 0.6, abs=1e-3)
+    assert clock.decode_lag('cam') == pytest.approx(jpeg_mtime - (now - 0.6), abs=1e-3)
     os.close(write_fd)
 
 
-def test_capture_ts_uses_the_line_written_before_the_jpeg(tmp_path):
+def test_stamp_ignores_a_pair_delayed_by_the_reader(tmp_path):
+    # Review case: the reader wakes late, so the JPEG's own line arrives well
+    # after the JPEG. Pairing by arrival would pick the previous frame's line;
+    # the ambiguous frame must not shift the learned lag.
     now = time.time()
     clock, write_fd = _clock_with_segment(tmp_path, segment_end_stream_t=8.0, segment_mtime=now - 1.0)
-    os.write(write_fd, b'8.200000\n')
-    assert _wait_for(lambda: clock.capture_ts('cam', time.time()) is not None)
-    first_jpeg_mtime = time.time()
+    arrived = _send(clock, write_fd, 8.4)
+    clock.stamp('cam', arrived + 0.01)
+    learned = clock.decode_lag('cam')
     time.sleep(0.2)
-    os.write(write_fd, b'8.400000\n')
-    assert _wait_for(lambda: clock.capture_ts('cam', time.time()) == pytest.approx(now - 0.6, abs=1e-3))
-    # The older JPEG still maps to its own frame, not the newer stats line.
-    assert clock.capture_ts('cam', first_jpeg_mtime) == pytest.approx(now - 0.8, abs=1e-3)
+    late_jpeg_mtime = time.time()
+    time.sleep(0.15)  # reader delayed past the JPEG write
+    _send(clock, write_fd, 8.6)
+    stamped = clock.stamp('cam', late_jpeg_mtime)
+    assert clock.decode_lag('cam') == pytest.approx(learned)
+    assert stamped == pytest.approx(late_jpeg_mtime - learned)
     os.close(write_fd)
 
 
-def test_capture_ts_rejects_implausible_mapping(tmp_path):
+def test_stamp_rejects_implausible_lag(tmp_path):
     now = time.time()
     # A stale list (e.g. RTSP timestamps reset) would put the frame far in the past.
     clock, write_fd = _clock_with_segment(tmp_path, segment_end_stream_t=500.0, segment_mtime=now - 1.0)
-    os.write(write_fd, b'8.400000\n')
-    time.sleep(0.1)
-    assert clock.capture_ts('cam', time.time()) is None
+    arrived = _send(clock, write_fd, 8.4)
+    assert clock.stamp('cam', arrived + 0.01) == pytest.approx(arrived + 0.01)
+    assert clock.decode_lag('cam') is None
     os.close(write_fd)
 
 
-def test_capture_ts_without_stats_is_none(tmp_path):
-    assert FrameCaptureClock().capture_ts('cam', time.time()) is None
+def test_stamp_without_stats_is_the_mtime(tmp_path):
+    mtime = time.time()
+    assert FrameCaptureClock().stamp('cam', mtime) == mtime
+
+
+def test_stamp_never_goes_backwards_when_the_lag_is_learned(tmp_path):
+    # Review case: frames stamped with the mtime before the first segment
+    # closes, then the learned (earlier) time - history must stay ordered.
+    now = time.time()
+    clock, write_fd = _clock_with_segment(tmp_path, segment_end_stream_t=8.0, segment_mtime=now - 1.0)
+    early = clock.stamp('cam', now)  # nothing learned yet: the mtime itself
+    arrived = _send(clock, write_fd, 8.4)
+    later = clock.stamp('cam', arrived + 0.01)  # learned: ~(now - 0.6), earlier
+    assert early == now
+    assert later >= early
+    os.close(write_fd)
 
 
 def test_latest_frame_falls_back_to_mtime_without_clock(tmp_path):
@@ -227,8 +268,11 @@ def test_real_ffmpeg_frames_land_on_the_segment_clock(tmp_path):
                 mtime = os.fstat(handle.fileno()).st_mtime
                 if mtime != last_mtime:
                     last_mtime = mtime
-                    stamped = clock.capture_ts('cam', mtime)
-                    if stamped is not None:
+                    stamped = clock.stamp('cam', mtime)
+                    lag = clock.decode_lag('cam')
+                    # Skip the few frames held at the last mtime stamp while
+                    # the switch to learned stamps catches up (no going back).
+                    if lag is not None and stamped == pytest.approx(mtime - lag, abs=1e-6):
                         copy = tmp_path / f'cap-{len(captures):04d}.jpg'
                         copy.write_bytes(handle.read())
                         captures.append((copy, stamped, mtime))
