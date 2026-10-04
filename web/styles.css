@@ -1326,6 +1326,31 @@ input[type="file"] { padding: 10px; }
 .clip-seg-pre { background: var(--muted); opacity: 0.4; }
 .clip-seg-event { background: var(--success); opacity: 0.85; }
 .clip-seg-tail { background: var(--accent); opacity: 0.55; }
+/* A single detection has no measurable span: a fixed hairline at that moment,
+   so the bar never implies a duration the track did not record. */
+.clip-seg-event-single {
+  width: 3px;
+  transform: translateX(-1px);
+  opacity: 1;
+}
+/* The triggering event (what Pre-Event / Post-event are measured from), drawn
+   distinct from the solid first-detection marker. */
+.clip-event-trigger {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--warning);
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+.clip-legend-swatch.clip-legend-swatch-trigger {
+  width: 0;
+  height: 12px;
+  border: none;
+  border-left: 2px dashed var(--warning);
+  border-radius: 0;
+}
 .clip-trigger-marker {
   position: absolute;
   top: 0;
