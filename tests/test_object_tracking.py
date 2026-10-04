@@ -180,10 +180,85 @@ def test_displacement_window_drops_old_positions():
 
 
 def test_approaching_subject_reports_motion_from_scale_alone():
-    """A person walking toward the camera translates almost not at all in image
-    space while the box grows. A center-only displacement scored that ~0 and the
-    classifier OVERRODE the motion mask to call a plainly walking person still.
-    The box's growth across the history window must register as motion."""
+    """Realistic head-on approach, measured rather than assumed.
+
+    Geometry is a pinhole model: a 1.7m subject at ~8m shrinking to ~6.4m over
+    8 cycles (~0.23 m/s), camera above the path so the box grows about a fixed
+    foot anchor. Run against the threshold this is the band where a center-only
+    measure lands UNDER it (0.0091) while the box's own growth lands OVER it
+    (0.0181) -- i.e. the case this change actually corrects.
+
+    Boundaries are asserted too, so the test cannot be mistaken for "approaching
+    subjects are now always detected": at 12m the box changes by less than 1% of
+    frame and BOTH measures call it still, and at 6m->3m the center-only measure
+    already clears the threshold on its own. The change widens sensitivity by
+    roughly 2x, it does not rescue distant approaches.
+    """
+    cam = 'trk-disp-approach-real'
+    _reset(cam)
+    out = None
+    for step in range(8):
+        distance = 8.0 - step * (1.6 / 7)
+        height = 1.02 / distance
+        out = ot.update_object_tracks(cam, [_det('person', 0.445, 0.72 - height, 0.11, height)])
+    with st._object_tracks_lock:
+        track = st._object_tracks[cam]['tracks'][0]
+    centers = track['centers']
+    mid = len(centers) // 2
+    mean = lambda pts, axis: sum(p[axis] for p in pts) / len(pts)
+    centre_only = max(
+        abs(mean(centers[mid:], 0) - mean(centers[:mid], 0)),
+        abs(mean(centers[mid:], 1) - mean(centers[:mid], 1)),
+    )
+    # The pre-fix measure really is below the threshold -- that is the bug.
+    assert centre_only <= ot.TRACK_STILL_DISPLACEMENT
+    assert out[0]['track_displacement'] > ot.TRACK_STILL_DISPLACEMENT
+    quiet = np.zeros((72, 128), dtype=bool)
+    assert os_.detection_motion_state(out[0], quiet, out[0]['track_displacement']) == os_.MODE_MOVING
+
+
+def test_distant_approach_is_still_still_under_both_measures():
+    """The honest lower bound: at ~12m the box changes by less than 1% of frame,
+    so neither measure clears the threshold and the subject reads still. This
+    pins that the change did not make everything moving."""
+    cam = 'trk-disp-far'
+    _reset(cam)
+    out = None
+    for step in range(8):
+        distance = 12.0 - step * (1.5 / 7)
+        height = 1.02 / distance
+        out = ot.update_object_tracks(cam, [_det('person', 0.458, 0.72 - height, 0.09, height)])
+    assert out[0]['track_displacement'] <= ot.TRACK_STILL_DISPLACEMENT
+
+
+def test_close_fast_approach_was_already_moving_pre_fix():
+    """The honest upper bound: a 6m->3m approach moves the center far enough that
+    the OLD measure already cleared the threshold. The change only widens the
+    margin here; it is not what makes this case work."""
+    cam = 'trk-disp-close'
+    _reset(cam)
+    out = None
+    for step in range(8):
+        distance = 6.0 - step * (3.0 / 7)
+        height = 1.02 / distance
+        out = ot.update_object_tracks(cam, [_det('person', 0.44, 0.72 - height, 0.12, height)])
+    with st._object_tracks_lock:
+        track = st._object_tracks[cam]['tracks'][0]
+    centers = track['centers']
+    mid = len(centers) // 2
+    mean = lambda pts, axis: sum(p[axis] for p in pts) / len(pts)
+    centre_only = max(
+        abs(mean(centers[mid:], 0) - mean(centers[:mid], 0)),
+        abs(mean(centers[mid:], 1) - mean(centers[:mid], 1)),
+    )
+    assert centre_only > ot.TRACK_STILL_DISPLACEMENT
+    assert out[0]['track_displacement'] > centre_only
+
+
+def test_approaching_subject_scale_growth_without_translation():
+    """The degenerate worst case, kept as a unit check: the box center is
+    EXACTLY parked and only the size grows. The center-only measure is exactly
+    zero here, so anything above it came from the scale term alone."""
     cam = 'trk-disp-approach'
     _reset(cam)
     # Center parked; height grows 0.04 -> 0.20 (walking straight at the lens).
