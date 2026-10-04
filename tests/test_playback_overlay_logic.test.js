@@ -98,6 +98,59 @@ test('sampleTrackAtTime stops drawing after the track hold window', () => {
 });
 
 
+test('sampleTrackAtTime caps the end hold on a wide-spaced track', () => {
+  // 10s spacing (slowest configurable interval): 3x spacing would hold 30s.
+  const sparse = [
+    { t: 0, detections: [detection(0.1)] },
+    { t: 10, detections: [detection(0.1)] },
+  ];
+  assert.equal(sandbox.sampleTrackAtTime(sparse, 12.5).length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sampleTrackAtTime(sparse, 13.5))), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sampleTrackAtTime([
+    { t: 20, detections: [detection(0.1)] },
+    { t: 30, detections: [] },
+  ], 16.5))), []);
+});
+
+
+test('sampleTrackAtTime end hold uses local spacing, not the track mean', () => {
+  // One long stall early inflates the mean spacing (~2.4s -> 7s hold
+  // uncapped, 3s capped); the tail is sampled every 0.5s, so hold 1.5s.
+  const stalled = [
+    { t: 0, detections: [detection(0.1)] },
+    { t: 10, detections: [detection(0.1)] },
+    { t: 10.5, detections: [detection(0.1)] },
+    { t: 11, detections: [detection(0.1)] },
+    { t: 11.5, detections: [detection(0.1)] },
+    { t: 12, detections: [detection(0.1)] },
+  ];
+  assert.equal(sandbox.sampleTrackAtTime(stalled, 13.4).length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sampleTrackAtTime(stalled, 13.7))), []);
+});
+
+
+test('sampleTrackAtTime does not bridge a miss across a long blind gap', () => {
+  const sparse = [
+    { t: 0, detections: [detection(0)] },
+    { t: 10, detections: [] },
+    { t: 20, detections: [detection(0.2)] },
+  ];
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sampleTrackAtTime(sparse, 5))), []);
+});
+
+
+test('sampleTrackAtTime bridges one missed cycle at the 2s adaptive ceiling', () => {
+  const stretched = [
+    { t: 0, detections: [detection(0)] },
+    { t: 2, detections: [] },
+    { t: 4, detections: [detection(0.2)] },
+  ];
+  const sampled = sandbox.sampleTrackAtTime(stretched, 3);
+  assert.equal(sampled.length, 1);
+  assert.ok(sampled[0].box.x > 0 && sampled[0].box.x < 0.2);
+});
+
+
 test('normalizeDetectionBox maps pixel boxes into normalized coordinates', () => {
   assert.deepEqual(
     JSON.parse(JSON.stringify(sandbox.normalizeDetectionBox({ x: 320, y: 180, width: 160, height: 90 }, 1280, 720))),
