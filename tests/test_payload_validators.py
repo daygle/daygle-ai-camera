@@ -1233,6 +1233,16 @@ def test_validate_live_settings_rejects_history_minutes_out_of_range(monkeypatch
         pv.validate_live_settings({'detection_history_minutes': 200})  # above max 120
 
 
+def test_validate_live_settings_bounds_motion_object_grace(monkeypatch, pv):
+    from fastapi import HTTPException
+    _install_validator_dependencies(monkeypatch)
+    assert pv.validate_live_settings({'motion_object_grace_seconds': 0})['motion_object_grace_seconds'] == 0
+    assert pv.validate_live_settings({})['motion_object_grace_seconds'] == 3.0
+    for bad in (-1, 11, 'soon'):
+        with pytest.raises(HTTPException):
+            pv.validate_live_settings({'motion_object_grace_seconds': bad})
+
+
 def test_validate_live_settings_rejects_non_numeric_history_minutes(monkeypatch, pv):
     """``detection_history_minutes='forever'`` triggers the cluster's
     TypeError/ValueError fallback path -> HTTPException(400). Exercise
@@ -1255,6 +1265,7 @@ def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
         'snapshot_refresh_ms', 'detection_status_refresh_ms',
         'detection_interval_seconds', 'face_detection_interval_seconds',
         'event_debounce_seconds',
+        'motion_object_grace_seconds',
         'background_detection_enabled', 'always_run_object_detection',
         'adaptive_detection_enabled',
         'object_detection_region_boost', 'object_detection_tiling',

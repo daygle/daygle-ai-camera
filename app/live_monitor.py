@@ -115,6 +115,11 @@ from app.recording_extension import (
 from app.backup import purge_camera_diagnostics_by_policy
 from app.utils import build_stream_url, normalize_bool_setting, normalize_ptz_motion_detection
 from app.zone_schema import label_matches
+from app.motion_object_priority import (
+    DEFAULT_GRACE_SECONDS as MOTION_OBJECT_DEFAULT_GRACE_SECONDS,
+    MAX_GRACE_SECONDS as MOTION_OBJECT_MAX_GRACE_SECONDS,
+    object_zone_keys as motion_object_zone_keys,
+)
 from app.zone_detection import (
     detection_matches_zone,
     filter_detections_for_camera,
@@ -500,6 +505,7 @@ def _prune_frame_motion_state() -> None:
         _state._periodic_scan_last_ts.pop(cid, None)
         with _state._motion_confirm_lock:
             _state._motion_confirm_streaks.pop(cid, None)
+        _state.motion_object_arbiter.clear_camera(cid)
         with _state._object_tracks_lock:
             _state._object_tracks.pop(cid, None)
     if stale:
@@ -1015,7 +1021,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # feeds motion-only zones/alerts. Default on; disable it to restore the
     # CPU-saving motion gate (inference only when motion fires).
     always_run_object_detection = normalize_bool_setting(live_settings.get('always_run_object_detection'), True)
-    if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections) and (not always_run_object_detection):
+    # Motion held for object priority must still be resolved this cycle (an
+    # object may now be visible, or the hold may expire), so it keeps the
+    # cycle running even on a quiet frame.
+    if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections) and (not always_run_object_detection) and (not _state.motion_object_arbiter.has_held(camera_id)):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         _telemetry_finish(MODE_SKIPPED_NO_MOTION)
         return None
@@ -1432,12 +1441,43 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             0, len(alertable_object_detections) - len(object_alert_detections),
         )
     record_only_detections = [d for d in alertable_object_detections if zone_record_on_detect(d, settings) and (not zone_object_rule_matches(settings, d, action='alert'))] if _zone_match_needed else []
+    # Object priority over motion across cycles (see app.motion_object_priority):
+    # motion in a zone an alertable object occupied within the grace window is
+    # the object's, and motion-only is held that long for an object to appear.
+    # Released motion is stamped and pictured at the moment it began.
+    _motion_hold_reason = None
+    _priority_objects = list(object_alert_detections) + record_only_detections
+    _motion_zones = [
+        zone for zone in (settings.get('detection') or {}).get('zones', [])
+        if zone.get('enabled', True) and zone.get('monitor_motion', True)
+    ]
+    try:
+        _motion_grace = min(MOTION_OBJECT_MAX_GRACE_SECONDS, max(0.0, float(
+            live_settings.get('motion_object_grace_seconds', MOTION_OBJECT_DEFAULT_GRACE_SECONDS)
+        )))
+    except (TypeError, ValueError):
+        _motion_grace = MOTION_OBJECT_DEFAULT_GRACE_SECONDS
+    _arbitration = _state.motion_object_arbiter.resolve(
+        camera_id,
+        now=frame_capture_ts,
+        grace_seconds=_motion_grace,
+        motion_detections=motion_detections,
+        object_zone_keys=motion_object_zone_keys(_motion_zones, _priority_objects, detection_matches_zone),
+        image=image,
+        image_is_numpy=frame_is_numpy,
+        has_objects=bool(_priority_objects),
+    )
     # Keep every firing motion zone in the playback track. Retaining only the
     # strongest zone made multi-zone motion clips show a box for one region while
-    # silently omitting movement elsewhere in the same frame.
+    # silently omitting movement elsewhere in the same frame. Motion attributed
+    # to an object is left out, so playback shows the car rather than a
+    # "Motion" box for its headlight spill; held motion stays in (it is real
+    # movement, and a released motion event needs its boxes).
+    _attributed_zones = set(_arbitration.attributed_zones)
     motion_history_detections = [
         {**motion, 'label': 'motion', 'motion_event': True}
         for motion in motion_detections
+        if str(motion.get('zone_id') or motion.get('zone_name') or '').strip() not in _attributed_zones
     ]
     record_live_detection_history(
         camera_id,
@@ -1445,6 +1485,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         sample_ts=frame_capture_ts,
         live_config=live_settings,
     )
+    motion_detections = _arbitration.motion_detections
+    if _arbitration.event_ts is not None:
+        frame_capture_ts = _arbitration.event_ts
+        image = _arbitration.image
+        frame_is_numpy = _arbitration.image_is_numpy
+    if _arbitration.held_zones and not motion_detections:
+        _motion_hold_reason = (
+            f'Motion held up to {_motion_grace:.0f}s so an object in the same zone takes priority.'
+        )
     alert_detections = list(object_alert_detections) + record_only_detections
     for _mot in motion_detections:
         alert_detections.append({**_mot, 'label': 'motion', 'motion_event': True})
@@ -1459,7 +1508,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     ]
     object_reason = _below_threshold_object_reason(detections, _monitored_zones)
     if not alert_detections and not _unknown_face_alerts and not _known_face_rule_alerts:
-        reason = _no_object_match_reason(detections, raw_labels, _monitored_zones)
+        reason = _motion_hold_reason or _no_object_match_reason(detections, raw_labels, _monitored_zones)
         update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         _telemetry_finish(_telemetry_mode)
         return None

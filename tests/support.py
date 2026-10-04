@@ -157,6 +157,10 @@ live:
   # if a deployment chooses a confirmation profile. Confirmation itself is
   # covered by tests/test_detection_confirmation.py.
   detection_confirm_frames: 1
+  # Same reasoning for motion: plumbing tests feed one motion frame and assert
+  # its event at once. The object-priority hold that delays motion-only events
+  # is covered by tests/test_motion_object_priority.py, which enables it.
+  motion_object_grace_seconds: 0
 storage:
   data_dir: {tmp_path / 'data'}
   database: {database_path}
