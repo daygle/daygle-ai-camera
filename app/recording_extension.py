@@ -884,6 +884,9 @@ def start_rtsp_recording_capture(
                     session = _state.active_rtsp_recordings.get(camera_id)
                     if session and int(session.get('recording_id', -1)) == int(recording_id):
                         _state.active_rtsp_recordings.pop(camera_id, None)
+                        deadline = float(session.get('capture_deadline_ts') or 0)
+                        ceiling = float(session.get('max_capture_deadline_ts') or deadline)
+                        _state.last_rtsp_capture_capped[camera_id] = deadline >= ceiling
                     captured_end_ts = captured_end_ts_holder.get('ts')
                     if captured_end_ts is not None:
                         # Monotonic: two captures for one camera can render at

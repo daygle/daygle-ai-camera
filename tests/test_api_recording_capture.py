@@ -858,6 +858,56 @@ def test_capture_end_boundary_never_moves_backwards(tmp_path, monkeypatch):
 
     assert main._state.last_rtsp_capture_end['camera-1'] == pytest.approx(newer_end, abs=0.001)
     main._state.last_rtsp_capture_end.pop('camera-1', None)
+
+
+@pytest.mark.parametrize(('max_clip_seconds', 'capped'), [(60, False), (10, True)])
+def test_capture_end_records_whether_the_clip_hit_max_clip(tmp_path, monkeypatch, max_clip_seconds, capped):
+    """A debounced detection may roll over into a follow-on clip only after a
+    clip cut at its Max Clip ceiling; the finished capture records which."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.postprocess_pool as postprocess_pool
+    mods = _m()
+
+    now = time.time()
+    clip = tmp_path / 'data' / 'recordings' / f'clip_{max_clip_seconds}.mp4'
+
+    class FakeRecordingService:
+        def prebuffer_window_seconds(self, _config=None):
+            return 70
+
+        def write_rtsp_clip_with_prebuffer(self, **kwargs):
+            path = Path(kwargs['file_path'])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'clip')
+            return now - 30.0, 15.0
+
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
+    monkeypatch.setattr(main._state, 'last_rtsp_capture_capped', {})
+    main._state.active_rtsp_recordings.clear()
+    recording_id = main.database.add_recording(
+        event_id=None, camera_id='camera-1',
+        started_at=datetime.fromtimestamp(now - 30, tz=timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now - 15, tz=timezone.utc).isoformat(),
+        duration_seconds=15.0, file_path=str(clip), thumbnail_path=None,
+        source='rtsp', created_at=main.utc_now(),
+    )
+    mods.recording_extension.start_rtsp_recording_capture(
+        'rtsp://example/stream',
+        {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
+        1,
+        [],
+        recording_id=recording_id,
+        camera_id='camera-1',
+        event_time=datetime.fromtimestamp(now - 25, tz=timezone.utc).isoformat(),
+        recording_config={'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': max_clip_seconds},
+    )
+    wait_until = time.time() + 5
+    while time.time() < wait_until and not clip.exists():
+        time.sleep(0.05)
+    assert postprocess_pool.clip_pool().wait_until_idle(timeout=5)
+    assert main._state.last_rtsp_capture_capped.get('camera-1') is capped
+    main._state.last_rtsp_capture_end.pop('camera-1', None)
     main._state.active_rtsp_recordings.clear()
 
 
