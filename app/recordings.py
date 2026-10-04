@@ -2157,6 +2157,37 @@ class RecordingService:
         drift fix lives in exactly one place."""
         return self._collect_prebuffer_segments_from_dir(self.prebuffer_dir / camera_key, start_ts, end_ts)
 
+    @staticmethod
+    def _audio_segment_starts(
+        segments: list[tuple[Path, float, float]],
+    ) -> list[tuple[Path, float, float]]:
+        """Anchor WAV starts at end minus the PCM header's actual duration.
+
+        Mtime spacing is not sample duration: final segments can be short and
+        write jitter must not stretch or shift audio. Read only headers, not
+        the PCM payload. Unfinished/corrupt headers keep their estimate for the
+        readability filter to reject; a concurrently pruned file is skipped.
+        Run again on staged copies so timing describes the bytes we assemble.
+        """
+        timed: list[tuple[Path, float, float]] = []
+        for segment, start, end in segments:
+            try:
+                with wave.open(str(segment), 'rb') as reader:
+                    frames = reader.getnframes()
+                    rate = reader.getframerate()
+                    frame_bytes = reader.getsampwidth() * reader.getnchannels()
+                    size = segment.stat().st_size
+                # An open ffmpeg WAV can claim a placeholder data length much
+                # larger than its file; it has no trustworthy duration yet.
+                if rate > 0 and frames > 0 and frames * frame_bytes <= size:
+                    start = end - frames / rate
+            except FileNotFoundError:
+                continue
+            except (wave.Error, EOFError, OSError, ValueError):
+                pass  # Preserve the existing unreadable-segment handling.
+            timed.append((segment, start, end))
+        return timed
+
     def _readable_audio_segments(
         self, segments: list[tuple[Path, float, float]]
     ) -> list[tuple[Path, float, float]]:
@@ -2684,6 +2715,9 @@ class RecordingService:
         # the wall-clock position of the first audio segment and explicitly trim
         # or delay the audio so its first sample lines up with video time zero.
         audio_timed = self._segment_timeline(self.audio_dir / camera_key, 'aud-*.wav', 1.0)
+        audio_timed = self._audio_segment_starts([
+            item for item in audio_timed if item[2] > start_ts
+        ])
         selected_audio = [
             item for item in audio_timed
             if item[2] > start_ts and item[1] < start_ts + duration_seconds
@@ -2727,7 +2761,7 @@ class RecordingService:
             # live sidecar between probe and stage); probing once here instead
             # of before AND after staging halves the ffprobe spawns per event
             # (~one per second of clip window).
-            selected_audio = self._readable_audio_segments(selected_audio)
+            selected_audio = self._audio_segment_starts(self._readable_audio_segments(selected_audio))
             if not selected_audio:
                 logger.info(
                     'No readable audio sidecars remained for %s before mux; keeping silent video clip.',

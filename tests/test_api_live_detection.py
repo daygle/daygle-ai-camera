@@ -7,6 +7,8 @@ tests/support.py.
 import threading
 import time
 
+import pytest
+
 from tests.support import _load_app, _m
 
 
@@ -409,6 +411,98 @@ def test_two_same_label_tracks_inside_cooldown_window_both_emit(tmp_path, monkey
         main._state.live_event_track_last_emitted.clear()
         with main._state._object_tracks_lock:
             main._state._object_tracks.pop('camera-1', None)
+
+
+@pytest.mark.parametrize('capture_state', ['capped', 'frozen', 'missing', 'record-off', 'no-stream'])
+def test_continuing_track_rolls_over_at_max_clip_without_waiting_for_cooldown(tmp_path, monkeypatch, capture_state):
+    """PR #452 covers fresh events, but the SAME track takes the debounce path."""
+    from datetime import datetime, timezone
+
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.utils
+    mods = _m()
+    camera = 'ceiling-cam'
+    now = time.time()
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _image, confidence=None):
+            return [{'label': 'person', 'confidence': 0.93,
+                     'box': {'x': 0.2, 'y': 0.2, 'width': 0.1, 'height': 0.3}}]
+
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx'}, main.utc_now())
+    main.database.set_setting('objects', {'default_mode': 'any'}, main.utc_now())
+    config = {'pre_event_seconds': 0, 'post_event_seconds': 5,
+              'extension_step_seconds': 5, 'max_clip_seconds': 10, 'continuous': False}
+    monkeypatch.setattr(main._state, 'camera_event_recording_config', lambda _cfg: config)
+    monkeypatch.setattr(app.utils, 'build_stream_url', lambda _cfg: 'rtsp://example/stream')
+    monkeypatch.setattr(mods.live_monitor, 'zone_record_on_detect', lambda *_a: True)
+    old_id = main.database.add_recording(
+        event_id=None, camera_id=camera,
+        started_at=datetime.fromtimestamp(now - 10, timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now, timezone.utc).isoformat(),
+        duration_seconds=10, file_path=str(tmp_path / 'capped.mp4'),
+        thumbnail_path=None, source='rtsp', created_at=main.utc_now(),
+    )
+    old_session = {'recording_id': old_id, 'start_capture_ts': now - 10,
+                   'capture_deadline_ts': now, 'max_capture_deadline_ts': now}
+    main._state.active_rtsp_recordings[camera] = old_session
+    settings = {'id': camera, 'name': 'Long event', 'detection': {'zones': []}}
+    started = []
+
+    def start_follow_on(*_args, **kwargs):
+        started.append(kwargs['recording_id'])
+        main._state.active_rtsp_recordings[camera] = {
+            'recording_id': kwargs['recording_id'], 'start_capture_ts': now,
+            'capture_deadline_ts': now + 5, 'max_capture_deadline_ts': now + 10,
+        }
+
+    monkeypatch.setattr(mods.recording_extension, 'start_rtsp_recording_capture', start_follow_on)
+    try:
+        # Seed the same track and both cooldown clocks with an earlier event.
+        first = mods.live_monitor.process_live_stream_alerts(
+            b'jpeg', {'timestamp': now - 6, 'width': 1280, 'height': 720},
+            settings, enforce_interval=False,
+        )
+        assert first is not None
+        assert main.database.get_event(first)['recording_id'] == old_id
+        if capture_state == 'frozen':
+            old_session['deadline_frozen'] = True
+        elif capture_state == 'missing':
+            main._state.active_rtsp_recordings.pop(camera)
+        elif capture_state == 'record-off':
+            monkeypatch.setattr(mods.live_monitor, 'zone_record_on_detect', lambda *_a: False)
+        elif capture_state == 'no-stream':
+            monkeypatch.setattr(app.utils, 'build_stream_url', lambda _cfg: '')
+        second = mods.live_monitor.process_live_stream_alerts(
+            b'jpeg', {'timestamp': now + 0.1, 'width': 1280, 'height': 720},
+            settings, enforce_interval=False,
+        )
+        if capture_state in {'record-off', 'no-stream'}:
+            assert second is None
+            assert started == []
+            return
+        assert second is not None, 'ongoing track must roll over even while debounced'
+        assert started == [main.database.get_event(second)['recording_id']]
+        assert started[0] != old_id
+        assert old_session['capture_deadline_ts'] == pytest.approx(now)
+        # A covered cycle still debounces, not a fresh clip/event per frame.
+        third = mods.live_monitor.process_live_stream_alerts(
+            b'jpeg', {'timestamp': now + 0.1, 'width': 1280, 'height': 720},
+            settings, enforce_interval=False,
+        )
+        assert third is None
+        assert len(started) == 1
+    finally:
+        main._state.active_rtsp_recordings.pop(camera, None)
+        main._state.live_event_last_emitted.pop(camera, None)
+        main._state.live_event_track_last_emitted.pop(camera, None)
+        main._state._object_tracks.pop(camera, None)
 
 
 def test_live_stream_default_any_mode_annotates_motion_state(tmp_path, monkeypatch):

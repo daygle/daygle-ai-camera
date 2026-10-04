@@ -693,6 +693,121 @@ def test_assemble_gapped_audio_skips_unreadable_and_returns_none_when_empty(tmp_
     ) is None
 
 
+def test_mux_anchors_staged_wav_by_sample_count_not_mtime_spacing(tmp_path, monkeypatch):
+    """Final short WAVs and write jitter must not shift PCM within the clip."""
+    import pytest
+
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'cam'
+    audio_dir.mkdir(parents=True)
+    a = _real_wav(audio_dir / 'aud-a.wav', seconds=0.5, value=1000)
+    b = _real_wav(audio_dir / 'aud-b.wav', seconds=1.0, value=2000)
+    os.utime(a, (101.0, 101.0))
+    os.utime(b, (102.2, 102.2))
+    video = tmp_path / 'clip.mp4'
+    video.write_bytes(b'video')
+    captured = {}
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _p: True))
+
+    def fake_mux(command, *_args, **_kwargs):
+        inputs = [i for i, arg in enumerate(command) if arg == '-i']
+        rate, frames = _read_frames(Path(command[inputs[1] + 1]))
+        captured['frames'] = frames
+        captured['rate'] = rate
+        Path(command[-1]).write_bytes(b'muxed')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_mux)
+    assert service._mux_prebuffer_audio('cam', video, 100.0, 3.0)
+    frames, rate = captured['frames'], captured['rate']
+    assert len(frames) / rate == pytest.approx(3.0)
+    # First WAV is [100.5,101], not the nominal [100,101]. Second WAV
+    # is [101.2,102.2], not [101,102.2] just because the mtime gap is 1.2s.
+    assert set(frames[:rate // 2]) == {0}
+    assert frames[int(0.75 * rate)] == 1000
+    assert set(frames[rate:int(1.2 * rate)]) == {0}
+    assert frames[int(1.25 * rate)] == 2000
+    assert set(frames[int(2.2 * rate):]) == {0}
+
+
+def test_audio_segment_starts_use_real_lengths_and_preserve_gaps(tmp_path):
+    import pytest
+
+    service = _service(tmp_path)
+    a = _real_wav(tmp_path / 'a.wav', seconds=1.25)
+    b = _real_wav(tmp_path / 'b.wav', seconds=0.25)
+    # Starts stay independent: neither short files nor a missing segment can
+    # collapse the wall-clock gap. This also covers non-nominal sample rates.
+    c = _real_wav(tmp_path / 'c.wav', seconds=0.5, rate=8000)
+    timed = service._audio_segment_starts([(a, 99, 100), (b, 101, 102), (c, 102, 103)])
+    assert [start for _, start, _ in timed] == pytest.approx([98.75, 101.75, 102.5])
+    assert [end for _, _, end in timed] == [100, 102, 103]
+
+
+def test_audio_segment_starts_handle_open_corrupt_and_pruned_files(tmp_path):
+    import struct
+
+    good = _real_wav(tmp_path / 'good.wav')
+    growing = _real_wav(tmp_path / 'growing.wav')
+    data = bytearray(growing.read_bytes())
+    # ffmpeg leaves a placeholder data length until the WAV closes.
+    data[40:44] = struct.pack('<I', 0xFFFFFFFF)
+    growing.write_bytes(data)
+    bad = _wav(tmp_path / 'corrupt.wav', 128)
+    missing = tmp_path / 'pruned.wav'
+    timed = RecordingService._audio_segment_starts([
+        (good, 0, 1), (growing, 1, 2), (bad, 2, 3), (missing, 3, 4),
+    ])
+    assert timed == [(good, 0, 1), (growing, 1, 2), (bad, 2, 3)]
+
+
+def test_real_mux_keeps_short_wav_at_its_clip_offset(tmp_path):
+    """Exercise the delivered MP4, not just the assembler or ffmpeg command."""
+    import array
+    import shutil
+    import pytest
+
+    ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg or not shutil.which('ffprobe'):
+        if os.environ.get('CI'):
+            pytest.fail('ffmpeg/ffprobe required for the audio timing regression')
+        pytest.skip('needs real ffmpeg/ffprobe')
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'cam'
+    audio_dir.mkdir(parents=True)
+    a = _real_wav(audio_dir / 'aud-a.wav', seconds=0.5, value=8000)
+    b = _real_wav(audio_dir / 'aud-b.wav', seconds=1.0, value=12000)
+    os.utime(a, (101.0, 101.0))
+    os.utime(b, (102.2, 102.2))
+    video = tmp_path / 'clip.mp4'
+    subprocess.run([
+        ffmpeg, '-v', 'error', '-f', 'lavfi', '-i', 'color=size=160x120:rate=25',
+        '-t', '3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(video),
+    ], check=True, capture_output=True, timeout=20)
+    assert service._mux_prebuffer_audio('cam', video, 100.0, 3.0)
+    result = subprocess.run([
+        ffmpeg, '-v', 'error', '-i', str(video), '-map', '0:a:0',
+        '-f', 's16le', '-ac', '1', '-ar', '16000', 'pipe:1',
+    ], check=True, capture_output=True, timeout=20)
+    samples = array.array('h')
+    samples.frombytes(result.stdout)
+
+    def amplitude(a, b):
+        window = samples[int(a * 16000):int(b * 16000)]
+        assert window
+        return sum(abs(x) for x in window) / len(window)
+
+    # AAC is lossy, so check signal placement away from codec boundaries.
+    assert amplitude(0.1, 0.4) < 100
+    assert amplitude(0.6, 0.9) > 5000
+    assert amplitude(1.05, 1.15) < 100
+    assert amplitude(1.4, 1.9) > 8000
+    assert amplitude(2.5, 2.9) < 100
+    assert RecordingService.clip_duration_seconds(video) == pytest.approx(3.0, abs=0.1)
+
+
 def test_first_error_line_skips_scheduler_cascade(tmp_path):
     """_first_error_line must return the originating error, not ffmpeg 7.x's
     scheduler propagation chatter that only repeats the error number."""

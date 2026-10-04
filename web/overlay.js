@@ -294,13 +294,10 @@ function sampleTrackAtTime(track, t) {
   // (monitor stall, slow cycle) must not stretch the hold everywhere.
   const tailSpacing = track.length > 1 ? last.t - track[track.length - 2].t : 0;
   if (time > last.t + trackHoldWindow(tailSpacing)) return [];
-  // Symmetrically, a track whose first sample falls mid-clip (the monitor only
-  // sampled around the event) must not back-fill that box over the whole
-  // pre-roll: hold it for ~a few sample intervals before its time, then
-  // nothing - those earlier frames were never analyzed.
-  const headSpacing = track.length > 1 ? track[1].t - track[0].t : 0;
-  if (time < track[0].t - trackHoldWindow(headSpacing)) return [];
-  if (time <= track[0].t) return track[0].detections || [];
+  // No observation exists before the track starts. Holding a future box
+  // backward paints an object into pre-roll frames that were never analyzed.
+  if (time < track[0].t) return [];
+  if (time === track[0].t) return track[0].detections || [];
   if (time >= last.t) {
     const prev = track.length > 1 ? track[track.length - 2] : null;
     return projectDetections(
@@ -351,11 +348,15 @@ function sampleTrackAtTime(track, t) {
   if (!(span > 0)) return next.detections || [];
   const factor = (time - prev.t) / span;
   if (factor <= 0) return prev.detections || [];
-  return (next.detections || []).map((nextDet) => {
+  if (factor >= 1) return next.detections || [];
+  return (next.detections || []).flatMap((nextDet) => {
     const prevDet = matchDetection(prev.detections || [], nextDet);
-    if (!prevDet?.box || !nextDet?.box) return nextDet;
+    // Interpolate only observed pairs. A new object must wait for its own
+    // sample rather than snap to a future position throughout the interval.
+    if (!prevDet) return [];
+    if (!prevDet.box || !nextDet?.box) return [prevDet];
     const lerp = (a, b) => Math.max(0, Math.min(1, a + (b - a) * factor));
-    return {
+    return [{
       ...nextDet,
       box: {
         x: lerp(prevDet.box.x, nextDet.box.x),
@@ -363,7 +364,7 @@ function sampleTrackAtTime(track, t) {
         width: lerp(prevDet.box.width, nextDet.box.width),
         height: lerp(prevDet.box.height, nextDet.box.height),
       },
-    };
+    }];
   });
 }
 
