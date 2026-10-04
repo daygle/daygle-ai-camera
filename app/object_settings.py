@@ -446,6 +446,15 @@ def update_still_dwell_alerts(
         return emitted
 
 
+def _center_step(detection: dict[str, Any]) -> float:
+    """Larger-axis box-center move between a track's last two sightings."""
+    current, previous = detection.get('track_center'), detection.get('track_prev_center')
+    try:
+        return max(abs(float(current[0]) - float(previous[0])), abs(float(current[1]) - float(previous[1])))
+    except (TypeError, ValueError, IndexError):
+        return 0.0
+
+
 def _two_point_step(detection: dict[str, Any]) -> float | None:
     """Largest single-cycle change in a track's box, in normalized frame units.
 
@@ -537,15 +546,21 @@ def detection_motion_state(
         except (TypeError, ValueError):
             track_age = 0
         if detection.get('track_id') is not None and 2 <= track_age < _TRACK_DISPLACEMENT_MIN_AGE:
-            # Exception: a track whose box stepped clearly across the frame
-            # since its first sighting is moving, not a flapping parked car. The
-            # tracker matches a walking subject by its motion once its box no
-            # longer overlaps the previous one, so without this the second
-            # sighting of every walker would be dropped under Moving Only.
+            # Exception: a track whose box clearly changed since its first
+            # sighting is not a flapping parked car. The tracker matches a
+            # walking subject by its motion once its box no longer overlaps the
+            # previous one, so without this the second sighting of every walker
+            # would be dropped under Moving Only.
             step = _two_point_step(detection)
-            if step is not None and step >= _TRACK_STEP_MOVING:
+            if step is None or step < _TRACK_STEP_MOVING:
+                return MODE_STILL
+            # A box that GREW or shrank (a subject approaching or receding) is
+            # moving. A box that only TRANSLATED is not proof on its own: an id
+            # swapped between two adjacent parked cars translates too (event
+            # 47935), so the mask decides it as it would a first sighting - a
+            # walker's box is full of changed pixels, a parked car's is not.
+            if _center_step(detection) < _TRACK_STEP_MOVING:
                 return MODE_MOVING
-            return MODE_STILL
     if diff_mask is None:
         return MODE_STILL
     box = detection.get('box')

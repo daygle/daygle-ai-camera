@@ -642,3 +642,18 @@ def test_velocity_is_per_cycle_across_intermittent_misses():
         out = ot.update_object_tracks(cam, [_det('person', x, 0.30, 0.03, 0.03)])
         ids.append(out[0]['track_id'])
     assert len(set(ids)) == 1, ids
+
+
+def test_parked_car_track_is_not_claimed_by_the_car_parked_beside_it():
+    # Event 47935: two adjacent parked cars detected intermittently at night.
+    # When car A is missed, car B (8% of the frame away, no overlap) must open
+    # or keep its own track rather than take over A's stationary one.
+    cam = 'trk-adjacent-parked'
+    _reset(cam)
+    for _ in range(4):
+        parked = ot.update_object_tracks(cam, [_det('car', 0.53, 0.15, 0.06, 0.06)])
+    out = ot.update_object_tracks(cam, [_det('car', 0.61, 0.15, 0.06, 0.06)])
+    assert out[0]['track_id'] != parked[0]['track_id']
+    # ...and A's track is still there for A when it is detected again.
+    again = ot.update_object_tracks(cam, [_det('car', 0.53, 0.15, 0.06, 0.06)])
+    assert again[0]['track_id'] == parked[0]['track_id']

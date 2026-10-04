@@ -103,6 +103,15 @@ _extent_unstable = box_geometry.extent_unstable
 MOTION_MATCH_GATE = 1.5
 MOTION_MATCH_MAX_MISSES = 2
 MOTION_MATCH_AREA_RATIO = 2.5
+# A track whose measured velocity is below this (normalized units per cycle)
+# is stationary, and its gate shrinks to ``MOTION_MATCH_STATIONARY_GATE`` x its
+# box side: a parked car cannot jump to the car parked beside it. Without this,
+# two adjacent parked cars detected intermittently at night swapped tracks, and
+# the jump read as motion under Moving Only (event 47935: a stationary box
+# flagged moving). Tracks without a velocity yet (one sighting) keep the full
+# gate so a walker's second sighting still matches.
+MOTION_MATCH_STATIONARY_SPEED = 0.01
+MOTION_MATCH_STATIONARY_GATE = 0.5
 
 
 def _center_of(box: dict[str, Any]) -> tuple[float, float] | None:
@@ -272,7 +281,12 @@ def _motion_match_distance(box: dict[str, Any], track: dict[str, Any]) -> float 
         size = max(float(track_box.get("width") or 0.0), float(track_box.get("height") or 0.0))
     except (TypeError, ValueError):
         return None
-    return distance if distance <= MOTION_MATCH_GATE * size else None
+    gate = MOTION_MATCH_GATE
+    if isinstance(velocity, (list, tuple)) and len(velocity) >= 2:
+        speed = (float(velocity[0]) ** 2 + float(velocity[1]) ** 2) ** 0.5
+        if speed < MOTION_MATCH_STATIONARY_SPEED:
+            gate = MOTION_MATCH_STATIONARY_GATE
+    return distance if distance <= gate * size else None
 
 
 def _label_key(detection: dict[str, Any]) -> str:
