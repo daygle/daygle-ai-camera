@@ -8,8 +8,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import app.object_settings as os_  # noqa: E402
 import app.object_tracking as ot  # noqa: E402
 import app.state as st  # noqa: E402
+import numpy as np  # noqa: E402
+import pytest  # noqa: E402
 
 
 def _det(label, x, y, w=0.1, h=0.1, conf=0.9):
@@ -174,6 +177,102 @@ def test_displacement_window_drops_old_positions():
     assert parked[0]['track_id'] == moving[0]['track_id']
     assert parked[0]['track_displacement'] is not None
     assert parked[0]['track_displacement'] <= ot.TRACK_STILL_DISPLACEMENT
+
+
+def test_approaching_subject_reports_motion_from_scale_alone():
+    """A person walking toward the camera translates almost not at all in image
+    space while the box grows. A center-only displacement scored that ~0 and the
+    classifier OVERRODE the motion mask to call a plainly walking person still.
+    The box's growth across the history window must register as motion."""
+    cam = 'trk-disp-approach'
+    _reset(cam)
+    # Center parked; height grows 0.04 -> 0.20 (walking straight at the lens).
+    out = None
+    for step in range(10):
+        height = 0.04 + step * 0.02
+        out = ot.update_object_tracks(cam, [_det('person', 0.50, 0.60 - height / 2, 0.05, height)])
+    with st._object_tracks_lock:
+        assert len(st._object_tracks[cam]['tracks']) == 1  # stayed one track
+    assert out[0]['track_displacement'] is not None
+    assert out[0]['track_displacement'] > ot.TRACK_STILL_DISPLACEMENT
+
+
+def test_approaching_subject_is_classified_moving_despite_a_quiet_mask():
+    """End-to-end: the tracker's scale-aware displacement must flip the
+    still/moving verdict for an approaching walker even when the pixel mask
+    reports no change inside the (correctly parked) box center."""
+    cam = 'trk-disp-approach-state'
+    _reset(cam)
+    out = None
+    for step in range(10):
+        height = 0.04 + step * 0.02
+        out = ot.update_object_tracks(cam, [_det('person', 0.50, 0.60 - height / 2, 0.05, height)])
+    quiet = np.zeros((72, 128), dtype=bool)
+    assert os_.detection_motion_state(out[0], quiet, out[0]['track_displacement']) == os_.MODE_MOVING
+
+
+def test_jittery_stationary_box_stays_still_despite_scale_wobble():
+    """The parked-but-wobbly car must not be rescued into *moving* by the new
+    scale term: alternating +/- ~0.5%-of-frame edge noise around a fixed size
+    cancels in the halves' means and must stay under the still threshold."""
+    cam = 'trk-disp-sizejitter'
+    _reset(cam)
+    wobble = [0.002, -0.002, 0.0015, -0.0025, 0.002, -0.0015, 0.0025, -0.002]
+    out = None
+    for dw in wobble:
+        out = ot.update_object_tracks(cam, [_det('car', 0.40, 0.40, 0.25, 0.15 + dw)])
+    assert out[0]['track_displacement'] is not None
+    assert out[0]['track_displacement'] <= ot.TRACK_STILL_DISPLACEMENT
+
+
+def test_approaching_subject_size_annotations_are_exposed():
+    """The age-2 classifier path reads track_size/track_prev_size, so the
+    tracker must stamp them on every detection, new tracks included."""
+    cam = 'trk-disp-sizeannot'
+    _reset(cam)
+    first = ot.update_object_tracks(cam, [_det('person', 0.50, 0.58, 0.04, 0.04)])[0]
+    assert first['track_size'] == pytest.approx(0.04)
+    assert first['track_prev_size'] is None
+    second = ot.update_object_tracks(cam, [_det('person', 0.50, 0.57, 0.06, 0.06)])[0]
+    assert second['track_size'] == pytest.approx(0.06)
+    assert second['track_prev_size'] == pytest.approx(0.04)
+    # Center barely moved, but the box grew 0.02 -- a real single-cycle step.
+    assert os_._two_point_step(second) == pytest.approx(0.02, abs=1e-6)
+
+
+def test_approaching_person_survives_the_age_two_bias():
+    """A walker toward the camera on its SECOND sighting: the box has not
+    translated, so the age-2 still bias used to swallow it under a Moving Only
+    rule before the windowed displacement ever became available."""
+    cam = 'trk-disp-approach-age2'
+    _reset(cam)
+    quiet = np.zeros((72, 128), dtype=bool)
+    # Already close to the lens, so one cycle of approach is a real scale step
+    # while both sightings still overlap (IoU 0.78 -> one track, not two).
+    ot.update_object_tracks(cam, [_det('person', 0.35, 0.35, 0.30, 0.30)])
+    second = ot.update_object_tracks(cam, [_det('person', 0.33, 0.33, 0.34, 0.34)])[0]
+    assert second['track_age'] == 2
+    assert second['track_displacement'] is None  # window not mature yet
+    assert os_.detection_motion_state(second, quiet, None) == os_.MODE_MOVING
+
+
+def test_mismatched_size_history_degrades_to_center_only():
+    """The size history is appended and trimmed in lockstep with the center
+    history, so the two windows line up positionally. A track carrying a
+    mismatched pair must pair NOTHING rather than pair a size with the wrong
+    center -- reporting another sighting's scale change would misclassify the
+    subject. It must fall back to the old center-only measure."""
+    cam = 'trk-disp-mismatch'
+    _reset(cam)
+    # A stationary box: only a scale term could ever push this over threshold.
+    for _ in range(6):
+        ot.update_object_tracks(cam, [_det('car', 0.50, 0.50, 0.20, 0.20)])
+    track = st._object_tracks[cam]['tracks'][0]
+    assert len(track['sizes']) == len(track['centers'])
+    # Corrupt the pairing, exactly as a hand-built or half-migrated track would.
+    track['sizes'] = track['sizes'][:1]
+    assert ot._recent_displacement(track) is not None
+    assert ot._recent_displacement(track) <= ot.TRACK_STILL_DISPLACEMENT
 
 
 def test_broken_box_chain_does_not_crash_displacement():

@@ -19,9 +19,12 @@ returns the SAME detections, each annotated with:
 - ``track_id``   -- stable integer id for this object on this camera,
 - ``track_age``  -- how many cycles this track has been seen (1 on first sight),
 - ``track_new``  -- ``True`` only on the cycle a track first appears,
-- ``track_displacement`` -- normalized (0-1 frame) Chebyshev distance between
-  the current box center and the most recent up-to
-  ``TRACK_DISPLACEMENT_HISTORY`` box centers of the same track. ``None`` until
+- ``track_displacement`` -- normalized (0-1 frame) Chebyshev motion of the box
+  over the most recent up-to ``TRACK_DISPLACEMENT_HISTORY`` observations: the
+  larger of the box-center translation and the box's own growth/shrink. The
+  scale term matters because a subject walking toward (or a car driving away
+  from) the camera barely moves its box *center* while the box scales, so a
+  center-only measure called a plainly moving subject *still*. ``None`` until
   the track has ``TRACK_DISPLACEMENT_MIN_AGE`` cycles of box history. The
   still/moving classifier (``app/object_settings.py``) reads this to override
   the motion-mask verdict: a track whose box has not moved is *still* even when
@@ -80,18 +83,45 @@ def _center_of(box: dict[str, Any]) -> tuple[float, float] | None:
     return (x + w / 2.0, y + h / 2.0)
 
 
-def _recent_displacement(track: dict[str, Any]) -> float | None:
-    """Net normalized motion of a track over its recent center history.
+def _size_of(box: dict[str, Any]) -> float:
+    """Return the box's normalized larger side (the same unit the center
+    history uses), or 0.0 for an unusable box.
 
-    Returns the larger-axis distance between the mean center of the OLDER half
-    of the last ``TRACK_DISPLACEMENT_HISTORY`` centers and the mean center of
-    the NEWER half, or ``None`` when the track has not accumulated enough
-    history yet (brand-new track, or a legacy track rebuilt after a restart).
+    A subject moving along the camera's depth axis keeps a near-stationary
+    center and expresses its motion as scale, so the motion measure needs this
+    alongside the center rather than instead of it.
+    """
+    try:
+        return max(
+            max(0.0, float(box.get("width") or 0.0)),
+            max(0.0, float(box.get("height") or 0.0)),
+        )
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _recent_displacement(track: dict[str, Any]) -> float | None:
+    """Net normalized motion of a track's box over its recent history.
+
+    Returns the larger of two comparisons between the OLDER half and the NEWER
+    half of the last ``TRACK_DISPLACEMENT_HISTORY`` observations:
+
+    - the larger-axis distance between the halves' mean centers, and
+    - the absolute difference between the halves' mean larger-side length.
+
+    ``None`` when the track has not accumulated enough history yet (brand-new
+    track, or a legacy track rebuilt after a restart).
+
+    The scale term is not optional: a person walking toward the camera (or a
+    car driving away from it) translates very little in image space while its
+    box grows steadily, so a center-only measure scored a plainly moving
+    subject below the still threshold and the classifier *overrode* the motion
+    mask to call it still.
 
     Comparing the two halves' *means* rejects per-cycle detector jitter: a
-    stationary box wobbles symmetrically around its true center, so the wobble
-    cancels in each mean and only sustained translation moves the halves apart.
-    The previous max-deviation-from-the-latest-center measure summed two
+    stationary box wobbles symmetrically around its true center and size, so
+    the wobble cancels in each mean and only sustained change moves the halves
+    apart. The previous max-deviation-from-the-latest-center measure summed two
     opposite jitter spikes and reported a parked-but-wobbly car (a large box
     whose edges shift a little each frame) as *moving*, so a Moving Only rule
     kept alerting on it.
@@ -99,27 +129,46 @@ def _recent_displacement(track: dict[str, Any]) -> float | None:
     centers = track.get("centers")
     if not isinstance(centers, list):
         return None
-    recent = [
-        center for center in centers[-TRACK_DISPLACEMENT_HISTORY:]
-        if isinstance(center, (list, tuple)) and len(center) >= 2
-    ]
-    if len(recent) < max(2, TRACK_DISPLACEMENT_MIN_AGE):
+    sizes = track.get("sizes")
+    window = centers[-TRACK_DISPLACEMENT_HISTORY:]
+    # ``sizes`` is appended and trimmed in lockstep with ``centers``, so their
+    # windows line up positionally. If a track somehow carries a mismatched
+    # pair, pair NOTHING rather than pairing a size with the wrong center: the
+    # measure then degrades to center-only, the old always-safe behaviour,
+    # instead of reporting a scale change that belongs to another sighting.
+    size_window: list[float] | None = None
+    if isinstance(sizes, list) and len(sizes) == len(centers):
+        try:
+            size_window = [float(value) for value in sizes[-TRACK_DISPLACEMENT_HISTORY:]]
+        except (TypeError, ValueError):
+            size_window = None
+    points: list[tuple[tuple[float, float], float]] = []
+    for index, center in enumerate(window):
+        if not (isinstance(center, (list, tuple)) and len(center) >= 2):
+            continue
+        size = size_window[index] if size_window is not None and index < len(size_window) else 0.0
+        points.append(((float(center[0]), float(center[1])), size))
+    if len(points) < max(2, TRACK_DISPLACEMENT_MIN_AGE):
         return None
-    mid = len(recent) // 2
-    older = recent[:mid] or recent[:1]
-    newer = recent[mid:] or recent[-1:]
+    mid = len(points) // 2
+    older = points[:mid] or points[:1]
+    newer = points[mid:] or points[-1:]
 
-    def _mean(points: list[Any]) -> tuple[float, float]:
-        xs = [float(point[0]) for point in points]
-        ys = [float(point[1]) for point in points]
-        return sum(xs) / len(xs), sum(ys) / len(ys)
+    def _mean(items: list[tuple[tuple[float, float], float]]) -> tuple[float, float, float]:
+        count = len(items)
+        return (
+            sum(item[0][0] for item in items) / count,
+            sum(item[0][1] for item in items) / count,
+            sum(item[1] for item in items) / count,
+        )
 
     try:
-        older_x, older_y = _mean(older)
-        newer_x, newer_y = _mean(newer)
+        older_x, older_y, older_size = _mean(older)
+        newer_x, newer_y, newer_size = _mean(newer)
     except (TypeError, ValueError):
         return None
-    return max(abs(newer_x - older_x), abs(newer_y - older_y))
+    translation = max(abs(newer_x - older_x), abs(newer_y - older_y))
+    return max(translation, abs(newer_size - older_size))
 
 
 def _iou(box_a: dict[str, Any], box_b: dict[str, Any]) -> float:
@@ -293,9 +342,13 @@ def update_object_tracks(
                 # Extend the bounded center history with THIS cycle's center;
                 # the previous center is already stored from the cycle that
                 # observed it (append-on-observe, never append-on-match, or
-                # the history double-counts and shifts the age gate).
+                # the history double-counts and shifts the age gate). The size
+                # history is kept index-aligned with the center history and
+                # trimmed identically, so ``_recent_displacement`` can pair
+                # each center with the box's scale at that same sighting.
                 best_track["box"] = box if isinstance(box, dict) else best_track["box"]
                 centers = best_track.setdefault("centers", [])
+                sizes = best_track.setdefault("sizes", [])
                 new_center = _center_of(box) if isinstance(box, dict) else None
                 if new_center is not None:
                     if centers:
@@ -307,7 +360,9 @@ def update_object_tracks(
                             (new_center[1] - float(centers[-1][1])) / elapsed,
                         )
                     centers.append(new_center)
+                    sizes.append(_size_of(box))
                 del centers[:-TRACK_DISPLACEMENT_HISTORY]
+                del sizes[:-TRACK_DISPLACEMENT_HISTORY]
                 best_track["hits"] += 1
                 best_track["misses"] = 0
                 best_track["last_ts"] = now
@@ -322,6 +377,8 @@ def update_object_tracks(
                 # first two sights (need two points to define a crossing).
                 detection["track_center"] = centers[-1] if centers else None
                 detection["track_prev_center"] = centers[-2] if len(centers) >= 2 else None
+                detection["track_size"] = sizes[-1] if sizes else None
+                detection["track_prev_size"] = sizes[-2] if len(sizes) >= 2 else None
             else:
                 track_id = state["next_id"]
                 state["next_id"] += 1
@@ -330,6 +387,7 @@ def update_object_tracks(
                     "label": label,
                     "box": box if isinstance(box, dict) else {},
                     "centers": [_center_of(box)] if isinstance(box, dict) else [],
+                    "sizes": [_size_of(box)] if isinstance(box, dict) else [],
                     "hits": 1,
                     "misses": 0,
                     "first_ts": now,
@@ -344,6 +402,8 @@ def update_object_tracks(
                 detection["track_displacement"] = None
                 detection["track_center"] = _center_of(box) if isinstance(box, dict) else None
                 detection["track_prev_center"] = None
+                detection["track_size"] = _size_of(box) if isinstance(box, dict) else None
+                detection["track_prev_size"] = None
 
         # Age out tracks that were not matched this cycle.
         survivors = []
