@@ -19,9 +19,12 @@ returns the SAME detections, each annotated with:
 - ``track_id``   -- stable integer id for this object on this camera,
 - ``track_age``  -- how many cycles this track has been seen (1 on first sight),
 - ``track_new``  -- ``True`` only on the cycle a track first appears,
-- ``track_displacement`` -- normalized (0-1 frame) Chebyshev distance between
-  the current box center and the most recent up-to
-  ``TRACK_DISPLACEMENT_HISTORY`` box centers of the same track. ``None`` until
+- ``track_displacement`` -- normalized (0-1 frame) Chebyshev motion of the box
+  over the most recent up-to ``TRACK_DISPLACEMENT_HISTORY`` observations: the
+  larger of the box-center translation and the box's own growth/shrink. The
+  scale term matters because a subject walking toward (or a car driving away
+  from) the camera barely moves its box *center* while the box scales, so a
+  center-only measure called a plainly moving subject *still*. ``None`` until
   the track has ``TRACK_DISPLACEMENT_MIN_AGE`` cycles of box history. The
   still/moving classifier (``app/object_settings.py``) reads this to override
   the motion-mask verdict: a track whose box has not moved is *still* even when
@@ -52,6 +55,70 @@ import app.state as _state
 TRACK_DISPLACEMENT_HISTORY = 8
 TRACK_DISPLACEMENT_MIN_AGE = 3
 TRACK_STILL_DISPLACEMENT = 0.01
+# Detector box-size jitter, as a fraction of the box's own larger side. Edge
+# jitter is proportional to box size, so a fixed threshold on an absolute size
+# change is size-dependent: a large parked box (a car close to the lens) crosses
+# it while a small one does not. Both a real depth-axis subject and the detector
+# noise scale with the box, so the scale term is measured and thresholded in
+# RELATIVE units -- see ``TRACK_SIZE_REFERENCE``.
+TRACK_SIZE_JITTER_FRACTION = 0.05
+# Converts a RELATIVE size change into the normalized-frame units the still
+# threshold uses: ``TRACK_SIZE_JITTER_FRACTION`` of relative growth is exactly
+# ``TRACK_STILL_DISPLACEMENT`` of signal. This keeps the verdict independent of
+# how large the box happens to be -- a subject that moves 5% closer grows its
+# box 5% whether it is 3 m or 20 m away -- and keeps the noise band (a few
+# percent of the box) below the threshold without a separate gate.
+TRACK_SIZE_REFERENCE = TRACK_STILL_DISPLACEMENT / TRACK_SIZE_JITTER_FRACTION
+# Extent instability: the detector drawing the SAME object at wildly different
+# sizes. Observed on real footage (event 47720): one cycle boxed a parked car's
+# whole body (0.506 x 0.429), the next only its roof (0.319 x 0.111) -- 2.4x
+# apart in aspect ratio, 6.1x in area, centre shifted 0.178 of the frame, and
+# the object had not moved at all. Both the centre and the scale measure read
+# that as vigorous motion, so a parked car was classified ``moving`` and kept
+# by a Moving Only rule.
+#
+# The signature is a large SHAPE change combined with one box sitting inside
+# the other. Neither of the two cases that legitimately move boxes has both:
+# a genuinely translating object separates its boxes (low containment), and a
+# subject approaching the camera scales its box uniformly (stable aspect).
+TRACK_ASPECT_DRIFT = 1.7
+TRACK_EXTENT_CONTAINMENT = 0.8
+
+
+def _box_tuple(box: dict[str, Any]) -> tuple[float, float, float, float] | None:
+    """Normalized ``(x, y, w, h)`` for a detection box, or None if unusable."""
+    try:
+        x = float(box.get("x") or 0.0)
+        y = float(box.get("y") or 0.0)
+        w = float(box.get("width") or 0.0)
+        h = float(box.get("height") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return (x, y, w, h)
+
+
+def _extent_unstable(
+    box_a: tuple[float, float, float, float],
+    box_b: tuple[float, float, float, float],
+) -> bool:
+    """True when two boxes disagree about SHAPE but agree about WHERE.
+
+    See ``TRACK_ASPECT_DRIFT``: a roof-only box nested inside a whole-vehicle
+    box is the same object drawn at two granularities, not an object that moved.
+    """
+    try:
+        ax, ay, aw, ah = (float(value) for value in box_a)
+        bx, by, bw, bh = (float(value) for value in box_b)
+    except (TypeError, ValueError):
+        return False
+    aw, ah, bw, bh = max(aw, 1e-9), max(ah, 1e-9), max(bw, 1e-9), max(bh, 1e-9)
+    aspect_a, aspect_b = aw / ah, bw / bh
+    if max(aspect_a, aspect_b) / min(aspect_a, aspect_b) <= TRACK_ASPECT_DRIFT:
+        return False
+    overlap_x = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+    overlap_y = max(0.0, min(ay + ah, by + bh) - max(ay, by))
+    smaller = min(aw * ah, bw * bh)
+    return smaller > 0.0 and (overlap_x * overlap_y) / smaller >= TRACK_EXTENT_CONTAINMENT
 
 # Motion-gated fallback for detections no track overlaps. At a 0.5-1.5s cycle a
 # walking person (a narrow box) moves further than its own width between
@@ -81,45 +148,85 @@ def _center_of(box: dict[str, Any]) -> tuple[float, float] | None:
 
 
 def _recent_displacement(track: dict[str, Any]) -> float | None:
-    """Net normalized motion of a track over its recent center history.
+    """Net normalized motion of a track's box over its recent history.
 
-    Returns the larger-axis distance between the mean center of the OLDER half
-    of the last ``TRACK_DISPLACEMENT_HISTORY`` centers and the mean center of
-    the NEWER half, or ``None`` when the track has not accumulated enough
-    history yet (brand-new track, or a legacy track rebuilt after a restart).
+    Returns the larger of two comparisons between the OLDER half and the NEWER
+    half of the last ``TRACK_DISPLACEMENT_HISTORY`` observations:
+
+    - the larger-axis distance between the halves' mean centers, and
+    - the RELATIVE change in the halves' mean larger-side length.
+
+    Returns ``0.0`` when the two halves disagree about box SHAPE while one box
+    sits inside the other: the same object drawn at two extents has not moved
+    (see ``TRACK_ASPECT_DRIFT``). ``None`` when the track has not accumulated
+    enough history yet (brand-new track, or a legacy track rebuilt after a
+    restart).
+
+    The scale term is not optional: a person walking toward the camera (or a
+    car driving away from it) translates very little in image space while its
+    box grows steadily, so a center-only measure scored a plainly moving
+    subject below the still threshold and the classifier *overrode* the motion
+    mask to call it still.
+
+    The scale term is thresholded in relative units (``TRACK_SIZE_REFERENCE``),
+    so the verdict is independent of how large the box happens to be.
 
     Comparing the two halves' *means* rejects per-cycle detector jitter: a
-    stationary box wobbles symmetrically around its true center, so the wobble
-    cancels in each mean and only sustained translation moves the halves apart.
-    The previous max-deviation-from-the-latest-center measure summed two
+    stationary box wobbles symmetrically around its true center and size, so
+    the wobble cancels in each mean and only sustained change moves the halves
+    apart. The previous max-deviation-from-the-latest-center measure summed two
     opposite jitter spikes and reported a parked-but-wobbly car (a large box
     whose edges shift a little each frame) as *moving*, so a Moving Only rule
     kept alerting on it.
     """
-    centers = track.get("centers")
-    if not isinstance(centers, list):
+    boxes = track.get("boxes")
+    if not isinstance(boxes, list):
         return None
-    recent = [
-        center for center in centers[-TRACK_DISPLACEMENT_HISTORY:]
-        if isinstance(center, (list, tuple)) and len(center) >= 2
-    ]
-    if len(recent) < max(2, TRACK_DISPLACEMENT_MIN_AGE):
+    window: list[tuple[float, float, float, float]] = []
+    for entry in boxes[-TRACK_DISPLACEMENT_HISTORY:]:
+        if isinstance(entry, (list, tuple)) and len(entry) >= 4:
+            try:
+                window.append(tuple(float(value) for value in entry[:4]))
+            except (TypeError, ValueError):
+                continue
+    if len(window) < max(2, TRACK_DISPLACEMENT_MIN_AGE):
         return None
-    mid = len(recent) // 2
-    older = recent[:mid] or recent[:1]
-    newer = recent[mid:] or recent[-1:]
+    mid = len(window) // 2
+    older = window[:mid] or window[:1]
+    newer = window[mid:] or window[-1:]
 
-    def _mean(points: list[Any]) -> tuple[float, float]:
-        xs = [float(point[0]) for point in points]
-        ys = [float(point[1]) for point in points]
-        return sum(xs) / len(xs), sum(ys) / len(ys)
+    def _mean_box(group: list[tuple[float, float, float, float]]) -> tuple[float, float, float, float]:
+        count = len(group)
+        return tuple(sum(item[axis] for item in group) / count for axis in range(4))
 
-    try:
-        older_x, older_y = _mean(older)
-        newer_x, newer_y = _mean(newer)
-    except (TypeError, ValueError):
-        return None
-    return max(abs(newer_x - older_x), abs(newer_y - older_y))
+    older_box = _mean_box(older)
+    newer_box = _mean_box(newer)
+
+    # The same object drawn at two different extents is not motion. Without
+    # this, a roof-only box nested inside a whole-vehicle box moves both the
+    # centre and the size enough to clear the threshold, and a parked car is
+    # classified moving. See TRACK_ASPECT_DRIFT.
+    if _extent_unstable(older_box, newer_box):
+        return 0.0
+
+    older_x = older_box[0] + older_box[2] / 2.0
+    older_y = older_box[1] + older_box[3] / 2.0
+    newer_x = newer_box[0] + newer_box[2] / 2.0
+    newer_y = newer_box[1] + newer_box[3] / 2.0
+    translation = max(abs(newer_x - older_x), abs(newer_y - older_y))
+
+    older_size = max(older_box[2], older_box[3])
+    newer_size = max(newer_box[2], newer_box[3])
+    mean_size = (newer_size + older_size) / 2.0
+    # The scale term is compared in RELATIVE units: growth divided by the box's
+    # own size, rescaled so that TRACK_SIZE_JITTER_FRACTION of relative growth
+    # is exactly TRACK_STILL_DISPLACEMENT of signal. An absolute measure would
+    # make a small object's identical relative growth read as no motion at all,
+    # and would let a large parked box cross the threshold on detector drift.
+    if mean_size <= 0.0:
+        return translation
+    scale_signal = (abs(newer_size - older_size) / mean_size) * TRACK_SIZE_REFERENCE
+    return max(translation, scale_signal)
 
 
 def _iou(box_a: dict[str, Any], box_b: dict[str, Any]) -> float:
@@ -170,8 +277,20 @@ def _motion_match_distance(box: dict[str, Any], track: dict[str, Any]) -> float 
     if center is None or not centers or int(track.get("misses") or 0) > MOTION_MATCH_MAX_MISSES:
         return None
     area, track_area = _box_area(box), _box_area(track_box)
-    if area <= 0 or track_area <= 0 or max(area, track_area) / min(area, track_area) > MOTION_MATCH_AREA_RATIO:
+    if area <= 0 or track_area <= 0:
         return None
+    if max(area, track_area) / min(area, track_area) > MOTION_MATCH_AREA_RATIO:
+        # Extent instability -- the same object drawn at two very different
+        # sizes, one box inside the other -- must not mint a new track id. A
+        # fresh id means a young track, and a young track never reaches the
+        # displacement override, so the pixel mask alone decides and a parked
+        # car caught in a passing car's headlights reads as moving (observed on
+        # event 47720). Two genuinely different objects separate their boxes
+        # and so still fail this test.
+        current = _box_tuple(box)
+        previous = _box_tuple(track_box)
+        if current is None or previous is None or not _extent_unstable(current, previous):
+            return None
     last_x, last_y = float(centers[-1][0]), float(centers[-1][1])
     steps = int(track.get("misses") or 0) + 1
     velocity = track.get("velocity")
@@ -293,9 +412,13 @@ def update_object_tracks(
                 # Extend the bounded center history with THIS cycle's center;
                 # the previous center is already stored from the cycle that
                 # observed it (append-on-observe, never append-on-match, or
-                # the history double-counts and shifts the age gate).
+                # the history double-counts and shifts the age gate). The size
+                # history is kept index-aligned with the center history and
+                # trimmed identically, so ``_recent_displacement`` can pair
+                # each center with the box's scale at that same sighting.
                 best_track["box"] = box if isinstance(box, dict) else best_track["box"]
                 centers = best_track.setdefault("centers", [])
+                boxes_hist = best_track.setdefault("boxes", [])
                 new_center = _center_of(box) if isinstance(box, dict) else None
                 if new_center is not None:
                     if centers:
@@ -307,7 +430,11 @@ def update_object_tracks(
                             (new_center[1] - float(centers[-1][1])) / elapsed,
                         )
                     centers.append(new_center)
+                    box_tuple = _box_tuple(box) if isinstance(box, dict) else None
+                    if box_tuple is not None:
+                        boxes_hist.append(box_tuple)
                 del centers[:-TRACK_DISPLACEMENT_HISTORY]
+                del boxes_hist[:-TRACK_DISPLACEMENT_HISTORY]
                 best_track["hits"] += 1
                 best_track["misses"] = 0
                 best_track["last_ts"] = now
@@ -322,6 +449,8 @@ def update_object_tracks(
                 # first two sights (need two points to define a crossing).
                 detection["track_center"] = centers[-1] if centers else None
                 detection["track_prev_center"] = centers[-2] if len(centers) >= 2 else None
+                detection["track_box"] = boxes_hist[-1] if boxes_hist else None
+                detection["track_prev_box"] = boxes_hist[-2] if len(boxes_hist) >= 2 else None
             else:
                 track_id = state["next_id"]
                 state["next_id"] += 1
@@ -330,6 +459,7 @@ def update_object_tracks(
                     "label": label,
                     "box": box if isinstance(box, dict) else {},
                     "centers": [_center_of(box)] if isinstance(box, dict) else [],
+                    "boxes": [_box_tuple(box)] if isinstance(box, dict) else [],
                     "hits": 1,
                     "misses": 0,
                     "first_ts": now,
@@ -344,6 +474,8 @@ def update_object_tracks(
                 detection["track_displacement"] = None
                 detection["track_center"] = _center_of(box) if isinstance(box, dict) else None
                 detection["track_prev_center"] = None
+                detection["track_box"] = _box_tuple(box) if isinstance(box, dict) else None
+                detection["track_prev_box"] = None
 
         # Age out tracks that were not matched this cycle.
         survivors = []

@@ -487,6 +487,87 @@ def test_filter_fast_path_honours_displacement_without_mask():
     assert out[0]['motion_state'] == 'moving'
 
 
+# ---------------------------------------------------------------------------
+# Detection > Objects: what the per-label Moving/Still modes now match
+# ---------------------------------------------------------------------------
+
+# The Objects page stores a per-label mode (any / moving / still) and a
+# separate still-alert dwell threshold. Neither the stored schema nor the UI
+# changed; what changed is the verdict those settings are matched AGAINST. A
+# subject approaching the camera used to be scored still, so these tests pin the
+# user-visible consequence in both directions rather than only at the classifier.
+
+
+def _approaching(cam, cycles=10, **extra):
+    """A person walking at the lens, run through the REAL tracker.
+
+    The box center stays parked while the box grows, so the displacement
+    annotation the classifier reads is whatever the tracker actually computed --
+    never a hand-written value. That keeps these tests honest: they fail if
+    the tracker regresses, not just if the classifier does.
+    """
+    import app.object_tracking as ot
+
+    with _state._object_tracks_lock:
+        _state._object_tracks.pop(cam, None)
+    out = None
+    for step in range(cycles):
+        height = 0.10 + step * 0.026
+        out = ot.update_object_tracks(
+            cam, [_det('person', x=0.50 - height / 2, y=0.60 - height / 2, w=height, h=height)],
+        )
+    assert out is not None and len(out) == 1
+    detection = dict(out[0])
+    detection.update(extra)
+    return detection
+
+
+def test_objects_moving_mode_admits_an_approaching_walker():
+    """A "Moving" label must pass a walker coming toward the camera. It used to
+    be classified still and silently dropped, so the label raised nothing."""
+    settings = {'default_mode': 'moving', 'labels': {'person': 'moving'}}
+    kept = os.filter_detections_by_motion_mode([_approaching('obj-mv')], _mask_none_changed(), settings)
+    assert len(kept) == 1
+    assert kept[0]['motion_state'] == 'moving'
+
+
+def test_objects_still_mode_rejects_an_approaching_walker():
+    """The same walker must NOT satisfy a "Still" label -- previously it did,
+    so a Still-only rule fired on people walking up to the door."""
+    settings = {'default_mode': 'any', 'labels': {'person': 'still'}}
+    assert os.filter_detections_by_motion_mode([_approaching('obj-st')], _mask_none_changed(), settings) == []
+
+
+def test_objects_still_alert_streak_breaks_when_someone_walks_up():
+    """A still-alert dwell streak must stop advancing while a subject actually
+    moves, instead of being kept alive by a person walking toward the camera."""
+    settings = {'default_mode': 'moving', 'labels': {'person': 'moving'}, 'still_alerts': {'person': 5}}
+    moving = _approaching('obj-dwell', cycles=8)
+    assert os.still_dwell_candidates([moving], _mask_all_changed(), settings) == []
+    # A genuinely parked person of the same label still accrues its streak.
+    parked = {**_det('person', x=0.40, y=0.40, w=0.30, h=0.30),
+              'track_id': moving['track_id'], 'track_age': 8, 'track_displacement': 0.0}
+    assert len(os.still_dwell_candidates([parked], _mask_all_changed(), settings)) == 1
+
+
+def test_objects_settings_schema_is_untouched_by_the_classifier_change():
+    """The Objects page must still validate, canonicalise and persist exactly
+    the same modes it always did -- the fix is classification-only."""
+    normalized = os.normalize_object_settings({
+        'default_mode': 'MOVING',
+        'labels': {'Person': 'still', 'car': 'bogus'},
+        'still_alerts': {'person': 300},
+    })
+    assert normalized['default_mode'] == 'moving'
+    # An unparseable per-label mode is DROPPED (it then falls back to the
+    # default), not coerced into a bogus persisted override.
+    assert normalized['labels'] == {'person': 'still'}
+    assert normalized['still_alerts'] == {'person': 300}
+    assert os.motion_mode_for_label('person', normalized) == 'still'
+    assert os.motion_mode_for_label('car', normalized) == 'moving'   # default
+    assert os.motion_mode_for_label('dog', normalized) == 'moving'   # default
+
+
 def test_still_dwell_candidates_honour_displacement():
     # A parked car with a noisy mask still accrues its dwell streak because
     # the candidate picker classifies via the displacement override too.

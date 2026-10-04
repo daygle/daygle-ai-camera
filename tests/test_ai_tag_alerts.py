@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 
 import pytest
 
@@ -40,6 +41,71 @@ def _zone(rule=None, **overrides):
             'ai_tags': rule if rule is not None else _rule()}
     zone.update(overrides)
     return zone
+
+
+# ---------------------------------------------------------------------------
+# Independence from the still/moving classifier
+# ---------------------------------------------------------------------------
+
+# The AI alert path decides what the model sees from the detection BOX only
+# (label + x/y/width/height) plus the image itself. It must never read the
+# tracker's annotations or the motion_state that app/object_settings.py
+# derives from them: those are classification verdicts about behaviour over
+# time, and letting one change what the model is shown would silently alter
+# every AI alert. This locks the boundary at the seam the model actually sees.
+
+
+def _tracked(label, x, y, w, h, **extra):
+    detection = {'label': label, 'x': x, 'y': y, 'width': w, 'height': h}
+    detection.update(extra)
+    return detection
+
+
+def test_ai_crop_and_prompt_ignore_track_and_motion_annotations(ata):
+    import cv2
+    import numpy as np
+
+    from app import ai_verification
+
+    frame = np.full((360, 640, 3), 40, dtype=np.uint8)
+    ok, encoded = cv2.imencode('.jpg', frame)
+    assert ok
+    image = encoded.tobytes()
+
+    plain = [_tracked('person', 0.30, 0.35, 0.20, 0.30)]
+    annotated = [{
+        'label': 'person', 'x': 0.30, 'y': 0.35, 'width': 0.20, 'height': 0.30,
+        'track_id': 550, 'track_age': 9, 'track_new': False,
+        'track_displacement': 0.042, 'track_center': (0.40, 0.50),
+        'track_prev_center': (0.38, 0.50), 'track_box': (0.30, 0.35, 0.20, 0.30),
+        'track_prev_box': (0.32, 0.36, 0.18, 0.27), 'motion_state': 'moving',
+    }]
+
+    # The crop handed to the model must be byte-identical.
+    assert ai_verification.focus_image(image, plain, 'person') == \
+        ai_verification.focus_image(image, annotated, 'person')
+    assert ai_verification._label_box(plain, 'person') == \
+        ai_verification._label_box(annotated, 'person')
+    # As must the prompt, for both the describe and the verify call.
+    assert ai_verification.build_describe_prompt('Cam', ['person']) == \
+        ai_verification.build_describe_prompt('Cam', ['person'])
+    assert ai_verification.build_prompt('person', 'Cam') == \
+        ai_verification.build_prompt('person', 'Cam')
+
+
+def test_ai_verification_and_tag_alerts_never_reference_motion_verdicts():
+    """Source-level backstop for the whole AI surface, including code paths
+    that build their own detection dicts rather than reusing the tracker's."""
+    from app import ai_tag_alerts, ai_verification
+
+    forbidden = (
+        'track_displacement', 'track_prev_center', 'track_prev_box',
+        'track_box', 'track_center', 'track_age', 'motion_state',
+    )
+    for module in (ai_verification, ai_tag_alerts):
+        source = Path(module.__file__).read_text(encoding='utf-8')
+        for name in forbidden:
+            assert name not in source, f'{module.__name__} must not read {name}'
 
 
 # ---------------------------------------------------------------------------

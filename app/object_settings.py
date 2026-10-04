@@ -74,6 +74,11 @@ from typing import Any
 
 import app.state as _state
 from app.label_groups import cached_label_groups
+# Shared rather than copied: the tuning constants above are duplicated in
+# app/object_tracking.py on purpose, but this is logic with real branches, and
+# two copies of it would drift. Importing is safe -- object_tracking imports
+# only app.state.
+from app.object_tracking import _extent_unstable
 from app.runtime_config import cached_snapshot
 from app.zone_schema import canonical_label
 
@@ -108,17 +113,32 @@ _MOVING_MIN_CHANGED_PIXELS = 2
 
 # Track-displacement override of the mask verdict (see module docstring). The
 # tracker annotates each detection with ``track_displacement``: the net
-# normalized box-center motion across its recent history, or ``None`` while
+# normalized box motion (center translation OR the box's own growth/shrink)
+# across its recent history, or ``None`` while
 # the track is too young to trust. A displacement of a hundredth of the frame
 # (~13 px at 720p, ~6 px at 320-wide detector input) is well above detector
 # box jitter for a parked subject and far below any real traverse, so the
 # override only fires on clear-cut cases and the mask keeps everything else.
 _TRACK_DISPLACEMENT_STILL = 0.01
-# A single cycle-to-cycle center step that cannot be detector jitter on a
-# stationary box (that wobble is well under 1% of the frame). Used only for
-# age-2 tracks, before the windowed displacement is available.
+# A single cycle-to-cycle box step -- center move or growth -- that cannot be
+# detector jitter on a stationary box (that wobble is well under 1% of the
+# frame). Used only for age-2 tracks, before the windowed displacement is
+# available.
 _TRACK_STEP_MOVING = 0.03
 _TRACK_DISPLACEMENT_MIN_AGE = 3
+# Detector box-size jitter as a fraction of the box's own larger side. Edge
+# jitter grows with the box, so a fixed threshold on an absolute size change is
+# size-dependent: a large parked box (a car close to the lens) crosses it while
+# a small one does not. A real depth-axis subject and the detector noise both
+# scale with the box, so the scale term is measured and thresholded in RELATIVE
+# units. Mirrors ``TRACK_SIZE_JITTER_FRACTION`` in app/object_tracking.py.
+_TRACK_SIZE_JITTER_FRACTION = 0.05
+# Converts a RELATIVE size change into the units ``_TRACK_STEP_MOVING`` uses, so
+# ``_TRACK_SIZE_JITTER_FRACTION`` of growth in one cycle is exactly one step
+# threshold. This is the same conversion the windowed path applies, at that
+# path's own (3x more conservative) threshold, preserving the deliberate
+# difference: one cycle of measurement is noisier than eight.
+_TRACK_SIZE_REFERENCE = _TRACK_STEP_MOVING / _TRACK_SIZE_JITTER_FRACTION
 
 
 def normalize_mode(value: Any, default: str = MODE_ANY) -> str:
@@ -428,12 +448,43 @@ def update_still_dwell_alerts(
 
 
 def _two_point_step(detection: dict[str, Any]) -> float | None:
-    """Larger-axis distance between a track's previous and current centers."""
+    """Largest single-cycle change in a track's box, in normalized frame units.
+
+    Returns 0.0 when the two sightings disagree about box shape while one sits
+    inside the other -- the same object drawn at two extents, not motion.
+
+    The larger of the box-center move and the box's own growth/shrink. The
+    scale half is what catches a subject walking toward the camera (or a car
+    driving away from it) between its first and second sighting: such a box
+    translates almost not at all, so a center-only step reads as no step at
+    all and the age-2 bias below would call a plainly approaching person
+    still."""
     current, previous = detection.get('track_center'), detection.get('track_prev_center')
     try:
-        return max(abs(float(current[0]) - float(previous[0])), abs(float(current[1]) - float(previous[1])))
+        step = max(abs(float(current[0]) - float(previous[0])), abs(float(current[1]) - float(previous[1])))
     except (TypeError, ValueError, IndexError):
         return None
+    current_box, previous_box = detection.get('track_box'), detection.get('track_prev_box')
+    if current_box is not None and previous_box is not None:
+        try:
+            current_size = max(float(current_box[2]), float(current_box[3]))
+            previous_size = max(float(previous_box[2]), float(previous_box[3]))
+        except (TypeError, ValueError, IndexError):
+            return step
+        # The same object drawn at two extents is not motion: a roof-only box
+        # inside a whole-vehicle box moves the centre by far more than the step
+        # threshold, so without this a parked car is read as moving on its
+        # second sighting and survives a Moving Only rule.
+        if _extent_unstable(tuple(current_box[:4]), tuple(previous_box[:4])):
+            return 0.0
+        mean_size = (current_size + previous_size) / 2.0
+        # Thresholded in RELATIVE units, so a small object's identical relative
+        # growth is not silently discarded and a large parked box cannot clear
+        # an absolute bar on detector drift alone.
+        if mean_size > 0.0:
+            size_signal = (abs(current_size - previous_size) / mean_size) * _TRACK_SIZE_REFERENCE
+            step = max(step, size_signal)
+    return step
 
 
 def detection_motion_state(
@@ -448,9 +499,11 @@ def detection_motion_state(
     mask is unavailable). ``None`` maps to ``still``: no pixel change was
     measured, so the subject is treated as still (see module docstring).
 
-    ``track_displacement`` is the tracker's net normalized box-center motion
-    for this detection's track (``None`` while the track is too young to
-    trust). When the tracker has enough history it OVERRIDES the mask verdict:
+    ``track_displacement`` is the tracker's net normalized box motion
+    for this detection's track -- the larger of box-center translation and box
+    growth, so a subject approaching the camera (whose center barely moves while
+    its box grows) counts as moving too (``None`` while the track is too young
+    to trust). When the tracker has enough history it OVERRIDES the mask verdict:
     a stationary track is ``still`` even if background change inside its large
     box crosses the mask threshold (the parked-car flap), and a traversing
     track is ``moving`` even when the mask reads quiet. The mask is the sole
