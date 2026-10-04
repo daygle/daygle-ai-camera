@@ -144,6 +144,37 @@ STALE_CAPTURE_SESSION_GRACE_SECONDS = 120.0
 _recording_timing_write_lock = threading.Lock()
 
 
+def _write_provisional_timing(
+    session: dict[str, Any], recording_id: int, *, ended_at: str, duration_seconds: float,
+) -> bool:
+    """An extension's provisional timing write; False if skipped.
+
+    Keeps a plausible duration on the row should the capture die. Skipped once
+    the capture has marked its timing final (``_mark_capture_timing_final``):
+    checking the flag and writing happen under one lock, so this write either
+    lands before the capture's own write (which then overwrites it) or not at
+    all - it can never win after the real timing.
+    """
+    with _recording_timing_write_lock:
+        if session.get('timing_written'):
+            return False
+        _state.database.update_recording_timing(
+            recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
+        )
+        return True
+
+
+def _mark_capture_timing_final(session: dict[str, Any]) -> None:
+    """Called by the capture just before writing its rendered timing: from
+    here no extension may write provisional timing to this recording. Waits
+    for an extension write already in progress, which the capture's own write
+    then overwrites. Marks the capture's OWN session record, which an
+    extension that read it before a follow-on clip took the camera's slot may
+    still hold."""
+    with _recording_timing_write_lock:
+        session['timing_written'] = True
+
+
 def extend_active_rtsp_recording(
     *,
     camera_id: str,
@@ -219,14 +250,10 @@ def extend_active_rtsp_recording(
         duration_seconds = max(1.0, new_deadline - start_ts)
         recording_id = int(session.get('recording_id'))
     # Provisional timing so a clip whose capture dies still lists a plausible
-    # duration. Skipped once the capture has written the real timing from the
-    # rendered media: a late write would otherwise win and leave the row
-    # claiming a longer clip than the file.
-    with _recording_timing_write_lock:
-        if not session.get('timing_written'):
-            _state.database.update_recording_timing(
-                recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
-            )
+    # duration; skipped once the capture has marked its real timing final.
+    _write_provisional_timing(
+        session, recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
+    )
     # Re-check that this recording is still the active one for this camera before
     # writing labels/trigger - a new capture may have started between lock release
     # and here, in which case these updates belong to a now-closed recording.
@@ -821,12 +848,7 @@ def start_rtsp_recording_capture(
                 content_start_ts = time.time()
                 _state.recording_service.write_rtsp_clip(stream_url, file_path, final_duration_seconds)
                 content_seconds = final_duration_seconds
-            if camera_id:
-                with _recording_timing_write_lock:
-                    with _state.active_rtsp_recordings_lock:
-                        session = _state.active_rtsp_recordings.get(camera_id)
-                        if session and int(session.get('recording_id', -1)) == int(recording_id):
-                            session['timing_written'] = True
+            _mark_capture_timing_final(capture_session)
             _state.database.update_recording_timing(
                 recording_id,
                 started_at=datetime.fromtimestamp(content_start_ts, tz=timezone.utc).isoformat(),
