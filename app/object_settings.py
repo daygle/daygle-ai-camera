@@ -121,6 +121,13 @@ _TRACK_DISPLACEMENT_STILL = 0.01
 # available.
 _TRACK_STEP_MOVING = 0.03
 _TRACK_DISPLACEMENT_MIN_AGE = 3
+# Detector box-size jitter as a fraction of the box's own larger side. Edge
+# jitter grows with the box, so an absolute threshold on a size change is
+# size-dependent: a large parked box (a car close to the lens) crosses it while
+# a small one does not. A real depth-axis subject and the noise both scale with
+# the box, so the discriminator has to be RELATIVE. Mirrors
+# ``TRACK_SIZE_JITTER_FRACTION`` in app/object_tracking.py.
+_TRACK_SIZE_JITTER_FRACTION = 0.05
 
 
 def normalize_mode(value: Any, default: str = MODE_ANY) -> str:
@@ -446,9 +453,17 @@ def _two_point_step(detection: dict[str, Any]) -> float | None:
     current_size, previous_size = detection.get('track_size'), detection.get('track_prev_size')
     if current_size is not None and previous_size is not None:
         try:
-            step = max(step, abs(float(current_size) - float(previous_size)))
+            current_size, previous_size = float(current_size), float(previous_size)
         except (TypeError, ValueError):
-            pass
+            return step
+        size_step = abs(current_size - previous_size)
+        mean_size = (current_size + previous_size) / 2.0
+        # Ignore a scale change inside this box's own jitter band, so a large
+        # parked box is no more exposed than a small one to the same relative
+        # detector noise.
+        if mean_size > 0.0 and size_step <= _TRACK_SIZE_JITTER_FRACTION * mean_size:
+            size_step = 0.0
+        step = max(step, size_step)
     return step
 
 

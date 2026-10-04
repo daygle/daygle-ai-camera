@@ -300,6 +300,51 @@ def test_jittery_stationary_box_stays_still_despite_scale_wobble():
     assert out[0]['track_displacement'] <= ot.TRACK_STILL_DISPLACEMENT
 
 
+def test_scale_noise_rejection_is_independent_of_box_size():
+    """Regression guard for a size-dependent false positive.
+
+    Detector edge jitter is proportional to the box, so a parked box half the
+    frame wide has several times the absolute size wobble of a small one. With
+    a fixed absolute threshold that pushes a large parked car over the still
+    threshold while a small one stays under -- i.e. the false-positive risk
+    concentrated on exactly the large-box case the displacement override exists
+    to protect (see app/object_settings.py:18). Requiring a RELATIVE change
+    makes both equally immune.
+
+    The relative wobble here (4% of the box) is well above the 1.5-3% measured
+    on a real detector's parked subject and still far below the ~13% of a real
+    head-on approach.
+    """
+    for side, label in ((0.10, 'small'), (0.55, 'large')):
+        cam = f'trk-disp-jitter-{label}'
+        _reset(cam)
+        # Drift +2% of the box for the first half of the window, -2% for the
+        # second: a 4% half-to-half difference that is pure detector drift, not
+        # motion. Centres are exactly parked, so only the scale term can fire.
+        out = None
+        for sign in (1, 1, 1, 1, -1, -1, -1, -1):
+            size = side * (1 + 0.02 * sign)
+            out = ot.update_object_tracks(cam, [_det('car', 0.50 - size / 2, 0.50 - size / 2, size, size)])
+        assert out[0]['track_displacement'] is not None
+        assert out[0]['track_displacement'] <= ot.TRACK_STILL_DISPLACEMENT, (
+            f'{label} box (side {side}) read as moving on detector drift alone'
+        )
+
+
+def test_real_depth_axis_growth_survives_the_jitter_gate():
+    """The jitter gate must not swallow the signal it was added around: a real
+    head-on approach is ~13% relative growth per half window, an order of
+    magnitude above the 5% jitter band."""
+    cam = 'trk-disp-gate'
+    _reset(cam)
+    out = None
+    for step in range(8):
+        distance = 8.0 - step * (1.6 / 7)
+        height = 1.02 / distance
+        out = ot.update_object_tracks(cam, [_det('person', 0.445, 0.72 - height, 0.11, height)])
+    assert out[0]['track_displacement'] > ot.TRACK_STILL_DISPLACEMENT
+
+
 def test_approaching_subject_size_annotations_are_exposed():
     """The age-2 classifier path reads track_size/track_prev_size, so the
     tracker must stamp them on every detection, new tracks included."""
