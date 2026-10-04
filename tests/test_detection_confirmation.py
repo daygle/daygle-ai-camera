@@ -136,6 +136,41 @@ def test_location_iou_confirms_stationary_subject(ds):
     assert [d['label'] for d in out] == ['cat']
 
 
+# The REAL boxes from event 47720 (Driveway, 04-10-2026 21:31), taken from the
+# recording's .track.json: a parked car drawn whole one cycle and as a roof-only
+# rectangle the next. They score IoU 0.163 despite nothing having moved.
+CAR_WHOLE = (0.200, 0.212, 0.506, 0.429)
+CAR_ROOF = (0.374, 0.212, 0.319, 0.111)
+
+
+def _det_box(label: str, box: tuple[float, float, float, float]) -> dict:
+    return {'label': label, 'confidence': 0.9,
+            'box': {'x': box[0], 'y': box[1], 'width': box[2], 'height': box[3]}}
+
+
+def test_location_iou_confirms_an_object_drawn_at_two_extents(ds):
+    """A roof-only box nested inside a whole-vehicle box scores IoU 0.163, so a
+    spatial gate set above that rejects the parked car on every cycle and it
+    never confirms at all -- it is simply never recorded. Same defect class as
+    the tracker's motion measure: the detector drew one object at two
+    granularities, and a box-comparison read that as "different object".
+    """
+    kwargs = dict(required_frames=2, window_frames=3, location_iou=0.5)
+    assert ds.confirm_object_detections('cam-1', [_det_box('car', CAR_WHOLE)], **kwargs) == []
+    out = ds.confirm_object_detections('cam-1', [_det_box('car', CAR_ROOF)], **kwargs)
+    assert [d['label'] for d in out] == ['car']
+
+
+def test_location_iou_still_rejects_two_distinct_objects(ds):
+    """The allowance is not a blanket bypass. Two same-label boxes with similar
+    aspect ratios (a distant car seen inside a large foreground box) are two
+    different objects, and the spatial gate must keep rejecting them."""
+    kwargs = dict(required_frames=2, window_frames=3, location_iou=0.5)
+    assert ds.confirm_object_detections('cam-1', [_det_box('car', (0.10, 0.30, 0.30, 0.25))], **kwargs) == []
+    out = ds.confirm_object_detections('cam-1', [_det_box('car', (0.14, 0.34, 0.10, 0.08))], **kwargs)
+    assert out == [], 'a nested same-shape box was treated as the same object'
+
+
 def test_location_iou_exempts_boxless_and_face(ds):
     # A detection with no box, and any 'face', bypass the spatial test and fall
     # back to label-only confirmation.
