@@ -412,6 +412,18 @@ def test_step_without_changed_pixels_is_still():
     assert os.detection_motion_state(swapped, _mask_none_changed(), None) == 'still'
 
 
+def test_translated_and_resized_age_two_box_is_moving_without_mask():
+    """Review case: a subject that moved sideways AND grew past the threshold
+    (approaching at an angle) is moving from its growth alone - the large
+    centre step must not route it to a quiet mask and call it still."""
+    approaching = {**_det('person'), 'track_id': 8, 'track_age': 2,
+                   'track_prev_center': (0.40, 0.40), 'track_center': (0.46, 0.42),
+                   'track_prev_box': (0.35, 0.30, 0.10, 0.20),
+                   'track_box': (0.40, 0.30, 0.12, 0.24)}
+    assert os._step_components(approaching)[1] >= os._TRACK_STEP_MOVING
+    assert os.detection_motion_state(approaching, _mask_none_changed(), None) == 'moving'
+
+
 def test_brand_new_track_still_uses_mask_so_fast_cars_are_not_lost():
     """A brand-new (age 1) detection keeps the mask verdict. This is critical:
     a fast car moves too far to IoU-match its own prior box, so it opens a new
