@@ -253,18 +253,35 @@ def test_scale_term_verdict_is_independent_of_box_size():
     assert os_.detection_motion_state(_det('car', 0.3, 0.3), quiet, small) == os_.MODE_STILL
 
 
-def test_distant_approach_is_still_still_under_both_measures():
-    """The honest lower bound: at ~12m the box changes by less than 1% of frame,
-    so neither measure clears the threshold and the subject reads still. This
-    pins that the change did not make everything moving."""
-    cam = 'trk-disp-far'
-    _reset(cam)
-    out = None
-    for step in range(8):
-        distance = 12.0 - step * (1.5 / 7)
-        height = 1.02 / distance
-        out = ot.update_object_tracks(cam, [_det('person', 0.458, 0.72 - height, 0.09, height)])
-    assert out[0]['track_displacement'] <= ot.TRACK_STILL_DISPLACEMENT
+def test_long_range_slow_approach_is_the_honest_remaining_miss():
+    """The real lower bound: a SLOW approach at LONG range lands just under the
+    threshold and reads still.
+
+    An earlier version of this test pinned the miss at 12m using a box with a
+    FIXED width while only the height grew. ``_size_of`` returns max(w, h), so
+    the constant width clamped the measure and zeroed the scale term -- the
+    same measurement artifact that produced a wrong distance bound in the PR
+    description. With a proportional box (w = 0.45 x h, as a person actually is)
+    a 12m approach is clearly detected. The genuine miss is ~20m at 0.23 m/s.
+    """
+    def displacement(d0, d1):
+        cam = f'trk-disp-range-{d0}'
+        _reset(cam)
+        out = None
+        for step in range(8):
+            distance = d0 + (d1 - d0) * step / 7
+            height = 1.02 / distance
+            width = 0.45 * height
+            out = ot.update_object_tracks(cam, [
+                _det('person', 0.50 - width / 2, 0.72 - height, width, height)])
+        return out[0]['track_displacement']
+
+    # ~20m at walking pace: just under. This is a tuning choice, not a limit.
+    assert displacement(20.0, 18.4) <= ot.TRACK_STILL_DISPLACEMENT
+    # Same pace at 16m and 12m: clearly detected. Pins that the miss is a
+    # distance/speed product, not "distant things are invisible".
+    assert displacement(16.0, 14.4) > ot.TRACK_STILL_DISPLACEMENT
+    assert displacement(12.0, 10.5) > ot.TRACK_STILL_DISPLACEMENT
 
 
 def test_close_fast_approach_was_already_moving_pre_fix():
@@ -331,7 +348,10 @@ def test_jittery_stationary_box_stays_still_despite_scale_wobble():
     wobble = [0.002, -0.002, 0.0015, -0.0025, 0.002, -0.0015, 0.0025, -0.002]
     out = None
     for dw in wobble:
-        out = ot.update_object_tracks(cam, [_det('car', 0.40, 0.40, 0.25, 0.15 + dw)])
+        # Wobble the WIDTH, which is the larger side: ``_size_of`` returns
+        # max(w, h), so wobbling a smaller side would leave the measure constant
+        # and make this test pass without exercising the scale term at all.
+        out = ot.update_object_tracks(cam, [_det('car', 0.40, 0.40, 0.25 + dw, 0.15)])
     assert out[0]['track_displacement'] is not None
     assert out[0]['track_displacement'] <= ot.TRACK_STILL_DISPLACEMENT
 
