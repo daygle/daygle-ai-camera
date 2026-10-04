@@ -170,16 +170,32 @@ def _recent_displacement(track: dict[str, Any]) -> float | None:
                 continue
     if len(window) < max(2, TRACK_DISPLACEMENT_MIN_AGE):
         return None
+    # Drop sightings drawn at a different EXTENT from the window's prevailing
+    # one (the box of median aspect). The pairwise check below only sees the
+    # two halves' summaries: one roof-only box among whole-vehicle boxes blends
+    # into an in-between summary that no longer reads as an extent change, yet
+    # shifts the summary centre by several hundredths of the frame, so a single
+    # flip kept a parked car "moving" for most of the window.
+    reference = sorted(window, key=lambda item: item[2] / max(item[3], 1e-9))[len(window) // 2]
+    window = [item for item in window if not _extent_unstable(item, reference)]
+    if len(window) < max(2, TRACK_DISPLACEMENT_MIN_AGE):
+        return 0.0  # flapping between extents is not evidence of motion
     mid = len(window) // 2
     older = window[:mid] or window[:1]
     newer = window[mid:] or window[-1:]
 
-    def _mean_box(group: list[tuple[float, float, float, float]]) -> tuple[float, float, float, float]:
-        count = len(group)
-        return tuple(sum(item[axis] for item in group) / count for axis in range(4))
+    def _median_box(group: list[tuple[float, float, float, float]]) -> tuple[float, float, float, float]:
+        # Per-axis median, not mean: one outlying sighting (a glare-inflated or
+        # half-occluded box) cannot drag a half's summary across the threshold,
+        # while sustained translation or growth still separates the halves.
+        def _median(values: list[float]) -> float:
+            ordered = sorted(values)
+            middle = len(ordered) // 2
+            return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2.0
+        return tuple(_median([item[axis] for item in group]) for axis in range(4))
 
-    older_box = _mean_box(older)
-    newer_box = _mean_box(newer)
+    older_box = _median_box(older)
+    newer_box = _median_box(newer)
 
     # The same object drawn at two different extents is not motion. Without
     # this, a roof-only box nested inside a whole-vehicle box moves both the
@@ -281,6 +297,13 @@ def _motion_match_distance(box: dict[str, Any], track: dict[str, Any]) -> float 
         size = max(float(track_box.get("width") or 0.0), float(track_box.get("height") or 0.0))
     except (TypeError, ValueError):
         return None
+    current, previous = _box_tuple(box), _box_tuple(track_box)
+    if current is not None and previous is not None and _extent_unstable(current, previous):
+        # The same object drawn at another extent, one box inside the other:
+        # containment already proves the place, so no distance gate applies -
+        # in particular not the stationary one, which a parked car's roof/body
+        # flip (centres ~0.18 of the frame apart) would otherwise fail.
+        return distance
     gate = MOTION_MATCH_GATE
     if isinstance(velocity, (list, tuple)) and len(velocity) >= 2:
         speed = (float(velocity[0]) ** 2 + float(velocity[1]) ** 2) ** 0.5
@@ -400,12 +423,21 @@ def update_object_tracks(
                 # history is kept index-aligned with the center history and
                 # trimmed identically, so ``_recent_displacement`` can pair
                 # each center with the box's scale at that same sighting.
+                previous_box = _box_tuple(best_track.get("box") or {})
                 best_track["box"] = box if isinstance(box, dict) else best_track["box"]
                 centers = best_track.setdefault("centers", [])
                 boxes_hist = best_track.setdefault("boxes", [])
                 new_center = _center_of(box) if isinstance(box, dict) else None
+                new_box = _box_tuple(box) if isinstance(box, dict) else None
+                # An extent flip (same object, other granularity) moves the box
+                # centre without the object moving; learning it as velocity
+                # would throw the next cycle's prediction off by the same jump.
+                extent_flip = (
+                    previous_box is not None and new_box is not None
+                    and _extent_unstable(previous_box, new_box)
+                )
                 if new_center is not None:
-                    if centers:
+                    if centers and not extent_flip:
                         # Per-cycle velocity: this step spans the cycles missed
                         # since the last sighting plus this one.
                         elapsed = int(best_track.get("misses") or 0) + 1

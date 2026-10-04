@@ -657,3 +657,51 @@ def test_parked_car_track_is_not_claimed_by_the_car_parked_beside_it():
     # ...and A's track is still there for A when it is detected again.
     again = ot.update_object_tracks(cam, [_det('car', 0.53, 0.15, 0.06, 0.06)])
     assert again[0]['track_id'] == parked[0]['track_id']
+
+
+_BODY = (0.30, 0.30, 0.506, 0.429)  # event 47720: whole parked car...
+_ROOF = (0.40, 0.31, 0.319, 0.111)  # ...and the same car boxed roof-only
+
+
+def _moving(cam, box):
+    det = ot.update_object_tracks(cam, [_det('car', *box)])[0]
+    return det, os_.detection_motion_state(det, None, det.get('track_displacement'))
+
+
+def test_single_extent_flip_does_not_make_a_parked_car_move():
+    # One roof-only sighting mixed into a half's summary used to blend into an
+    # in-between box that passed the shape check yet shifted the centre: the
+    # car read moving for most of the window (7 cycles).
+    cam = 'trk-extent-flip-window'
+    _reset(cam)
+    states = [_moving(cam, box)[1] for box in [_BODY] * 6 + [_ROOF] + [_BODY] * 6]
+    assert states.count(os_.MODE_MOVING) == 0, states
+
+
+def test_alternating_extents_do_not_make_a_parked_car_move():
+    cam = 'trk-extent-alternating'
+    _reset(cam)
+    states = [_moving(cam, box)[1] for box in [_BODY, _ROOF] * 6]
+    assert states.count(os_.MODE_MOVING) == 0, states
+
+
+def test_extent_flip_is_not_learned_as_velocity():
+    cam = 'trk-extent-velocity'
+    _reset(cam)
+    for box in [_BODY] * 4 + [_ROOF]:
+        det, _state = _moving(cam, box)
+    track = st._object_tracks[cam]['tracks'][0]
+    assert det['track_id'] == track['id']
+    vx, vy = track['velocity']
+    assert abs(vx) < 1e-6 and abs(vy) < 1e-6
+
+
+def test_extent_flip_matches_a_stationary_track_despite_its_small_gate():
+    # Roof-only track, then the whole body: centres ~0.15 apart, beyond the
+    # stationary gate (0.5 x 0.319), but containment proves the same place.
+    cam = 'trk-extent-stationary-gate'
+    _reset(cam)
+    for _ in range(4):
+        roof, _state = _moving(cam, _ROOF)
+    body, _state = _moving(cam, _BODY)
+    assert body['track_id'] == roof['track_id']
