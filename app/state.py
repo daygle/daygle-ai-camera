@@ -228,6 +228,12 @@ _motion_confirm_lock: threading.Lock = threading.Lock()
 # does not track these cross-module attribute accesses.
 # codeql[py/unused-global-variable]
 _motion_confirm_streaks: dict = {}
+
+# Object priority over motion across cycles (headlights before the car, glow
+# after it). Self-locking; see app.motion_object_priority.
+from app.motion_object_priority import MotionObjectArbiter  # noqa: E402
+
+motion_object_arbiter = MotionObjectArbiter()
 # Per-camera still-dwell streaks (app/object_settings.py):
 # {camera_id: {label: {'still_since': epoch_seconds, 'alerted': bool}}}. The
 # "still for N minutes" alert watches how long a label has been detected

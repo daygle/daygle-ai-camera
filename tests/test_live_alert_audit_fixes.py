@@ -268,6 +268,10 @@ auth:
 ai:
   backend: onnx
   confidence: 0.45
+live:
+  # These tests drive motion frames and assert the event at once; the
+  # object-priority hold is covered by tests/test_motion_object_priority.py.
+  motion_object_grace_seconds: 0
 storage:
   data_dir: {tmp_path / 'data'}
   database: {database_path}

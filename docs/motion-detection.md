@@ -64,11 +64,19 @@ line-crossing.
 
 This is an optional alert that fires from Layer 1's pixel-diff result, without caring what YOLO found.
 
-You configure it on the **Zones** page: each area has its own **Motion detection** card with a single toggle. Flip it on and the motion rule is created with sensible defaults; use the **Sensitivity** field to set the minimum confidence, and the **Advanced** expander for cooldown, email/push, time windows, and the per-zone **Gate override** / **Scale override**. When a zone's pixel-diff confidence reaches the sensitivity threshold, the alert fires immediately - even before YOLO has identified any specific object. The system normally computes this confidence from the changed pixels inside the zone's own rectangle, so motion elsewhere in the camera view does not raise this zone's score.
+You configure it on the **Zones** page: each area has its own **Motion detection** card with a single toggle. Flip it on and the motion rule is created with sensible defaults; use the **Sensitivity** field to set the minimum confidence, and the **Advanced** expander for cooldown, email/push, time windows, and the per-zone **Gate override** / **Scale override**. When a zone's pixel-diff confidence reaches the sensitivity threshold, the alert fires without needing YOLO to identify anything - after a short hold that lets an object in the same zone take priority (see below). The system normally computes this confidence from the changed pixels inside the zone's own rectangle, so motion elsewhere in the camera view does not raise this zone's score.
 
 **Per-zone sensitivity.** The **Gate override** and **Scale override** fields (under a motion card's **Advanced** expander) let one zone use a different pixel-diff sensitivity than the rest of the camera. Leave them blank to inherit the camera/global values. This is what lets a sensitive doorway (low gate) and a noisy tree-line (high gate) coexist on a single camera - the whole-camera **Motion Gate Fraction** / **Motion Scale Fraction** no longer have to be a compromise. The live hint under the Sensitivity slider shows the resulting "approx. X% of this zone's pixels must change", and marks the zone as a *per-zone override* when either field is set.
 
 Use this when you want to be notified any time *anything* moves in an area, regardless of what it is.
+
+**Objects take priority over motion.** Motion is the fallback signal: when an object explains it, you get the object's event, not a separate *Motion* one. Three rules enforce that:
+
+- **Same cycle:** a motion box that a detected object's box covers is dropped, so the event shows the object rather than a second *Motion* subject.
+- **Motion before an object** (headlights sweeping the zone before the car is recognisable): motion with no object in its zone is held for the **Object Priority Window** (Settings, default 3s). If an object appears in that zone meanwhile, the motion is absorbed into the object's event and never alerts on its own. If none does, the motion event fires when the window ends, stamped with the moment the motion began and showing that frame, so its recording's pre-roll starts where the motion did.
+- **Motion after or beside an object** (tail-light glow, beam spill on the road ahead of the car): motion in a zone where an object was seen within the window counts as that object's.
+
+The cost is that a genuine motion-only alert arrives up to the window's length later. Set the window to 0 to restore immediate motion alerts. If an object at night is often recognised later than the window (a car only identified once it is close), raise it.
 
 ---
 

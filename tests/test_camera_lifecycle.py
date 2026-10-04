@@ -122,8 +122,16 @@ def test_cleanup_camera_runtime_state_removes_all_dicts(state):
     with state._sound_statuses_lock:
         state._sound_statuses['cam-old'] = {'state': 'listening'}
     state._periodic_scan_last_ts['cam-old'] = 1.0
+    state.motion_object_arbiter.resolve(
+        'cam-old', now=1.0, grace_seconds=3.0,
+        motion_detections=[{'zone_id': 'z', 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}],
+        object_zone_keys={'other'}, image=None, image_is_numpy=False, has_objects=False,
+    )
+    assert state.motion_object_arbiter.has_held('cam-old')
 
     _cleanup_camera_runtime_state({'cam-old'})
+
+    assert not state.motion_object_arbiter.has_held('cam-old')
 
     assert 'cam-old' not in state.live_detection_history
     assert 'cam-old' not in state.live_detection_confirm_history

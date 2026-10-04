@@ -95,6 +95,11 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     # app.live_monitor.camera_uses_face_detections).
     'face_detection_interval_seconds': 1.0,
     'event_debounce_seconds': 10.0,
+    # Object priority over motion across cycles: motion-only is held this
+    # long for an object to appear in the same zone (headlights before the
+    # car), and motion this close to an object in its zone is the object's.
+    # 0 restores immediate motion events. See app.motion_object_priority.
+    'motion_object_grace_seconds': 3.0,
     # Temporal confirmation gate (all object labels). ``1`` disables the gate
     # and allows the first confident detection to alert or record. Higher values
     # trade alert latency for more resistance to one-frame false positives.
