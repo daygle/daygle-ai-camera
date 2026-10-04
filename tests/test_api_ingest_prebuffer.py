@@ -215,6 +215,8 @@ def test_shared_ingest_worker_command_fans_out_three_outputs(tmp_path, monkeypat
 
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
     monkeypatch.setattr(recordings_module.subprocess, 'Popen', fake_popen)
+    # Fake ffmpeg: keep the frame-clock capability probe off this Popen.
+    monkeypatch.setattr(recordings_module, 'stream_frame_stats_supported', lambda _ffmpeg: False)
 
     service._run_prebuffer_worker('cam', 'rtsp://example/stream', {
         'stop_event': stop,
@@ -613,6 +615,8 @@ def test_prebuffer_worker_backs_off_and_throttles_on_dead_link(tmp_path, monkeyp
     warnings: list[str] = []
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
     monkeypatch.setattr(recordings_module.subprocess, 'Popen', fake_popen)
+    # Fake ffmpeg: keep the frame-clock capability probe off this Popen.
+    monkeypatch.setattr(recordings_module, 'stream_frame_stats_supported', lambda _ffmpeg: False)
     monkeypatch.setattr(
         recordings_module.logger,
         'warning',
