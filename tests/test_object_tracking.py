@@ -217,6 +217,33 @@ def test_approaching_subject_reports_motion_from_scale_alone():
     assert os_.detection_motion_state(out[0], quiet, out[0]['track_displacement']) == os_.MODE_MOVING
 
 
+def test_scale_term_is_only_visible_on_boxes_above_a_tenth_of_frame():
+    """DOCUMENTED LIMITATION, not a desired behaviour -- pinned so it cannot
+    change silently.
+
+    The jitter gate is RELATIVE (noise scales with the box) but the still
+    threshold the result is compared against is ABSOLUTE (0.01 of frame), so a
+    small object's genuinely large relative growth produces a small absolute
+    number and is rejected. Measured: an approach with identical ~13% relative
+    growth per half window is visible only once the box exceeds ~0.11 of frame.
+
+    Fixing this properly means the scale term's threshold has to be relative
+    too, which changes the meaning of ``track_displacement``. That is a design
+    decision to be taken deliberately, not smuggled into this PR.
+    """
+    for size, expect in ((0.05, os_.MODE_STILL), (0.20, os_.MODE_MOVING)):
+        cam = f'trk-disp-sizebound-{size}'
+        _reset(cam)
+        out = None
+        for step in range(8):
+            grown = size * (1 + 0.16 * step / 7)
+            out = ot.update_object_tracks(cam, [
+                _det('car', 0.50 - grown / 2, 0.50 - grown / 2, grown, grown)])
+        quiet = np.zeros((72, 128), dtype=bool)
+        state = os_.detection_motion_state(out[0], quiet, out[0]['track_displacement'])
+        assert state == expect, f'box side {size}: got {state}, expected {expect}'
+
+
 def test_distant_approach_is_still_still_under_both_measures():
     """The honest lower bound: at ~12m the box changes by less than 1% of frame,
     so neither measure clears the threshold and the subject reads still. This
