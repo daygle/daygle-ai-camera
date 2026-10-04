@@ -147,6 +147,14 @@ const WEB_SHARED_GLOBALS = {
   resizeOverlayCanvas: 'readonly',
   sampleTrackAtTime: 'readonly',
 
+  // web/clip_timeline.js - clip segment timeline shared by the recordings and
+  // timeline playback pages (loaded after overlay.js, before the page script).
+  nudgeClipTime: 'readonly',
+  renderClipTimeline: 'readonly',
+  resetClipTimeline: 'readonly',
+  seekClipFromClientX: 'readonly',
+  updateClipTimelinePlayhead: 'readonly',
+
   // web/live.js - live-view page frame: shared element handles and page
 // state; page scripts loaded after live.js reference these. The four mutable
 // page-state names are 'writable' (declared with `let` in their defining
@@ -204,6 +212,19 @@ export default [
       // duplicate lexical declaration is a SyntaxError at parse/load time
       // (same file) or when the second script loads (cross-file).
       'no-redeclare': 'off',
+    },
+  },
+  {
+    // The shared clip timeline reads the playback page's own element handles
+    // and current recording, declared at top level by BOTH recordings.js and
+    // timeline.js (whichever page loaded it). Scoped to this file so other
+    // scripts cannot silently rely on a page-local name.
+    files: ['web/clip_timeline.js'],
+    languageOptions: {
+      globals: {
+        els: 'readonly',
+        activeRecording: 'readonly',
+      },
     },
   },
   {

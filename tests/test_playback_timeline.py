@@ -4,9 +4,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# The clip timeline is shared by the recordings and timeline pages.
 PLAYBACK_SCRIPTS = (
-    ROOT / 'web' / 'recordings.js',
-    ROOT / 'web' / 'timeline.js',
+    ROOT / 'web' / 'clip_timeline.js',
 )
 
 
