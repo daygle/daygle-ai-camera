@@ -1238,7 +1238,7 @@ def test_validate_live_settings_bounds_motion_object_grace(monkeypatch, pv):
     _install_validator_dependencies(monkeypatch)
     assert pv.validate_live_settings({'motion_object_grace_seconds': 0})['motion_object_grace_seconds'] == 0
     assert pv.validate_live_settings({})['motion_object_grace_seconds'] == 3.0
-    for bad in (-1, 11, 'soon'):
+    for bad in (-1, 11, 'soon', float('nan')):
         with pytest.raises(HTTPException):
             pv.validate_live_settings({'motion_object_grace_seconds': bad})
 

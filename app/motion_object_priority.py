@@ -114,8 +114,13 @@ class MotionObjectArbiter:
                 return last is not None and abs(now - last) <= grace_seconds
 
             result = ArbiterResult(motion_detections=[])
-            # Held motion that an object has since shown up for is absorbed.
-            for key in [k for k, item in held.items() if seen.get(k, float('-inf')) >= item.first_ts]:
+            # Held motion that an object showed up for WITHIN its hold is
+            # absorbed. A sighting after the hold expired (a gap between
+            # cycles) does not reach back: that motion is released below.
+            for key in [
+                k for k, item in held.items()
+                if item.first_ts <= seen.get(k, float('-inf')) <= item.first_ts + grace_seconds
+            ]:
                 held.pop(key, None)
             current: dict[str, dict[str, Any]] = {}
             for detection in motion_detections:

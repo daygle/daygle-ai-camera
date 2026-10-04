@@ -182,6 +182,10 @@ def _cleanup_camera_runtime_state(removed_ids: set[str]) -> None:
     with _state._motion_confirm_lock:
         for cam_id in removed_ids:
             _state._motion_confirm_streaks.pop(cam_id, None)
+    # Held motion and object sightings (self-locking): a deleted and re-added
+    # camera must not release or suppress motion from its previous life.
+    for cam_id in removed_ids:
+        _state.motion_object_arbiter.clear_camera(cam_id)
     from app.detection_state import frame_motion_locks
     with frame_motion_locks():
         for cam_id in removed_ids:

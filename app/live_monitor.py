@@ -1054,7 +1054,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             'last_detector_error': _assigned_error or '',
         }
     detector_ready = bool(detector_loaded and detector_method_available)
-    if not detector_ready and not motion_detections:
+    # Held motion must still reach the arbiter so the hold can expire and
+    # release: motion-only rules keep working without an object detector.
+    if not detector_ready and not motion_detections and not _state.motion_object_arbiter.has_held(camera_id):
         detector_reason = (
             ai_state['last_detector_error']
             or 'Live object detector is not loaded; motion-only rules can still run.'

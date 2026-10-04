@@ -75,6 +75,16 @@ def test_motion_in_a_zone_without_the_object_is_not_absorbed():
     assert released.event_ts is None
 
 
+def test_object_seen_after_an_expired_hold_does_not_absorb_it():
+    # Review case: a gap between cycles - motion held at t=0, next cycle at
+    # t=10 sees a car. The hold had expired; its motion is released, not
+    # silently absorbed by an object that arrived long after.
+    arbiter = MotionObjectArbiter()
+    _resolve(arbiter, 100.0, [MOTION])
+    late = _resolve(arbiter, 110.0, object_zones={'drive'})
+    assert late.motion_detections == [MOTION]
+
+
 def test_zero_grace_is_legacy_immediate_motion():
     arbiter = MotionObjectArbiter()
     result = _resolve(arbiter, 100.0, [MOTION], grace=0)
@@ -93,7 +103,7 @@ def test_object_zone_keys_matches_objects_to_motion_zones():
 # Live pipeline
 # ---------------------------------------------------------------------------
 
-def _pipeline(tmp_path, monkeypatch):
+def _pipeline(tmp_path, monkeypatch, *, detector_available=True):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
     mods = _m()
@@ -101,8 +111,8 @@ def _pipeline(tmp_path, monkeypatch):
 
     class FakeDetector:
         backend = 'onnx'
-        available = True
-        unavailable_reason = None
+        available = detector_available
+        unavailable_reason = None if detector_available else 'model missing'
 
         def detect_image(self, _image, confidence=None):
             return [dict(obj) for obj in plan['objects']]
@@ -184,3 +194,14 @@ def test_shipped_default_holds_motion_for_three_seconds():
     from app.config_facades import DEFAULT_LIVE_CONFIG
     from app.motion_object_priority import DEFAULT_GRACE_SECONDS
     assert DEFAULT_LIVE_CONFIG['motion_object_grace_seconds'] == DEFAULT_GRACE_SECONDS == 3.0
+
+
+def test_held_motion_still_fires_without_an_object_detector(tmp_path, monkeypatch):
+    # Review case: with no detector, a quiet cycle used to return before the
+    # arbiter, so a short motion pulse stayed held forever. Motion-only rules
+    # are documented to keep working without a detector.
+    main, cycle, labels, base = _pipeline(tmp_path, monkeypatch, detector_available=False)
+    assert cycle(0.0, motion=True) is None
+    event_id = cycle(3.5)
+    assert event_id is not None
+    assert labels(event_id) == ['motion']

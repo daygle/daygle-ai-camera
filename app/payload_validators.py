@@ -809,7 +809,8 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         motion_object_grace_seconds = float(merged.get('motion_object_grace_seconds', 3.0))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='motion_object_grace_seconds must be a number.') from exc
-    if motion_object_grace_seconds < 0 or motion_object_grace_seconds > 10:
+    # Chained so NaN (every comparison false) is rejected too.
+    if not 0 <= motion_object_grace_seconds <= 10:
         raise HTTPException(status_code=400, detail='motion_object_grace_seconds must be between 0 and 10.')
     try:
         detection_history_minutes = int(float(merged.get('detection_history_minutes', 10)))
