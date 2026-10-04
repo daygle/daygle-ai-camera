@@ -446,44 +446,50 @@ def update_still_dwell_alerts(
         return emitted
 
 
-def _two_point_step(detection: dict[str, Any]) -> float | None:
-    """Largest single-cycle change in a track's box, in normalized frame units.
+def _step_components(detection: dict[str, Any]) -> tuple[float, float] | None:
+    """``(center_step, size_step)`` between a track's last two sightings.
 
-    Returns 0.0 when the two sightings disagree about box shape while one sits
-    inside the other -- the same object drawn at two extents, not motion.
+    Both in normalized frame units comparable to ``_TRACK_STEP_MOVING``: the
+    larger-axis box-center move, and the box's own growth/shrink in relative
+    units (see ``_TRACK_SIZE_REFERENCE``). ``(0.0, 0.0)`` when the two
+    sightings disagree about box shape while one sits inside the other -- the
+    same object drawn at two extents, not motion. None without two centers.
 
-    The larger of the box-center move and the box's own growth/shrink. The
-    scale half is what catches a subject walking toward the camera (or a car
-    driving away from it) between its first and second sighting: such a box
+    The scale half is what catches a subject walking toward the camera (or a
+    car driving away from it) between its first and second sighting: such a box
     translates almost not at all, so a center-only step reads as no step at
-    all and the age-2 bias below would call a plainly approaching person
-    still."""
+    all and the age-2 bias would call a plainly approaching person still."""
     current, previous = detection.get('track_center'), detection.get('track_prev_center')
     try:
-        step = max(abs(float(current[0]) - float(previous[0])), abs(float(current[1]) - float(previous[1])))
+        center_step = max(abs(float(current[0]) - float(previous[0])), abs(float(current[1]) - float(previous[1])))
     except (TypeError, ValueError, IndexError):
         return None
     current_box, previous_box = detection.get('track_box'), detection.get('track_prev_box')
-    if current_box is not None and previous_box is not None:
-        try:
-            current_size = max(float(current_box[2]), float(current_box[3]))
-            previous_size = max(float(previous_box[2]), float(previous_box[3]))
-        except (TypeError, ValueError, IndexError):
-            return step
-        # The same object drawn at two extents is not motion: a roof-only box
-        # inside a whole-vehicle box moves the centre by far more than the step
-        # threshold, so without this a parked car is read as moving on its
-        # second sighting and survives a Moving Only rule.
-        if _extent_unstable(tuple(current_box[:4]), tuple(previous_box[:4])):
-            return 0.0
-        mean_size = (current_size + previous_size) / 2.0
-        # Thresholded in RELATIVE units, so a small object's identical relative
-        # growth is not silently discarded and a large parked box cannot clear
-        # an absolute bar on detector drift alone.
-        if mean_size > 0.0:
-            size_signal = (abs(current_size - previous_size) / mean_size) * _TRACK_SIZE_REFERENCE
-            step = max(step, size_signal)
-    return step
+    if current_box is None or previous_box is None:
+        return center_step, 0.0
+    try:
+        current_size = max(float(current_box[2]), float(current_box[3]))
+        previous_size = max(float(previous_box[2]), float(previous_box[3]))
+    except (TypeError, ValueError, IndexError):
+        return center_step, 0.0
+    # The same object drawn at two extents is not motion: a roof-only box
+    # inside a whole-vehicle box moves the centre by far more than the step
+    # threshold, so without this a parked car is read as moving on its second
+    # sighting and survives a Moving Only rule.
+    if _extent_unstable(tuple(current_box[:4]), tuple(previous_box[:4])):
+        return 0.0, 0.0
+    mean_size = (current_size + previous_size) / 2.0
+    # Thresholded in RELATIVE units, so a small object's identical relative
+    # growth is not silently discarded and a large parked box cannot clear an
+    # absolute bar on detector drift alone.
+    size_step = (abs(current_size - previous_size) / mean_size) * _TRACK_SIZE_REFERENCE if mean_size > 0.0 else 0.0
+    return center_step, size_step
+
+
+def _two_point_step(detection: dict[str, Any]) -> float | None:
+    """Largest single-cycle change in a track's box (see ``_step_components``)."""
+    components = _step_components(detection)
+    return max(components) if components is not None else None
 
 
 def detection_motion_state(
@@ -537,15 +543,22 @@ def detection_motion_state(
         except (TypeError, ValueError):
             track_age = 0
         if detection.get('track_id') is not None and 2 <= track_age < _TRACK_DISPLACEMENT_MIN_AGE:
-            # Exception: a track whose box stepped clearly across the frame
-            # since its first sighting is moving, not a flapping parked car. The
-            # tracker matches a walking subject by its motion once its box no
-            # longer overlaps the previous one, so without this the second
-            # sighting of every walker would be dropped under Moving Only.
-            step = _two_point_step(detection)
-            if step is not None and step >= _TRACK_STEP_MOVING:
+            # Exception: a track whose box clearly changed since its first
+            # sighting is not a flapping parked car. The tracker matches a
+            # walking subject by its motion once its box no longer overlaps the
+            # previous one, so without this the second sighting of every walker
+            # would be dropped under Moving Only.
+            components = _step_components(detection)
+            if components is None or max(components) < _TRACK_STEP_MOVING:
+                return MODE_STILL
+            # A box that GREW or shrank (a subject approaching or receding) is
+            # moving, whether or not it also translated. A box that only
+            # TRANSLATED is not proof on its own: an id swapped between two
+            # adjacent parked cars translates too (event 47935), so the mask
+            # decides it as it would a first sighting - a walker's box is full
+            # of changed pixels, a parked car's is not.
+            if components[1] >= _TRACK_STEP_MOVING:
                 return MODE_MOVING
-            return MODE_STILL
     if diff_mask is None:
         return MODE_STILL
     box = detection.get('box')

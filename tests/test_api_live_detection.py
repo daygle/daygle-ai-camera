@@ -413,9 +413,17 @@ def test_two_same_label_tracks_inside_cooldown_window_both_emit(tmp_path, monkey
             main._state._object_tracks.pop('camera-1', None)
 
 
-@pytest.mark.parametrize('capture_state', ['capped', 'frozen', 'missing', 'record-off', 'no-stream'])
+@pytest.mark.parametrize(
+    'capture_state',
+    ['capped', 'frozen', 'missing-capped', 'missing-ended', 'record-off', 'no-stream'],
+)
 def test_continuing_track_rolls_over_at_max_clip_without_waiting_for_cooldown(tmp_path, monkeypatch, capture_state):
-    """PR #452 covers fresh events, but the SAME track takes the debounce path."""
+    """PR #452 covers fresh events, but the SAME track takes the debounce path.
+
+    With no capture running, only a clip cut at its Max Clip ceiling rolls
+    over: after one that ended normally the cooldown suppresses the duplicate
+    (``missing-ended``), or every flicker of a lingering object - a parked car
+    misread as moving - opened a new event each clip length."""
     from datetime import datetime, timezone
 
     _load_app(tmp_path, monkeypatch)
@@ -452,6 +460,7 @@ def test_continuing_track_rolls_over_at_max_clip_without_waiting_for_cooldown(tm
     old_session = {'recording_id': old_id, 'start_capture_ts': now - 10,
                    'capture_deadline_ts': now, 'max_capture_deadline_ts': now}
     main._state.active_rtsp_recordings[camera] = old_session
+    monkeypatch.setattr(main._state, 'last_rtsp_capture_capped', {})
     settings = {'id': camera, 'name': 'Long event', 'detection': {'zones': []}}
     started = []
 
@@ -473,8 +482,9 @@ def test_continuing_track_rolls_over_at_max_clip_without_waiting_for_cooldown(tm
         assert main.database.get_event(first)['recording_id'] == old_id
         if capture_state == 'frozen':
             old_session['deadline_frozen'] = True
-        elif capture_state == 'missing':
+        elif capture_state in {'missing-capped', 'missing-ended'}:
             main._state.active_rtsp_recordings.pop(camera)
+            main._state.last_rtsp_capture_capped[camera] = capture_state == 'missing-capped'
         elif capture_state == 'record-off':
             monkeypatch.setattr(mods.live_monitor, 'zone_record_on_detect', lambda *_a: False)
         elif capture_state == 'no-stream':
@@ -483,7 +493,7 @@ def test_continuing_track_rolls_over_at_max_clip_without_waiting_for_cooldown(tm
             b'jpeg', {'timestamp': now + 0.1, 'width': 1280, 'height': 720},
             settings, enforce_interval=False,
         )
-        if capture_state in {'record-off', 'no-stream'}:
+        if capture_state in {'record-off', 'no-stream', 'missing-ended'}:
             assert second is None
             assert started == []
             return

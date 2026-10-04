@@ -1615,13 +1615,24 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         )
     ):
         debounce_seconds = max(resolved_cooldowns.values())
+        # Snapshot before extending: the extension retires a stale session itself.
+        with _state.active_rtsp_recordings_lock:
+            capture_blocked = (
+                camera_id in _state.active_rtsp_recordings
+                or bool(_state.last_rtsp_capture_capped.get(camera_id))
+            )
         extended_recording_id = extend_active_rtsp_recording(camera_id=camera_id, event_time=frame_capture_time, recording_config=camera_recording_config, detections=recording_detections)
         # Cooldown suppresses duplicate EVENTS, not continuing footage. A
-        # capped/frozen/missing capture cannot extend; let a recording-enabled
-        # stream create one follow-on event/clip through the normal path below.
+        # capped/frozen capture cannot extend; let a recording-enabled stream
+        # create one follow-on event/clip through the normal path below. With no
+        # capture at all, that applies only when the last clip was cut at its
+        # Max Clip ceiling: after a clip that ended normally, a detection inside
+        # the cooldown is exactly the duplicate the cooldown exists to suppress
+        # (otherwise every flicker of a lingering object opened a new event).
         # Covered cycles and alert-only cameras keep their existing debounce.
         needs_follow_on = (
             extended_recording_id is None
+            and capture_blocked
             and _camera_has_live_alert_stream(settings)
             and _state.recording_service.should_record(recording_detections, camera_recording_config)[0]
         )

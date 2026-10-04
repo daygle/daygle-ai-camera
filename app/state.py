@@ -248,6 +248,11 @@ active_rtsp_recordings: dict = {}
 # ``recording_extension.start_rtsp_recording_capture``). In-memory only: after a
 # restart the rolling prebuffer is empty too, so there is nothing to overlap.
 last_rtsp_capture_end: dict = {}
+# Whether that last completed capture ended at its Max Clip Duration ceiling,
+# per camera, under the same lock. A debounced detection may roll over into a
+# follow-on clip when the previous one was cut at the ceiling; after a clip that
+# ended normally (its post-roll ran out) the cooldown applies as usual.
+last_rtsp_capture_capped: dict = {}
 
 # ---------------------------------------------------------------------------
 # Camera health shared state

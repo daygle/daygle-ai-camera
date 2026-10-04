@@ -390,16 +390,38 @@ def test_persistent_immature_track_biases_to_still():
     assert os.detection_motion_state(persistent, _mask_changed_inside_box(), None) == 'still'
 
 
-def test_persistent_immature_track_that_stepped_across_the_frame_is_moving():
+def test_persistent_immature_track_that_stepped_across_the_frame_uses_mask():
     """The still bias guards a parked car's flapping mask, not a subject the
     tracker followed across the frame: a walker matched by motion at age 2 has
-    a two-point step far beyond detector jitter, and must survive Moving Only."""
+    a two-point step far beyond detector jitter, so the mask decides it (a
+    walker's box is full of changed pixels) and it survives Moving Only."""
     walker = {**_det('person'), 'track_id': 7, 'track_age': 2,
               'track_prev_center': (0.115, 0.375), 'track_center': (0.170, 0.375)}
-    assert os.detection_motion_state(walker, _mask_none_changed(), None) == 'moving'
+    assert os.detection_motion_state(walker, _mask_changed_inside_box(), None) == 'moving'
     jitter = {**_det('car'), 'track_id': 5, 'track_age': 2,
               'track_prev_center': (0.500, 0.500), 'track_center': (0.504, 0.498)}
     assert os.detection_motion_state(jitter, _mask_all_changed(), None) == 'still'
+
+
+def test_step_without_changed_pixels_is_still():
+    """Event 47935: an id swapped between two adjacent parked cars steps across
+    the frame too, but nothing in its box changed. The step alone must not
+    call it moving."""
+    swapped = {**_det('car'), 'track_id': 127, 'track_age': 2,
+               'track_prev_center': (0.560, 0.180), 'track_center': (0.640, 0.180)}
+    assert os.detection_motion_state(swapped, _mask_none_changed(), None) == 'still'
+
+
+def test_translated_and_resized_age_two_box_is_moving_without_mask():
+    """Review case: a subject that moved sideways AND grew past the threshold
+    (approaching at an angle) is moving from its growth alone - the large
+    centre step must not route it to a quiet mask and call it still."""
+    approaching = {**_det('person'), 'track_id': 8, 'track_age': 2,
+                   'track_prev_center': (0.40, 0.40), 'track_center': (0.46, 0.42),
+                   'track_prev_box': (0.35, 0.30, 0.10, 0.20),
+                   'track_box': (0.40, 0.30, 0.12, 0.24)}
+    assert os._step_components(approaching)[1] >= os._TRACK_STEP_MOVING
+    assert os.detection_motion_state(approaching, _mask_none_changed(), None) == 'moving'
 
 
 def test_brand_new_track_still_uses_mask_so_fast_cars_are_not_lost():
