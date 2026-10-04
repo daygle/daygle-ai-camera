@@ -113,6 +113,27 @@ MOTION_MATCH_AREA_RATIO = 2.5
 MOTION_MATCH_STATIONARY_SPEED = 0.01
 MOTION_MATCH_STATIONARY_GATE = 0.5
 
+# Anchored stationary tracks. The windowed displacement compares the two halves
+# of the last ``TRACK_DISPLACEMENT_HISTORY`` boxes, so a transient change in a
+# parked car's box - a passing car hiding part of it for a cycle or two, or
+# headlight glare reshaping it - stays in the window and reads "moving" for
+# several cycles after the box is back exactly where it was (event 48173: two
+# occluded cycles, then six "moving" samples on an unmoved box). Once a track has
+# read still for ``ANCHOR_STILL_CYCLES`` consecutive sightings it is anchored to
+# its settled box (counting only sightings with a full history window, so a
+# young track's slow approach is never anchored early): a sighting within
+# ``ANCHOR_TOLERANCE`` of the anchor is still
+# whatever the window holds, and the anchor is only released - handing back to
+# the windowed measure - when the box departs from it for
+# ``ANCHOR_RELEASE_CYCLES`` consecutive sightings. A sighting while another
+# detection covers the anchor (something passing in front) does not count
+# toward release: the box is unreliable then. A car that really pulls out
+# departs steadily and reads moving after the release cycles.
+ANCHOR_STILL_CYCLES = 4
+ANCHOR_TOLERANCE = 2 * TRACK_STILL_DISPLACEMENT
+ANCHOR_RELEASE_CYCLES = 3
+ANCHOR_OCCLUSION_OVERLAP = 0.2
+
 
 def _center_of(box: dict[str, Any]) -> tuple[float, float] | None:
     """Return the normalized center ``(cx, cy)`` of a detection box, or None."""
@@ -312,6 +333,88 @@ def _motion_match_distance(box: dict[str, Any], track: dict[str, Any]) -> float 
     return distance if distance <= gate * size else None
 
 
+def _box_deviation(
+    current: tuple[float, float, float, float],
+    reference: tuple[float, float, float, float],
+) -> float:
+    """Translation-or-scale change between two boxes, in still-threshold units.
+
+    The same measure the windowed displacement applies to its two halves: the
+    larger-axis centre move, or the relative change of the larger side scaled
+    by ``TRACK_SIZE_REFERENCE``. Zero for the same object at another extent.
+    """
+    if _extent_unstable(current, reference):
+        return 0.0
+    translation = max(
+        abs((current[0] + current[2] / 2.0) - (reference[0] + reference[2] / 2.0)),
+        abs((current[1] + current[3] / 2.0) - (reference[1] + reference[3] / 2.0)),
+    )
+    current_size, reference_size = max(current[2], current[3]), max(reference[2], reference[3])
+    mean_size = (current_size + reference_size) / 2.0
+    if mean_size <= 0.0:
+        return translation
+    return max(translation, abs(current_size - reference_size) / mean_size * TRACK_SIZE_REFERENCE)
+
+
+def _covered(anchor: tuple[float, float, float, float], others: list[tuple[float, float, float, float]]) -> bool:
+    """Whether another detection's box covers a meaningful part of ``anchor``."""
+    ax, ay, aw, ah = anchor
+    area = aw * ah
+    if area <= 0.0:
+        return False
+    for ox, oy, ow, oh in others:
+        overlap = max(0.0, min(ax + aw, ox + ow) - max(ax, ox)) * max(0.0, min(ay + ah, oy + oh) - max(ay, oy))
+        if overlap / area >= ANCHOR_OCCLUSION_OVERLAP:
+            return True
+    return False
+
+
+def _anchored_displacement(
+    track: dict[str, Any],
+    box: tuple[float, float, float, float] | None,
+    others: list[tuple[float, float, float, float]],
+) -> float | None:
+    """Displacement for the classifier, robust to transient changes once settled.
+
+    Updates the track's anchor state (see ``ANCHOR_STILL_CYCLES``) and returns
+    0.0 while an anchored track's box is within tolerance - or departs only
+    transiently - otherwise the windowed displacement.
+    """
+    windowed = _recent_displacement(track)
+    anchor = track.get("anchor")
+    if anchor is not None and box is not None:
+        if _box_deviation(box, anchor) <= ANCHOR_TOLERANCE:
+            track["anchor_breaks"] = 0
+            return 0.0
+        if not _covered(anchor, others):
+            track["anchor_breaks"] = int(track.get("anchor_breaks") or 0) + 1
+        if int(track.get("anchor_breaks") or 0) < ANCHOR_RELEASE_CYCLES:
+            return 0.0
+        # Sustained departure: the subject really moved. Release the anchor and
+        # report what the history says.
+        track.pop("anchor", None)
+        track["anchor_breaks"] = 0
+        track["still_streak"] = 0
+        return windowed
+    full_window = len(track.get("boxes") or []) >= TRACK_DISPLACEMENT_HISTORY
+    if windowed is not None and windowed <= TRACK_STILL_DISPLACEMENT and full_window:
+        # Only a full window counts: a young track's first still readings can
+        # be a slow, distant approach that has not yet cleared the threshold.
+        track["still_streak"] = int(track.get("still_streak") or 0) + 1
+        if track["still_streak"] >= ANCHOR_STILL_CYCLES:
+            boxes = [b for b in (track.get("boxes") or [])[-TRACK_DISPLACEMENT_HISTORY:] if len(b) >= 4]
+            if boxes:
+                def _median(values: list[float]) -> float:
+                    ordered = sorted(values)
+                    middle = len(ordered) // 2
+                    return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2.0
+                track["anchor"] = tuple(_median([float(b[axis]) for b in boxes]) for axis in range(4))
+                track["anchor_breaks"] = 0
+    else:
+        track["still_streak"] = 0
+    return windowed
+
+
 def _label_key(detection: dict[str, Any]) -> str:
     return str(detection.get("label") or "").strip().lower()
 
@@ -410,6 +513,7 @@ def update_object_tracks(
         # Apply the precomputed assignments in input order so the returned list
         # remains in detector order; only ownership of a track is order-free.
         matched_track_ids.clear()
+        cycle_boxes = [_box_tuple(d.get("box")) if isinstance(d.get("box"), dict) else None for d in detections]
         for detection_index, detection in enumerate(detections):
             box = detection.get("box")
             label = _label_key(detection)
@@ -458,7 +562,11 @@ def update_object_tracks(
                 detection["track_id"] = best_track["id"]
                 detection["track_age"] = best_track["hits"]
                 detection["track_new"] = False
-                detection["track_displacement"] = _recent_displacement(best_track)
+                detection["track_displacement"] = _anchored_displacement(
+                    best_track,
+                    cycle_boxes[detection_index],
+                    [b for i, b in enumerate(cycle_boxes) if b is not None and i != detection_index],
+                )
                 # This cycle's centre and the previous one, so a behavioural
                 # consumer (line-crossing) can test the ``prev -> curr`` step
                 # without reaching into tracker state. ``None`` prev on the

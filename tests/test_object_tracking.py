@@ -705,3 +705,49 @@ def test_extent_flip_matches_a_stationary_track_despite_its_small_gate():
         roof, _state = _moving(cam, _ROOF)
     body, _state = _moving(cam, _BODY)
     assert body['track_id'] == roof['track_id']
+
+
+# ---------------------------------------------------------------------------
+# Anchored stationary tracks: transient changes to a parked car's box.
+# ---------------------------------------------------------------------------
+
+_SETTLED = (0.614, 0.148, 0.062, 0.066)   # event 48173, parked car (track 190)
+_HIDDEN = (0.614, 0.154, 0.055, 0.050)    # same car partly hidden by a passing car
+_PASSING = (0.538, 0.19, 0.131, 0.129)     # the passing car in front of it
+
+
+def _states(cam, frames):
+    _reset(cam)
+    states = []
+    for boxes in frames:
+        out = ot.update_object_tracks(cam, [_det('car', *box) for box in boxes])
+        states.append(os_.detection_motion_state(out[0], None, out[0].get('track_displacement')))
+    return states
+
+
+def test_parked_car_briefly_hidden_by_a_passing_car_stays_still():
+    # Event 48173: two cycles with the parked car's box shrunk by a passing car
+    # left that box in the 8-sighting window, and the unmoved car then read
+    # moving for six samples.
+    states = _states('trk-anchor-hidden', [[_SETTLED]] * 14 + [[_HIDDEN]] * 2 + [[_SETTLED]] * 9)
+    assert os_.MODE_MOVING not in states, states
+
+
+def test_occlusion_by_a_detected_passing_car_never_releases_the_anchor():
+    states = _states('trk-anchor-occluder', [[_SETTLED]] * 14 + [[_HIDDEN, _PASSING]] * 5 + [[_SETTLED]] * 6)
+    assert os_.MODE_MOVING not in states, states
+
+
+def test_parked_car_that_pulls_out_reads_moving_within_a_few_cycles():
+    departing = [[(_SETTLED[0] - step * 0.015, *_SETTLED[1:])] for step in range(1, 12)]
+    states = _states('trk-anchor-departs', [[_SETTLED]] * 14 + departing)
+    assert os_.MODE_MOVING in states[14:14 + ot.ANCHOR_RELEASE_CYCLES + 2], states[14:]
+    assert states[-1] == os_.MODE_MOVING
+
+
+def test_a_young_track_is_not_anchored_before_its_window_fills():
+    cam = 'trk-anchor-young'
+    _reset(cam)
+    for _ in range(ot.TRACK_DISPLACEMENT_HISTORY - 1):
+        ot.update_object_tracks(cam, [_det('car', *_SETTLED)])
+    assert 'anchor' not in st._object_tracks[cam]['tracks'][0]
