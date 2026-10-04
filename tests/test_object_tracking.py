@@ -162,11 +162,16 @@ def test_displacement_window_drops_old_positions():
     _reset(cam)
     # Sweep far across the frame, then park. The old traverse must age out of
     # the bounded history so a parked-after-moving subject reads still again.
+    moving = None
     for step in range(10):
-        ot.update_object_tracks(cam, [_det('car', 0.05 + step * 0.09, 0.5, 0.1, 0.1)])
+        moving = ot.update_object_tracks(cam, [_det('car', 0.05 + step * 0.09, 0.5, 0.1, 0.1)])
     parked = None
-    for _ in range(6):
+    # A full history window of parked cycles flushes the traverse out.
+    for _ in range(ot.TRACK_DISPLACEMENT_HISTORY):
         parked = ot.update_object_tracks(cam, [_det('car', 0.95, 0.5, 0.1, 0.1)])
+    # The traverse and the parked car are one track (motion-gated matching),
+    # so this really exercises the window rather than a fresh track.
+    assert parked[0]['track_id'] == moving[0]['track_id']
     assert parked[0]['track_displacement'] is not None
     assert parked[0]['track_displacement'] <= ot.TRACK_STILL_DISPLACEMENT
 
@@ -192,3 +197,63 @@ def test_centers_are_bounded_per_track():
         tracks = st._object_tracks[cam]['tracks']
         assert len(tracks) == 1
         assert len(tracks[0]['centers']) <= ot.TRACK_DISPLACEMENT_HISTORY
+
+
+# ---------------------------------------------------------------------------
+# Motion-gated matching: subjects that move further than their own box.
+# ---------------------------------------------------------------------------
+
+def test_walking_person_keeps_one_id_when_boxes_stop_overlapping():
+    # Recording #16646: a person 3% of the frame wide stepping ~5.5% per cycle
+    # never overlaps their previous box, and used to get a new id every sample.
+    cam = 'trk-walker'
+    _reset(cam)
+    ids = []
+    for step in range(6):
+        out = ot.update_object_tracks(cam, [_det('person', 0.10 + step * 0.055, 0.30, 0.03, 0.15)])
+        ids.append(out[0]['track_id'])
+    assert len(set(ids)) == 1
+    assert out[0]['track_age'] == 6
+
+
+def test_walking_person_survives_a_missed_cycle():
+    cam = 'trk-walker-miss'
+    _reset(cam)
+    first = ot.update_object_tracks(cam, [_det('person', 0.10, 0.30, 0.03, 0.15)])
+    ot.update_object_tracks(cam, [_det('person', 0.155, 0.30, 0.03, 0.15)])
+    ot.update_object_tracks(cam, [])  # detector missed this cycle
+    out = ot.update_object_tracks(cam, [_det('person', 0.265, 0.30, 0.03, 0.15)])
+    assert out[0]['track_id'] == first[0]['track_id']
+
+
+def test_crossing_walkers_keep_their_own_ids():
+    cam = 'trk-crossing'
+    _reset(cam)
+    left_ids, right_ids = set(), set()
+    for step in range(8):
+        out = ot.update_object_tracks(cam, [
+            _det('person', 0.20 + step * 0.06, 0.30, 0.03, 0.15),
+            _det('person', 0.70 - step * 0.06, 0.32, 0.03, 0.15),
+        ])
+        left_ids.add(out[0]['track_id'])
+        right_ids.add(out[1]['track_id'])
+    assert len(left_ids) == 1 and len(right_ids) == 1
+    assert left_ids != right_ids
+
+
+def test_motion_match_rejects_a_differently_sized_box():
+    cam = 'trk-size-gate'
+    _reset(cam)
+    car = ot.update_object_tracks(cam, [_det('car', 0.10, 0.50, 0.20, 0.10)])
+    out = ot.update_object_tracks(cam, [_det('car', 0.30, 0.50, 0.04, 0.03)])
+    assert out[0]['track_id'] != car[0]['track_id']
+
+
+def test_motion_match_ignores_stale_tracks():
+    cam = 'trk-stale-gate'
+    _reset(cam)
+    first = ot.update_object_tracks(cam, [_det('person', 0.10, 0.30, 0.03, 0.15)])
+    for _ in range(ot.MOTION_MATCH_MAX_MISSES + 1):
+        ot.update_object_tracks(cam, [])
+    out = ot.update_object_tracks(cam, [_det('person', 0.16, 0.30, 0.03, 0.15)])
+    assert out[0]['track_id'] != first[0]['track_id']

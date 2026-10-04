@@ -45,9 +45,14 @@ These results are then matched against your zone rules. If a zone covers the are
 Every confirmed object detection is stamped with a **stable track id** so the
 same person/car keeps one identity across detection cycles instead of being a
 fresh anonymous box each frame. The tracker is a lightweight greedy IoU matcher
-(same-label only) - no extra dependencies - and is additive: it annotates each
-detection with `track_id`, `track_age` (cycles seen), and `track_new` (first
-sighting) without changing which alerts or recordings fire. These ids flow into
+(same-label only) - no extra dependencies. A subject that moves further than its
+own box between cycles (a walking person at a 0.5-1.5s cadence) no longer
+overlaps its previous box, so an unmatched detection may also claim a recently
+seen same-label track when it sits near where that track's last step predicts
+and is a similar size. It annotates each detection with `track_id`, `track_age`
+(cycles seen), and `track_new` (first sighting). The moving/still classifier
+reads a track's age and movement, so a subject the tracker follows across the
+frame reads *moving* from its second sighting. These ids flow into
 the detection history and recording rows, giving the playback overlay continuity
 and providing the foundation for de-duplicated events, dwell-time, and
 line-crossing.

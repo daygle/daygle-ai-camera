@@ -8,9 +8,10 @@ label on a moving subject.
 
 The tracker is intentionally simple and dependency-free (no Kalman filter / no
 Hungarian assignment): globally ranked IoU matching within the same object
-label. That is plenty for the 2-4 Hz per-camera detection cadence here, and it
-never blocks or allocates on a hot path beyond a handful of small dict/list
-operations.
+label, then a motion-gated nearest-center fallback (``MOTION_MATCH_GATE``) for
+subjects that moved further than their own box since the last cycle. That is
+plenty for the per-camera detection cadence here, and it never blocks or
+allocates on a hot path beyond a handful of small dict/list operations.
 
 Contract: :func:`update_object_tracks` takes the per-camera detection list and
 returns the SAME detections, each annotated with:
@@ -51,6 +52,20 @@ import app.state as _state
 TRACK_DISPLACEMENT_HISTORY = 8
 TRACK_DISPLACEMENT_MIN_AGE = 3
 TRACK_STILL_DISPLACEMENT = 0.01
+
+# Motion-gated fallback for detections no track overlaps. At a 0.5-1.5s cycle a
+# walking person (a narrow box) moves further than its own width between
+# cycles, so IoU is zero and every cycle used to open a new track: one person
+# crossing the frame carried a new id per sample, breaking playback
+# interpolation, dwell and line-crossing alike. A leftover detection may claim
+# a same-label track seen within ``MOTION_MATCH_MAX_MISSES`` cycles when its
+# center lies within ``MOTION_MATCH_GATE`` x the track box's larger side of
+# where the track's last step predicts it, and its area is within
+# ``MOTION_MATCH_AREA_RATIO`` of the track's. IoU matches are resolved first and
+# are unaffected, so stationary objects keep exactly their previous behaviour.
+MOTION_MATCH_GATE = 1.5
+MOTION_MATCH_MAX_MISSES = 2
+MOTION_MATCH_AREA_RATIO = 2.5
 
 
 def _center_of(box: dict[str, Any]) -> tuple[float, float] | None:
@@ -132,6 +147,44 @@ def _iou(box_a: dict[str, Any], box_b: dict[str, Any]) -> float:
     return intersection / union if union > 0 else 0.0
 
 
+def _box_area(box: dict[str, Any]) -> float:
+    try:
+        return max(0.0, float(box.get("width") or 0.0)) * max(0.0, float(box.get("height") or 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _motion_match_distance(box: dict[str, Any], track: dict[str, Any]) -> float | None:
+    """Gated distance from ``box`` to where ``track`` should be now, or None.
+
+    The prediction extends the track's last observed step by one step per
+    cycle elapsed since it was seen (``misses + 1``), so a subject moving at a
+    steady pace is matched near its expected position rather than near its last
+    one. Returns None when the pair fails the gate or the size check.
+    """
+    center = _center_of(box)
+    track_box = track.get("box") or {}
+    centers = [c for c in (track.get("centers") or []) if isinstance(c, (list, tuple)) and len(c) >= 2]
+    if center is None or not centers or int(track.get("misses") or 0) > MOTION_MATCH_MAX_MISSES:
+        return None
+    area, track_area = _box_area(box), _box_area(track_box)
+    if area <= 0 or track_area <= 0 or max(area, track_area) / min(area, track_area) > MOTION_MATCH_AREA_RATIO:
+        return None
+    last_x, last_y = float(centers[-1][0]), float(centers[-1][1])
+    steps = int(track.get("misses") or 0) + 1
+    if len(centers) >= 2:
+        step_x = last_x - float(centers[-2][0])
+        step_y = last_y - float(centers[-2][1])
+        last_x += step_x * steps
+        last_y += step_y * steps
+    distance = ((center[0] - last_x) ** 2 + (center[1] - last_y) ** 2) ** 0.5
+    try:
+        size = max(float(track_box.get("width") or 0.0), float(track_box.get("height") or 0.0))
+    except (TypeError, ValueError):
+        return None
+    return distance if distance <= MOTION_MATCH_GATE * size else None
+
+
 def _label_key(detection: dict[str, Any]) -> str:
     return str(detection.get("label") or "").strip().lower()
 
@@ -197,6 +250,29 @@ def update_object_tracks(
         assignments: dict[int, dict[str, Any]] = {}
         assigned_detection_indices: set[int] = set()
         for _score, detection_index, track_index in candidates:
+            track = tracks[track_index]
+            if detection_index in assigned_detection_indices or track["id"] in matched_track_ids:
+                continue
+            assignments[detection_index] = track
+            assigned_detection_indices.add(detection_index)
+            matched_track_ids.add(track["id"])
+
+        # Motion-gated fallback for what IoU left unmatched (see
+        # MOTION_MATCH_GATE), nearest pairs first, same exclusivity rules.
+        motion_candidates: list[tuple[float, int, int]] = []
+        for detection_index, detection in enumerate(detections):
+            box = detection.get("box")
+            if detection_index in assigned_detection_indices or not isinstance(box, dict):
+                continue
+            label = _label_key(detection)
+            for track_index, track in enumerate(tracks):
+                if track["label"] != label or track["id"] in matched_track_ids:
+                    continue
+                distance = _motion_match_distance(box, track)
+                if distance is not None:
+                    motion_candidates.append((distance, detection_index, track_index))
+        motion_candidates.sort()
+        for _distance, detection_index, track_index in motion_candidates:
             track = tracks[track_index]
             if detection_index in assigned_detection_indices or track["id"] in matched_track_ids:
                 continue
