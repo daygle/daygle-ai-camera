@@ -109,6 +109,7 @@ from app.event_debounce import (
 from app.recording_extension import (
     _make_continuous_chunk_callback,
     attach_event_recording,
+    continue_active_recording,
     extend_active_rtsp_recording,
     recording_skip_reason,
 )
@@ -1224,6 +1225,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     detections = annotate_motion_states(
         detections, diff_mask, camera_motion=camera_motion['active'],
     )
+    # Kept for continue_active_recording below: the still/moving filter drops
+    # still objects, but a still object an active clip already follows may
+    # keep that clip going for a moment.
+    _annotated_detections = detections
     # Still-dwell candidates must be taken from the UNFILTERED detections: the
     # still/moving filter below drops still detections under the default Moving
     # Only mode, which would otherwise starve every "still for N minutes" alert
@@ -1487,6 +1492,21 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         sample_ts=frame_capture_ts,
         live_config=live_settings,
     )
+    # An active clip continues on what follows its object: a still object it
+    # already follows, or motion (see continue_active_recording). Only on cycles
+    # with no recordable object - those extend through the normal path below -
+    # and never during camera motion, when pixel change is not scene activity.
+    if not object_alert_detections and not record_only_detections and not camera_motion['active']:
+        try:
+            continue_active_recording(
+                camera_id=camera_id,
+                frame_ts=frame_capture_ts,
+                motion_detections=motion_detections,
+                still_detections=[d for d in _annotated_detections if d.get('motion_state') == 'still'],
+                recording_config=_state.camera_event_recording_config(settings),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('Recording continuation failed on %s: %s', camera_id, exc)
     motion_detections = _arbitration.motion_detections
     if _arbitration.event_ts is not None:
         frame_capture_ts = _arbitration.event_ts

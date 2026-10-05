@@ -175,13 +175,105 @@ def _mark_capture_timing_final(session: dict[str, Any]) -> None:
         session['timing_written'] = True
 
 
+# ── Extension markers ──────────────────────────────────────────────────────
+# Each active clip records WHAT kept it going, so the playback bar can mark it:
+# consecutive extensions with the same reason (an object, motion, or a still
+# object) within ``EXTENSION_RUN_GAP_SECONDS`` of each other coalesce into one
+# run. A clip extends on nearly every detection cycle while something is in
+# view, so a marker per extension would be noise; one per run says "the car kept
+# this going from 12s to 19s, then motion from 21s to 30s". The clip's original
+# deadline (trigger + post-event) is kept too, so the bar can show where the clip
+# would have ended without them.
+EXTENSION_RUN_GAP_SECONDS = 3.0
+
+
+def _note_extension(session: dict[str, Any], event_ts: float, reason: str, label: str | None) -> bool:
+    """Fold one extension into the session's runs. True when a new run began.
+
+    Call with ``_state.active_rtsp_recordings_lock`` held.
+    """
+    runs = session.setdefault('extension_runs', [])
+    if runs:
+        last = runs[-1]
+        if last['reason'] == reason and event_ts - float(last['end']) <= EXTENSION_RUN_GAP_SECONDS:
+            last['end'] = max(float(last['end']), event_ts)
+            if label and not last.get('label'):
+                last['label'] = label
+            return False
+    runs.append({'start': event_ts, 'end': event_ts, 'reason': reason, 'label': label})
+    return True
+
+
+def _extensions_payload(session: dict[str, Any]) -> dict[str, Any] | None:
+    """The JSON stored on the recording row (``recordings.extensions``)."""
+    with _state.active_rtsp_recordings_lock:
+        runs = [dict(run) for run in session.get('extension_runs') or []]
+        original = session.get('original_deadline_ts')
+    if not runs:
+        return None
+
+    def iso(ts: float) -> str:
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+
+    return {
+        'original_end': iso(original) if original is not None else None,
+        'runs': [
+            {'start': iso(run['start']), 'end': iso(run['end']), 'reason': run['reason'], 'label': run.get('label')}
+            for run in runs
+        ],
+    }
+
+
+def _persist_extensions(recording_id: int, session: dict[str, Any]) -> None:
+    """Best effort: markers are a playback aid and must never fail a capture."""
+    payload = _extensions_payload(session)
+    if payload is None:
+        return
+    try:
+        _state.database.update_recording_extensions(recording_id, payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug('Could not store extension markers for recording %s: %s', recording_id, exc)
+
+
+def _extension_reason(detections: list[dict[str, Any]] | None) -> tuple[str, str | None]:
+    """``('object', label)`` when a concrete object extended the clip, else motion."""
+    for detection in detections or []:
+        label = str(detection.get('label') or '').strip().lower()
+        if label and label not in GENERIC_TRIGGER_LABELS:
+            return 'object', label
+    return 'motion', 'motion'
+
+
+def _object_track_ids(detections: list[dict[str, Any]] | None) -> set[int]:
+    ids: set[int] = set()
+    for detection in detections or []:
+        label = str(detection.get('label') or '').strip().lower()
+        track_id = detection.get('track_id')
+        if label and label not in GENERIC_TRIGGER_LABELS and isinstance(track_id, int) and track_id > 0:
+            ids.add(track_id)
+    return ids
+
+
 def extend_active_rtsp_recording(
     *,
     camera_id: str,
     event_time: str,
     recording_config: dict[str, Any] | None = None,
     detections: list[dict[str, Any]] | None = None,
+    reason: str | None = None,
+    label: str | None = None,
+    step_seconds: float | None = None,
 ) -> int | None:
+    """Extend the camera's in-flight clip to cover ``event_time``.
+
+    ``reason``/``label`` name what extended it for the playback markers
+    (derived from ``detections`` when omitted). ``step_seconds`` overrides the
+    configured extension step: the continuation rules in
+    :func:`continue_active_recording` use the shorter post-event time.
+    """
+    if reason is None:
+        reason, derived_label = _extension_reason(detections)
+        label = label or derived_label
     try:
         event_dt = datetime.fromisoformat(str(event_time))
     except ValueError:
@@ -192,7 +284,7 @@ def extend_active_rtsp_recording(
     extension_step_seconds = max(
         0,
         int(config.get('extension_step_seconds', config.get('post_event_seconds', 10))),
-    )
+    ) if step_seconds is None else max(0.0, float(step_seconds))
     extend_until = event_dt.timestamp() + extension_step_seconds
     with _state.active_rtsp_recordings_lock:
         session = _state.active_rtsp_recordings.get(camera_id)
@@ -231,6 +323,11 @@ def extend_active_rtsp_recording(
             # the old capture checks its recording_id before touching the slot.
             return None
         new_deadline = min(max_deadline, max(current_deadline, extend_until))
+        if reason == 'object':
+            # The objects that keep this clip going, and when one last did: the
+            # still-object continuation rule reads both.
+            session.setdefault('track_ids', set()).update(_object_track_ids(detections))
+            session['last_object_ts'] = max(float(session.get('last_object_ts') or 0.0), event_dt.timestamp())
         if new_deadline <= current_deadline:
             if extend_until > current_deadline:
                 # The deadline already sits at the Max Clip Duration ceiling and
@@ -245,6 +342,7 @@ def extend_active_rtsp_recording(
                 return None
             return int(session.get('recording_id'))
         session['capture_deadline_ts'] = new_deadline
+        new_run = _note_extension(session, event_dt.timestamp(), reason, label)
         start_ts = float(session.get('start_capture_ts') or new_deadline)
         ended_at = datetime.fromtimestamp(new_deadline, tz=timezone.utc).isoformat()
         duration_seconds = max(1.0, new_deadline - start_ts)
@@ -254,6 +352,10 @@ def extend_active_rtsp_recording(
     _write_provisional_timing(
         session, recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
     )
+    if new_run:
+        # Runs start rarely; storing each one keeps the markers on the row even
+        # if the capture dies before it writes the final set.
+        _persist_extensions(recording_id, session)
     # Re-check that this recording is still the active one for this camera before
     # writing labels/trigger - a new capture may have started between lock release
     # and here, in which case these updates belong to a now-closed recording.
@@ -285,6 +387,59 @@ def extend_active_rtsp_recording(
                     recording_id, trigger_type=trigger_type, trigger_label=candidate_label,
                 )
     return recording_id
+
+
+def continue_active_recording(
+    *,
+    camera_id: str,
+    frame_ts: float,
+    motion_detections: list[dict[str, Any]] | None,
+    still_detections: list[dict[str, Any]] | None,
+    recording_config: dict[str, Any] | None = None,
+) -> int | None:
+    """Keep an active clip going on what follows its object.
+
+    A clip used to end one extension step after the last detection that matched
+    a recording rule, even with the scene plainly still active: a car that
+    parks is classed *still* and dropped by Moving Only, and the motion that
+    follows it (someone getting out, a door) extends nothing unless that zone's
+    motion rule records. Continuing a clip is a different decision from
+    starting one, so for a clip that is ALREADY recording:
+
+    * a still object the clip has already followed (same track id) keeps it
+      going for up to the post-event time after that object last moved, so the
+      clip shows it come to rest without a parked car holding every clip open;
+    * otherwise, motion keeps it going (motion alone still never STARTS a clip).
+
+    Both extend by the post-event time, and Max Clip Duration caps the clip as
+    always. Call only on cycles where no recordable object was detected.
+    Returns the extended recording id, or None.
+    """
+    with _state.active_rtsp_recordings_lock:
+        session = _state.active_rtsp_recordings.get(camera_id)
+        if not session or session.get('deadline_frozen'):
+            return None
+        track_ids = set(session.get('track_ids') or ())
+        last_object_ts = session.get('last_object_ts')
+    config = recording_config or effective_recording_config()
+    post_seconds = max(1, int(config.get('post_event_seconds', 15)))
+    event_time = datetime.fromtimestamp(frame_ts, tz=timezone.utc).isoformat()
+    still = [
+        detection for detection in still_detections or []
+        if isinstance(detection.get('track_id'), int) and detection['track_id'] in track_ids
+    ]
+    if still and last_object_ts is not None and frame_ts - float(last_object_ts) <= post_seconds:
+        return extend_active_rtsp_recording(
+            camera_id=camera_id, event_time=event_time, recording_config=config,
+            reason='still', label=str(still[0].get('label') or '').strip().lower() or None,
+            step_seconds=post_seconds,
+        )
+    if motion_detections:
+        return extend_active_rtsp_recording(
+            camera_id=camera_id, event_time=event_time, recording_config=config,
+            reason='motion', label='motion', step_seconds=post_seconds,
+        )
+    return None
 
 
 def recording_track_sidecar_path(file_path: Path) -> Path:
@@ -757,6 +912,14 @@ def start_rtsp_recording_capture(
         'start_capture_ts': start_capture_ts,
         'capture_deadline_ts': min(max_deadline_ts, initial_deadline_ts),
         'max_capture_deadline_ts': max_deadline_ts,
+        # Where the clip would end with no extension, and what it follows
+        # (see continue_active_recording and the extension markers).
+        'original_deadline_ts': min(max_deadline_ts, initial_deadline_ts),
+        'track_ids': _object_track_ids(detections),
+        'last_object_ts': triggered_at.timestamp() if _object_track_ids(detections) or any(
+            str(d.get('label') or '').strip().lower() not in GENERIC_TRIGGER_LABELS for d in detections or []
+        ) else None,
+        'extension_runs': [],
     }
     if camera_id:
         with _state.active_rtsp_recordings_lock:
@@ -879,6 +1042,7 @@ def start_rtsp_recording_capture(
             )
             captured_end_ts_holder['ts'] = start_capture_ts + duration_seconds
         finally:
+            _persist_extensions(recording_id, capture_session)
             if camera_id:
                 with _state.active_rtsp_recordings_lock:
                     session = _state.active_rtsp_recordings.get(camera_id)

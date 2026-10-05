@@ -238,6 +238,13 @@ class EventDatabase(
                 db.execute("ALTER TABLE person_faces ADD COLUMN thumbnail BLOB")
             except sqlite3.OperationalError:
                 pass  # Column already exists on upgrades from older schemas.
+            # Migration: what kept each recording going past its first
+            # post-event window (JSON; see app.recording_extension), drawn as
+            # markers on the playback bar. New installs get it via CREATE TABLE.
+            try:
+                db.execute("ALTER TABLE recordings ADD COLUMN extensions TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists (or the table is created below).
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -307,6 +314,7 @@ class EventDatabase(
                     trigger_label TEXT,
                     created_at TEXT NOT NULL,
                     owner_user_id INTEGER,
+                    extensions TEXT,
                     FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL,
                     FOREIGN KEY(owner_user_id) REFERENCES users(id) ON DELETE SET NULL
                 );

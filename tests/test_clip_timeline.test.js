@@ -48,6 +48,8 @@ function render(recording, { duration = 60 } = {}) {
   const sandbox = {
     els,
     activeRecording: recording,
+    // utils.js provides titleCase on the real pages.
+    titleCase: (value) => String(value || '').replace(/\b\w/g, (c) => c.toUpperCase()),
     document: {
       createElement: () => makeElement(),
       createTextNode: (text) => ({ text }),
@@ -130,4 +132,56 @@ test('clips without a localized detection get no timeline', () => {
   const { els } = render({ track: [{ t: 3, detections: [] }] });
   assert.equal(els.clipTimeline.hidden, true);
   assert.equal(els.clipTimelineLegend.children.length, 0);
+});
+
+// Extension markers: recording.extensions (app/recording_extension.py) holds
+// runs of what kept the clip going and where it would originally have ended.
+const iso = (base, seconds) => new Date(Date.parse(base) + seconds * 1000).toISOString();
+const BASE = '2026-10-05T10:00:00.000Z';
+
+function extendedRecording(runs, originalEnd) {
+  return {
+    started_at: BASE,
+    track: [sample(10), sample(14)],
+    extensions: {
+      original_end: originalEnd === null ? null : iso(BASE, originalEnd),
+      runs: runs.map(([start, end, reason, label]) => ({ start: iso(BASE, start), end: iso(BASE, end), reason, label })),
+    },
+  };
+}
+
+test('each extension run is marked on the bar and in the legend', () => {
+  const { bar, legend } = render(extendedRecording([
+    [11, 14, 'object', 'car'],
+    [20, 28, 'still', 'car'],
+    [30, 42, 'motion', 'motion'],
+  ], 25));
+  const strips = bar.filter((el) => el.className.startsWith('clip-extension'));
+  assert.deepEqual(strips.map((el) => el.className), [
+    'clip-extension clip-extension-object',
+    'clip-extension clip-extension-still',
+    'clip-extension clip-extension-motion',
+  ]);
+  assert.equal(strips[2].style.left, '50%');
+  assert.equal(strips[2].style.width, '20%');
+  assert.equal(strips[0].title, 'Car kept recording 11s–14s');
+  assert.equal(strips[1].title, 'Car kept recording while still 20s–28s');
+  assert.equal(strips[2].title, 'Motion kept recording 30s–42s');
+  const original = bar.find((el) => el.className === 'clip-original-end');
+  assert.equal(original.style.left, `${(25 / 60) * 100}%`);
+  const texts = legend.map((item) => item.text);
+  assert.ok(texts.includes('Extended ×3'), texts.join(' | '));
+  assert.ok(texts.includes('Original end 25s'), texts.join(' | '));
+});
+
+test('no original-end line when the clip did not run past it', () => {
+  const { bar, legend } = render(extendedRecording([[11, 14, 'object', 'car']], 60));
+  assert.ok(!bar.some((el) => el.className === 'clip-original-end'));
+  assert.ok(!legend.some((item) => item.text.startsWith('Original end')));
+});
+
+test('clips without extensions draw no markers', () => {
+  const { bar, legend } = render({ started_at: BASE, track: [sample(10), sample(14)] });
+  assert.ok(!bar.some((el) => el.className.startsWith('clip-extension') || el.className === 'clip-original-end'));
+  assert.ok(!legend.some((item) => item.text.startsWith('Extended')));
 });
