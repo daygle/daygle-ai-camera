@@ -340,6 +340,13 @@ function snapshotRow(event) {
     ? '<span class="detection detection-alert" title="An alert notification was fired for this event">🔔 Alert</span>'
     : '';
   const snapshotUrl = `/api/events/${encodeURIComponent(event.id)}/snapshot`;
+  // A snapshot is an event, so it carries the same AI write-up and tags the
+  // events and recordings lists show (app/ai_verification.py). Render them
+  // identically - tags inline after the pills, description in a bubble - so
+  // the three activity pages read the same.
+  const description = (event.metadata || {}).ai_description || {};
+  const aiTags = aiTagPills(description.tags);
+  const aiTip = aiDescriptionTip(description.text);
   // The gallery renders a 208px-wide thumb, so ask for the downscaled variant:
   // annotating and shipping a full-resolution frame per row is what made this
   // page slow to fill. The Open action still links the full-size image.
@@ -372,7 +379,7 @@ function snapshotRow(event) {
             </span>
           </span>
         </div>
-        <div class="activity-item-badges snapshot-row-badges">${snapshotPills(event)}${faceIdentityPills(eventFaceIdentities(event))}${alertBadge}</div>
+        <div class="activity-item-badges snapshot-row-badges">${snapshotPills(event)}${faceIdentityPills(eventFaceIdentities(event))}${alertBadge}${aiTags}${aiTip}</div>
       </div>
       <div class="snapshot-row-actions">${actions.join('')}</div>
     </article>
