@@ -58,6 +58,46 @@ function clipTriggerOffset(duration) {
   return offset >= 0 && offset <= duration ? offset : null;
 }
 
+// What kept the clip going past its first post-event window, as clip-relative
+// seconds: ``recording.extensions`` (see app.recording_extension) stores runs of
+// extensions with one reason each - the object, motion after it, or the object
+// standing still - and where the clip would have ended without them.
+const CLIP_EXTENSION_REASONS = {
+  object: 'kept recording',
+  motion: 'Motion kept recording',
+  still: 'kept recording while still',
+};
+
+function clipExtensions(duration) {
+  const ext = activeRecording?.extensions;
+  const startMs = Date.parse(activeRecording?.started_at || '');
+  if (!ext || !Number.isFinite(startMs)) return null;
+  const at = (iso) => {
+    const ms = Date.parse(iso || '');
+    return Number.isFinite(ms) ? (ms - startMs) / 1000 : null;
+  };
+  const runs = (Array.isArray(ext.runs) ? ext.runs : [])
+    .map((run) => ({ ...run, startAt: at(run.start), endAt: at(run.end) }))
+    .filter((run) => run.startAt !== null && run.startAt >= 0 && run.startAt <= duration)
+    .map((run) => ({ ...run, endAt: Math.min(duration, Math.max(run.startAt, run.endAt ?? run.startAt)) }));
+  const originalEnd = at(ext.original_end);
+  return {
+    runs,
+    // Only meaningful when the clip actually ran past it.
+    originalEnd: originalEnd !== null && originalEnd > 0 && originalEnd < duration - 0.25 ? originalEnd : null,
+  };
+}
+
+function clipExtensionText(run) {
+  const label = run.label && run.label !== 'motion' ? titleCase(run.label) : '';
+  const what = run.reason === 'motion' ? CLIP_EXTENSION_REASONS.motion
+    : `${label || 'Object'} ${CLIP_EXTENSION_REASONS[run.reason] || 'kept recording'}`;
+  const span = run.endAt - run.startAt >= 0.05
+    ? `${fmtClipSeconds(run.startAt)}–${fmtClipSeconds(run.endAt)}`
+    : `at ${fmtClipSeconds(run.startAt)}`;
+  return `${what} ${span}`;
+}
+
 function appendClipLegendItem(swatchClass, text, title) {
   const wrap = document.createElement('span');
   wrap.className = 'clip-legend-item';
@@ -142,6 +182,27 @@ function renderClipTimeline() {
     els.clipTimelineBar.appendChild(trigger);
   }
 
+  // Extension runs: a strip along the bottom of the bar for each run, notched
+  // where it starts, and a dotted line where the clip would have ended.
+  const extensions = clipExtensions(duration);
+  if (extensions) {
+    for (const run of extensions.runs) {
+      const strip = document.createElement('div');
+      strip.className = `clip-extension clip-extension-${run.reason === 'motion' || run.reason === 'still' ? run.reason : 'object'}`;
+      strip.style.left = pct(run.startAt);
+      strip.style.width = pct(Math.max(0, run.endAt - run.startAt));
+      strip.title = clipExtensionText(run);
+      els.clipTimelineBar.appendChild(strip);
+    }
+    if (extensions.originalEnd !== null) {
+      const original = document.createElement('div');
+      original.className = 'clip-original-end';
+      original.style.left = pct(extensions.originalEnd);
+      original.title = `Without extensions the clip would have ended at ${fmtClipSeconds(extensions.originalEnd)}.`;
+      els.clipTimelineBar.appendChild(original);
+    }
+  }
+
   const playhead = document.createElement('div');
   playhead.className = 'clip-playhead';
   playhead.id = 'clipPlayhead';
@@ -160,6 +221,20 @@ function renderClipTimeline() {
       'clip-legend-swatch-trigger',
       `Trigger ${fmtClipSeconds(triggerAt)}`,
       'When the triggering event fired. Pre-Event covers clip start to here; Post-event runs from here.',
+    );
+  }
+  if (extensions && extensions.runs.length) {
+    appendClipLegendItem(
+      'clip-legend-swatch-extension',
+      `Extended ×${extensions.runs.length}`,
+      extensions.runs.map(clipExtensionText).join('\n'),
+    );
+  }
+  if (extensions && extensions.originalEnd !== null) {
+    appendClipLegendItem(
+      'clip-legend-swatch-original-end',
+      `Original end ${fmtClipSeconds(extensions.originalEnd)}`,
+      'Where the clip would have ended (trigger + Post-event) without the extensions.',
     );
   }
   els.clipTimeline.hidden = false;

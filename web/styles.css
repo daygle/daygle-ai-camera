@@ -1390,6 +1390,45 @@ input[type="file"] { padding: 10px; }
   background: var(--text);
   transform: translate(-50%, -1px);
 }
+/* Extension runs (what kept the clip going): a strip along the bottom of the
+   bar, notched at its start; the dotted line is where the clip would have
+   ended without them. */
+.clip-extension {
+  position: absolute;
+  bottom: 0;
+  height: 5px;
+  min-width: 3px;
+  border-left: 2px solid var(--text);
+  background: var(--text);
+  opacity: 0.75;
+}
+.clip-extension-motion { background: var(--warning); }
+.clip-extension-still { background: var(--muted); }
+.clip-original-end {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dotted var(--text);
+  opacity: 0.7;
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+.clip-legend-swatch.clip-legend-swatch-extension {
+  height: 5px;
+  border: none;
+  border-left: 2px solid var(--text);
+  border-radius: 0;
+  background: var(--text);
+  opacity: 0.75;
+}
+.clip-legend-swatch.clip-legend-swatch-original-end {
+  width: 0;
+  height: 12px;
+  border: none;
+  border-left: 2px dotted var(--text);
+  border-radius: 0;
+}
 .clip-playhead {
   position: absolute;
   top: 0;

@@ -639,8 +639,24 @@ class RecordingsMixin:
             db.executemany("DELETE FROM recordings WHERE id = ?", [(recording_id,) for recording_id in ordered_purge_ids])
             return rows
 
+    def update_recording_extensions(self, recording_id: int, extensions: dict[str, Any]) -> bool:
+        """Store what kept a recording going past its first post-event window
+        (built by ``app.recording_extension``; drawn on the playback bar)."""
+        with self.write_slot(), self.connect() as db:
+            cursor = db.execute(
+                "UPDATE recordings SET extensions = ? WHERE id = ?",
+                (json.dumps(extensions), int(recording_id)),
+            )
+            return cursor.rowcount > 0
+
     def _recording_row(self, row: sqlite3.Row) -> dict[str, Any]:
         recording = dict(row)
+        # Parsed for the API; a missing or corrupt value reads as no extensions.
+        try:
+            parsed = json.loads(recording.get("extensions") or "null")
+        except (TypeError, ValueError):
+            parsed = None
+        recording["extensions"] = parsed if isinstance(parsed, dict) else None
         file_path = safe_storage_path(recording.get("file_path"), roots=('recordings_dir',))
         recording["media_ready"] = (
             file_path is not None
