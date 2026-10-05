@@ -200,17 +200,6 @@ function aiVerificationBadge(event) {
   return `<span class="detection ${filtered ? 'detection-ai-filtered' : 'detection-ai-verified'}" title="${escapeHtml(title)}">🤖 ${filtered ? 'Filtered' : 'Verified'}</span>`;
 }
 
-// Plain-English description written by the local AI model (see
-// app/ai_verification.py), when event descriptions are enabled.
-function eventDescription(event) {
-  const record = (event.metadata || {}).ai_description || {};
-  const text = record.text
-    ? `<p class="activity-item-description" title="Described by the local AI model">${escapeHtml(record.text)}</p>`
-    : '';
-  const tags = aiTagPills(record.tags);
-  return `${text}${tags ? `<div class="activity-item-badges activity-item-ai-tags">${tags}</div>` : ''}`;
-}
-
 function renderEventRow(event) {
   const created = event.created_at || '';
   const camera = eventCameraLabel(event);
@@ -226,6 +215,13 @@ function renderEventRow(event) {
     ? '<span class="detection detection-alert" title="An alert notification was fired for this event">🔔 Alert</span>'
     : '';
   const aiBadge = aiVerificationBadge(event);
+  // AI tags join the detection pills in one row, so they read as a trailing
+  // label on the event. The model's plain-English write-up for the same
+  // record (app/ai_verification.py) rides along as an info-tip bubble: it is
+  // a full sentence, and rendering it inline stretched every row of the feed.
+  const description = (event.metadata || {}).ai_description || {};
+  const aiTags = aiTagPills(description.tags);
+  const aiTip = aiDescriptionTip(description.text);
   // Two per-event actions: open the annotated snapshot (green detection
   // boxes, as in alert emails) and/or open the recording the event belongs to.
   // Distinct colours (green = snapshot, violet = recording) keep the two
@@ -242,7 +238,7 @@ function renderEventRow(event) {
     <tr class="activity-table-row ${typeClass}" data-event-row="${escapeHtml(String(event.id))}">
       <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}${aiBadge}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
       <td class="activity-cell-camera">${escapeHtml(camera)}</td>
-      <td class="activity-cell-detections"><div class="activity-item-badges">${eventPills(event)}</div>${eventDescription(event)}</td>
+      <td class="activity-cell-detections"><div class="activity-item-badges">${eventPills(event)}${aiTags}${aiTip}</div></td>
       <td class="activity-cell-when">
         <div class="activity-item-when">
           <div class="activity-item-when-relative">

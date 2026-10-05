@@ -80,6 +80,7 @@ const WEB_SHARED_GLOBALS = {
   DETECTION_MOTION_ICON: 'readonly',
   detectionPill: 'readonly',
   aiTagPills: 'readonly',
+  aiDescriptionTip: 'readonly',
   escapeHtml: 'readonly',
   eventFaceIdentities: 'readonly',
   faceIdentityPills: 'readonly',

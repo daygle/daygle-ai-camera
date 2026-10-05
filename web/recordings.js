@@ -143,6 +143,14 @@ function recordingDetectionLabels(recording) {
   return specific.length ? specific : all;
 }
 
+// The local model's plain-English write-up for a clip is stored on the event
+// that triggered it, not on the recording row -- the recording keeps only the
+// derived ai_labels. Show it as an info-tip bubble so a full sentence does not
+// stretch every row of the list.
+function recordingDescriptionTip(recording) {
+  return aiDescriptionTip(recording.event?.metadata?.ai_description?.text);
+}
+
 function recordingDisplayTrigger(recording) {
   if (isSoundRecording(recording)) {
     const meta = recording.event?.metadata || {};
@@ -662,7 +670,7 @@ function recordingRowHtml(recording) {
     <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
       <td class="activity-cell-type"><span class="activity-item-type">${typeLabel}</span><span class="activity-cell-ref">Recording #${recording.id}</span></td>
       <td class="activity-cell-camera">${escapeHtml(recordingCameraName(recording))}</td>
-      <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}${aiTagPills(recording.ai_labels)}</div></td>
+      <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}${aiTagPills(recording.ai_labels)}${recordingDescriptionTip(recording)}</div></td>
       <td class="activity-cell-zone">${zoneCell}</td>
       <td class="activity-cell-when">
         <div class="activity-item-when">

@@ -996,6 +996,19 @@ function aiTagPills(tags) {
     .join('');
 }
 
+// The plain-English write-up the local vision model produced for an event
+// (app/ai_verification.py), surfaced as a help bubble so a long sentence does
+// not stretch every row. Reuses the settings pages' .info-tip icon, whose
+// ::after bubble shows `data-tip` on hover AND keyboard focus -- the
+// tabindex/aria-label pair is what makes it reachable without a mouse.
+// Returns '' when there is no description, so callers can drop it inline.
+function aiDescriptionTip(text) {
+  const description = String(text == null ? '' : text).trim();
+  if (!description) return '';
+  const safe = escapeHtml(description);
+  return `<span class="info-tip" data-tip="${safe}" title="${safe}" tabindex="0" aria-label="AI description: ${safe}"></span>`;
+}
+
 function detectionPill(label, confidence, isSound = false, count = 1) {
   const labelIsSound = isSound || isSoundLabel(label);
   const display = labelIsSound
@@ -2322,6 +2335,7 @@ window.daygleUi = {
   // UI helpers
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
   detectionPill, motionPill, formatMotionFraction, motionFractionOf, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON,
+  aiDescriptionTip,
   // Face-identity pills + filters (recordings + snapshots)
   DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,

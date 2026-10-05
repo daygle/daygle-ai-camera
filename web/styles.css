@@ -196,7 +196,6 @@
 :root.light .detection.detection-alert { background: rgba(220,38,38,.12); color: #b91c1c; border-color: rgba(220,38,38,.35); font-weight: 800; }
 :root.light .detection.detection-ai-filtered { background: rgba(71,85,105,.10); color: #334155; border-color: rgba(71,85,105,.35); }
 :root.light .detection.detection-ai-tag { background: transparent; color: var(--muted); border: 1px dashed var(--border); font-weight: 600; }
-.activity-item-ai-tags { margin-top: 4px; }
 .detection.detection-ai-verified { background: rgba(22,163,74,.10); color: #15803d; border-color: rgba(22,163,74,.35); }
 :root.light .detection.detection-face { background: rgba(217,119,6,.14); color: #b45309; border-color: rgba(217,119,6,.35); font-weight: 800; }
 :root.light .detection.detection-face-unknown { background: rgba(219,39,119,.12); color: #be185d; border-color: rgba(219,39,119,.35); font-weight: 800; }

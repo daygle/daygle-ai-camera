@@ -305,8 +305,8 @@ window.daygleAuthReady = (async () => {
   const PAGE_TABS = [
     [
       { href: '/recordings', icon: '🎞️', label: 'Recordings', match: (p) => p === '/recordings' || /^\/recordings\/\d+$/.test(p) },
-      { href: '/recordings/timeline', icon: '🕒', label: 'Timeline' },
       { href: '/snapshots', icon: '📸', label: 'Snapshots' },
+      { href: '/recordings/timeline', icon: '🕒', label: 'Timeline' },
     ],
     // The section's own URL is also the prefix of its sibling tabs, so its
     // tab matches exactly rather than by prefix.
