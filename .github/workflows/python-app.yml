@@ -11,9 +11,12 @@ permissions:
 
 # Rapid successive pushes to a PR branch cancel the superseded run instead of
 # queueing duplicate matrix jobs (2 Python versions x full dep install).
+# Only on PRs: on main every commit needs its own verdict, and cancelling there
+# marked merged commits "cancelled" (red) whenever the next merge or bot commit
+# landed - and re-running an older commit's run cancelled the newer one.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
