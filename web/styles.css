@@ -14,6 +14,19 @@
 .zones-shell label:has([data-zone-motion-notify-start]), .zones-shell label:has([data-zone-motion-notify-end]),
 .zones-shell label:has([data-zone-face-notify-start]), .zones-shell label:has([data-zone-face-notify-end]) { display: none; }
 .alerts-toolbar { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+/* The save button sits at the foot of the policy card, next to what it saves
+   (mirrors the Zones/Sounds editor footers). */
+.alerts-editor-footer {
+  margin-top: 1.5rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  justify-content: flex-end;
+}
+.alerts-editor-footer button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.alerts-editor-footer button svg { flex: 0 0 auto; }
 .alerts-toolbar label { min-width: 220px; flex: 1; }
 .alerts-toolbar button { min-height: 42px; }
 .alerts-policy-grid { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 12px; }
@@ -1978,6 +1991,10 @@ tr.drag-over {
   /* Zone editor footer: full-width button on phones */
   .zone-editor-footer { display: flex; justify-content: stretch; }
   .zone-editor-footer button { flex: 1; justify-content: center; }
+  /* Alerts editor footer: hint above a full-width save button */
+  .alerts-editor-footer { flex-wrap: wrap; justify-content: stretch; }
+  .alerts-editor-footer button { flex: 1 1 100%; width: 100%; justify-content: center; }
+  .alerts-editor-footer .zones-save-copy { flex: 1 1 100%; margin: 0; }
   /* Sound editor footer: full-width stacked buttons */
   .sound-editor-footer { display: flex; flex-wrap: wrap; gap: 10px; justify-content: stretch; }
   .sound-editor-footer button { flex: 1; justify-content: center; }

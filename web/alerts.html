@@ -96,7 +96,6 @@
         <h1>Alerts</h1>
         <p class="muted">Create separate policies for objects, recognized people, and sounds. Give each policy its own schedule, threshold, cooldown, and delivery channels. Detection scope and recording are set on the Zones and Sounds pages.</p>
       </div>
-      <button id="saveAlertsBtn" class="primary" type="button">Save Alert Rules</button>
       <div class="onnx-hero-mark hero-mark--amber" aria-hidden="true">
         <span class="onnx-hero-ring onnx-hero-ring-back"></span>
         <span class="onnx-hero-ring onnx-hero-ring-front"></span>
@@ -123,6 +122,13 @@
       </div>
       <p id="alertScopeHint" class="form-help muted">Objects, motion, and faces are assigned - and set to record - per area on the Zones page; sound classes on the Sounds page. This page configures how each assigned item notifies you - email, push, schedules, and cooldowns.</p>
       <div id="alertsList" class="alerts-policy-list"></div>
+      <div class="alerts-editor-footer">
+        <div class="zones-save-copy"><span class="zones-save-indicator"></span><span>Remember to save your changes.</span></div>
+        <button id="saveAlertsBtn" class="primary" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+          Save Alert Rules
+        </button>
+      </div>
     </section>
   </main>
   <script src="/static/nav.js"></script>
