@@ -1,36 +1,42 @@
 // events.js - Dedicated Events page (the single activity feed).
 // Loaded by events.html only. Shows GRANULAR detection events (one row per
-// occurrence) from /api/events, filterable by type (object / motion / sound)
-// and time range. An alert is just a property of an event (whether a
+// occurrence) from /api/events, filtered through the filter bar shared with
+// /recordings and /snapshots (web/library_filters.js): keyword search, time
+// range, type, camera, label, face, alerted-only and sort. An alert is just a property of an event (whether a
 // notification fired), surfaced as an indicator on the row - there is no
 // separate alerts page. Each row links to the recording it belongs to, and a
 // recording spans many events (event.recording_id).
 //
 // isSoundLabel, GENERIC_TRIGGER_LABELS, detectionPill, motionPill, formatDate,
-// timeAgo, escapeHtml, cameraLabel, daygleSinceParamForRange and
-// api() are all provided by web/utils.js.
+// timeAgo, escapeHtml, cameraLabel and api() are all provided by
+// web/utils.js; createLibraryFilters by web/library_filters.js.
 
 const els = {
   eventFeed: document.getElementById('eventFeed'),
-  listStatus: document.getElementById('listStatus'),
-  filterPills: document.querySelectorAll('[data-filter]'),
-  rangeBtns: document.querySelectorAll('[data-range]'),
+  filterMount: document.getElementById('eventFilters'),
   statMotionEvents: document.getElementById('statMotionEvents'),
   statObjectEvents: document.getElementById('statObjectEvents'),
   statSoundEvents: document.getElementById('statSoundEvents'),
 };
 
 let allEvents = [];
-let activeFilter = 'all';
-let activeRange = 'today';
+// The shared filter bar; created on DOMContentLoaded.
+let filters = null;
+
+// The type pill (object / motion / sound) is a classification the client
+// derives from each event's detections, so it filters the loaded rows here;
+// every other filter is applied by /api/events.
+function activeType() {
+  return filters ? filters.query().type : 'all';
+}
 
 // ─── Server-side pagination ─────────────────────────────────────────────────
 // The list STREAMS: the first server page paints immediately, further pages
 // arrive when the user asks ("Load more") or scrolls near the bottom
 // (sentinel), so a huge history is never fetched wholesale before the first
 // rows are on screen. allEvents holds only the pages loaded so far - the
-// filter pills, the stat cards and the column sorts all describe that loaded
-// set, and the status line says when more is available.
+// type pills, the stat cards and the column sorts all describe that loaded
+// set, and the result count says when more is available.
 const EVENTS_PAGE_SIZE = 200;
 let eventsPager = null;
 // Each loadEvents() supersedes the previous one: a late page from an old
@@ -45,8 +51,8 @@ let eventsRowsReady = false;
 // Click-to-sort column headers re-order the currently loaded list
 // client-side. `null` means the server order (newest first) applies;
 // clicking a column cycles asc → desc → back to the default. The sort
-// survives filter pill changes and the range-triggered reload (the new
-// list is simply re-sorted by the same key). Mirrors /recordings.
+// survives filter changes and the reload they trigger (the new list is
+// simply re-sorted by the same key). Mirrors /recordings.
 let eventsSortState = null;
 
 function eventSortValue(event, key) {
@@ -106,10 +112,6 @@ function bindSortHeaders() {
       renderList();
     });
   });
-}
-
-function getSinceParam() {
-  return daygleSinceParamForRange(activeRange);
 }
 
 // ─── Event classification ───────────────────────────────────────────────────
@@ -254,8 +256,9 @@ function renderEventRow(event) {
 }
 
 function visibleEvents() {
-  if (activeFilter === 'all') return allEvents;
-  return allEvents.filter((event) => eventKind(event) === activeFilter);
+  const type = activeType();
+  if (type === 'all') return allEvents;
+  return allEvents.filter((event) => eventKind(event) === type);
 }
 
 function renderStats() {
@@ -276,14 +279,14 @@ function renderStats() {
 // The status line counts the LOADED rows and says when the history has more,
 // so a count on a partially-streamed list never reads as the full history.
 function updateEventListStatus() {
-  if (!els.listStatus) return;
+  if (!filters) return;
   const events = visibleEvents();
   const more = Boolean(eventsPager && !eventsPager.done);
   if (!events.length) {
-    els.listStatus.textContent = more ? 'More events available' : '';
+    filters.setCount(more ? 'More events available' : '0 events');
     return;
   }
-  els.listStatus.textContent = `${events.length} event${events.length === 1 ? '' : 's'}${more ? ' loaded · more available' : ''}`;
+  filters.setCount(`${events.length} event${events.length === 1 ? '' : 's'}${more ? ' loaded · more available' : ''}`);
 }
 
 function renderListFooter() {
@@ -332,8 +335,9 @@ async function loadMoreEvents() {
     if (session !== eventsLoadSession) return;
     allEvents = allEvents.concat(page.items);
     renderStats();
+    const type = activeType();
     appendEventRows(page.items.filter(
-      (event) => activeFilter === 'all' || eventKind(event) === activeFilter,
+      (event) => type === 'all' || eventKind(event) === type,
     ));
     updateEventListStatus();
   } catch (_err) {
@@ -354,8 +358,8 @@ function renderList() {
         <div class="activity-empty-icon" aria-hidden="true">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
         </div>
-        <h2>No events in this range</h2>
-        <p class="muted">Try a wider time range, or wait for a new detection.</p>
+        <h2>No events match the current filters</h2>
+        <p class="muted">Try a wider time range, clearing a filter, or wait for a new detection.</p>
       </div>${renderListFooter()}`;
     eventsRowsReady = false;
     wireLoadMore();
@@ -392,11 +396,10 @@ function renderList() {
   wireLoadMore();
 }
 
-// ─── Plain-English search ───────────────────────────────────────────────────
-// Searches the AI event descriptions (GET /api/event-search). Results replace
-// the feed until Clear or a time-range pill reloads the normal list.
-let searchActive = false;
-
+// ─── Plain-English (AI) search ──────────────────────────────────────────────
+// The bar's Ask AI button searches the AI event descriptions
+// (GET /api/event-search). Results replace the feed until any filter changes,
+// which reloads the normal list.
 function describeInterpretation(interp, count) {
   if (!interp) return '';
   const parts = [];
@@ -411,18 +414,7 @@ function describeInterpretation(interp, count) {
   }
   const how = interp.interpreted_by === 'model' ? 'AI-interpreted' : 'keyword';
   const relaxed = interp.relaxed ? ' No event matched everything, so these match any of the terms.' : '';
-  return `${count} result${count === 1 ? '' : 's'} (${how} search: ${parts.join(', ') || 'any described event'}).${relaxed}`;
-}
-
-function setSearchUi(active, summary = '') {
-  searchActive = active;
-  const clearBtn = document.getElementById('eventSearchClear');
-  const summaryEl = document.getElementById('eventSearchSummary');
-  if (clearBtn) clearBtn.hidden = !active;
-  if (summaryEl) {
-    summaryEl.hidden = !summary;
-    summaryEl.textContent = summary;
-  }
+  return `AI search: ${count} result${count === 1 ? '' : 's'} (${how}: ${parts.join(', ') || 'any described event'}).${relaxed} Change any filter to return to the full feed.`;
 }
 
 async function runEventSearch(query) {
@@ -430,37 +422,49 @@ async function runEventSearch(query) {
   eventsLoadSession += 1;
   const session = eventsLoadSession;
   els.eventFeed.innerHTML = '<p class="muted">Searching…</p>';
-  setSearchUi(true, 'Searching event descriptions…');
+  filters?.setNote('Searching event descriptions…');
   setLoadMoreSentinel('events', null, loadMoreEvents);
   eventsPager = null;
   try {
     const result = await api(`/api/event-search?q=${encodeURIComponent(query)}`);
     if (session !== eventsLoadSession) return;
     allEvents = result.items || [];
-    setSearchUi(true, describeInterpretation(result.interpretation, allEvents.length));
+    filters?.setNote(describeInterpretation(result.interpretation, allEvents.length));
   } catch (error) {
     if (session !== eventsLoadSession) return;
     allEvents = [];
-    setSearchUi(true, `Search failed: ${error.message}`);
+    filters?.setNote(`AI search failed: ${error.message}`);
   }
   renderStats();
   if (!allEvents.length) {
-    els.eventFeed.innerHTML = '<p class="muted empty-state">No described events matched. Only events described by the AI model are searchable; turn on Describe Events under Intelligence → AI, or describe past events there.</p>';
+    els.eventFeed.innerHTML = '<p class="muted empty-state">No described events matched. Only events described by the AI model are searchable this way; turn on Describe Events under Intelligence → AI, or describe past events there. The Search button matches labels, cameras, zones and faces on every event.</p>';
     updateEventListStatus();
     return;
   }
   renderList();
 }
 
+// The /api/events query for the bar's current state. The type pill is left
+// out on purpose: it is applied client-side by visibleEvents().
+function eventsQueryString(query) {
+  const params = new URLSearchParams();
+  if (query.since) params.set('since', query.since);
+  if (query.until) params.set('until', query.until);
+  if (query.q) params.set('q', query.q);
+  if (query.camera_id) params.set('camera_id', query.camera_id);
+  if (query.label) params.set('label', query.label);
+  if (query.face) params.set('face', query.face);
+  if (query.alerted_only) params.set('alerted_only', 'true');
+  if (query.sort && query.sort !== 'newest') params.set('sort', query.sort);
+  return params.toString();
+}
+
 async function loadEvents() {
-  setSearchUi(false);
+  filters?.setNote('');
   if (els.eventFeed) els.eventFeed.innerHTML = '<p class="muted">Loading events…</p>';
   eventsLoadSession += 1;
   const session = eventsLoadSession;
-  const params = new URLSearchParams();
-  const since = getSinceParam();
-  if (since) params.set('since', since);
-  const query = params.toString();
+  const query = eventsQueryString(filters ? filters.query() : libraryDefaultQuery());
   // One page first: the list paints off the first response and streams the
   // rest on demand instead of awaiting the whole history.
   eventsPager = createCursorPager(`/api/events${query ? `?${query}` : ''}`, EVENTS_PAGE_SIZE);
@@ -483,48 +487,28 @@ async function loadEvents() {
   renderList();
 }
 
-function wireSearch() {
-  const form = document.getElementById('eventSearchForm');
-  const input = document.getElementById('eventSearchInput');
-  form?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const query = (input?.value || '').trim();
-    if (query) runEventSearch(query);
-    else if (searchActive) loadEvents();
-  });
-  document.getElementById('eventSearchClear')?.addEventListener('click', () => {
-    if (input) input.value = '';
-    loadEvents();
-  });
-}
-
-function wireControls() {
-  wireSearch();
-  els.filterPills.forEach((pill) => {
-    pill.addEventListener('click', () => {
-      activeFilter = pill.dataset.filter || 'all';
-      els.filterPills.forEach((p) => {
-        const selected = p === pill;
-        p.classList.toggle('active', selected);
-        p.setAttribute('aria-selected', selected ? 'true' : 'false');
-      });
-      renderList();
-    });
-  });
-  els.rangeBtns.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      activeRange = btn.dataset.range || 'today';
-      els.rangeBtns.forEach((b) => {
-        const selected = b === btn;
-        b.classList.toggle('active', selected);
-        b.setAttribute('aria-selected', selected ? 'true' : 'false');
-      });
-      loadEvents();
-    });
-  });
-}
+// Re-render the custom-range time pickers when Profile > Time Format changes
+// in another tab, and the rows so their timestamps follow the new format.
+window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
+  filters?.refreshTimePickers();
+  if (allEvents.length) renderList();
+};
 
 document.addEventListener('DOMContentLoaded', () => {
-  wireControls();
+  if (!els.filterMount) return;
+  filters = createLibraryFilters({
+    mount: els.filterMount,
+    kind: 'events',
+    noun: 'events',
+    types: ['all', 'object', 'motion', 'sound'],
+    searchPlaceholder: 'Search events: person, driveway, red car, a face name…',
+    onAiSearch: runEventSearch,
+    onChange: (_query, reason) => {
+      // The type pill only re-filters what is loaded; everything else is a
+      // server-side filter and reloads the list.
+      if (reason === 'type' && eventsPager) renderList();
+      else loadEvents();
+    },
+  });
   loadEvents();
 });

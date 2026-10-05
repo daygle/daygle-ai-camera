@@ -126,7 +126,6 @@ const WEB_SHARED_GLOBALS = {
   timeSelectValue: 'readonly',
   titleCase: 'readonly',
   RECORDINGS_OVERLAY_TOGGLE_KEY: 'readonly',
-  RECORDINGS_FILTER_PANEL_KEY: 'readonly',
   TIMELINE_OVERLAY_TOGGLE_KEY: 'readonly',
   // web/utils.js - behavioural tripwire geometry/normalisation (Zones canvas).
   tripwireDefaultLine: 'readonly',
@@ -147,6 +146,11 @@ const WEB_SHARED_GLOBALS = {
   projectDetections: 'readonly',
   resizeOverlayCanvas: 'readonly',
   sampleTrackAtTime: 'readonly',
+
+  // web/library_filters.js - the filter bar shared by the Events, Recordings
+  // and Snapshots pages (loaded after utils.js, before the page script).
+  createLibraryFilters: 'readonly',
+  libraryDefaultQuery: 'readonly',
 
   // web/clip_timeline.js - clip segment timeline shared by the recordings and
   // timeline playback pages (loaded after overlay.js, before the page script).

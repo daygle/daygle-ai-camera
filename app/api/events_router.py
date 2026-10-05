@@ -57,11 +57,16 @@ def events(
     alerted_only: bool = False,
     with_recording: bool = False,
     since: str | None = Query(None),
+    until: str | None = Query(None, description='ISO timestamp; include events created at or before this time.'),
+    camera_id: str | None = Query(None, max_length=200),
+    q: str | None = Query(None, max_length=300, description='Keywords; every word must appear in a label, zone, camera, AI tag/description or face name.'),
+    face: str | None = Query(None, max_length=200, description='Recognised face: any, unknown, id:<person_id> or name:<name>.'),
+    sort: str = Query('newest', pattern='^(newest|oldest)$'),
     db=Depends(get_database),
 ):
     user = require_user(request)
     try:
-        decoded = decode_cursor(cursor, 'events', 'newest') if cursor else None
+        decoded = decode_cursor(cursor, 'events', sort) if cursor else None
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     owner_user_id = None if str(user.get('role') or '').lower() == 'admin' else int(user['id'])
@@ -73,15 +78,38 @@ def events(
         since=since,
         cursor=decoded,
         owner_user_id=owner_user_id,
+        until=until,
+        camera_id=camera_id,
+        query=q,
+        face=face,
+        sort=sort,
     )
     scoped = [_scope_event_recordings(event, user) for event in event_list]
     return {
         'items': [event for event in scoped if event is not None],
         'next_cursor': (
-            encode_cursor('events', 'newest', next_cursor[0], next_cursor[1])
+            encode_cursor('events', sort, next_cursor[0], next_cursor[1])
             if next_cursor else None
         ),
     }
+
+
+@router.get('/api/library/facets')
+def library_facets(
+    request: Request,
+    kind: str = Query(..., pattern='^(events|snapshots|recordings)$'),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
+    db=Depends(get_database),
+):
+    """Label and face options for the shared filter bar (web/library_filters.js).
+
+    Counts cover the requested time window and honour the viewer's recording
+    scope, so a viewer never sees labels or faces from another user's clips.
+    """
+    user = require_user(request)
+    owner_user_id = None if str(user.get('role') or '').lower() == 'admin' else int(user['id'])
+    return db.library_facets(kind, since=since, until=until, owner_user_id=owner_user_id)
 
 
 @router.get('/api/event-search')
