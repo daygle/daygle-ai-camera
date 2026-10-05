@@ -133,6 +133,18 @@ ANCHOR_STILL_CYCLES = 4
 ANCHOR_TOLERANCE = 2 * TRACK_STILL_DISPLACEMENT
 ANCHOR_RELEASE_CYCLES = 3
 ANCHOR_OCCLUSION_OVERLAP = 0.2
+# A redrawn parked car is not a departure. At night the detector can redraw a
+# parked car when a passing car's headlights light it - recording 17783: a
+# minivan anchored for the evening was boxed as just its lit roof, a box nested
+# inside its settled one but not different enough in shape to count as an
+# extent flip. Every roof sighting counted toward release, so after three the
+# anchor let go and the unmoved car read "moving" until the window refilled. A
+# departing box nested in the anchor (``EXTENT_CONTAINMENT`` of the smaller box
+# inside the larger) that holds within ``TRACK_STILL_DISPLACEMENT`` of the first
+# departing box is that redraw, and does not count toward release. A car that
+# really pulls out keeps moving from one sighting to the next, so it leaves the
+# first departing box behind and is released as before, one sighting later.
+ANCHOR_REDRAW_TOLERANCE = TRACK_STILL_DISPLACEMENT
 
 
 def _center_of(box: dict[str, Any]) -> tuple[float, float] | None:
@@ -369,6 +381,20 @@ def _covered(anchor: tuple[float, float, float, float], others: list[tuple[float
     return False
 
 
+def _nested(
+    box: tuple[float, float, float, float],
+    anchor: tuple[float, float, float, float],
+) -> bool:
+    """Whether the smaller of two boxes lies (mostly) inside the larger."""
+    bx, by, bw, bh = box
+    ax, ay, aw, ah = anchor
+    smaller = min(bw * bh, aw * ah)
+    if smaller <= 0.0:
+        return False
+    overlap = max(0.0, min(bx + bw, ax + aw) - max(bx, ax)) * max(0.0, min(by + bh, ay + ah) - max(by, ay))
+    return overlap / smaller >= box_geometry.EXTENT_CONTAINMENT
+
+
 def _anchored_displacement(
     track: dict[str, Any],
     box: tuple[float, float, float, float] | None,
@@ -385,14 +411,24 @@ def _anchored_displacement(
     if anchor is not None and box is not None:
         if _box_deviation(box, anchor) <= ANCHOR_TOLERANCE:
             track["anchor_breaks"] = 0
+            track.pop("departure", None)
             return 0.0
-        if not _covered(anchor, others):
+        # The first box away from the anchor; later departures are measured
+        # against it to tell a steady redraw from a car that keeps moving.
+        departure = track.get("departure")
+        if departure is None:
+            track["departure"] = box
+        redrawn = _nested(box, anchor) and (
+            departure is None or _box_deviation(box, departure) <= ANCHOR_REDRAW_TOLERANCE
+        )
+        if not redrawn and not _covered(anchor, others):
             track["anchor_breaks"] = int(track.get("anchor_breaks") or 0) + 1
         if int(track.get("anchor_breaks") or 0) < ANCHOR_RELEASE_CYCLES:
             return 0.0
         # Sustained departure: the subject really moved. Release the anchor and
         # report what the history says.
         track.pop("anchor", None)
+        track.pop("departure", None)
         track["anchor_breaks"] = 0
         track["still_streak"] = 0
         return windowed
