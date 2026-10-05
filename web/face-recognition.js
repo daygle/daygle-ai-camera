@@ -155,12 +155,7 @@ frReloadBtn.addEventListener('click', reloadService);
 
 loadSettings();
 loadFaceMode();
-// Tab bar (Settings / People). Shared implementation with URL-hash
-// deep-linking lives in utils.js - /detection/faces#people opens People.
-// When the Review tab is activated, refresh the unknown faces list.
-initDaygleTabs();
-
-// Hook tab activation to refresh the Review panel.
-document.getElementById('tab-review')?.addEventListener('click', () => {
-  window.refreshUnknownFaces?.();
-});
+// Settings / People / Review are stacked cards on this page, not tabs, so
+// there is no tab bar to wire up. The unknown-faces list self-loads on page
+// load (web/unknown-faces.js) and /detection/faces#people still deep-links to
+// the People card via its id.

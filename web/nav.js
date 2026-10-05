@@ -273,8 +273,8 @@ window.daygleAuthReady = (async () => {
         { href: '/cameras', matches: ['/cameras'], label: 'Cameras', icon: 'cameras' },
         { href: '/zones', matches: ['/zones'], label: 'Zones', icon: 'zones' },
         { href: '/alerts', matches: ['/alerts'], label: 'Alerts', icon: 'alerts' },
-        // People enrolment lives on the Face Recognition page's People tab
-        // (/face-recognition#people); /people redirects there.
+        // People enrolment lives in the People card on the Face Recognition
+        // page (/detection/faces#people); /people redirects there.
         { href: '/detection', matches: ['/detection', '/objects', '/sounds', '/face-recognition'], label: 'Detection', icon: 'detection' },
       ],
     },

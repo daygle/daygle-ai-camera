@@ -6681,6 +6681,9 @@ button.secondary:disabled, a.secondary:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* Sits inside an <h2> on the face Review card, so centre it on the text
+     line rather than letting the baseline offset it. */
+  vertical-align: middle;
   min-width: 18px;
   height: 18px;
   border-radius: 9px;
@@ -6691,6 +6694,14 @@ button.secondary:disabled, a.secondary:disabled {
   padding: 0 5px;
   margin-left: 6px;
 }
+
+/* Face Recognition page (face-recognition.html) - Settings / People / Review
+   are stacked cards rather than a second row of tabs, so the only navigation
+   is the Detection section tab strip. Each card is a hash target (#people
+   from the /people redirect), and the sticky mobile top bar would otherwise
+   cover the card it scrolls to. */
+.face-card { scroll-margin-top: calc(var(--topbar-h) + 12px); }
+@media (min-width: 901px) { .face-card { scroll-margin-top: 12px; } }
 
 /* =====================================================================
    ONNX model library page (onnx.html) - hero, tabs, and library layout

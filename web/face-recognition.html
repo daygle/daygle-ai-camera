@@ -23,15 +23,12 @@
       </div>
     </header>
 
-    <div class="settings-tabs" role="tablist" aria-label="Face Recognition sections">
-      <button class="settings-tab" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" data-tab="settings" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">⚙️</span><span class="settings-tab-label">Settings</span></button>
-      <button class="settings-tab" type="button" role="tab" id="tab-people" aria-controls="panel-people" data-tab="people" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">👥</span><span class="settings-tab-label">People</span></button>
-      <button class="settings-tab" type="button" role="tab" id="tab-review" aria-controls="panel-review" data-tab="review" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🔍</span><span class="settings-tab-label">Review</span><span id="reviewBadge" class="settings-tab-badge" hidden></span></button>
-    </div>
+    <!-- The three face sections are stacked cards on one page rather than a
+     second row of tabs: the Detection section tab (Objects / Sounds / Faces)
+     is the only tab strip on this page. Each former tab is now a card with an
+     id, so the /detection/faces#people deep link still lands on its section. -->
 
-    <div class="settings-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings">
-
-    <section class="card">
+    <section class="card face-card" id="face-settings">
       <div class="settings-section-header">
         <div class="settings-section-icon">⚙️</div>
         <div>
@@ -89,16 +86,12 @@
       </form>
     </section>
 
-    </div><!-- /panel-settings -->
-
-    <div class="settings-panel" id="panel-people" role="tabpanel" aria-labelledby="tab-people" data-panel="people" hidden>
-
-    <section class="card">
+    <section class="card face-card" id="people">
       <div class="settings-section-header">
-        <div class="settings-section-icon">➕</div>
+        <div class="settings-section-icon">👥</div>
         <div>
-          <h2>Add Person</h2>
-          <p class="settings-section-subtitle">Create a person, then enrol face photos for them below. Requires an embedding model and recognition enabled to enrol faces.</p>
+          <h2>People</h2>
+          <p class="settings-section-subtitle">Add someone, then enrol their face photos. Requires an embedding model and recognition enabled to enrol faces.</p>
         </div>
       </div>
       <form id="addPersonForm" class="settings-form">
@@ -114,31 +107,17 @@
           <button id="addPersonBtn" class="btn-success" type="submit">Add Person</button>
         </div>
       </form>
-    </section>
-
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">👤</div>
-        <div>
-          <h2>Enrolled People</h2>
-          <p class="settings-section-subtitle">Manage people and their enrolled faces.</p>
-        </div>
-      </div>
       <div id="peopleMessage" class="muted"></div>
       <div id="peopleEmpty" class="muted" hidden>No people enrolled yet.</div>
       <div id="peopleList" class="model-card-grid"></div>
     </section>
 
-    </div><!-- /panel-people -->
-
-    <div class="settings-panel" id="panel-review" role="tabpanel" aria-labelledby="tab-review" data-panel="review" hidden>
-
-    <section class="card">
+    <section class="card face-card" id="review">
       <div class="settings-section-header">
         <div class="settings-section-icon">🔍</div>
         <div>
-          <h2>Unknown Faces</h2>
-          <p class="settings-section-subtitle">Review captured faces that weren't matched to any enrolled person. Assign them to create new face enrolments, or dismiss them.</p>
+          <h2>Review <span id="reviewBadge" class="settings-tab-badge" hidden></span></h2>
+          <p class="settings-section-subtitle">Captured faces that weren't matched to any enrolled person. Assign them to create new face enrolments, or dismiss them.</p>
         </div>
       </div>
       <div id="reviewMessage" class="muted"></div>
@@ -150,8 +129,6 @@
         <button id="reviewNext" class="secondary" type="button" disabled>Next →</button>
       </div>
     </section>
-
-    </div><!-- /panel-review -->
 
   </main>
   <script src="/static/nav.js"></script>

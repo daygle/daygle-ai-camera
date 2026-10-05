@@ -382,8 +382,8 @@ def arcface_page():
 @router.get('/people')
 def people_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    # People enrolment moved into the Face Recognition page's People tab;
-    # the hash opens that tab directly via initDaygleTabs' deep-linking.
+    # People enrolment lives in the People card on the Face Recognition page;
+    # the hash scrolls straight to that card.
     return RedirectResponse('/detection/faces#people', status_code=303)
 
 

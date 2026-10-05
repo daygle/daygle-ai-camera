@@ -1,4 +1,4 @@
-// unknown-faces.js - Review tab for the Face Recognition page.
+// unknown-faces.js - Review card for the Face Recognition page.
 // Manages the unknown face capture review workflow: list, assign, dismiss.
 
 (function () {
@@ -232,12 +232,7 @@
   }
 
   // ── Initialise ────────────────────────────────────────────────────
-  // Expose a refresh function so the tab can be reloaded on activation.
-  window.refreshUnknownFaces = async function () {
-    await loadPersons();
-    await loadFaces();
-  };
-
-  // Preload on page load (the tab may already be active via URL hash).
+  // Review is a card on the face page rather than a tab, so the list simply
+  // loads with the page instead of on tab activation.
   loadPersons().then(() => loadFaces());
 })();
