@@ -55,7 +55,15 @@ def test_timeline_object_card_excludes_motion_only_clips():
     # The Objects bucket excludes sound, motion-only AND continuous-only clips so
     # each kind renders on its own dedicated card without being duplicated.
     assert "const objectRecordings = recordings.filter((r) => !isSoundRecording(r) && !isMotionOnlyRecording(r) && !isContinuousOnlyRecording(r));" in source
-    assert "if (normalized === '__object__') return !isSoundRecording(recording) && !isMotionOnlyRecording(recording) && !isContinuousOnlyRecording(recording);" in source
+    # The Object type filter (recordingKind, used by the shared filter bar)
+    # applies the same rule: sound first, then motion-only, then continuous,
+    # and only what is left is an object clip.
+    assert (
+        "if (isSoundRecording(recording)) return 'sound';\n"
+        "  if (isMotionOnlyRecording(recording)) return 'motion';\n"
+        "  if (isContinuousOnlyRecording(recording)) return 'continuous';\n"
+        "  return 'object';"
+    ) in source
 
 
 def test_timeline_has_a_separate_continuous_card_and_partition():
