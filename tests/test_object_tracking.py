@@ -751,3 +751,45 @@ def test_a_young_track_is_not_anchored_before_its_window_fills():
     for _ in range(ot.TRACK_DISPLACEMENT_HISTORY - 1):
         ot.update_object_tracks(cam, [_det('car', *_SETTLED)])
     assert 'anchor' not in st._object_tracks[cam]['tracks'][0]
+
+
+# ---------------------------------------------------------------------------
+# A parked car redrawn by passing headlights is not a departure.
+# ---------------------------------------------------------------------------
+
+# Recording 17783 (Driveway, night): the minivan's real roof boxes, all three
+# tagged "moving" on track 1898 though the car never moved. Its whole-car box
+# is not in the clip (still sightings are filtered out before the overlay
+# history), so _VAN is a whole-car box that, like the real one, holds the roof
+# without the pair counting as an extent flip.
+_VAN = (0.20, 0.20, 0.62, 0.50)
+_VAN_ROOFS = [
+    (0.2717, 0.2216, 0.4208, 0.2341),
+    (0.2665, 0.2214, 0.4261, 0.2437),
+    (0.2672, 0.2215, 0.4248, 0.2412),
+]
+
+
+def test_redrawn_roof_box_does_not_release_a_parked_car():
+    from app.box_geometry import extent_unstable
+    assert not extent_unstable(_VAN_ROOFS[0], _VAN), 'must exercise the redraw rule, not the extent flip'
+    states = _states('trk-anchor-redraw', [[_VAN]] * 14 + [[roof] for roof in _VAN_ROOFS * 3] + [[_VAN]] * 4)
+    assert os_.MODE_MOVING not in states, states
+
+
+def test_redraw_then_pulling_out_still_reads_moving():
+    # The car is redrawn to its roof, then really leaves: the roof box keeps
+    # moving away, so the anchor is released.
+    leaving = [[(_VAN_ROOFS[0][0] - step * 0.03, *_VAN_ROOFS[0][1:])] for step in range(1, 10)]
+    states = _states('trk-anchor-redraw-leaves', [[_VAN]] * 14 + [[_VAN_ROOFS[0]]] * 3 + leaving)
+    assert os_.MODE_MOVING in states[17:17 + ot.ANCHOR_RELEASE_CYCLES + 3], states[17:]
+    assert states[-1] == os_.MODE_MOVING
+
+
+def test_parked_car_driving_toward_the_camera_still_reads_moving():
+    # Growing toward the lens keeps the old box nested in the new one, but the
+    # box keeps changing every sighting, so it is a departure, not a redraw.
+    growing = [[(0.20 - step * 0.02, 0.20 - step * 0.01, 0.62 + step * 0.04, 0.50 + step * 0.03)] for step in range(1, 10)]
+    states = _states('trk-anchor-approach', [[_VAN]] * 14 + growing)
+    assert os_.MODE_MOVING in states[14:14 + ot.ANCHOR_RELEASE_CYCLES + 3], states[14:]
+    assert states[-1] == os_.MODE_MOVING

@@ -54,6 +54,9 @@ zero) only accepts a detection within half its box size, so two cars parked side
 by side never swap identities. Once a track has stayed still for a full
 history window it is anchored to its settled box: a passing car briefly hiding
 part of it, or headlight glare reshaping its box, no longer reads as movement.
+At night the detector may redraw a parked car when headlights light it, for
+example boxing only its roof. A box that jumps inside the settled one and then
+holds steady there is treated as that redraw, not as the car leaving.
 Only a box that stays away from the anchor for several cycles in a row (and not
 while something else covers it) releases the anchor, so a car that pulls out
 still reads *moving* within a few detection cycles. It annotates each detection with `track_id`,
