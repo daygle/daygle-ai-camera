@@ -10,7 +10,7 @@
 //   [ search keywords ............................ ] [Search] [Ask AI]
 //   [Today 24h 7d 30d All Custom]  [All Object Motion Sound]  [Filters (n)]
 //   (Custom)  From [date][time]   To [date][time]
-//   (Filters) Camera | Label | Face | Sort | [x] Alerted only
+//   (Filters) Camera | Label | Face | Sort | [x] Alert Only
 //   123 events · [camera: Driveway x] [label: Person x]          Clear all
 //
 // Every control applies as soon as it changes - there is no Apply button - and
@@ -125,11 +125,24 @@ function libraryDefaultQuery() {
   return libraryQueryForState(libraryDefaultState());
 }
 
+// Which optional controls a page shows. The Timeline keeps its own camera,
+// day and time pickers, so it turns the bar's time range, camera and sort off;
+// a hidden control is neither read from nor written to the URL, so it never
+// clashes with the page's own parameters (the Timeline's ?camera_id=).
+function libraryControls(options = {}) {
+  return {
+    range: options.showRange !== false,
+    camera: options.showCamera !== false,
+    sort: options.showSort !== false,
+  };
+}
+
 // Parse the URL query string into a filter state. Accepts the historical deep
 // links (?label=, ?camera_id=, ?face=) that other pages already emit.
-function libraryStateFromSearch(search, types) {
+function libraryStateFromSearch(search, types, controls = libraryControls()) {
   const params = new URLSearchParams(search || '');
   const state = libraryDefaultState();
+  if (!controls.range) params.delete('range');
   const ranges = new Set(LIBRARY_RANGES.map((range) => range.value));
   if (params.get('q')) state.q = params.get('q').slice(0, 300);
   if (ranges.has(params.get('range'))) state.range = params.get('range');
@@ -137,29 +150,35 @@ function libraryStateFromSearch(search, types) {
     const match = String(value || '').match(/^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}))?$/);
     return match ? { date: match[1], time: match[2] || '' } : null;
   };
-  const from = splitStamp(params.get('from'));
-  const to = splitStamp(params.get('to'));
+  const from = controls.range ? splitStamp(params.get('from')) : null;
+  const to = controls.range ? splitStamp(params.get('to')) : null;
   if (from || to) {
     state.range = 'custom';
     if (from) { state.dateFrom = from.date; state.timeFrom = from.time || LIBRARY_TIME_FROM_DEFAULT; }
     if (to) { state.dateTo = to.date; state.timeTo = to.time || LIBRARY_TIME_TO_DEFAULT; }
   }
   if (types.includes(params.get('type'))) state.type = params.get('type');
-  if (params.get('camera_id')) state.camera = params.get('camera_id');
+  if (controls.camera && params.get('camera_id')) state.camera = params.get('camera_id');
   if (params.get('label')) state.label = params.get('label').trim().toLowerCase();
   if (params.get('face')) state.face = params.get('face');
   if (params.get('alerted') === '1') state.alerted = true;
-  if (params.get('sort') === 'oldest') state.sort = 'oldest';
+  if (controls.sort && params.get('sort') === 'oldest') state.sort = 'oldest';
   return state;
 }
 
 // Write the non-default parts of a state back into a query string, keeping
 // any unrelated parameters (e.g. /recordings?recording_id=) intact.
-function librarySearchFromState(state, currentSearch) {
+function librarySearchFromState(state, currentSearch, controls = libraryControls()) {
   const params = new URLSearchParams(currentSearch || '');
-  ['q', 'range', 'from', 'to', 'type', 'camera_id', 'label', 'face', 'alerted', 'sort'].forEach((key) => params.delete(key));
+  const owned = ['q', 'type', 'label', 'face', 'alerted'];
+  if (controls.range) owned.push('range', 'from', 'to');
+  if (controls.camera) owned.push('camera_id');
+  if (controls.sort) owned.push('sort');
+  owned.forEach((key) => params.delete(key));
   if (state.q) params.set('q', state.q);
-  if (state.range === 'custom') {
+  if (!controls.range) {
+    // The page owns its own time window.
+  } else if (state.range === 'custom') {
     if (state.dateFrom) params.set('from', `${state.dateFrom}T${state.timeFrom || LIBRARY_TIME_FROM_DEFAULT}`);
     if (state.dateTo) params.set('to', `${state.dateTo}T${state.timeTo || LIBRARY_TIME_TO_DEFAULT}`);
     if (!state.dateFrom && !state.dateTo) params.set('range', 'custom');
@@ -167,11 +186,11 @@ function librarySearchFromState(state, currentSearch) {
     params.set('range', state.range);
   }
   if (state.type && state.type !== 'all') params.set('type', state.type);
-  if (state.camera) params.set('camera_id', state.camera);
+  if (controls.camera && state.camera) params.set('camera_id', state.camera);
   if (state.label) params.set('label', state.label);
   if (state.face) params.set('face', state.face);
   if (state.alerted) params.set('alerted', '1');
-  if (state.sort === 'oldest') params.set('sort', 'oldest');
+  if (controls.sort && state.sort === 'oldest') params.set('sort', 'oldest');
   const text = params.toString();
   return text ? `?${text}` : '';
 }
@@ -185,8 +204,12 @@ function createLibraryFilters(options) {
   const extraLabels = options.extraLabels || [];
   const onChange = typeof options.onChange === 'function' ? options.onChange : () => {};
   const onAiSearch = typeof options.onAiSearch === 'function' ? options.onAiSearch : null;
+  const controls = libraryControls(options);
+  // 'api' fetches /api/library/facets for the window; 'manual' leaves the
+  // page to call controller.setFacets() with options it computed itself.
+  const facetsFromApi = options.facets !== 'manual';
   const cameraNames = new Map();
-  let state = libraryStateFromSearch(window.location?.search || '', types);
+  let state = libraryStateFromSearch(window.location?.search || '', types, controls);
   let searchTimer = null;
   let facetsSession = 0;
   let facets = { labels: [], faces: { people: [], unknown: 0 } };
@@ -218,7 +241,7 @@ function createLibraryFilters(options) {
       ${onAiSearch ? `<button type="button" class="secondary library-ai-btn" data-library-ai title="Ask the AI model in plain English, e.g. red car in the driveway yesterday afternoon">${sparkIcon}<span>Ask AI</span></button>` : ''}
     </form>
     <div class="library-filter-toolbar">
-      <div class="library-segment" role="group" aria-label="Time range">
+      <div class="library-segment" role="group" aria-label="Time range"${controls.range ? '' : ' hidden'}>
         ${LIBRARY_RANGES.map((range) => `<button type="button" class="library-segment-btn" data-library-range="${range.value}" aria-pressed="false">${escapeHtml(range.label)}</button>`).join('')}
       </div>
       ${types.length > 1 ? `<div class="library-segment library-type-segment" role="group" aria-label="Type">
@@ -233,11 +256,11 @@ function createLibraryFilters(options) {
       <label><span>To</span><span class="library-datetime"><input id="${ids.dateTo}" type="date" aria-label="To date" /><span data-library-time="to"></span></span></label>
     </div>
     <div class="library-filter-panel" id="${ids.panel}" hidden>
-      <label><span>Camera</span><select id="${ids.camera}"><option value="">All cameras</option></select></label>
+      <label${controls.camera ? '' : ' hidden'}><span>Camera</span><select id="${ids.camera}"><option value="">All cameras</option></select></label>
       <label><span>Label</span><select id="${ids.label}"><option value="">All labels</option></select></label>
       <label data-library-face-field hidden><span>Face</span><select id="${ids.face}"><option value="">All faces</option></select></label>
-      <label><span>Sort</span><select id="${ids.sort}"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
-      <label class="library-check"><input id="${ids.alerted}" type="checkbox" /><span>Alerted only</span></label>
+      <label${controls.sort ? '' : ' hidden'}><span>Sort</span><select id="${ids.sort}"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+      <label class="library-check"><input id="${ids.alerted}" type="checkbox" /><span>Alert Only</span></label>
     </div>
     <div class="library-filter-summary">
       <span class="library-result-count" data-library-count aria-live="polite"></span>
@@ -332,7 +355,7 @@ function createLibraryFilters(options) {
     if (state.camera) chips.push({ key: 'camera', text: `Camera: ${cameraText(state.camera)}` });
     if (state.label) chips.push({ key: 'label', text: `Label: ${optionText(els.label, state.label) || titleCase(state.label)}` });
     if (state.face) chips.push({ key: 'face', text: `Face: ${faceText(state.face)}` });
-    if (state.alerted) chips.push({ key: 'alerted', text: 'Alerted only' });
+    if (state.alerted) chips.push({ key: 'alerted', text: 'Alert Only' });
     if (state.sort === 'oldest') chips.push({ key: 'sort', text: 'Oldest first' });
     return chips;
   }
@@ -349,7 +372,7 @@ function createLibraryFilters(options) {
       button.classList.toggle('active', active);
       button.setAttribute('aria-pressed', String(active));
     });
-    els.custom.hidden = state.range !== 'custom';
+    els.custom.hidden = !controls.range || state.range !== 'custom';
     els.dateFrom.value = state.dateFrom;
     els.dateTo.value = state.dateTo;
     if (els.timeFrom) setTimeSelectValue(els.timeFrom, state.timeFrom || LIBRARY_TIME_FROM_DEFAULT);
@@ -374,12 +397,12 @@ function createLibraryFilters(options) {
   function commit(reason) {
     syncControls();
     try {
-      const search = librarySearchFromState(state, window.location.search);
+      const search = librarySearchFromState(state, window.location.search, controls);
       if (search !== window.location.search) {
         history.replaceState(history.state, '', `${window.location.pathname}${search}${window.location.hash || ''}`);
       }
     } catch (_err) { /* history unavailable (sandboxed frame) - URL sync is a convenience */ }
-    if (reason === 'range') loadFacets();
+    if (reason === 'range' && facetsFromApi) loadFacets();
     onChange(controller.query(), reason);
   }
 
@@ -554,6 +577,12 @@ function createLibraryFilters(options) {
       syncControls();
     },
     reloadFacets: loadFacets,
+    // For facets: 'manual' pages - { labels: [{value, count, ai}],
+    // faces: { people: [{value, name, count}], unknown } }.
+    setFacets(next) {
+      facets = next || { labels: [], faces: { people: [], unknown: 0 } };
+      renderFacetOptions();
+    },
     ready: null,
   };
 
@@ -562,6 +591,9 @@ function createLibraryFilters(options) {
   try { savedOpen = localStorage.getItem(LIBRARY_FILTER_PANEL_KEY); } catch (_err) { /* storage disabled - keep default */ }
   setPanelOpen(savedOpen === '1' || panelFilterCount() > 0, false);
   syncControls();
-  controller.ready = Promise.all([loadCameras(), loadFacets()]);
+  controller.ready = Promise.all([
+    controls.camera ? loadCameras() : Promise.resolve(),
+    facetsFromApi ? loadFacets() : Promise.resolve(renderFacetOptions()),
+  ]);
   return controller;
 }

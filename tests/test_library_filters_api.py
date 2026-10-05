@@ -226,3 +226,28 @@ def test_api_forwards_filters_and_serves_facets(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_alerted_recording_ids_follow_the_alerted_only_rule(tmp_path):
+    """The Timeline's Alert Only filter reads a per-clip flag built from the
+    same rule as /api/recordings?alerted_only: an alert on the clip or on its
+    triggering event."""
+    from app.database import EventDatabase
+
+    db = EventDatabase(str(tmp_path / 'ev.sqlite3'))
+    ids = _seed(db)
+
+    def add_recording(event_id, name):
+        return db.add_recording(
+            event_id=event_id, camera_id='front', started_at='2026-06-01T08:00:00+00:00',
+            ended_at='2026-06-01T08:00:10+00:00', duration_seconds=10, file_path=str(tmp_path / f'{name}.mp4'),
+            thumbnail_path=None, source='rtsp', created_at='2026-06-01T08:00:00+00:00', trigger_type='object',
+        )
+
+    via_event = add_recording(ids['person_front'], 'a')
+    via_clip = add_recording(None, 'b')
+    quiet = add_recording(ids['car_back'], 'c')
+    db.add_alert('2026-06-01T08:00:00+00:00', 'rule', ids['person_front'], 'person', 0.9, 'm')
+    db.add_alert('2026-06-01T08:00:00+00:00', 'rule', ids['motion_front'], 'motion', 0.9, 'm', recording_id=via_clip)
+    assert db.alerted_recording_ids([via_event, via_clip, quiet]) == {via_event, via_clip}
+    assert db.alerted_recording_ids([]) == set()

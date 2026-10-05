@@ -72,7 +72,7 @@
         <div class="settings-section-icon" aria-hidden="true">🎚️</div>
         <div>
           <h2>Timeline Controls</h2>
-          <p class="settings-section-subtitle">Pick a camera and day, narrow the time window, then load the clips.</p>
+          <p class="settings-section-subtitle">Pick a camera and day, narrow the time window, then filter the clips by keyword, type, label, face or alerts.</p>
         </div>
         <div class="button-row timeline-controls-actions">
           <button id="timelineNowBtn" class="secondary" type="button" title="Jump to today from 00:00 to the current time">
@@ -90,9 +90,6 @@
           <span>Camera <span class="info-tip" data-tip="All timeline data is scoped to the selected camera. Default: first camera" title="All timeline data is scoped to the selected camera. Default: first camera" tabindex="0" aria-label="Help: All timeline data is scoped to the selected camera. Default: first camera"></span></span>
           <select id="timelineCameraSelect" aria-label="Select camera"></select></label>
         <label>
-          <span>Filter <span class="info-tip" data-tip="Limit clips to a specific trigger or detected object. Default: all recordings" title="Limit clips to a specific trigger or detected object. Default: all recordings" tabindex="0" aria-label="Help: Limit clips to a specific trigger or detected object. Default: all recordings"></span></span>
-          <select id="timelineFilterSelect" aria-label="Filter by trigger type"></select></label>
-        <label>
           <span>Day <span class="info-tip" data-tip="Pick the date to visualise. Default: today" title="Pick the date to visualise. Default: today" tabindex="0" aria-label="Help: Pick the date to visualise. Default: today"></span></span>
           <input id="timelineDate" type="date" aria-label="Timeline day" /></label>
         <label>
@@ -102,6 +99,9 @@
           <span>To <span class="info-tip" data-tip="Latest time of day to include (5-minute steps). Default: 23:55" title="Latest time of day to include (5-minute steps). Default: 23:55" tabindex="0" aria-label="Help: Latest time of day to include (5-minute steps). Default: 23:55"></span></span>
           <span id="timelineToTimeMount" aria-label="End time" data-time-role="to"></span></label>
       </form>
+      <!-- Search, type, label, face and alerted-only: the filter bar shared
+           with Events, Recordings and Snapshots (web/library_filters.js). -->
+      <div id="timelineFilters"></div>
     </section>
 
     <!-- Inline clip player (shown when a recording segment is clicked) -->
@@ -233,6 +233,7 @@
 
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
+  <script src="/static/library_filters.js"></script>
   <script src="/static/overlay.js"></script>
   <script src="/static/clip_timeline.js"></script>
   <script src="/static/timeline.js"></script>

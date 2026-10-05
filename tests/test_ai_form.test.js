@@ -9,7 +9,6 @@ test('AI settings submits an empty API key to clear stored credentials', () => {
     model: { value: 'gemma3:4b' },
     api_key: { value: '' },
     timeout_seconds: { value: '20' },
-    focus_crop: { value: 'true' },
     describe_events: { value: 'off' },
   };
   const form = { elements: fields, addEventListener() {}, querySelectorAll: () => [] };
@@ -23,5 +22,5 @@ test('AI settings submits an empty API key to clear stored credentials', () => {
   assert.equal(payload.api_key, '');
   assert.equal(payload.model, 'gemma3:4b');
   assert.equal(payload.timeout_seconds, 20);
-  assert.equal(payload.focus_crop, true);
+  assert.equal('focus_crop' in payload, false, 'focus_crop left the form; the stored value must not be overwritten');
 });
