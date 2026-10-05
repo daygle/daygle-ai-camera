@@ -7396,7 +7396,9 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
 }
 .library-custom-range { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
 .library-custom-range[hidden],
-.library-filter-panel[hidden] { display: none; }
+.library-filter-panel[hidden],
+.library-segment[hidden],
+.library-filter-panel label[hidden] { display: none; }
 .library-custom-range label,
 .library-filter-panel label {
   display: grid;

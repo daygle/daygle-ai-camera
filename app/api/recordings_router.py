@@ -208,6 +208,11 @@ def recordings_timeline(
         )
         if segment is not None
     ]
+    # The timeline filters the loaded day in the browser; flag the clips that
+    # fired an alert so its Alerted only filter needs no extra request.
+    alerted_ids = db.alerted_recording_ids([int(segment['id']) for segment in segments])
+    for segment in segments:
+        segment['alerted'] = int(segment['id']) in alerted_ids
     rec_config = effective_recording_config()
     return {
         'camera': selected_camera,

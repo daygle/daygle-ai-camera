@@ -406,6 +406,23 @@ class RecordingsMixin:
             ).fetchall()
             return self._assemble_recordings(db, rows)
 
+    def alerted_recording_ids(self, recording_ids: list[int]) -> set[int]:
+        """Recordings that fired an alert, by the same rule as the list's
+        ``alerted_only`` filter: an alert on the clip itself or on its
+        triggering event."""
+        alerted: set[int] = set()
+        with self.connect() as db:
+            for batch in _batched([int(recording_id) for recording_id in recording_ids]):
+                placeholders = ','.join('?' * len(batch))
+                rows = db.execute(
+                    f'''SELECT r.id FROM recordings r WHERE r.id IN ({placeholders}) AND EXISTS (
+                            SELECT 1 FROM alert_history ah WHERE ah.recording_id = r.id
+                            OR (r.event_id IS NOT NULL AND ah.event_id = r.event_id))''',
+                    batch,
+                ).fetchall()
+                alerted.update(int(row['id']) for row in rows)
+        return alerted
+
     def get_recording(self, recording_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute("SELECT * FROM recordings WHERE id = ?", (recording_id,)).fetchone()

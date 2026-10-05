@@ -3,7 +3,8 @@ const els = {
   timelineDate: document.getElementById('timelineDate'),
   fromTime: null, // populated by renderTimelineTimeSelects() below
   toTime: null,   // populated by renderTimelineTimeSelects() below
-  filterSelect: document.getElementById('timelineFilterSelect'),
+  // Mount for the filter bar shared with /events, /recordings and /snapshots.
+  filterMount: document.getElementById('timelineFilters'),
   timelineLoadBtn: document.getElementById('timelineLoadBtn'),
   // The timeline visualisation now renders into four parallel cards
   // (Objects + Motion + Sounds + Continuous). Their per-card DOM refs live on TIMELINE_CARDS
@@ -438,27 +439,112 @@ function recordingFilterTokens(recording) {
   return tokens;
 }
 
-function filterDisplayLabel(value) {
-  if (value === '__sound__') return 'Sound';
-  if (value === '__object__') return 'Object';
-  if (value === '__continuous__') return 'Continuous';
-  return titleCase(value || '');
+// ── Filters (shared filter bar) ──────────────────────────────────────────
+// The Timeline loads one camera's whole day, so the shared bar
+// (web/library_filters.js) filters that loaded day here in the browser. The
+// bar's own time range, camera and sort are switched off: the Timeline's
+// camera, day and From/To pickers stay in charge of the window.
+let filters = null;
+
+function timelineQuery() {
+  return filters ? filters.query() : libraryDefaultQuery();
 }
 
-function matchesRecordingFilter(recording, filterValue) {
-  const normalized = String(filterValue || '').trim().toLowerCase();
-  if (!normalized) return true;
-  if (normalized === '__sound__') return isSoundRecording(recording);
-  if (normalized === '__continuous__') return isContinuousOnlyRecording(recording);
-  if (normalized === '__object__') return !isSoundRecording(recording) && !isMotionOnlyRecording(recording) && !isContinuousOnlyRecording(recording);
-  if (normalized === 'motion') {
-    // Tightened to motion-only recordings now that motion is a real
-    // category on its own. The previous "trigger type != placeholder"
-    //    heuristic also matched object recordings with a non-continuous
-    //    trigger, which made the dropdown a worse label than All.
-    return !isSoundRecording(recording) && isMotionOnlyRecording(recording);
+function timelineFiltersActive(query = timelineQuery()) {
+  return Boolean(query.q || query.type !== 'all' || query.label || query.face || query.alerted_only);
+}
+
+function recordingKind(recording) {
+  if (isSoundRecording(recording)) return 'sound';
+  if (isMotionOnlyRecording(recording)) return 'motion';
+  if (isContinuousOnlyRecording(recording)) return 'continuous';
+  return 'object';
+}
+
+// Everything a keyword can match on a clip, mirroring the server-side search
+// on the list pages: camera, trigger, detection/AI labels, zones, and the
+// linked events' camera name, sound class, AI write-up and tags, and faces.
+function recordingSearchText(recording) {
+  const parts = [recording.camera_id, cameraLabel(recording), recording.trigger_label, ...(recording.labels || []), ...(recording.ai_labels || [])];
+  (recording.detections || []).forEach((d) => parts.push(d?.label, d?.zone_name));
+  [recording.event, ...(recording.events || [])].forEach((event) => {
+    const meta = event?.metadata || {};
+    parts.push(meta.camera_name, meta.label, meta.class_label, meta.ai_description?.text, ...(meta.ai_description?.tags || []));
+    (meta.face_identities?.people || []).forEach((person) => parts.push(person?.name));
+    (event?.detections || []).forEach((d) => parts.push(d?.label, d?.zone_name));
+  });
+  return parts.filter(Boolean).join(' ').toLowerCase();
+}
+
+function recordingHasLabel(recording, label) {
+  if (label === 'motion') return !isSoundRecording(recording) && isMotionOnlyRecording(recording);
+  if (recordingFilterTokens(recording).has(label)) return true;
+  return [...(recording.labels || []), ...(recording.ai_labels || [])]
+    .some((value) => String(value || '').trim().toLowerCase() === label);
+}
+
+function matchesTimelineFilters(recording, query) {
+  if (query.type && query.type !== 'all' && recordingKind(recording) !== query.type) return false;
+  if (query.label && !recordingHasLabel(recording, query.label)) return false;
+  if (query.face && !matchesFaceFilter(collectRecordingFaceIdentities(recording), query.face)) return false;
+  if (query.alerted_only && !recording.alerted) return false;
+  if (query.q) {
+    // Every word must match, as on the list pages.
+    const text = recordingSearchText(recording);
+    if (!query.q.toLowerCase().split(/\s+/).filter(Boolean).every((word) => text.includes(word))) return false;
   }
-  return recordingFilterTokens(recording).has(normalized);
+  return true;
+}
+
+// Label and Face options for the loaded day (the list pages ask
+// /api/library/facets; the Timeline already holds every clip of the day).
+function timelineFacets(recordings) {
+  const labels = new Map();
+  const people = new Map();
+  let unknown = 0;
+  recordings.forEach((recording) => {
+    const detected = new Set(recordingDetectionLabels(recording).concat(recording.labels || [])
+      .map((label) => String(label || '').trim().toLowerCase())
+      .filter((label) => label && !GENERIC_TRIGGER_LABELS.has(label)));
+    detected.forEach((label) => {
+      const entry = labels.get(label) || { value: label, count: 0, ai: false };
+      entry.count += 1;
+      entry.ai = false;
+      labels.set(label, entry);
+    });
+    (recording.ai_labels || []).forEach((tag) => {
+      const label = String(tag || '').trim().toLowerCase();
+      if (!label || detected.has(label)) return;
+      const entry = labels.get(label) || { value: label, count: 0, ai: true };
+      entry.count += 1;
+      labels.set(label, entry);
+    });
+    const faces = collectRecordingFaceIdentities(recording);
+    if (faces.unknown > 0) unknown += 1;
+    faces.people.forEach((person, key) => {
+      const entry = people.get(key) || { value: key, name: person.name, count: 0 };
+      entry.count += 1;
+      people.set(key, entry);
+    });
+  });
+  return {
+    labels: Array.from(labels.values()),
+    faces: { people: Array.from(people.values()).sort((a, b) => a.name.localeCompare(b.name)), unknown },
+  };
+}
+
+// Old deep links used ?filter=<type or label>; map them onto the bar's
+// ?type= / ?label= before it reads the URL.
+function migrateLegacyFilterParam() {
+  const params = new URLSearchParams(window.location.search);
+  const legacy = String(params.get('filter') || '').trim().toLowerCase();
+  if (!legacy) return;
+  params.delete('filter');
+  const types = { __sound__: 'sound', __object__: 'object', __continuous__: 'continuous', motion: 'motion' };
+  if (types[legacy]) params.set('type', types[legacy]);
+  else params.set('label', legacy);
+  const query = params.toString();
+  window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
 }
 
 // Kept page-local (not hoisted to utils.js): app.js and yamnet-tflite.js
@@ -525,9 +611,11 @@ function timelineParams(overrides = {}) {
 }
 
 function replaceUrl(recordingId = state.activeRecordingId) {
-  const params = new URLSearchParams();
+  // Start from the current query so the filter bar's own parameters (q, type,
+  // label, face, alerted) survive; only the Timeline's keys are rewritten.
+  const params = new URLSearchParams(window.location.search);
+  ['camera_id', 'day', 'from_time', 'to_time', 'filter', 'recording_id'].forEach((key) => params.delete(key));
   const { cameraId, day } = timelineParams();
-  const filter = els.filterSelect.value || '';
   const fromTime = timeSelectValue(els.fromTime) || '';
   const toTime = timeSelectValue(els.toTime) || '';
   if (cameraId) params.set('camera_id', cameraId);
@@ -537,7 +625,6 @@ function replaceUrl(recordingId = state.activeRecordingId) {
   // 23:55 end-of-day sentinel - treat them as "all day" via the constant).
   if (fromTime && fromTime !== TIMELINE_FILTER_TIME_FROM_DEFAULT) params.set('from_time', fromTime);
   if (toTime && toTime !== TIMELINE_FILTER_TIME_TO_DEFAULT) params.set('to_time', toTime);
-  if (filter) params.set('filter', filter);
   if (recordingId) params.set('recording_id', String(recordingId));
   const query = params.toString();
   window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
@@ -552,61 +639,12 @@ function populateControls(payload) {
   els.timelineDate.value = selectedDay;
 }
 
-function populateFilterOptions(recordings) {
-  const currentFilter = els.filterSelect.value || new URLSearchParams(window.location.search).get('filter') || '';
-  const counts = {};
-  recordings.forEach((recording) => {
-    const labels = new Set([recordingTypeLabel(recording).toLowerCase()]);
-    recordingDetectionLabels(recording).forEach((label) => labels.add(label));
-    labels.forEach((label) => { counts[label] = (counts[label] || 0) + 1; });
-  });
-
-  const soundCount = recordings.filter(isSoundRecording).length;
-  const motionCount = recordings.filter((recording) => !isSoundRecording(recording) && isMotionOnlyRecording(recording)).length;
-  const continuousCount = recordings.filter((recording) => isContinuousOnlyRecording(recording)).length;
-  const objectCount = recordings.length - soundCount - motionCount - continuousCount;
-  const options = [{ value: '', label: `All recordings${recordings.length ? ` (${recordings.length})` : ''}` }];
-  if (soundCount > 0) options.push({ value: '__sound__', label: `Sound (${soundCount})` });
-  if (motionCount > 0) options.push({ value: 'motion', label: `Motion (${motionCount})` });
-  if (objectCount > 0) options.push({ value: '__object__', label: `Object (${objectCount})` });
-  if (continuousCount > 0) options.push({ value: '__continuous__', label: `Continuous (${continuousCount})` });
-  // '__continuous__' and its plain 'continuous' type token are both pre-seeded
-  // so the loop below doesn't add a duplicate "Continuous" option (mirrors how
-  // 'motion' is suppressed in favour of the reserved Motion option above).
-  const seen = new Set(['', '__sound__', '__object__', 'motion', '__continuous__', 'continuous']);
-  const addOption = (value) => {
-    const normalized = String(value || '').trim().toLowerCase();
-    if (!normalized || seen.has(normalized)) return;
-    seen.add(normalized);
-    const count = counts[normalized];
-    options.push({ value: normalized, label: count ? `${titleCase(normalized)} (${count})` : titleCase(normalized) });
-  };
-
-  recordings.forEach((recording) => {
-    addOption(recordingTypeLabel(recording));
-    recordingDetectionLabels(recording).forEach(addOption);
-  });
-  if (recordings.length) addOption('motion');
-
-  const ordered = [options[0], ...options.slice(1).sort((left, right) => {
-    if (left.value === 'motion') return -1;
-    if (right.value === 'motion') return 1;
-    return left.label.localeCompare(right.label);
-  })];
-  els.filterSelect.innerHTML = ordered.map((option) => (
-    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
-  )).join('');
-
-  const availableValues = new Set(ordered.map((option) => option.value));
-  els.filterSelect.value = availableValues.has(currentFilter) ? currentFilter : '';
-}
-
 function filteredRecordings() {
   const recordings = state.payload?.recordings || [];
   const { fromSeconds, toSeconds } = getTimeRangeConfig();
-  const filterValue = els.filterSelect.value;
+  const query = timelineQuery();
   return recordings.filter((recording) => {
-    if (!matchesRecordingFilter(recording, filterValue)) return false;
+    if (!matchesTimelineFilters(recording, query)) return false;
     const start = Number(recording.timeline_start_seconds || 0);
     const end = Number(recording.timeline_end_seconds || start + 1);
     return start < toSeconds && end > fromSeconds;
@@ -643,10 +681,10 @@ function renderSummary(payload, totalRecordingCount) {
     els.statClips.textContent = String(recordings.length);
     if (els.statClipsSub) {
       if (totalRecordingCount > recordings.length) {
-        els.statClipsSub.textContent = `${recordings.length} of ${totalRecordingCount} clips match the filter`;
+        els.statClipsSub.textContent = `${recordings.length} of ${totalRecordingCount} clips match the filters`;
       } else {
-        els.statClipsSub.textContent = els.filterSelect.value
-          ? `Matching “${filterDisplayLabel(els.filterSelect.value)}”`
+        els.statClipsSub.textContent = timelineFiltersActive()
+          ? 'Every clip matches the filters'
           : 'Matching the current filter';
       }
     }
@@ -951,13 +989,13 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
   // blurb that mirrors the global stats grid's clip count but for this
   // kind only, so an object-heavy day and a sound-heavy day each speak
   // for themselves regardless of how the other card is populated.
-  const isFiltered = !!els.filterSelect.value;
+  const isFiltered = timelineFiltersActive();
   const isWindowed = fromSeconds > 0 || toSeconds < DAY_SECONDS;
   const chipKind = isFiltered || isWindowed ? 'filtered' : 'ready';
   const chipLabel = isFiltered ? 'Filtered' : isWindowed ? 'Time Range' : 'Ready';
   setTimelineStatusChip(card, { kind: chipKind, label: chipLabel });
   if (card.status) {
-    const filterPart = isFiltered ? ` matching ${filterDisplayLabel(els.filterSelect.value)}` : '';
+    const filterPart = isFiltered ? ' matching the filters' : '';
     const windowPart = isWindowed ? ` from ${formatUserClock(fromSeconds)} to ${formatUserClock(toSeconds)}` : '';
     card.status.textContent = `${cardRecordings.length} ${kindWord} clip${cardRecordings.length === 1 ? '' : 's'}${filterPart}${windowPart} for ${escapeHtml(cameraName)} on ${escapeHtml(formattedDay)}.`;
   }
@@ -1100,6 +1138,7 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
   const recordings = filteredRecordings();
   const viewPayload = { ...(state.payload || {}), recordings };
   renderSummary(viewPayload, allRecordings.length);
+  filters?.setCount(`${recordings.length} of ${allRecordings.length} clip${allRecordings.length === 1 ? '' : 's'}`);
 
   // Partition the filtered set so each card sees only its own slice.
   // Sound clips route to Sounds, motion-only clips route to Motion, and
@@ -1173,7 +1212,7 @@ async function loadTimeline({ preserveSelection = true } = {}) {
   if (session !== timelineLoadSession) return;
   state.payload = payload;
   populateControls(payload);
-  populateFilterOptions(payload.recordings || []);
+  filters?.setFacets(timelineFacets(payload.recordings || []));
   await renderFilteredTimeline({ preserveSelection });
 }
 
@@ -1246,14 +1285,6 @@ els.cameraSelect.addEventListener('change', () => {
 
 els.timelineDate.addEventListener('change', () => {
   loadTimeline({ preserveSelection: false }).catch((error) => {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    reportTimelineError(error.message);
-  });
-});
-
-els.filterSelect.addEventListener('change', () => {
-  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
     reportTimelineError(error.message);
@@ -1396,15 +1427,35 @@ loadAuth().then(async () => {
   const params = new URLSearchParams(window.location.search);
   const queryDay = params.get('day');
   const queryCameraId = params.get('camera_id');
-  const queryFilter = params.get('filter');
   const queryFromTime = params.get('from_time');
   const queryToTime = params.get('to_time');
   els.timelineDate.value = queryDay || new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   if (queryCameraId) els.cameraSelect.innerHTML = `<option value="${escapeHtml(queryCameraId)}" selected>${escapeHtml(queryCameraId)}</option>`;
-  if (queryFilter) els.filterSelect.innerHTML = `<option value="${escapeHtml(queryFilter)}" selected>${escapeHtml(titleCase(queryFilter))}</option>`;
   if (queryFromTime) setTimeSelectValue(els.fromTime, queryFromTime);
   if (queryToTime) setTimeSelectValue(els.toTime, queryToTime);
   TIMELINE_CARDS.forEach((card) => setTimelineStatusChip(card, { kind: 'idle', label: 'Loading' }));
+  if (els.filterMount) {
+    migrateLegacyFilterParam();
+    filters = createLibraryFilters({
+      mount: els.filterMount,
+      kind: 'timeline',
+      noun: 'clips',
+      types: ['all', 'object', 'motion', 'sound', 'continuous'],
+      extraLabels: [{ value: 'motion', label: 'Motion' }],
+      showRange: false,
+      showCamera: false,
+      showSort: false,
+      facets: 'manual',
+      searchPlaceholder: 'Search this day: person, driveway, red car, a face name…',
+      onChange: () => {
+        renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
+          // Skip UI updates if api() triggered a 401 redirect
+          if (window.daygleAuth?.redirecting) return;
+          reportTimelineError(error.message);
+        });
+      },
+    });
+  }
   await loadConfiguredLabels();
   await loadTimeline({ preserveSelection: true });
 }).catch((error) => {
