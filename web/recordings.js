@@ -1,16 +1,8 @@
 const els = {
   recordings: document.getElementById('recordings'),
-  cameraFilter: document.getElementById('cameraFilter'),
-  recordingDateFrom: document.getElementById('recordingDateFrom'),
-  recordingTimeFrom: null, // populated by renderFilterTimeSelects() below
-  recordingDateTo: document.getElementById('recordingDateTo'),
-  recordingTimeTo: null,   // populated by renderFilterTimeSelects() below
-  recordingSort: document.getElementById('recordingSort'),
-  recordingSearchBtn: document.getElementById('recordingSearchBtn'),
-  recordingClearBtn: document.getElementById('recordingClearBtn'),
-  filterForm: document.getElementById('recordingsFilterForm'),
-  filterToggle: document.getElementById('recordingsFilterToggle'),
-  filterBadge: document.getElementById('recordingsFilterBadge'),
+  // Mount for the filter bar shared with /events and /snapshots
+  // (web/library_filters.js).
+  filterMount: document.getElementById('recordingFilters'),
   clipPlayer: document.getElementById('clipPlayer'),
   clipPlayerStatus: document.getElementById('clipPlayerStatus'),
   recordingDetails: document.getElementById('recordingDetails'),
@@ -26,17 +18,18 @@ const els = {
   // Download button and subtitle live in the inline player card.
   videoModalDownload: document.getElementById('videoModalDownload'),
   videoModalSubtitle: document.getElementById('videoModalSubtitle'),
-  listStatus: document.getElementById('listStatus'),
   statTotalClips: document.getElementById('statTotalClips'),
   statTotalDuration: document.getElementById('statTotalDuration'),
   statCameraCount: document.getElementById('statCameraCount'),
-  statFilterStatus: document.getElementById('statFilterStatus'),
-  statFilterHint: document.getElementById('statFilterHint'),
-  // Label filter select
-  labelFilter: document.getElementById('labelFilter'),
-  faceFilter: document.getElementById('faceFilter'),
-  faceField: document.getElementById('faceField'),
 };
+
+// The shared filter bar; created during bootstrap (see the end of the file).
+let filters = null;
+
+// Errors from a list load land on the filter bar's note line.
+function showListError(message) {
+  if (filters) filters.setNote(message);
+}
 
 // CSRF token and current user live on window.daygleAuth set via
 // setApiAuth() (loaded from web/utils.js). Date/time display preferences are
@@ -205,154 +198,6 @@ function formatDurationShort(totalSeconds) {
   return remMinutes ? `${hours}h ${remMinutes}m` : `${hours}h`;
 }
 
-function updateFilterStat(label, hint) {
-  if (!els.statFilterStatus || !els.statFilterHint) return;
-  els.statFilterStatus.textContent = label;
-  els.statFilterHint.textContent = hint;
-}
-
-// ── Collapsible filter panel ──────────────────────────────────────────────
-// The filter form is eight controls tall and most visits never touch it, so
-// it starts collapsed behind the toolbar's Filters button. The choice is
-// remembered, so someone who filters every visit keeps it open and everyone
-// else keeps a short page.
-function setFilterPanelOpen(open, { persist = true } = {}) {
-  if (!els.filterForm || !els.filterToggle) return;
-  els.filterForm.hidden = !open;
-  els.filterToggle.setAttribute('aria-expanded', String(open));
-  if (!persist) return;
-  // Storage can throw (privacy modes, sandboxed frames) - same guarded
-  // convention as every other localStorage read on this page.
-  try { localStorage.setItem(RECORDINGS_FILTER_PANEL_KEY, open ? '1' : '0'); } catch (_err) { /* storage disabled - keep default */ }
-}
-
-// Surface how many filters are live on the collapsed button. The stat card
-// spells them out in words, so this is a glanceable count rather than the
-// only signal - a filtered list must never look unfiltered.
-function updateFilterPanelBadge(activeCount) {
-  const count = Number(activeCount) || 0;
-  if (els.filterBadge) {
-    els.filterBadge.textContent = String(count);
-    els.filterBadge.hidden = !count;
-  }
-  if (!els.filterToggle) return;
-  els.filterToggle.classList.toggle('is-filtered', count > 0);
-  // Keeps the visible word "Filters" as the start of the accessible name.
-  els.filterToggle.setAttribute('aria-label', count ? `Filters, ${count} active` : 'Filters');
-}
-
-function parseFilterTimeParts(timeString, fallbackHour, fallbackMinute, fallbackSecond = 0, fallbackMillisecond = 0) {
-  const match = String(timeString || '').match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) {
-    return {
-      hour: fallbackHour,
-      minute: fallbackMinute,
-      second: fallbackSecond,
-      millisecond: fallbackMillisecond,
-    };
-  }
-  const hour = Math.min(23, Math.max(0, Number.parseInt(match[1], 10) || 0));
-  const minute = Math.min(59, Math.max(0, Number.parseInt(match[2], 10) || 0));
-  return { hour, minute, second: fallbackSecond, millisecond: fallbackMillisecond };
-}
-
-function formatIsoDateForFilter(dateString, endOfDay = false, timeString = '') {
-  if (!dateString) return '';
-  // The browser returns YYYY-MM-DD without a timezone. Anchor from/to bounds
-  // in local time so the filter feels intuitive. When a time is provided, it
-  // refines the selected date into an exact local datetime boundary.
-  const [year, month, day] = dateString.split('-').map((part) => Number.parseInt(part, 10));
-  if (!year || !month || !day) return '';
-  const fallback = endOfDay
-    ? parseFilterTimeParts(timeString, 23, 59, 59, 999)
-    : parseFilterTimeParts(timeString, 0, 0);
-  const date = new Date(year, month - 1, day, fallback.hour, fallback.minute, fallback.second, fallback.millisecond);
-  return date.toISOString();
-}
-
-// ── Filter state & pickers ────────────────────────────────────────────────
-// Mount spans in the filter form render through the shared `renderTimeSelect`
-// helper (web/utils.js) so the From / To time pickers follow the user's
-// Profile > Time Format choice (12h with AM/PM vs. 24h), matching the same
-// UX on the /timeline page. Re-rendered on init, on Reset Filters, and
-// whenever the cross-tab prefs hook fires so a profile change instantly
-// swaps the picker style without a manual refresh.
-const FILTER_TIME_FROM_DEFAULT = '00:00';
-// Minute resolution is 5 minutes (shared with the timeline + /sounds and
-// /zones rule editors), so 23:55 is the latest valid value that still
-// pins against the end of the day.
-const FILTER_TIME_TO_DEFAULT = '23:55';
-
-function renderFilterTimeSelect(mountId, defaultValue) {
-  const mount = document.getElementById(mountId);
-  if (!mount) return null;
-  const role = mount.dataset.timeRole || '';
-  mount.innerHTML = renderTimeSelect(defaultValue, 'data-filter-time-role', role);
-  return mount.querySelector('.time-select-wrap');
-}
-
-function renderFilterTimeSelects() {
-  els.recordingTimeFrom = renderFilterTimeSelect('recordingTimeFromMount', FILTER_TIME_FROM_DEFAULT);
-  els.recordingTimeTo = renderFilterTimeSelect('recordingTimeToMount', FILTER_TIME_TO_DEFAULT);
-}
-
-renderFilterTimeSelects();
-
-// The page opens scoped to "today" so a large library doesn't stall the
-// first paint: default both date inputs to the local calendar day and let
-// loadRecordings() translate them into started_after / started_before ISO
-// bounds (same local-midnight semantics as the timeline page's "today").
-function localTodayDateString() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-}
-
-function applyDefaultDateFilters() {
-  const today = localTodayDateString();
-  if (els.recordingDateFrom) els.recordingDateFrom.value = today;
-  if (els.recordingDateTo) els.recordingDateTo.value = today;
-}
-
-applyDefaultDateFilters();
-
-// ── Label filter state ────────────────────────────────────────────
-
-function currentFilterValues() {
-  return {
-    label: els.labelFilter?.value || '',
-    face: els.faceFilter?.value || '',
-    cameraId: els.cameraFilter?.value || '',
-    dateFrom: els.recordingDateFrom?.value || '',
-    // Read from the custom hour/minute (/AM/PM) selects so the filter value
-    // always matches what the user sees in the picker rather than the
-    // browser-native `<input type="time">` element which rendered in the
-    // viewer's locale (often 12-hour even when 24h is preferred).
-    timeFrom: timeSelectValue(els.recordingTimeFrom) || FILTER_TIME_FROM_DEFAULT,
-    dateTo: els.recordingDateTo?.value || '',
-    timeTo: timeSelectValue(els.recordingTimeTo) || FILTER_TIME_TO_DEFAULT,
-    sort: els.recordingSort?.value || 'newest',
-  };
-}
-
-function describeFilters(filters) {
-  const parts = [];
-  if (filters.label) {
-    const option = els.labelFilter?.querySelector(`option[value="${escapeHtml(filters.label)}"]`);
-    parts.push(`label “${option?.textContent || filters.label}”`);
-  }
-  if (filters.face) {
-    const faceOption = els.faceFilter?.querySelector(`option[value="${escapeHtml(filters.face)}"]`);
-    parts.push(`face “${faceOption?.textContent || filters.face}”`);
-  }
-  if (filters.cameraId) {
-    const cameraOption = Array.from(els.cameraFilter?.options || []).find((o) => o.value === filters.cameraId);
-    parts.push(`camera “${cameraOption?.textContent || filters.cameraId}”`);
-  }
-  if (filters.dateFrom) parts.push(`from ${formatUserDate(filters.dateFrom)} ${filters.timeFrom || FILTER_TIME_FROM_DEFAULT}`);
-  if (filters.dateTo) parts.push(`through ${formatUserDate(filters.dateTo)} ${filters.timeTo || FILTER_TIME_TO_DEFAULT}`);
-  return parts;
-}
-
 function renderStats(recordings) {
   if (els.statTotalClips) els.statTotalClips.textContent = String(recordings.length);
   if (els.statTotalDuration) {
@@ -367,10 +212,10 @@ function renderStats(recordings) {
 
 // ── Click-to-sort column headers ─────────────────────────────────────────
 // Headers re-order the currently loaded list client-side. `null` means the
-// server order from the Sort By select applies; clicking a column cycles
+// server order from the filter bar's Sort applies; clicking a column cycles
 // asc → desc → back to the server default. The sort survives filter changes
 // and the preparing-clip auto-refresh, and clears when the user explicitly
-// changes the Sort By select (server-side newest/oldest).
+// changes the bar's Sort (server-side newest/oldest).
 let recordingsSortState = null;
 let currentRecordings = [];
 
@@ -380,7 +225,7 @@ let currentRecordings = [];
 // (sentinel). currentRecordings holds only the pages loaded so far, so a
 // huge history is never fetched wholesale before the first paint.
 const RECORDINGS_PAGE_SIZE = 200;
-// A post-filtered view (motion-only / face) keeps drawing server pages until
+// A post-filtered view (motion-only / continuous) keeps drawing server pages until
 // it can show a batch, but never more than this per action so one click can't
 // quietly drain a sparse history.
 const RECORDINGS_MAX_PAGES_PER_LOAD = 10;
@@ -392,16 +237,32 @@ let recordingsMoreLoading = false;
 // True while the incremental renderer has FINISHED painting the current
 // table; a streamed page is only appended to a completed <tbody>.
 let recordingsRowsReady = false;
-// Client-side post-filters SQL can't express (motion-only, face identity),
-// applied to every streamed page by collectVisibleRecordings().
+// Client-side post-filters SQL can't express - the motion-only / continuous
+// classification and the Object type that excludes both - applied to every
+// streamed page by collectVisibleRecordings().
 let recordingsViewFilter = null;
 
 function recordingMatchesView(recording) {
   if (!recordingsViewFilter) return true;
   if (recordingsViewFilter.motionOnly && !isMotionOnlyRecording(recording)) return false;
-  if (recordingsViewFilter.face
-    && !matchesFaceFilter(collectRecordingFaceIdentities(recording), recordingsViewFilter.face)) return false;
+  if (recordingsViewFilter.continuousOnly
+    && (isSoundRecording(recording) || isMotionOnlyRecording(recording) || !isContinuousOnlyRecording(recording))) return false;
+  if (recordingsViewFilter.objectOnly
+    && (isMotionOnlyRecording(recording) || isContinuousOnlyRecording(recording))) return false;
   return true;
+}
+
+// The result count on the filter bar describes the LOADED rows and says when
+// the history has more, so a partly-streamed list never reads as complete.
+function updateRecordingCount() {
+  if (!filters) return;
+  const count = currentRecordings.length;
+  const more = Boolean(recordingsPager && !recordingsPager.done);
+  if (!count) {
+    filters.setCount(more ? 'More recordings available' : '0 recordings');
+    return;
+  }
+  filters.setCount(`${count} recording${count === 1 ? '' : 's'}${more ? ' loaded · more available' : ''}`);
 }
 
 // Stream server pages through the post-filters until `targetCount` visible
@@ -539,6 +400,7 @@ async function loadMoreRecordings() {
     if (session !== recordingsLoadSession) return;
     currentRecordings = currentRecordings.concat(fresh);
     renderStats(currentRecordings);
+    updateRecordingCount();
     appendRecordingRows(fresh);
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect
@@ -552,6 +414,7 @@ async function loadMoreRecordings() {
 function renderRecordings(recordings) {
   currentRecordings = recordings;
   renderStats(recordings);
+  updateRecordingCount();
   if (!recordings.length) {
     // Concatenation, not a template literal: the H2 XSS guard (see
     // tests/test_xss_static_guards.py) rejects any `innerHTML = `…${…}…``
@@ -1044,53 +907,47 @@ async function loadCameras() {
     const data = await api('/api/cameras');
     const cameras = data?.cameras || [];
     // Cache id -> friendly name for every camera so event-less recordings can
-    // resolve a display name (see recordingCameraName). Done before the
-    // cameraFilter early-return so the map is populated even on the playback
-    // page, which has no filter dropdown.
+    // resolve a display name (see recordingCameraName). The filter bar's
+    // Camera dropdown is filled by web/library_filters.js itself.
     for (const camera of cameras) {
       const id = String(camera.id || '').trim();
       if (id) cameraNamesById.set(id, camera.name || camera.id);
-    }
-    if (!cameras.length || !els.cameraFilter) return;
-    for (const camera of cameras) {
-      const option = document.createElement('option');
-      option.value = camera.id;
-      option.textContent = camera.name || camera.id;
-      els.cameraFilter.appendChild(option);
     }
   } catch (_error) {
     // Silent api() fallback (no UI mutation) - redirect guard skipped by design.
   }
 }
 
-async function loadRecordings(filters = {}) {
-  const resolved = typeof filters === 'string' || filters instanceof String
-    ? { label: String(filters), cameraId: '' }
-    : { ...currentFilterValues(), ...filters };
+// The /api/recordings query for the filter bar's state. Recordings are
+// filtered by their start time, so the bar's since/until become
+// started_after/started_before.
+function recordingsQueryParams(query) {
   const params = new URLSearchParams();
-  if (resolved.label) params.set('label', resolved.label);
-  if (resolved.cameraId) params.set('camera_id', resolved.cameraId);
-  const startedAfter = formatIsoDateForFilter(resolved.dateFrom, false, resolved.timeFrom);
-  if (startedAfter) params.set('started_after', startedAfter);
-  const startedBefore = formatIsoDateForFilter(resolved.dateTo, true, resolved.timeTo);
-  if (startedBefore) params.set('started_before', startedBefore);
-  if (resolved.sort) params.set('sort', resolved.sort);
-  if (resolved.label === 'motion') {
-    // Backend strips generic trigger words (motion/alert/human/object/none/off/
-    // continuous) from `recording.labels` so a server-side `label=motion`
-    // query returns nothing. Stream without a label filter and keep only
-    // motion-only recordings as pages arrive so the dropdown option works.
-    params.delete('label');
-  }
-  // Face identity is filtered on the client: it lives in the linked event
-  // metadata (recording.event / recording.events) that /api/recordings already
-  // returns, and the endpoint has no identity query param. This mirrors the
-  // motion special-case above -- post-filter each streamed page rather than
-  // widen the SQL. Both post-filters live in recordingsViewFilter, which
-  // collectVisibleRecordings applies to every page it streams.
+  if (query.label && query.label !== 'motion') params.set('label', query.label);
+  if (query.camera_id) params.set('camera_id', query.camera_id);
+  if (query.since) params.set('started_after', query.since);
+  if (query.until) params.set('started_before', query.until);
+  if (query.sort) params.set('sort', query.sort);
+  if (query.q) params.set('q', query.q);
+  if (query.face) params.set('face', query.face);
+  if (query.alerted_only) params.set('alerted_only', 'true');
+  if (query.type === 'sound') params.set('source_type', 'sound');
+  if (query.type === 'object') params.set('source_type', 'object');
+  return params;
+}
+
+async function loadRecordings() {
+  const query = filters ? filters.query() : libraryDefaultQuery();
+  const params = recordingsQueryParams(query);
+  // The backend strips generic trigger words (motion/alert/human/object/none/
+  // off/continuous) from `recording.labels`, so a server-side `label=motion`
+  // query returns nothing. The Motion label and the Motion / Continuous /
+  // Object type pills therefore stream without that filter and keep only the
+  // matching clips as pages arrive.
   recordingsViewFilter = {
-    motionOnly: resolved.label === 'motion',
-    face: resolved.face || '',
+    motionOnly: query.label === 'motion' || query.type === 'motion',
+    continuousOnly: query.type === 'continuous',
+    objectOnly: query.type === 'object',
   };
   recordingsLoadSession += 1;
   const session = recordingsLoadSession;
@@ -1109,15 +966,16 @@ async function loadRecordings(filters = {}) {
     throw error;
   }
   if (session !== recordingsLoadSession) return currentRecordings;
-  const activeFilters = describeFilters(resolved);
-  updateFilterPanelBadge(activeFilters.length);
-  if (activeFilters.length) {
-    updateFilterStat('Filtered', `Showing clips matching ${activeFilters.join(' and ')}.`);
-  } else {
-    updateFilterStat('All', 'Showing every clip');
-  }
+  filters?.setNote('');
   renderRecordings(recordings);
   return recordings;
+}
+
+function reloadRecordings() {
+  return loadRecordings().catch((error) => {
+    if (window.daygleAuth?.redirecting) return;
+    showListError(error.message);
+  });
 }
 
 // Player/overlay/timeline wiring only applies where the video element exists:
@@ -1202,187 +1060,6 @@ if (els.clipOverlayToggle) {
 }
 } // end if (els.clipPlayer)
 
-// Restore the saved open/closed choice. A visit that arrives already
-// filtered (?label=..., and friends) always shows the controls: the list
-// would otherwise be filtered with nothing on screen explaining why.
-(function initFilterPanel() {
-  if (!els.filterForm || !els.filterToggle) return;
-  const params = new URLSearchParams(window.location.search);
-  const deepLinked = Boolean(params.get('label') || params.get('camera_id') || params.get('face'));
-  let saved = null;
-  try { saved = localStorage.getItem(RECORDINGS_FILTER_PANEL_KEY); } catch (_err) { /* storage disabled - keep default */ }
-  setFilterPanelOpen(deepLinked || saved === '1', { persist: false });
-})();
-
-els.filterToggle?.addEventListener('click', () => {
-  const opening = Boolean(els.filterForm?.hidden);
-  setFilterPanelOpen(opening);
-  // Land the keyboard inside the panel it just revealed rather than leaving
-  // focus on the button that opened it.
-  if (opening) els.filterForm?.querySelector('select, input, button')?.focus();
-});
-
-els.cameraFilter?.addEventListener('change', () => {
-  loadRecordings().catch((error) => {
-    if (window.daygleAuth?.redirecting) return;
-    if (els.listStatus) els.listStatus.textContent = error.message;
-  });
-});
-els.labelFilter?.addEventListener('change', () => {
-  loadRecordings().catch((error) => {
-    if (window.daygleAuth?.redirecting) return;
-    if (els.listStatus) els.listStatus.textContent = error.message;
-  });
-});
-els.faceFilter?.addEventListener('change', () => {
-  loadRecordings().catch((error) => {
-    if (window.daygleAuth?.redirecting) return;
-    if (els.listStatus) els.listStatus.textContent = error.message;
-  });
-});
-els.filterForm?.addEventListener('submit', (event) => {
-  event.preventDefault();
-  loadRecordings().catch((error) => {
-    if (window.daygleAuth?.redirecting) return;
-    if (els.listStatus) els.listStatus.textContent = error.message;
-  });
-});
-els.recordingSort?.addEventListener('change', () => {
-  // The user picked an explicit server-side order (newest/oldest) - drop any
-  // active column sort so the select's order is what the table shows.
-  recordingsSortState = null;
-});
-els.recordingClearBtn?.addEventListener('click', () => {
-  if (els.labelFilter) els.labelFilter.value = '';
-  if (els.faceFilter) els.faceFilter.value = '';
-  if (els.cameraFilter) els.cameraFilter.value = '';
-  // Reset dates back to the page default (today), not an empty "all time"
-  // range, so the button restores the fast default view.
-  applyDefaultDateFilters();
-  if (els.recordingSort) els.recordingSort.value = 'newest';
-  recordingsSortState = null;
-  // Re-render the From/To time pickers back to their defaults. Going through
-  // renderFilterTimeSelects (rather than poking child selects directly) means
-  // Reset Filters also handles the 12h vs 24h AM/PM swap correctly.
-  renderFilterTimeSelects();
-  loadRecordings().catch((error) => {
-    if (window.daygleAuth?.redirecting) return;
-    if (els.listStatus) els.listStatus.textContent = error.message;
-  });
-});
-
-// ── Label filter options ────────────────────────────────────────────────
-
-async function populateLabelFilterOptionsFromApi() {
-  if (!els.labelFilter) return;
-  try {
-    // Build the label/face dropdowns from the most recent slice of the
-    // library instead of draining the whole history: fetching every clip just
-    // to populate a <select> would re-introduce the full-table fetch this page
-    // avoids everywhere else. 1000 recent clips cover the labels in active
-    // use; the option counts read as recent-sample counts.
-    const samplePager = createCursorPager('/api/recordings', 500);
-    const sample = [];
-    while (sample.length < 1000 && !samplePager.done) {
-      const page = await samplePager.loadPage();
-      sample.push(...page.items);
-      if (!page.items.length) break;
-    }
-    populateLabelFilterOptions(sample);
-    populateFaceFilterOptions(sample);
-  } catch (_error) {
-    // Silent api() fallback (no UI mutation) - redirect guard skipped by design.
-  }
-}
-
-// Build the Face filter from the identities present across all recordings:
-// one option per recognised person, plus "Any Face" / "Unknown" when present.
-// The field stays hidden on deployments that never ran face recognition, so it
-// adds no clutter there. Mirrors populateLabelFilterOptions' preserve-selection.
-function populateFaceFilterOptions(recordings) {
-  if (!els.faceFilter) return;
-  const previous = els.faceFilter.value || '';
-  const people = new Map(); // key -> {name, count}
-  let anyUnknown = 0;
-  let anyFace = 0;
-  recordings.forEach((recording) => {
-    const { people: recPeople, unknown } = collectRecordingFaceIdentities(recording);
-    if (recPeople.size || unknown > 0) anyFace += 1;
-    if (unknown > 0) anyUnknown += 1;
-    for (const [key, person] of recPeople) {
-      const existing = people.get(key);
-      if (existing) existing.count += 1;
-      else people.set(key, { name: person.name, count: 1 });
-    }
-  });
-  const hasFaces = people.size > 0 || anyUnknown > 0;
-  if (els.faceField) els.faceField.hidden = !hasFaces;
-  if (!hasFaces) {
-    els.faceFilter.innerHTML = '<option value="">All Faces</option>';
-    els.faceFilter.value = '';
-    return;
-  }
-  const options = [{ value: '', label: `All Faces${anyFace ? ` (${anyFace})` : ''}` }, { value: 'any', label: 'Any Face' }];
-  const peopleOptions = Array.from(people.entries())
-    .map(([key, person]) => ({ value: key, label: `${person.name} (${person.count})` }))
-    .sort((left, right) => left.label.localeCompare(right.label));
-  options.push(...peopleOptions);
-  if (anyUnknown > 0) options.push({ value: 'unknown', label: `Unknown (${anyUnknown})` });
-  const values = new Set(options.map((option) => option.value));
-  els.faceFilter.innerHTML = options.map((option) => (
-    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
-  )).join('');
-  els.faceFilter.value = values.has(previous) ? previous : '';
-}
-
-function populateLabelFilterOptions(recordings) {
-  if (!els.labelFilter) return;
-  const currentFilter = els.labelFilter.value || new URLSearchParams(window.location.search).get('label') || '';
-  const counts = {};
-  recordings.forEach((recording) => {
-    recordingDetectionLabels(recording).forEach((label) => { counts[label] = (counts[label] || 0) + 1; });
-  });
-
-  const options = [{ value: '', label: `All Labels${recordings.length ? ` (${recordings.length})` : ''}` }];
-  const seen = new Set(['']);
-  const addOption = (value) => {
-    const normalized = String(value || '').trim().toLowerCase();
-    if (!normalized || seen.has(normalized)) return;
-    seen.add(normalized);
-    const count = counts[normalized];
-    options.push({ value: normalized, label: count ? `${titleCase(normalized)} (${count})` : titleCase(normalized) });
-  };
-
-  recordings.forEach((recording) => {
-    recordingDetectionLabels(recording).forEach(addOption);
-  });
-  if (recordings.length) addOption('motion');
-  // AI tags filter through the same label query; mark them so they are not
-  // mistaken for detections.
-  const aiCounts = {};
-  recordings.forEach((recording) => {
-    (recording.ai_labels || []).forEach((tag) => { aiCounts[tag] = (aiCounts[tag] || 0) + 1; });
-  });
-  Object.keys(aiCounts).forEach((tag) => {
-    const normalized = String(tag || '').trim().toLowerCase();
-    if (!normalized || seen.has(normalized)) return;
-    seen.add(normalized);
-    options.push({ value: normalized, label: `${titleCase(normalized)} (AI tag, ${aiCounts[tag]})` });
-  });
-
-  const ordered = [options[0], ...options.slice(1).sort((left, right) => {
-    if (left.value === 'motion') return -1;
-    if (right.value === 'motion') return 1;
-    return left.label.localeCompare(right.label);
-  })];
-  els.labelFilter.innerHTML = ordered.map((option) => (
-    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
-  )).join('');
-
-  const availableValues = new Set(ordered.map((option) => option.value));
-  els.labelFilter.value = availableValues.has(currentFilter) ? currentFilter : '';
-}
-
 els.clipPlayerClose?.addEventListener('click', () => hideInlinePlayer());
 
 
@@ -1391,19 +1068,12 @@ document.addEventListener('keydown', (event) => {
 });
 
 // Re-render the recordings list (and any open modal's "Started" line) when
-// the user's date_format / time_format changes in another tab. The From/To
-// time pickers also need to swap between 24h and 12h+AM/PM, so they're
-// re-rendered here too - translation between formats is handled by
-// renderTimeSelect reading the current selection via selH/selM, so a
-// 14:30 selection in 24h mode becomes "2:30 PM" in 12h mode rather than
-// snapping back to the defaults.
+// the user's date_format / time_format changes in another tab. The filter
+// bar's custom-range time pickers swap between 24h and 12h+AM/PM too.
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
-  const preservedFrom = els.recordingTimeFrom ? timeSelectValue(els.recordingTimeFrom) : FILTER_TIME_FROM_DEFAULT;
-  const preservedTo = els.recordingTimeTo ? timeSelectValue(els.recordingTimeTo) : FILTER_TIME_TO_DEFAULT;
-  els.recordingTimeFrom = renderFilterTimeSelect('recordingTimeFromMount', preservedFrom || FILTER_TIME_FROM_DEFAULT);
-  els.recordingTimeTo = renderFilterTimeSelect('recordingTimeToMount', preservedTo || FILTER_TIME_TO_DEFAULT);
-  if (typeof loadRecordings !== 'function' || !els || !els.listStatus) return;
-  loadRecordings().catch((error) => { els.listStatus.textContent = error.message; });
+  filters?.refreshTimePickers();
+  if (!filters) return;
+  reloadRecordings();
 };
 
 const playbackPageMatch = window.location.pathname.match(/^\/recordings\/(\d+)$/);
@@ -1417,14 +1087,31 @@ if (autoPlayId && playbackPageMatch) {
 }
 
 loadAuth().then(async () => {
+  if (els.filterMount) {
+    filters = createLibraryFilters({
+      mount: els.filterMount,
+      kind: 'recordings',
+      noun: 'recordings',
+      types: ['all', 'object', 'motion', 'sound', 'continuous'],
+      // Motion-only clips carry no concrete label, so Motion is offered
+      // explicitly (it filters client-side, see loadRecordings).
+      extraLabels: [{ value: 'motion', label: 'Motion' }],
+      searchPlaceholder: 'Search recordings: person, driveway, red car, a face name…',
+      onChange: (_query, reason) => {
+        // Picking an explicit server order drops any column sort so the
+        // bar's order is what the table shows.
+        if (reason === 'sort') recordingsSortState = null;
+        reloadRecordings();
+      },
+    });
+  }
   await Promise.all([loadCameras(), loadLiveSettings()]);
-  await populateLabelFilterOptionsFromApi();
   await loadRecordings();
   // Auto-play the deep-linked recording inline above the library card.
   if (autoPlayId) {
     await playRecording(autoPlayId);
   }
 }).catch((error) => {
-  if (els.listStatus) els.listStatus.textContent = error.message;
+  showListError(error.message);
   window.showToast?.(error.message, true);
 });

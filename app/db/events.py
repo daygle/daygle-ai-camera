@@ -5,6 +5,13 @@ import sqlite3
 from collections import defaultdict
 from typing import Any
 
+from app.db.library_filters import (
+    event_alerted_condition,
+    event_camera_condition,
+    event_face_condition,
+    event_query_condition,
+    face_facet_rows,
+)
 from app.detection_status import GENERIC_TRIGGER_LABELS
 from app.utils import _normalize_iso_to_utc
 
@@ -20,6 +27,18 @@ def _motion_fraction(detection: dict[str, Any]) -> float | None:
     if value != value:  # NaN
         return None
     return max(0.0, min(1.0, value))
+
+
+# Recordings an event belongs to: its own recording_id, a recording that
+# names it as the trigger, or one linked through an alert.
+_EVENT_RECORDING_LINKS = """
+    r.id = e.recording_id
+    OR r.event_id = e.id
+    OR EXISTS (
+        SELECT 1 FROM alert_history ah
+        WHERE ah.event_id = e.id AND ah.recording_id = r.id
+    )
+"""
 
 
 def _batched(values: list[int]) -> list[list[int]]:
@@ -321,6 +340,11 @@ class EventsMixin:
         *,
         cursor: tuple[str, int] | None = None,
         owner_user_id: int | None = None,
+        until: str | None = None,
+        camera_id: str | None = None,
+        query: str | None = None,
+        face: str | None = None,
+        sort: str = 'newest',
     ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
         """Return ``(events, next_raw_cursor)`` ordered by ``(created_at, id)``.
 
@@ -329,57 +353,15 @@ class EventsMixin:
         applies the viewer's recording scope in SQL so a full page is never shortened
         after privacy filtering (which would look like the end of the list).
         """
-        since = _normalize_iso_to_utc(since) if since else None
-        page_size = max(1, int(limit))
-        with self.connect() as db:
-            conditions = ['e.dismissed = 0']
-            params: list[Any] = []
-            if label:
-                conditions.append('EXISTS (SELECT 1 FROM detections d WHERE d.event_id = e.id AND d.label = ?)')
-                params.append(label)
-            if since:
-                conditions.append('e.created_at >= ?')
-                params.append(since)
-            if alerted_only:
-                conditions.append('EXISTS (SELECT 1 FROM alert_history ah WHERE ah.event_id = e.id)')
-            recording_links = """
-                r.id = e.recording_id
-                OR r.event_id = e.id
-                OR EXISTS (
-                    SELECT 1 FROM alert_history ah
-                    WHERE ah.event_id = e.id AND ah.recording_id = r.id
-                )
-            """
-            if with_recording:
-                conditions.append(f'EXISTS (SELECT 1 FROM recordings r WHERE {recording_links})')
-            if owner_user_id is not None:
-                conditions.append(
-                    'NOT EXISTS (SELECT 1 FROM recordings r '
-                    f'WHERE ({recording_links}) AND r.owner_user_id IS NOT NULL '
-                    'AND r.owner_user_id != ?)'
-                )
-                params.append(int(owner_user_id))
-            if cursor is not None:
-                conditions.append('(e.created_at, e.id) < (?, ?)')
-                params.extend((cursor[0], int(cursor[1])))
-
-            rows = db.execute(
-                f"""
-                SELECT e.* FROM events e
-                WHERE {' AND '.join(conditions)}
-                ORDER BY e.created_at DESC, e.id DESC
-                LIMIT ?
-                """,
-                [*params, page_size + 1],
-            ).fetchall()
-            has_more = len(rows) > page_size
-            visible_rows = rows[:page_size]
-            next_cursor = (
-                (str(visible_rows[-1]['created_at']), int(visible_rows[-1]['id']))
-                if has_more and visible_rows
-                else None
-            )
-            return self._events_with_detections(db, visible_rows), next_cursor
+        conditions = ['e.dismissed = 0']
+        params: list[Any] = []
+        if with_recording:
+            conditions.append(f'EXISTS (SELECT 1 FROM recordings r WHERE {_EVENT_RECORDING_LINKS})')
+        return self._event_list_page(
+            conditions, params,
+            label=label, limit=limit, alerted_only=alerted_only, since=since, until=until,
+            camera_id=camera_id, query=query, face=face, sort=sort, cursor=cursor, owner_user_id=owner_user_id,
+        )
 
     def list_snapshots_page(
         self,
@@ -388,44 +370,92 @@ class EventsMixin:
         *,
         cursor: tuple[str, int] | None = None,
         owner_user_id: int | None = None,
+        until: str | None = None,
+        label: str | None = None,
+        camera_id: str | None = None,
+        query: str | None = None,
+        alerted_only: bool = False,
+        face: str | None = None,
+        sort: str = 'newest',
     ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
-        """Return a stable newest-first snapshot page and its next raw cursor."""
-        since = _normalize_iso_to_utc(since) if since else None
-        page_size = max(1, int(limit))
-        with self.connect() as db:
-            conditions = [
-                'e.dismissed = 0',
-                'e.snapshot_path IS NOT NULL',
-                "e.snapshot_path != ''",
-            ]
-            params: list[Any] = []
-            if since:
-                conditions.append('e.created_at >= ?')
-                params.append(since)
-            recording_links = """
-                r.id = e.recording_id
-                OR r.event_id = e.id
-                OR EXISTS (
-                    SELECT 1 FROM alert_history ah
-                    WHERE ah.event_id = e.id AND ah.recording_id = r.id
-                )
-            """
-            if owner_user_id is not None:
-                conditions.append(
-                    'NOT EXISTS (SELECT 1 FROM recordings r '
-                    f'WHERE ({recording_links}) AND r.owner_user_id IS NOT NULL '
-                    'AND r.owner_user_id != ?)'
-                )
-                params.append(int(owner_user_id))
-            if cursor is not None:
-                conditions.append('(e.created_at, e.id) < (?, ?)')
-                params.extend((cursor[0], int(cursor[1])))
+        """Return a stable snapshot page (newest first by default) and its next raw cursor."""
+        conditions = [
+            'e.dismissed = 0',
+            'e.snapshot_path IS NOT NULL',
+            "e.snapshot_path != ''",
+        ]
+        return self._event_list_page(
+            conditions, [],
+            label=label, limit=limit, alerted_only=alerted_only, since=since, until=until,
+            camera_id=camera_id, query=query, face=face, sort=sort, cursor=cursor, owner_user_id=owner_user_id,
+        )
 
+    def _event_list_page(
+        self,
+        conditions: list[str],
+        params: list[Any],
+        *,
+        label: str | None,
+        limit: int,
+        alerted_only: bool,
+        since: str | None,
+        until: str | None,
+        camera_id: str | None,
+        query: str | None,
+        face: str | None,
+        sort: str,
+        cursor: tuple[str, int] | None,
+        owner_user_id: int | None,
+    ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
+        """Keyset-paged event list shared by the Events and Snapshots libraries.
+
+        Both pages send the same filter bar (web/library_filters.js), so the
+        filters are applied identically here: detection label, camera, the
+        ``since``/``until`` window, a keyword ``query``, a recognised ``face``,
+        alerted-only, and newest/oldest order.
+        """
+        since = _normalize_iso_to_utc(since) if since else None
+        until = _normalize_iso_to_utc(until) if until else None
+        page_size = max(1, int(limit))
+        descending = str(sort or 'newest').strip().lower() != 'oldest'
+        conditions = list(conditions)
+        params = list(params)
+        if label:
+            conditions.append('EXISTS (SELECT 1 FROM detections d WHERE d.event_id = e.id AND d.label = ?)')
+            params.append(label)
+        if since:
+            conditions.append('e.created_at >= ?')
+            params.append(since)
+        if until:
+            conditions.append('e.created_at <= ?')
+            params.append(until)
+        if alerted_only:
+            conditions.append(event_alerted_condition('e'))
+        for extra in (
+            event_camera_condition('e', camera_id),
+            event_query_condition('e', query),
+            event_face_condition('e', face),
+        ):
+            if extra is not None:
+                conditions.append(extra[0])
+                params.extend(extra[1])
+        if owner_user_id is not None:
+            conditions.append(
+                'NOT EXISTS (SELECT 1 FROM recordings r '
+                f'WHERE ({_EVENT_RECORDING_LINKS}) AND r.owner_user_id IS NOT NULL '
+                'AND r.owner_user_id != ?)'
+            )
+            params.append(int(owner_user_id))
+        if cursor is not None:
+            conditions.append(f"(e.created_at, e.id) {'<' if descending else '>'} (?, ?)")
+            params.extend((cursor[0], int(cursor[1])))
+        order = 'DESC' if descending else 'ASC'
+        with self.connect() as db:
             rows = db.execute(
                 f"""
                 SELECT e.* FROM events e
                 WHERE {' AND '.join(conditions)}
-                ORDER BY e.created_at DESC, e.id DESC
+                ORDER BY e.created_at {order}, e.id {order}
                 LIMIT ?
                 """,
                 [*params, page_size + 1],
@@ -438,6 +468,92 @@ class EventsMixin:
                 else None
             )
             return self._events_with_detections(db, visible_rows), next_cursor
+
+    def library_facets(
+        self,
+        kind: str,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Label and face options (with counts) for one library page's window.
+
+        ``kind`` is ``events``, ``snapshots`` or ``recordings``. The filter
+        bar's Label and Face dropdowns are built from this so they list what
+        exists in the selected time range, not only the rows already loaded.
+        """
+        since = _normalize_iso_to_utc(since) if since else None
+        until = _normalize_iso_to_utc(until) if until else None
+        params: list[Any] = []
+        if kind == 'recordings':
+            conditions = ['1 = 1']
+            if since:
+                conditions.append('r.started_at >= ?')
+                params.append(since)
+            if until:
+                conditions.append('r.started_at <= ?')
+                params.append(until)
+            if owner_user_id is not None:
+                conditions.append('(r.owner_user_id IS NULL OR r.owner_user_id = ?)')
+                params.append(int(owner_user_id))
+            scope = f"SELECT r.id FROM recordings r WHERE {' AND '.join(conditions)}"
+            with self.connect() as db:
+                label_rows = db.execute(
+                    f'''SELECT lower(rl.label) AS label, rl.source AS source, COUNT(DISTINCT rl.recording_id) AS count
+                        FROM recording_labels rl WHERE rl.recording_id IN ({scope})
+                        GROUP BY lower(rl.label), rl.source''',
+                    params,
+                ).fetchall()
+                event_scope = (
+                    f'SELECT e.id FROM events e WHERE e.recording_id IN ({scope}) '
+                    f'OR e.id IN (SELECT r2.event_id FROM recordings r2 WHERE r2.id IN ({scope}))'
+                )
+                faces = face_facet_rows(db, event_scope, [*params, *params])
+            labels: dict[str, dict[str, Any]] = {}
+            for row in label_rows:
+                label = str(row['label'] or '').strip()
+                if not label or label in GENERIC_TRIGGER_LABELS:
+                    continue
+                entry = labels.setdefault(label, {'value': label, 'count': 0, 'ai': True})
+                entry['count'] = max(entry['count'], int(row['count'] or 0))
+                if row['source'] != 'ai':
+                    entry['ai'] = False
+            return {'labels': sorted(labels.values(), key=lambda item: item['value']), 'faces': faces}
+
+        conditions = ['e.dismissed = 0']
+        if kind == 'snapshots':
+            conditions.extend(['e.snapshot_path IS NOT NULL', "e.snapshot_path != ''"])
+        if since:
+            conditions.append('e.created_at >= ?')
+            params.append(since)
+        if until:
+            conditions.append('e.created_at <= ?')
+            params.append(until)
+        if owner_user_id is not None:
+            conditions.append(
+                'NOT EXISTS (SELECT 1 FROM recordings r '
+                f'WHERE ({_EVENT_RECORDING_LINKS}) AND r.owner_user_id IS NOT NULL '
+                'AND r.owner_user_id != ?)'
+            )
+            params.append(int(owner_user_id))
+        scope = f"SELECT e.id FROM events e WHERE {' AND '.join(conditions)}"
+        with self.connect() as db:
+            label_rows = db.execute(
+                f'''SELECT d.label AS label, COUNT(DISTINCT d.event_id) AS count
+                    FROM detections d WHERE d.event_id IN ({scope})
+                    GROUP BY d.label ORDER BY d.label''',
+                params,
+            ).fetchall()
+            faces = face_facet_rows(db, scope, params)
+        labels_out = []
+        for row in label_rows:
+            label = str(row['label'] or '').strip()
+            # 'motion' stays: motion-only events are a real, filterable kind.
+            if not label or (label.lower() in GENERIC_TRIGGER_LABELS and label.lower() != 'motion'):
+                continue
+            labels_out.append({'value': label, 'count': int(row['count'] or 0), 'ai': False})
+        return {'labels': labels_out, 'faces': faces}
 
     def clear_event_snapshot(self, event_id: int) -> bool:
         """Detach a stored snapshot from its event (Snapshots-library delete).

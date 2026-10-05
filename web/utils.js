@@ -1978,11 +1978,6 @@ const DAYGLE_PREFS_MESSAGE_TYPE = 'daygle-date-prefs';
 // the same preference on /timeline - unify them only if a global "always
 // show detection tracking" preference is desired.
 const RECORDINGS_OVERLAY_TOGGLE_KEY = 'daygle.recordings.overlay.enabled';
-// Whether the recordings library's filter form is expanded. Stored as a
-// preference (rather than always collapsed) so someone who reaches for the
-// filters every visit keeps them open, and the default stays collapsed for
-// everyone else.
-const RECORDINGS_FILTER_PANEL_KEY = 'daygle.recordings.filters.open';
 const TIMELINE_OVERLAY_TOGGLE_KEY = 'daygle.timeline.overlay.enabled';
 const LIVE_AI_TRACK_KEY = 'daygle.live.overlay.track.enabled';
 
@@ -2365,5 +2360,5 @@ window.daygleUi = {
   // name in later scripts loaded into the same realm. (window.X is NOT a
   // property - that's how const differs from var - so reach for the bare
   // name or window.daygleUi.X, never window.X.)
-  RECORDINGS_OVERLAY_TOGGLE_KEY, TIMELINE_OVERLAY_TOGGLE_KEY, LIVE_AI_TRACK_KEY, RECORDINGS_FILTER_PANEL_KEY, DAYGLE_PREFS_STORAGE_KEY,
+  RECORDINGS_OVERLAY_TOGGLE_KEY, TIMELINE_OVERLAY_TOGGLE_KEY, LIVE_AI_TRACK_KEY, DAYGLE_PREFS_STORAGE_KEY,
 };

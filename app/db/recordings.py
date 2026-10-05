@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from app.db.library_filters import recording_face_condition, recording_query_condition
 from app.detection_status import GENERIC_TRIGGER_LABELS
 from app.media_utils import recording_playback_sidecar_path, safe_storage_path
 from app.utils import _normalize_iso_to_utc
@@ -296,6 +297,8 @@ class RecordingsMixin:
         *,
         cursor: tuple[str, int] | None = None,
         owner_user_id: int | None = None,
+        query: str | None = None,
+        face: str | None = None,
     ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
         """Return ``(recordings, next_raw_cursor)`` with stable keyset ordering."""
         started_after = _normalize_iso_to_utc(started_after) if started_after else None
@@ -342,6 +345,10 @@ class RecordingsMixin:
                 conditions.append("EXISTS (SELECT 1 FROM events e WHERE e.id = r.event_id AND e.source = 'sound')")
             elif source_type == 'object':
                 conditions.append("(r.event_id IS NULL OR NOT EXISTS (SELECT 1 FROM events e WHERE e.id = r.event_id AND e.source = 'sound'))")
+            for extra in (recording_query_condition('r', query), recording_face_condition('r', face)):
+                if extra is not None:
+                    conditions.append(extra[0])
+                    params.extend(extra[1])
             if cursor is not None:
                 comparison = '<' if descending else '>'
                 conditions.append(f'(r.started_at, r.id) {comparison} (?, ?)')

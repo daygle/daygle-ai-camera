@@ -57,5 +57,5 @@ test('timeline and snapshots loads discard responses superseded by a newer load'
   const sStart = snapshots.indexOf('async function loadSnapshots(');
   const sBody = snapshots.slice(sStart, snapshots.indexOf('\n}\n', sStart));
   assert.match(sBody, /const session = snapshotsLoadSession;/);
-  assert.ok(sBody.indexOf('if (session !== snapshotsLoadSession) return;') < sBody.indexOf('allSnapshots = items;'));
+  assert.ok(sBody.indexOf('if (session !== snapshotsLoadSession) return;') < sBody.indexOf('allSnapshots = page.items;'));
 });

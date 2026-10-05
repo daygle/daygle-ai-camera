@@ -252,9 +252,6 @@
 :root.light .monitor-zone-polygon polygon,
 :root.light .monitor-zone-polygon polyline { fill: rgba(2,132,199,.08); }
 :root.light .toast { background: #fff; box-shadow: 0 8px 32px rgba(0,0,0,.12); }
-:root.light .activity-filter-group { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.08); }
-:root.light .activity-filter-pill:hover { background: rgba(0,0,0,.08); color: var(--text); }
-:root.light .activity-filter-pill.active { background: linear-gradient(135deg, #0284c7, #059669); color: #fff; box-shadow: 0 2px 8px rgba(2,132,199,.25); }
 :root.light .activity-item-type { background: rgba(71,214,255,.12); color: var(--accent); font-weight: 700; border: 1px solid rgba(71,214,255,.3); }
 :root.light .activity-item-sound .activity-item-type { background: rgba(124,58,237,.15); color: #6d28d9; border: 1px solid rgba(124,58,237,.25); }
 :root.light .activity-item-motion .activity-item-type { background: rgba(5,150,105,.12); color: #047857; border: 1px solid rgba(5,150,105,.2); }
@@ -1175,7 +1172,6 @@ input[type="file"] { padding: 10px; }
   .timeline-controls-card .settings-section-header { flex-wrap: wrap; }
   .timeline-controls-actions { margin: 0; width: 100%; justify-content: stretch; flex-wrap: wrap; }
   .timeline-controls-actions button { flex: 1; justify-content: center; }
-  .activity-filter-group { flex-wrap: wrap; }
 }
 .toggle-control {
   display: inline-flex;
@@ -1732,64 +1728,8 @@ tr.drag-over {
   flex-shrink: 0;
 }
 
-/* Filter disclosure. The caret mirrors .multi-select-caret: it points down
-   while the panel is closed and flips up once it is open. */
-.recordings-filter-caret { transition: transform 0.15s; }
-.recordings-filter-toggle[aria-expanded="true"] .recordings-filter-caret { transform: rotate(180deg); }
-/* Count of live filters, shown on the button while the panel is collapsed so
-   a filtered library never looks unfiltered. Tinted like .zone-shape-badge so
-   it reads in both themes. */
-.recordings-filter-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: rgba(71, 214, 255, .18);
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1;
-}
-:root.light .recordings-filter-badge { background: rgba(2, 132, 199, .12); color: #0369a1; }
-.recordings-filter-toggle.is-filtered { border-color: var(--accent); color: var(--accent); }
-:root.light .recordings-filter-toggle.is-filtered { border-color: #0369a1; color: #0369a1; }
-
 .hero-action {
   flex-shrink: 0;
-}
-.recordings-list-status {
-  margin: 0;
-  min-height: 1.2em;
-}
-.recordings-filter-grid,
-.snapshots-filter-grid {
-  margin-top: 0;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
-  align-items: end;
-}
-.recordings-filter-actions,
-.snapshots-filter-actions {
-  display: flex;
-  align-items: end;
-  grid-column: 1 / -1;
-}
-.recordings-filter-actions .button-row,
-.snapshots-filter-actions .button-row {
-  margin: 0;
-  padding: 0;
-  border-top: 0;
-  justify-content: flex-start;
-}
-.recordings-filter-actions > span:first-child,
-.snapshots-filter-actions > span:first-child {
-  display: none;
-}
-.recordings-filter-actions::after,
-.snapshots-filter-actions::after {
-  display: none;
 }
 .recordings-list {
   gap: 10px;
@@ -1840,8 +1780,6 @@ tr.drag-over {
 }
 
 @media (max-width: 760px) {
-  .recordings-filter-grid,
-  .snapshots-filter-grid { grid-template-columns: 1fr; }
   .recordings-list-card .settings-section-header { flex-wrap: wrap; }
   .recordings-toolbar-actions { width: 100%; justify-content: stretch; flex-wrap: wrap; }
   .recordings-toolbar-actions button { flex: 1; justify-content: center; }
@@ -2034,8 +1972,6 @@ tr.drag-over {
     text-overflow: clip;
     overflow-wrap: anywhere;
   }
-  /* Activity filter pills: drop the full-pill capsule shape when they wrap */
-  .activity-filter-group { border-radius: 14px; }
   /* Settings section headers: wrap hero action below title */
   .settings-section-header { flex-wrap: wrap; gap: 10px; }
   .settings-section-header .hero-action { width: 100%; }
@@ -3578,95 +3514,6 @@ tr.drag-over {
   display: block;
   flex-shrink: 0;
 }
-.activity-filter-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-.activity-filter-group {
-  display: inline-flex;
-  /* Allow wrap so adding more filter pills (e.g. motion) doesn't overflow
-     the row on desktop widths; the border-radius drops to 14px when wrapped
-     so multi-line groupings still look consistent. */
-  flex-wrap: wrap;
-  align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  padding: 4px;
-  gap: 2px;
-  max-width: 100%;
-}
-@media (min-width: 1180px) {
-  /* All seven pills fit on one line above ~1180px - restore the full-pill
-     capsule shape. Below that the row wraps onto two lines and the 14px
-     radius above reads as a tighter grouping. */
-  .activity-filter-group {
-    border-radius: 999px;
-  }
-}
-.activity-filter-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 800;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.activity-filter-pill:hover { color: var(--text); }
-.activity-filter-pill.active {
-  background: linear-gradient(135deg, var(--accent), var(--success));
-  color: #04111c;
-}
-.result-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-  color: var(--muted);
-  background: var(--surface);
-  min-height: 1em;
-  letter-spacing: 0.01em;
-}
-.activity-range-group {
-  display: flex;
-  gap: 0;
-}
-.activity-range-group .activity-filter-pill {
-  border-radius: 0;
-  margin: 0;
-  border: 1px solid var(--border);
-  border-right-width: 0;
-  font-size: 11px;
-  padding: 5px 12px;
-  font-weight: 700;
-}
-.activity-range-group .activity-filter-pill:first-child {
-  border-radius: 6px 0 0 6px;
-}
-.activity-range-group .activity-filter-pill:last-child {
-  border-radius: 0 6px 6px 0;
-  border-right-width: 1px;
-}
-.activity-range-group .activity-filter-pill.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-  z-index: 1;
-}
-
 /* Activity list (overrides the global `.list` max-height so the feed
    can grow with the viewport) */
 .activity-list {
@@ -3735,11 +3582,6 @@ tr.drag-over {
   max-width: 100%;
   line-height: 1.3;
 }
-.event-search { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0 6px; }
-.event-search > svg { color: var(--muted); flex: none; }
-.event-search input[type="search"] { flex: 1 1 260px; min-width: 0; }
-.event-search button { flex: none; }
-.event-search-summary { margin: 4px 0 10px; }
 .activity-item-badges {
   display: flex;
   flex-wrap: wrap;
@@ -3994,9 +3836,6 @@ button.activity-item-action.activity-item-action-delete:hover {
 }
 
 @media (max-width: 760px) {
-  .activity-filter-row { flex-direction: column; align-items: stretch; }
-  .activity-filter-group { align-self: flex-start; }
-
   /* Dismiss buttons: wrap onto their own full-width row below the section title */
   .activity-card .settings-section-header { flex-wrap: wrap; }
   .activity-toolbar-actions {
@@ -4050,7 +3889,7 @@ button.activity-item-action.activity-item-action-delete:hover {
 }
 .live-toggle-control { padding: 10px 14px; }
 
-/* View-mode segmented toggle (mirrors activity-filter-pill) */
+/* View-mode segmented toggle (mirrors .library-segment-btn) */
 .view-mode-toggle {
   display: inline-flex;
   align-items: center;
@@ -7436,3 +7275,216 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
 /* System > Health: per-camera video decoder. */
 .decode-list { display: grid; gap: 6px; margin-top: 12px; }
 .decode-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; }
+
+/* ─── Library filter bar (web/library_filters.js) ─────────────────────────
+   One bar shared by Events, Recordings and Snapshots: search, time range and
+   type segments, a collapsible panel for camera/label/face/sort/alerted, and
+   removable chips for whatever is active. */
+.library-filters {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0 12px;
+}
+.library-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.library-search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.library-search-field > svg {
+  position: absolute;
+  left: 12px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.library-search-field input[type="search"] {
+  width: 100%;
+  padding-left: 36px;
+}
+.library-search button { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.library-ai-btn svg { display: block; flex-shrink: 0; }
+.library-filter-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.library-segment {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  max-width: 100%;
+}
+:root.light .library-segment { background: rgba(0, 0, 0, .04); border-color: rgba(0, 0, 0, .08); }
+.library-segment-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.library-segment-btn:hover { color: var(--text); background: var(--hover); }
+.library-segment-btn.active {
+  background: linear-gradient(135deg, var(--accent), var(--success));
+  color: #04111c;
+}
+:root.light .library-segment-btn.active {
+  background: linear-gradient(135deg, #0284c7, #059669);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, .25);
+}
+.library-segment-btn svg { display: block; flex-shrink: 0; }
+.library-more-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  line-height: 1;
+}
+.library-more-toggle svg { display: block; flex-shrink: 0; }
+/* The caret points down while the panel is closed and flips up when open. */
+.library-filter-caret { transition: transform 0.15s; }
+.library-more-toggle[aria-expanded="true"] .library-filter-caret { transform: rotate(180deg); }
+/* Count of panel filters, so a collapsed panel never hides that the list is
+   narrowed. */
+.library-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(71, 214, 255, .18);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+:root.light .library-filter-badge { background: rgba(2, 132, 199, .12); color: #0369a1; }
+.library-more-toggle.is-filtered { border-color: var(--accent); color: var(--accent); }
+:root.light .library-more-toggle.is-filtered { border-color: #0369a1; color: #0369a1; }
+.library-custom-range,
+.library-filter-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  align-items: end;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--hover);
+}
+.library-custom-range { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.library-custom-range[hidden],
+.library-filter-panel[hidden] { display: none; }
+.library-custom-range label,
+.library-filter-panel label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.library-custom-range label > span:first-child,
+.library-filter-panel label > span:first-child {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.library-datetime {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.library-datetime input[type="date"] { flex: 1 1 150px; min-width: 0; }
+.library-filter-panel label.library-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  cursor: pointer;
+}
+.library-filter-panel label.library-check > span { font-size: 13px; font-weight: 700; color: var(--text); }
+.library-check input { width: auto; margin: 0; }
+.library-filter-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 28px;
+}
+.library-result-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.library-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.library-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid rgba(71, 214, 255, .35);
+  border-radius: 999px;
+  background: rgba(71, 214, 255, .1);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.library-chip > span:last-child {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  line-height: 1;
+}
+.library-chip:hover > span:last-child { background: rgba(71, 214, 255, .2); }
+:root.light .library-chip { color: #0369a1; border-color: rgba(2, 132, 199, .3); background: rgba(2, 132, 199, .08); }
+.library-clear-all {
+  margin-left: auto;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.library-clear-all:hover { color: var(--text); }
+.library-search-note { margin: 0; font-size: 13px; }
+
+@media (max-width: 760px) {
+  .library-more-toggle { margin-left: 0; }
+  .library-search button { flex: 1 1 auto; justify-content: center; }
+  .library-segment { width: 100%; }
+  .library-segment-btn { flex: 1 1 auto; justify-content: center; }
+}

@@ -14,7 +14,7 @@
       <div>
         <p class="eyebrow">Captured Frames</p>
         <h1>Snapshots</h1>
-        <p class="muted">Saved detection frames across all cameras, starting with today by default so the library opens fast - widen the From Date to reach further back. Snapshots sit alongside recordings and are flagged when they fired an alert.</p>
+        <p class="muted">Saved detection frames across all cameras, starting with today so the library opens fast - pick a wider time range to reach further back. Snapshots sit alongside recordings and are flagged when they fired an alert.</p>
       </div>
       <div class="onnx-hero-mark" aria-hidden="true">
         <span class="onnx-hero-ring onnx-hero-ring-back"></span>
@@ -54,16 +54,6 @@
         <strong id="statAlertedCount" class="stat-card-value">0</strong>
         <small class="muted stat-card-sub">Frames that fired an alert</small>
       </article>
-      <article class="card stat-card">
-        <div class="stat-card-head">
-          <span class="stat-card-label">Filters</span>
-          <span class="stat-card-icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
-          </span>
-        </div>
-        <strong id="statFilterStatus" class="stat-card-value">Today</strong>
-        <small class="muted stat-card-sub" id="statFilterHint">Showing snapshots captured today</small>
-      </article>
     </section>
 
     <section class="card activity-card">
@@ -71,62 +61,11 @@
         <div class="settings-section-icon">📸</div>
         <div>
           <h2>Snapshot Library</h2>
-          <p class="settings-section-subtitle">Browse saved detection frames and narrow them with Filters by camera, label, date, or time. Today's frames load first; applying an earlier From Date loads older ones. Each row opens the annotated image; admins can delete a stored snapshot without touching the event or its recording.</p>
-        </div>
-        <div class="button-row recordings-toolbar-actions">
-          <button id="snapshotsFilterToggle" class="secondary recordings-filter-toggle" type="button" aria-expanded="false" aria-controls="snapshotFilterForm">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-            <span>Filters</span>
-            <span id="snapshotsFilterBadge" class="recordings-filter-badge" aria-hidden="true" hidden>0</span>
-            <svg class="recordings-filter-caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
+          <p class="settings-section-subtitle">Browse saved detection frames. Search by keyword, then narrow by time, type, camera, label or face. Each row opens the annotated image; admins can delete a stored snapshot without touching the event or its recording.</p>
         </div>
       </div>
 
-      <p id="listStatus" class="muted recordings-list-status"></p>
-
-      <form id="snapshotFilterForm" class="form-grid snapshots-filter-grid" onsubmit="return false;" hidden>
-        <label>
-          <span>Camera <span class="info-tip" data-tip="Limit results to a specific camera. Default: every camera" title="Limit results to a specific camera. Default: every camera" tabindex="0" aria-label="Help: Limit results to a specific camera. Default: every camera"></span></span>
-          <select id="snapshotCameraFilter" aria-label="Filter by camera">
-            <option value="">All Cameras</option>
-          </select></label>
-        <label>
-          <span>Label <span class="info-tip" data-tip="Limit to a specific detected object or sound. Default: every snapshot in the current date range" title="Limit to a specific detected object or sound. Default: every snapshot in the current date range" tabindex="0" aria-label="Help: Limit to a specific detected object or sound. Default: every snapshot in the current date range"></span></span>
-          <select id="snapshotLabelFilter" aria-label="Filter by label">
-            <option value="">All Labels</option>
-          </select></label>
-        <label id="snapshotFaceField" hidden>
-          <span>Face <span class="info-tip" data-tip="Limit to snapshots where a specific enrolled person or an unrecognised (Unknown) face was seen. Default: every snapshot in the current date range" title="Limit to snapshots where a specific enrolled person or an unrecognised (Unknown) face was seen. Default: every snapshot in the current date range" tabindex="0" aria-label="Help: Limit to snapshots where a specific enrolled person or an unrecognised (Unknown) face was seen. Default: every snapshot in the current date range"></span></span>
-          <select id="snapshotFaceFilter" aria-label="Filter by recognised face">
-            <option value="">All Faces</option>
-          </select></label>
-        <label>
-          <span>From Date <span class="info-tip" data-tip="Earliest capture date (inclusive). Default: today's snapshots only - pick an earlier date and apply to load more" title="Earliest capture date (inclusive). Default: today's snapshots only - pick an earlier date and apply to load more" tabindex="0" aria-label="Help: Earliest capture date (inclusive). Default: today's snapshots only - pick an earlier date and apply to load more"></span></span>
-          <input id="snapshotDateFrom" type="date" aria-label="Filter by start date" /></label>
-        <label>
-          <span>From Time <span class="info-tip" data-tip="Earliest time on the from date (5-minute steps). Default: 00:00" title="Earliest time on the from date (5-minute steps). Default: 00:00" tabindex="0" aria-label="Help: Earliest time on the from date (5-minute steps). Default: 00:00"></span></span>
-          <span id="snapshotTimeFromMount" aria-label="Filter by start time" data-time-role="from"></span></label>
-        <label>
-          <span>To Date <span class="info-tip" data-tip="Latest capture date (inclusive). Default: today's snapshots only" title="Latest capture date (inclusive). Default: today's snapshots only" tabindex="0" aria-label="Help: Latest capture date (inclusive). Default: today's snapshots only"></span></span>
-          <input id="snapshotDateTo" type="date" aria-label="Filter by end date" /></label>
-        <label>
-          <span>To Time <span class="info-tip" data-tip="Latest time on the to date (5-minute steps). Default: 23:55" title="Latest time on the to date (5-minute steps). Default: 23:55" tabindex="0" aria-label="Help: Latest time on the to date (5-minute steps). Default: 23:55"></span></span>
-          <span id="snapshotTimeToMount" aria-label="Filter by end time" data-time-role="to"></span></label>
-        <label>
-          <span>Sort By <span class="info-tip" data-tip="Order of the list. Default: Newest" title="Order of the list. Default: Newest" tabindex="0" aria-label="Help: Order of the list. Default: Newest"></span></span>
-          <select id="snapshotSort" aria-label="Sort order">
-            <option value="newest">Newest</option>
-            <option value="oldest">Oldest</option>
-          </select></label>
-        <label class="snapshots-filter-actions">
-          <span>&nbsp;</span>
-          <div class="button-row">
-            <button id="snapshotClearBtn" class="secondary" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg><span>Reset Filters</span></button>
-            <button id="snapshotSearchBtn" type="submit">Apply Filters</button>
-          </div>
-        </label>
-      </form>
+      <div id="snapshotFilters"></div>
 
       <div id="snapshotGallery" class="list snapshots-gallery" aria-live="polite"></div>
     </section>
@@ -134,6 +73,7 @@
 
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
+  <script src="/static/library_filters.js"></script>
   <script src="/static/snapshots.js"></script>
 </body>
 </html>

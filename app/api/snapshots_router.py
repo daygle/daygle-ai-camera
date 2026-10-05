@@ -36,12 +36,23 @@ def snapshots(
     limit: int = Query(100, ge=1, le=500),
     cursor: str | None = Query(None),
     since: str | None = Query(None),
+    until: str | None = Query(None, description='ISO timestamp; include snapshots captured at or before this time.'),
+    label: str | None = Query(None, max_length=200),
+    camera_id: str | None = Query(None, max_length=200),
+    q: str | None = Query(None, max_length=300, description='Keywords; every word must appear in a label, zone, camera, AI tag/description or face name.'),
+    alerted_only: bool = False,
+    face: str | None = Query(None, max_length=200, description='Recognised face: any, unknown, id:<person_id> or name:<name>.'),
+    sort: str = Query('newest', pattern='^(newest|oldest)$'),
     db=Depends(get_database),
 ):
-    """List a newest-first cursor page of events that saved a frame."""
+    """List a cursor page (newest first by default) of events that saved a frame.
+
+    Takes the same filters as ``/api/events`` so the Snapshots page can share
+    the Events page's filter bar.
+    """
     user = require_user(request)
     try:
-        decoded = decode_cursor(cursor, 'snapshots', 'newest') if cursor else None
+        decoded = decode_cursor(cursor, 'snapshots', sort) if cursor else None
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     owner_user_id = None if str(user.get('role') or '').lower() == 'admin' else int(user['id'])
@@ -50,12 +61,19 @@ def snapshots(
         since=since,
         cursor=decoded,
         owner_user_id=owner_user_id,
+        until=until,
+        label=label,
+        camera_id=camera_id,
+        query=q,
+        alerted_only=alerted_only,
+        face=face,
+        sort=sort,
     )
     scoped = [_scope_event_recordings(event, user) for event in snapshot_list]
     return {
         'items': [event for event in scoped if event is not None],
         'next_cursor': (
-            encode_cursor('snapshots', 'newest', next_cursor[0], next_cursor[1])
+            encode_cursor('snapshots', sort, next_cursor[0], next_cursor[1])
             if next_cursor else None
         ),
     }

@@ -5,79 +5,30 @@
 // admin delete the stored image - deleting a snapshot never touches the
 // event or its recording.
 //
-// Unlike /api/recordings, /api/snapshots has no server-side filter params
-// beyond limit + `since`, so the recordings-style filter card (camera, label,
-// from/to date+time, sort) filters the already-fetched snapshot list
-// client-side. The endpoint returns full event objects - detections,
-// metadata and created_at are all present - so every filter below is exact.
-//
-// Paging the whole table before first paint is what made this page crawl, so
-// the list now asks for TODAY's snapshots by default via the `since` bound
-// (see snapshotsRequestSinceMs below). The From/To date card can still reach
-// further back: widening it re-requests with the wider bound, while camera,
-// label, face and sort keep filtering what is already in memory.
+// Filtering goes through the bar shared with /events and /recordings
+// (web/library_filters.js). /api/snapshots takes the same since/until,
+// camera, label, face, keyword, alerted-only and sort parameters as
+// /api/events, so the server does the narrowing and the gallery STREAMS:
+// the first page paints straight away and older pages arrive on scroll or
+// "Load More", instead of the whole range being fetched before first paint.
+// Only the Object / Motion type pill filters client-side, because that
+// classification is derived from each event's detections.
 //
 // escapeHtml, api, showToast, timeAgo, formatDate, cameraLabel, detectionPill,
-// motionPill, isSoundLabel, GENERIC_TRIGGER_LABELS, titleCase,
-// formatUserDate, renderTimeSelect and timeSelectValue are all provided by
-// web/utils.js.
+// motionPill, isSoundLabel and GENERIC_TRIGGER_LABELS are provided by
+// web/utils.js; createLibraryFilters by web/library_filters.js.
 
 const els = {
   gallery: document.getElementById('snapshotGallery'),
-  listStatus: document.getElementById('listStatus'),
-  cameraFilter: document.getElementById('snapshotCameraFilter'),
-  labelFilter: document.getElementById('snapshotLabelFilter'),
-  faceFilter: document.getElementById('snapshotFaceFilter'),
-  faceField: document.getElementById('snapshotFaceField'),
-  dateFrom: document.getElementById('snapshotDateFrom'),
-  timeFrom: null, // populated by renderFilterTimeSelects() below
-  dateTo: document.getElementById('snapshotDateTo'),
-  timeTo: null,   // populated by renderFilterTimeSelects() below
-  sort: document.getElementById('snapshotSort'),
-  filterForm: document.getElementById('snapshotFilterForm'),
-  filterToggle: document.getElementById('snapshotsFilterToggle'),
-  filterBadge: document.getElementById('snapshotsFilterBadge'),
-  clearBtn: document.getElementById('snapshotClearBtn'),
+  filterMount: document.getElementById('snapshotFilters'),
   statTotal: document.getElementById('statTotalSnapshots'),
   statCameras: document.getElementById('statCameraCount'),
   statAlerted: document.getElementById('statAlertedCount'),
-  statFilterStatus: document.getElementById('statFilterStatus'),
-  statFilterHint: document.getElementById('statFilterHint'),
 };
 
 let allSnapshots = [];
-
-// ── Filter time pickers (shared with /recordings) ───────────────────────
-// Mount spans in the filter form render through the shared `renderTimeSelect`
-// helper (web/utils.js) so the From / To time pickers follow the user's
-// Profile > Time Format choice (12h with AM/PM vs. 24h). Re-rendered on
-// init, on Reset Filters, and whenever the cross-tab prefs hook fires so a
-// profile change instantly swaps the picker style without a refresh.
-const FILTER_TIME_FROM_DEFAULT = '00:00';
-const FILTER_TIME_TO_DEFAULT = '23:55';
-
-function renderFilterTimeSelect(mountId, defaultValue) {
-  const mount = document.getElementById(mountId);
-  if (!mount) return null;
-  const role = mount.dataset.timeRole || '';
-  mount.innerHTML = renderTimeSelect(defaultValue, 'data-filter-time-role', role);
-  return mount.querySelector('.time-select-wrap');
-}
-
-function renderFilterTimeSelects() {
-  els.timeFrom = renderFilterTimeSelect('snapshotTimeFromMount', FILTER_TIME_FROM_DEFAULT);
-  els.timeTo = renderFilterTimeSelect('snapshotTimeToMount', FILTER_TIME_TO_DEFAULT);
-}
-
-renderFilterTimeSelects();
-
-// The page opens scoped to today's local calendar day, matching /recordings.
-function applyDefaultDateFilters() {
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  if (els.dateFrom) els.dateFrom.value = today;
-  if (els.dateTo) els.dateTo.value = today;
-}
+// The shared filter bar; created on DOMContentLoaded.
+let filters = null;
 
 // ── Snapshot classification ─────────────────────────────────────────────
 // Mirrors the events page so the pill labels read identically: sound events
@@ -141,188 +92,6 @@ function snapshotPills(event) {
 function snapshotCameraLabel(event) {
   const meta = event.metadata || {};
   return cameraLabel(meta.camera_name, meta.camera_id) || event.source || 'unknown';
-}
-
-// ── Filter helpers ──────────────────────────────────────────────────────
-// Snapshot events arrive from /api/snapshots with metadata.camera_id /
-// metadata.camera_name. The camera filter select is populated from
-// /api/cameras (id -> name), so an event matches when either its stored id
-// equals the selected id or its stored name equals the selected camera name.
-function snapshotMatchesCamera(event, cameraId) {
-  if (!cameraId) return true;
-  const meta = event.metadata || {};
-  if (meta.camera_id && String(meta.camera_id) === String(cameraId)) return true;
-  const option = Array.from(els.cameraFilter?.options || []).find((o) => o.value === String(cameraId));
-  const cameraName = option?.textContent;
-  if (cameraName && meta.camera_name && String(meta.camera_name).toLowerCase() === String(cameraName).toLowerCase()) {
-    return true;
-  }
-  // Fall back to the display label the row uses so snapshots whose metadata
-  // lacks a structured camera_id still filter correctly.
-  return snapshotCameraLabel(event).toLowerCase() === String(cameraName || cameraId).toLowerCase();
-}
-
-// A snapshot matches a label when any of its detections carries that label
-// (object labels, sound labels and the generic 'motion' trigger all flow
-// through the same detection array), falling back to the metadata label for
-// sound events that stored it there instead.
-function snapshotHasLabel(event, label) {
-  const needle = String(label || '').trim().toLowerCase();
-  if (!needle) return true;
-  const detections = event.detections || [];
-  if (detections.some((d) => String(d && d.label || '').trim().toLowerCase() === needle)) return true;
-  const meta = event.metadata || {};
-  return String(meta.label || meta.class_label || '').trim().toLowerCase() === needle;
-}
-
-function parseTimeParts(timeString) {
-  const match = String(timeString || '').match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-  return {
-    hour: Math.min(23, Math.max(0, Number.parseInt(match[1], 10) || 0)),
-    minute: Math.min(59, Math.max(0, Number.parseInt(match[2], 10) || 0)),
-  };
-}
-
-// Build a local-time Date for a YYYY-MM-DD + HH:MM filter bound, so the
-// From/To semantics feel intuitive (the browser returns dates without a
-// timezone). Returns null when the date string is unusable.
-function localBoundary(dateString, timeString, endOfDay) {
-  const [year, month, day] = String(dateString || '').split('-').map((part) => Number.parseInt(part, 10));
-  if (!year || !month || !day) return null;
-  const fallback = endOfDay ? { hour: 23, minute: 59 } : { hour: 0, minute: 0 };
-  const parts = parseTimeParts(timeString) || fallback;
-  return new Date(year, month - 1, day, parts.hour, parts.minute, endOfDay ? 59 : 0, endOfDay ? 999 : 0);
-}
-
-// ── Lower bound: today by default ────────────────────────────────────────
-// /api/snapshots walks a cursor over every snapshot it is allowed to return,
-// so an unbounded first load paged through the entire table. Both bounds
-// below are derived from the same filter state so the request (`since=`) and
-// the client-side range test can never disagree:
-//   * no date filters -> local midnight today,
-//   * From Date set    -> that instant (honouring From Time),
-//   * only To Date set -> the start of that day, so a To Date in the past
-//                         still loads the day the operator asked for.
-let loadedSinceMs = null; // widest `since` already fetched; null = nothing yet
-
-// Lower bound of what the list should display for the given filters.
-function snapshotsFloorMs(filters) {
-  if (filters.dateFrom) {
-    const from = localBoundary(filters.dateFrom, filters.timeFrom, false);
-    if (from) return from.getTime();
-  } else if (filters.dateTo) {
-    const toDayStart = localBoundary(filters.dateTo, '', false);
-    if (toDayStart) return toDayStart.getTime();
-  }
-  const todayStart = Date.parse(daygleSinceParamForRange('today'));
-  return Number.isFinite(todayStart) ? todayStart : 0;
-}
-
-// `since` bound for the request: never later than the display floor, so the
-// fetched set is always a superset of what the client renders (a future From
-// Date, for example, still loads today and lets the floor hide it).
-function snapshotsRequestSinceMs(filters) {
-  const floor = snapshotsFloorMs(filters);
-  const todayStart = Date.parse(daygleSinceParamForRange('today'));
-  return Number.isFinite(todayStart) && todayStart < floor ? todayStart : floor;
-}
-
-function snapshotInRange(event, filters) {
-  const created = Date.parse(event.created_at || '');
-  if (!Number.isFinite(created)) return true;
-  if (created < snapshotsFloorMs(filters)) return false;
-  const toBoundary = localBoundary(filters.dateTo, filters.timeTo, true);
-  if (toBoundary && created > toBoundary.getTime()) return false;
-  return true;
-}
-
-function currentFilterValues() {
-  return {
-    label: els.labelFilter?.value || '',
-    face: els.faceFilter?.value || '',
-    cameraId: els.cameraFilter?.value || '',
-    dateFrom: els.dateFrom?.value || '',
-    // Read from the custom hour/minute (/AM/PM) selects so the filter value
-    // always matches what the user sees in the picker.
-    timeFrom: timeSelectValue(els.timeFrom) || FILTER_TIME_FROM_DEFAULT,
-    dateTo: els.dateTo?.value || '',
-    timeTo: timeSelectValue(els.timeTo) || FILTER_TIME_TO_DEFAULT,
-    sort: els.sort?.value || 'newest',
-  };
-}
-
-function describeFilters(filters) {
-  const parts = [];
-  if (filters.label) {
-    const option = els.labelFilter?.querySelector(`option[value="${escapeHtml(filters.label)}"]`);
-    parts.push(`label “${option?.textContent || filters.label}”`);
-  }
-  if (filters.face) {
-    const faceOption = els.faceFilter?.querySelector(`option[value="${escapeHtml(filters.face)}"]`);
-    parts.push(`face “${faceOption?.textContent || filters.face}”`);
-  }
-  if (filters.cameraId) {
-    const cameraOption = Array.from(els.cameraFilter?.options || []).find((o) => o.value === filters.cameraId);
-    parts.push(`camera “${cameraOption?.textContent || filters.cameraId}”`);
-  }
-  if (filters.dateFrom) parts.push(`from ${formatUserDate(filters.dateFrom)} ${filters.timeFrom || FILTER_TIME_FROM_DEFAULT}`);
-  if (filters.dateTo) parts.push(`through ${formatUserDate(filters.dateTo)} ${filters.timeTo || FILTER_TIME_TO_DEFAULT}`);
-  return parts;
-}
-
-// ── Collapsible filter panel ──────────────────────────────────────────────
-// Same as the Recordings page: the filter form starts collapsed behind the
-// toolbar's Filters button, and the open/closed choice is remembered.
-const SNAPSHOTS_FILTER_PANEL_KEY = 'daygle.snapshots.filters.open';
-
-function setFilterPanelOpen(open, { persist = true } = {}) {
-  if (!els.filterForm || !els.filterToggle) return;
-  els.filterForm.hidden = !open;
-  els.filterToggle.setAttribute('aria-expanded', String(open));
-  if (!persist) return;
-  try { localStorage.setItem(SNAPSHOTS_FILTER_PANEL_KEY, open ? '1' : '0'); } catch (_err) { /* storage disabled - keep default */ }
-}
-
-// Filters changed from the defaults (today, whole day, every camera and
-// label), counted on the collapsed button so a filtered gallery never looks
-// unfiltered.
-function activeFilterCount(filters) {
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  return [
-    filters.label,
-    filters.face,
-    filters.cameraId,
-    filters.dateFrom && filters.dateFrom !== today,
-    filters.dateTo && filters.dateTo !== today,
-    filters.timeFrom && filters.timeFrom !== FILTER_TIME_FROM_DEFAULT,
-    filters.timeTo && filters.timeTo !== FILTER_TIME_TO_DEFAULT,
-  ].filter(Boolean).length;
-}
-
-function updateFilterPanelBadge(filters) {
-  const count = activeFilterCount(filters);
-  if (els.filterBadge) {
-    els.filterBadge.textContent = String(count);
-    els.filterBadge.hidden = !count;
-  }
-  if (!els.filterToggle) return;
-  els.filterToggle.classList?.toggle('is-filtered', count > 0);
-  els.filterToggle.setAttribute('aria-label', count ? `Filters, ${count} active` : 'Filters');
-}
-
-function updateFilterStat(filters) {
-  updateFilterPanelBadge(filters);
-  if (!els.statFilterStatus || !els.statFilterHint) return;
-  const active = describeFilters(filters);
-  if (active.length) {
-    els.statFilterStatus.textContent = 'Filtered';
-    els.statFilterHint.textContent = `Showing snapshots matching ${active.join(' and ')}.`;
-  } else {
-    els.statFilterStatus.textContent = 'Today';
-    els.statFilterHint.textContent = 'Showing snapshots captured today';
-  }
 }
 
 function snapshotRow(event) {
@@ -397,13 +166,65 @@ function renderStats(snapshots) {
   if (els.statAlerted) els.statAlerted.textContent = String(alerted);
 }
 
-function renderGallery(snapshots) {
-  if (els.listStatus) {
-    els.listStatus.textContent = snapshots.length
-      ? `${snapshots.length} snapshot${snapshots.length === 1 ? '' : 's'}`
-      : '';
+function activeType() {
+  return filters ? filters.query().type : 'all';
+}
+
+function visibleSnapshots() {
+  const type = activeType();
+  if (type === 'all') return allSnapshots;
+  return allSnapshots.filter((event) => snapshotKind(event) === type);
+}
+
+// ── Server-side pagination ──────────────────────────────────────────────
+// Mirrors /events: one page paints first, later pages stream on demand.
+// Each loadSnapshots() supersedes the previous one so a late page from an
+// old filter state never lands in the new gallery.
+const SNAPSHOTS_PAGE_SIZE = 120;
+let snapshotsPager = null;
+let snapshotsLoadSession = 0;
+let snapshotsMoreLoading = false;
+// True once the incremental renderer has finished painting the gallery; a
+// streamed page is only appended to a completed render.
+let snapshotsRowsReady = false;
+
+function updateSnapshotCount() {
+  if (!filters) return;
+  const count = visibleSnapshots().length;
+  const more = Boolean(snapshotsPager && !snapshotsPager.done);
+  if (!count) {
+    filters.setCount(more ? 'More snapshots available' : '0 snapshots');
+    return;
   }
+  filters.setCount(`${count} snapshot${count === 1 ? '' : 's'}${more ? ' loaded · more available' : ''}`);
+}
+
+function renderGalleryFooter() {
+  if (!snapshotsPager || snapshotsPager.done) return '';
+  return `
+    <div class="list-load-more" id="snapshots-more">
+      <button type="button" class="secondary list-load-more-btn" id="snapshots-more-btn">Load More</button>
+      <span class="muted">Older snapshots load as you scroll.</span>
+    </div>`;
+}
+
+function wireLoadMore() {
+  document.getElementById('snapshots-more')?.remove();
+  if (snapshotsPager && !snapshotsPager.done && els.gallery) {
+    els.gallery.insertAdjacentHTML('beforeend', renderGalleryFooter());
+  }
+  const button = document.getElementById('snapshots-more-btn');
+  if (button) button.addEventListener('click', () => loadMoreSnapshots());
+  const sentinel = document.getElementById('snapshots-more');
+  setLoadMoreSentinel('snapshots', sentinel, loadMoreSnapshots);
+}
+
+function renderGallery() {
+  const snapshots = visibleSnapshots();
+  renderStats(snapshots);
+  updateSnapshotCount();
   if (!els.gallery) return;
+  snapshotsRowsReady = false;
   if (!snapshots.length) {
     els.gallery.innerHTML = `
       <div class="activity-empty-state snapshots-empty-state">
@@ -413,6 +234,7 @@ function renderGallery(snapshots) {
         <h2>No snapshots match the current filters</h2>
         <p class="muted">Try a wider time range, clearing a filter, or waiting for a new detection to be captured.</p>
       </div>`;
+    wireLoadMore();
     return;
   }
   // Item 15: paint the gallery progressively rather than in one innerHTML
@@ -421,14 +243,65 @@ function renderGallery(snapshots) {
   // lets the observer drop src without a refetch on return).
   renderIncrementally(els.gallery, snapshots, snapshotRow, {
     onComplete: () => {
+      snapshotsRowsReady = true;
       bindDeleteButtons();
       observeMediaLifecycle(els.gallery);
+      wireLoadMore();
     },
   });
 }
 
+// Append one streamed page; falls back to a full repaint when the previous
+// render has not finished (its unpainted rows would otherwise be lost).
+function appendSnapshots(rows) {
+  if (snapshotsRowsReady && !rows.length) {
+    // Nothing new is visible (the page held only other types): just move the
+    // load-more footer along.
+    wireLoadMore();
+    return;
+  }
+  if (!els.gallery || !snapshotsRowsReady) {
+    renderGallery();
+    return;
+  }
+  document.getElementById('snapshots-more')?.remove();
+  snapshotsRowsReady = false;
+  renderIncrementally(els.gallery, rows, snapshotRow, {
+    append: true,
+    onComplete: () => {
+      snapshotsRowsReady = true;
+      bindDeleteButtons();
+      observeMediaLifecycle(els.gallery);
+      wireLoadMore();
+    },
+  });
+}
+
+async function loadMoreSnapshots() {
+  if (!snapshotsPager || snapshotsPager.done || snapshotsMoreLoading) return;
+  snapshotsMoreLoading = true;
+  const session = snapshotsLoadSession;
+  try {
+    const page = await snapshotsPager.loadPage();
+    if (session !== snapshotsLoadSession) return;
+    allSnapshots = allSnapshots.concat(page.items);
+    const type = activeType();
+    renderStats(visibleSnapshots());
+    updateSnapshotCount();
+    appendSnapshots(page.items.filter((event) => type === 'all' || snapshotKind(event) === type));
+  } catch (_err) {
+    if (session !== snapshotsLoadSession) return;
+    if (typeof showToast === 'function') showToast('Failed to load more snapshots.', true);
+  } finally {
+    snapshotsMoreLoading = false;
+  }
+}
+
 function bindDeleteButtons() {
   document.querySelectorAll('[data-delete-snapshot]').forEach((button) => {
+    // Streamed pages re-bind the gallery; never stack a second handler.
+    if (button.dataset.daygleBound) return;
+    button.dataset.daygleBound = '1';
     button.addEventListener('click', async () => {
       const id = button.dataset.deleteSnapshot;
       if (!confirm(`Delete snapshot for event #${id}? The event and its recording stay intact.`)) return;
@@ -445,230 +318,65 @@ function bindDeleteButtons() {
   });
 }
 
-// Apply the active filters to the full snapshot list, then render.
-function applyFilters() {
-  const filters = currentFilterValues();
-  const filtered = allSnapshots.filter((event) => {
-    if (!snapshotMatchesCamera(event, filters.cameraId)) return false;
-    if (!snapshotHasLabel(event, filters.label)) return false;
-    if (!matchesFaceFilter(eventFaceIdentities(event), filters.face)) return false;
-    if (!snapshotInRange(event, filters)) return false;
-    return true;
-  });
-  if (filters.sort === 'oldest') {
-    filtered.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
-  }
-  updateFilterStat(filters);
-  renderStats(filtered);
-  renderGallery(filtered);
+// The /api/snapshots query for the bar's current state (the type pill is
+// applied client-side by visibleSnapshots()).
+function snapshotsQueryString(query) {
+  const params = new URLSearchParams();
+  if (query.since) params.set('since', query.since);
+  if (query.until) params.set('until', query.until);
+  if (query.q) params.set('q', query.q);
+  if (query.camera_id) params.set('camera_id', query.camera_id);
+  if (query.label) params.set('label', query.label);
+  if (query.face) params.set('face', query.face);
+  if (query.alerted_only) params.set('alerted_only', 'true');
+  if (query.sort && query.sort !== 'newest') params.set('sort', query.sort);
+  return params.toString();
 }
 
-// Re-request only when the date card reaches further back than the widest
-// bound already loaded. Narrowing (or resetting back to the default) reuses
-// the in-memory list because the fetched set always covers today.
-async function applyFiltersOrReload() {
-  const since = snapshotsRequestSinceMs(currentFilterValues());
-  if (loadedSinceMs === null || since < loadedSinceMs) {
-    await loadSnapshots(since);
-    return;
-  }
-  applyFilters();
-}
-
-// ── Camera + label filter options ────────────────────────────────────────
-async function loadCameras() {
-  try {
-    const data = await api('/api/cameras');
-    const cameras = data?.cameras || [];
-    if (!cameras.length || !els.cameraFilter) return;
-    for (const camera of cameras) {
-      const option = document.createElement('option');
-      option.value = camera.id;
-      option.textContent = camera.name || camera.id;
-      els.cameraFilter.appendChild(option);
-    }
-  } catch (_error) {
-    // Silent api() fallback (no UI mutation) - redirect guard skipped by design.
-  }
-}
-
-function populateLabelOptions() {
-  if (!els.labelFilter) return;
-  // Refetches (a widened date range) rebuild this list - keep the operator's
-  // pick unless it vanished from the new set, like populateFaceOptions does.
-  const previous = els.labelFilter.value || '';
-  const counts = {};
-  allSnapshots.forEach((event) => {
-    const labels = new Set();
-    (event.detections || []).forEach((d) => {
-      const label = String(d && d.label || '').trim().toLowerCase();
-      if (label) labels.add(label);
-    });
-    const meta = event.metadata || {};
-    if (meta.label || meta.class_label) labels.add(String(meta.label || meta.class_label).trim().toLowerCase());
-    labels.forEach((label) => { counts[label] = (counts[label] || 0) + 1; });
-  });
-
-  const options = [{ value: '', label: `All Labels${allSnapshots.length ? ` (${allSnapshots.length})` : ''}` }];
-  const seen = new Set(['']);
-  const addOption = (value) => {
-    const normalized = String(value || '').trim().toLowerCase();
-    // Mirror /recordings: strip generic trigger words so the dropdown only
-    // surfaces concrete object/sound labels plus a single Motion option.
-    if (!normalized || seen.has(normalized) || GENERIC_TRIGGER_LABELS.has(normalized)) return;
-    seen.add(normalized);
-    const count = counts[normalized];
-    options.push({ value: normalized, label: count ? `${titleCase(normalized)} (${count})` : titleCase(normalized) });
-  };
-  allSnapshots.forEach((event) => {
-    (event.detections || []).forEach((d) => addOption(d && d.label));
-    const meta = event.metadata || {};
-    addOption(meta.label);
-    addOption(meta.class_label);
-  });
-  // Motion-only frames carry no concrete object label - surface a single
-  // Motion option (like /recordings) so those snapshots stay filterable.
-  if (allSnapshots.some((event) => snapshotKind(event) === 'motion')) addOption('motion');
-  const ordered = [options[0], ...options.slice(1).sort((left, right) => left.label.localeCompare(right.label))];
-  els.labelFilter.innerHTML = ordered.map((option) => (
-    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
-  )).join('');
-  const values = new Set(ordered.map((option) => option.value));
-  els.labelFilter.value = values.has(previous) ? previous : '';
-}
-
-// Build the Face filter from the identities actually present in the loaded
-// snapshots: one option per recognised person, plus "Any Face" / "Unknown"
-// when applicable. The whole field stays hidden on deployments that never run
-// face recognition (no face_identities in any snapshot), so it adds no clutter
-// there. Mirrors populateLabelOptions' preserve-selection behaviour.
-function populateFaceOptions() {
-  if (!els.faceFilter) return;
-  const previous = els.faceFilter.value || '';
-  const people = new Map(); // key -> {name, count}
-  let anyUnknown = 0;
-  let anyFace = 0;
-  for (const event of allSnapshots) {
-    const { people: eventPeople, unknown } = eventFaceIdentities(event);
-    if (eventPeople.size || unknown > 0) anyFace += 1;
-    if (unknown > 0) anyUnknown += 1;
-    for (const [key, person] of eventPeople) {
-      const existing = people.get(key);
-      if (existing) existing.count += 1;
-      else people.set(key, { name: person.name, count: 1 });
-    }
-  }
-  const hasFaces = people.size > 0 || anyUnknown > 0;
-  if (els.faceField) els.faceField.hidden = !hasFaces;
-  if (!hasFaces) {
-    els.faceFilter.innerHTML = '<option value="">All Faces</option>';
-    els.faceFilter.value = '';
-    return;
-  }
-  const options = [{ value: '', label: `All Faces${anyFace ? ` (${anyFace})` : ''}` }, { value: 'any', label: 'Any Face' }];
-  const peopleOptions = Array.from(people.entries())
-    .map(([key, person]) => ({ value: key, label: `${person.name} (${person.count})` }))
-    .sort((left, right) => left.label.localeCompare(right.label));
-  options.push(...peopleOptions);
-  if (anyUnknown > 0) options.push({ value: 'unknown', label: `Unknown (${anyUnknown})` });
-  const values = new Set(options.map((option) => option.value));
-  els.faceFilter.innerHTML = options.map((option) => (
-    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
-  )).join('');
-  els.faceFilter.value = values.has(previous) ? previous : '';
-}
-
-// `sinceMs` is the lower bound to request (null = derive it from the current
-// filter state, i.e. today by default). Only ever called with a bound that is
-// wider than what is already loaded, so `loadedSinceMs` keeps tracking the
-// widest window fetched so far.
-// Bumped per loadSnapshots call so a slow, older range request that finishes
-// last cannot overwrite the gallery (and the loaded-range bound) of a newer one.
-let snapshotsLoadSession = 0;
-
-async function loadSnapshots(sinceMs = null) {
+async function loadSnapshots() {
   snapshotsLoadSession += 1;
   const session = snapshotsLoadSession;
-  const since = sinceMs ?? snapshotsRequestSinceMs(currentFilterValues());
   if (els.gallery) els.gallery.innerHTML = '<p class="muted">Loading snapshots…</p>';
+  const query = snapshotsQueryString(filters ? filters.query() : libraryDefaultQuery());
+  snapshotsPager = createCursorPager(`/api/snapshots${query ? `?${query}` : ''}`, SNAPSHOTS_PAGE_SIZE);
+  allSnapshots = [];
   try {
-    const params = new URLSearchParams({ since: new Date(since).toISOString() });
-    const items = await fetchAllCursorPages(`/api/snapshots?${params}`, 500);
+    const page = await snapshotsPager.loadPage();
     if (session !== snapshotsLoadSession) return;
-    allSnapshots = items;
-    loadedSinceMs = since;
+    allSnapshots = page.items;
   } catch (_err) {
     if (session !== snapshotsLoadSession) return;
     allSnapshots = [];
-    // Drop the bound so the next attempt re-requests instead of trusting it.
-    loadedSinceMs = null;
+    setLoadMoreSentinel('snapshots', null, loadMoreSnapshots);
     if (els.gallery) els.gallery.innerHTML = '<p class="muted empty-state">Could not load snapshots.</p>';
     if (typeof showToast === 'function') showToast('Failed to load snapshots.', true);
     return;
   }
-  populateLabelOptions();
-  populateFaceOptions();
-  applyFilters();
+  renderGallery();
 }
 
-function wireControls() {
-  els.filterForm?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    // Apply Filters can widen the date range, which needs a fresh request.
-    applyFiltersOrReload();
-  });
-  // Camera and label are instant-pick filters (like /recordings); the date
-  // range and sort apply on the Apply Filters button.
-  els.cameraFilter?.addEventListener('change', () => applyFilters());
-  els.labelFilter?.addEventListener('change', () => applyFilters());
-  els.faceFilter?.addEventListener('change', () => applyFilters());
-  els.clearBtn?.addEventListener('click', () => {
-    if (els.labelFilter) els.labelFilter.value = '';
-    if (els.faceFilter) els.faceFilter.value = '';
-    if (els.cameraFilter) els.cameraFilter.value = '';
-    if (els.dateFrom) els.dateFrom.value = '';
-    if (els.dateTo) els.dateTo.value = '';
-    if (els.sort) els.sort.value = 'newest';
-    // Re-render the From/To time pickers back to their defaults. Going through
-    // renderFilterTimeSelects (rather than poking child selects directly) means
-    // Reset Filters also handles the 12h vs 24h AM/PM swap correctly.
-    renderFilterTimeSelects();
-    applyFiltersOrReload();
-  });
-}
-
-// Re-render the time pickers when the user's date_format / time_format
-// changes in another tab (mirrors /recordings).
+// Re-render the custom-range time pickers when Profile > Time Format changes
+// in another tab (mirrors /recordings and /events).
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
-  const preservedFrom = els.timeFrom ? timeSelectValue(els.timeFrom) : FILTER_TIME_FROM_DEFAULT;
-  const preservedTo = els.timeTo ? timeSelectValue(els.timeTo) : FILTER_TIME_TO_DEFAULT;
-  els.timeFrom = renderFilterTimeSelect('snapshotTimeFromMount', preservedFrom || FILTER_TIME_FROM_DEFAULT);
-  els.timeTo = renderFilterTimeSelect('snapshotTimeToMount', preservedTo || FILTER_TIME_TO_DEFAULT);
+  filters?.refreshTimePickers();
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
-  applyDefaultDateFilters();
-  wireControls();
   // Await the shared /api/auth/me so the delete button only renders for
   // admins (the backend enforces this either way).
   await window.daygleAuthReady;
-  await loadCameras();
+  if (!els.filterMount) return;
+  filters = createLibraryFilters({
+    mount: els.filterMount,
+    kind: 'snapshots',
+    noun: 'snapshots',
+    // Sound events carry no frame, so snapshots are only ever object or motion.
+    types: ['all', 'object', 'motion'],
+    searchPlaceholder: 'Search snapshots: person, driveway, red car, a face name…',
+    onChange: (_query, reason) => {
+      if (reason === 'type' && snapshotsPager) renderGallery();
+      else loadSnapshots();
+    },
+  });
   loadSnapshots();
-});
-
-// Restore the saved open/closed choice; a visit deep-linked with a filter
-// (?label=..., ?camera_id=..., ?face=...) always shows the controls.
-(function initFilterPanel() {
-  if (!els.filterForm || !els.filterToggle) return;
-  const params = new URLSearchParams(window.location?.search || '');
-  const deepLinked = Boolean(params.get('label') || params.get('camera_id') || params.get('face'));
-  let saved = null;
-  try { saved = localStorage.getItem(SNAPSHOTS_FILTER_PANEL_KEY); } catch (_err) { /* storage disabled - keep default */ }
-  setFilterPanelOpen(deepLinked || saved === '1', { persist: false });
-})();
-
-els.filterToggle?.addEventListener('click', () => {
-  const opening = Boolean(els.filterForm?.hidden);
-  setFilterPanelOpen(opening);
-  if (opening) els.filterForm?.querySelector('select, input, button')?.focus();
 });
