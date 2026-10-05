@@ -63,24 +63,6 @@
 
     <section class="card">
       <div class="settings-section-header">
-        <div class="settings-section-icon" aria-hidden="true">✅</div>
-        <div>
-          <h2>Alert Verification</h2>
-          <p class="settings-section-subtitle">Before an object alert's email or push notification is sent, the model confirms the object is really there. Alerts it rejects (shadows, reflections, bushes) are not notified, but the event and recording are kept and marked <strong>🤖 Filtered</strong> in the Events list. Turn it on per alert with <strong>AI Verify</strong> on the <a href="/alerts">Alerts</a> page. Face, motion and sound alerts are never verified.</p>
-        </div>
-      </div>
-      <div class="form-grid">
-        <label>
-          <span>Focus on Object <span class="info-tip" data-tip="Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled" title="Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled" tabindex="0" aria-label="Help: Send a close-up around the detected object (with surrounding context) instead of the full frame. Helps small models judge small or distant objects. Default: Enabled"></span></span>
-          <select name="focus_crop">
-            <option value="true">Enabled</option>
-            <option value="false">Disabled</option>
-          </select></label>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">💬</div>
         <div>
           <h2>Descriptions &amp; Search</h2>
@@ -114,16 +96,6 @@
         <span id="aiBackfillStatus" class="muted" aria-live="polite"></span>
       </div>
       <p class="muted ai-page-note">Save <strong>Describe Events</strong> first; past events use the saved settings.</p>
-    </section>
-
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon" aria-hidden="true">🏷️</div>
-        <div>
-          <h2>AI Tag Alerts</h2>
-          <p class="settings-section-subtitle">Get alerted when the model names something in an area, such as a ladder or a parcel, even when object detection has no class for it. Turn on <strong>AI tag alert</strong> per area on the <a href="/zones">Zones</a> page, then choose email or push under <strong>AI Tag</strong> on the <a href="/alerts">Alerts</a> page.</p>
-        </div>
-      </div>
     </section>
 
     <div class="button-row ai-save-row">

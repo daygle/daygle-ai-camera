@@ -1,7 +1,7 @@
 // ai.js - Intelligence > AI page (ai.html). Admin-only.
-// The local vision model (app/ai_verification.py): server + model, shared
-// alert-verification options (verification itself is ticked per alert rule on
-// the Alerts page), event descriptions / search, and the past-events backfill.
+// The local vision model (app/ai_verification.py): server + model, event
+// descriptions / search, and the past-events backfill. Alert verification and
+// AI tag alerts are configured per rule on the Alerts page.
 // One form, one PUT /api/settings/ai-verification. Uses api() / escapeHtml /
 // showToast from utils.js.
 
@@ -18,10 +18,11 @@ const AI_FORM_DEFAULTS = {
   model: 'gemma3:4b',
   api_key: '',
   timeout_seconds: 20,
-  focus_crop: 'true',
   describe_events: 'off',
 };
-const AI_BOOLEAN_FIELDS = new Set(['focus_crop']);
+// Alert verification's focus_crop is no longer on this form; the PUT merges
+// onto the stored settings, so its saved value (default on) is kept.
+const AI_BOOLEAN_FIELDS = new Set();
 const AI_INTEGER_FIELDS = new Set(['timeout_seconds']);
 
 function aiMessage(text, isError = false) {
