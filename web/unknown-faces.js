@@ -167,6 +167,8 @@
       showToast(`Assigned to ${result.person_name || 'person'}.`);
       await loadPersons();
       await loadFaces();
+      // Let the People card (people.js) refresh its face counts.
+      window.dispatchEvent(new CustomEvent('daygle:people-changed', { detail: { source: 'review' } }));
     } catch (err) {
       showToast(err.message || 'Failed to assign face.', true);
       if (btn) btn.disabled = false;
@@ -235,4 +237,11 @@
   // Review is a card on the face page rather than a tab, so the list simply
   // loads with the page instead of on tab activation.
   loadPersons().then(() => loadFaces());
+
+  // A person added, renamed or deleted on the People card (people.js) changes
+  // the assign dropdown, so reload the list and redraw the cards.
+  window.addEventListener('daygle:people-changed', (event) => {
+    if (event.detail?.source === 'review') return;
+    loadPersons().then(render);
+  });
 })();
