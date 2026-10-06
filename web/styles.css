@@ -745,9 +745,22 @@ input[type="file"] { padding: 10px; }
   flex-wrap: wrap;
   gap: 8px;
 }
+/* The shared `.status-panel span` rule (0,1,1) beats the plain `.detection`
+   inline-flex (0,1,0), blockifying the pill and stranding the "×N" count on a
+   second line below "Car · 96%". Re-state the pill as inline-flex so label,
+   confidence and count share one line. */
 .status-panel .recording-detail-detections .detection {
   margin: 0;
   width: fit-content;
+  display: inline-flex;
+}
+/* Same leak lands on the count span itself: it inherits the muted label
+   colour and a 5px bottom margin instead of the pill's recessed metadata
+   styling. Cancel both (0,4,0 beats the shared 0,1,1 rule). */
+.status-panel .recording-detail-detections .detection .detection-count {
+  display: inline-block;
+  margin-bottom: 0;
+  color: inherit;
 }
 .status-panel.status-ok { border: 1px solid rgba(73,230,163,.4); background: rgba(73,230,163,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
 .status-panel.status-warning { border: 1px solid rgba(251,191,36,.4); background: rgba(251,191,36,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
