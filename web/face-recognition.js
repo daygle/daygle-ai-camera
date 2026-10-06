@@ -81,6 +81,9 @@ async function loadSettings() {
       const conf = aiStatus.face_confidence;
       frForm.face_confidence.value = (conf != null && conf !== '') ? String(conf) : '0.45';
     }
+    if (frForm.elements['face_require_person']) {
+      frForm.face_require_person.value = aiStatus.face_require_person === false ? 'false' : 'true';
+    }
   } catch (err) {
     frMessage.textContent = err.message || 'Failed to load settings.';
   }
@@ -117,6 +120,9 @@ async function saveSettings(event) {
     try {
       const confVal = frForm.elements['face_confidence']?.value.trim();
       const aiPayload = { face_confidence: confVal !== '' ? Number(confVal) : 0.45 };
+      if (frForm.elements['face_require_person']) {
+        aiPayload.face_require_person = frForm.face_require_person.value !== 'false';
+      }
       await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify(aiPayload) });
     } catch (err) {
       faceConfError = err;

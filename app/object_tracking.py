@@ -669,3 +669,19 @@ def live_track_ids(camera_id: str, label: str) -> set[Any]:
     with _state._object_tracks_lock:
         state = _state._object_tracks.get(camera_id) or {}
         return {track["id"] for track in state.get("tracks", []) if track.get("label") == key}
+
+
+def recent_track_boxes(camera_id: str, label: str, *, max_misses: int = 2) -> list[dict[str, Any]]:
+    """Boxes of the ``label`` tracks seen within the last ``max_misses`` cycles.
+
+    For gates that need "was there one here a moment ago" -- a detector that
+    flickers for a cycle should not make everything that depends on it vanish.
+    """
+    key = str(label or "").strip().lower()
+    with _state._object_tracks_lock:
+        state = _state._object_tracks.get(camera_id) or {}
+        return [
+            dict(track["box"])
+            for track in state.get("tracks", [])
+            if track.get("label") == key and track.get("misses", 0) <= max_misses and isinstance(track.get("box"), dict)
+        ]
