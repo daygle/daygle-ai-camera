@@ -80,6 +80,26 @@ async function addPerson(event) {
   }
 }
 
+const FACE_SOURCE_LABELS = {
+  enrolled: 'Enrolled photo',
+  review: 'Assigned from Review',
+  auto: 'Auto-learned',
+};
+
+async function deleteAutoFaces(card) {
+  const personId = card.dataset.personId;
+  const name = card.querySelector('strong')?.textContent || 'this person';
+  if (!window.confirm(`Remove every face learned automatically for ${name}? Photos you enrolled and faces you assigned from Review stay.`)) return;
+  try {
+    const result = await api(`/api/persons/${encodeURIComponent(personId)}/faces?source=auto`, { method: 'DELETE' });
+    showToast(`Removed ${result.removed} auto-learned face${result.removed === 1 ? '' : 's'}.`);
+    announcePeopleChanged();
+    await loadPeople();
+  } catch (err) {
+    showToast(err.message || 'Remove failed.', true);
+  }
+}
+
 function cardFor(target) {
   return target.closest('[data-person-id]');
 }
@@ -122,6 +142,7 @@ async function showFaces(card) {
     if (!faces.length) {
       panel.innerHTML = '<p class="muted">No faces enrolled for this person yet.</p>';
     } else {
+      const autoCount = faces.filter((face) => face.source === 'auto').length;
       // Plain template + escapeHtml on values: the ``thumb`` fragment is
       // already-safe HTML markup, so interpolating it through safeHtml`` would
       // double-escape its tags into visible text (see personCard above).
@@ -135,13 +156,19 @@ async function showFaces(card) {
           <figure class="face-thumb">
             ${thumb}
             <figcaption class="face-thumb-caption">
-              <span class="muted">Face #${faceId}</span>
+              <span class="muted">${escapeHtml(FACE_SOURCE_LABELS[face.source] || 'Enrolled photo')}</span>
               <span class="face-thumb-date muted">${escapeHtml(formatFaceDate(face.created_at))}</span>
             </figcaption>
             <button class="btn-danger model-action-btn face-thumb-delete" type="button" data-action="delete-face" data-face-id="${faceId}">Delete</button>
           </figure>`;
       });
-      panel.innerHTML = `<div class="face-thumb-grid">${rows.join('')}</div>`;
+      // Auto-learned faces can come from a confident WRONG match, and older
+      // ones were stored without a picture, so offer to clear them in one go.
+      const autoNote = autoCount
+        ? `<div class="person-faces-auto"><span class="muted">${autoCount} face${autoCount === 1 ? ' was' : 's were'} learned automatically from live matches (Auto-enrich).</span>
+             <button class="btn-danger model-action-btn" type="button" data-action="delete-auto-faces">Remove auto-learned (${autoCount})</button></div>`
+        : '';
+      panel.innerHTML = `${autoNote}<div class="face-thumb-grid">${rows.join('')}</div>`;
     }
     panel.hidden = false;
   } catch (err) {
@@ -206,6 +233,7 @@ peopleList.addEventListener('click', (event) => {
   else if (action === 'rename') renamePerson(card);
   else if (action === 'delete') deletePerson(card);
   else if (action === 'delete-face') deleteFace(card, button.dataset.faceId);
+  else if (action === 'delete-auto-faces') deleteAutoFaces(card);
 });
 
 peopleList.addEventListener('change', (event) => {
