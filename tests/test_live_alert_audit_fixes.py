@@ -416,7 +416,11 @@ def test_live_pipeline_captures_unknown_face_for_review(tmp_path, monkeypatch):
         unavailable_reason = None
 
         def detect_frame(self, _frame, confidence=None):
-            return []  # no COCO objects; faces come from the secondary detector
+            # The person the face belongs to: faces only count on a person
+            # (face_require_person, on by default); the face itself comes
+            # from the secondary detector.
+            return [{'label': 'person', 'confidence': 0.9,
+                     'box': {'x': 0.35, 'y': 0.25, 'width': 0.3, 'height': 0.7}}]
 
         def detect_image(self, _bytes, confidence=None):
             return []
