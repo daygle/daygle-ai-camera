@@ -78,6 +78,12 @@
           <label>
             <span>Face Confidence <span class="info-tip" data-tip="Minimum detection confidence (0-1). Default: 0.45. Faces are small targets - a lower value like 0.30 often catches distant faces better." title="Minimum detection confidence (0-1). Default: 0.45. Faces are small targets - a lower value like 0.30 often catches distant faces better." tabindex="0" aria-label="Help: Minimum detection confidence (0-1). Default: 0.45."></span></span>
             <input name="face_confidence" type="number" min="0" max="1" step="0.01" value="0.45" /></label>
+          <label>
+            <span>Only Accept Faces On A Person <span class="info-tip" data-tip="Count a face only where the object detector also sees a person (now or a moment ago). Stops the face model boxing gravel, fences or the timestamp as faces, which it often does on night/IR footage. Turn off only for a close-up camera where people are not detected. Default: Enabled" title="Count a face only where the object detector also sees a person (now or a moment ago). Stops the face model boxing gravel, fences or the timestamp as faces, which it often does on night/IR footage. Turn off only for a close-up camera where people are not detected. Default: Enabled" tabindex="0" aria-label="Help: Count a face only where a person is also detected. Default: Enabled"></span></span>
+            <select name="face_require_person">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select></label>
         </div>
         <div class="button-row">
           <button id="frReloadBtn" class="btn-info" type="button">Reload</button>

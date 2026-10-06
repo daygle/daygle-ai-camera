@@ -76,7 +76,7 @@ from app.object_settings import (
     still_dwell_candidates,
     update_still_dwell_alerts,
 )
-from app.object_tracking import update_object_tracks
+from app.object_tracking import recent_track_boxes, update_object_tracks
 from app.behaviour_monitor import (
     clear_behavioural_state,
     emit_activity_spike_anomalies,
@@ -798,7 +798,62 @@ def merge_secondary_face_detections(
         return detections
     if not face_detections:
         return detections
+    if camera_id and face_requires_person(effective_ai_config()):
+        face_detections = faces_on_people(camera_id, face_detections, detections)
     return list(detections) + list(face_detections)
+
+
+def face_requires_person(ai_config: dict[str, Any]) -> bool:
+    """"Only accept faces on a person" (Faces page), on unless switched off."""
+    return normalize_bool_setting(ai_config.get('face_require_person'), True)
+
+
+# How far a face's centre may sit outside a person's box, as a share of that
+# box: a head is at the top edge of a person box, and a box drawn a little
+# tight must not drop the face it belongs to.
+_FACE_PERSON_MARGIN = 0.1
+
+
+def faces_on_people(camera_id: str, faces: list, detections: list) -> list:
+    """Keep only the faces whose centre lies on a person.
+
+    A face detector run on its own misfires on textures the object model
+    shrugs off -- at night on an IR camera it boxes gravel, concrete, fences
+    and the timestamp overlay as "faces", sometimes at high confidence. A real
+    face belongs to a person, and the object detector finds people far more
+    reliably, so a face counts only where a person is: one detected this
+    cycle, or a person track seen in the last couple of cycles (the person
+    model can miss a frame while the face is still in view).
+    """
+    people = [
+        detection.get('box') for detection in detections
+        if str(detection.get('label') or '').strip().lower() == 'person' and isinstance(detection.get('box'), dict)
+    ]
+    people.extend(recent_track_boxes(camera_id, 'person'))
+    if not people:
+        return []
+
+    def _on_person(face: dict) -> bool:
+        box = face.get('box')
+        if not isinstance(box, dict):
+            return False
+        try:
+            cx = float(box['x']) + float(box['width']) / 2
+            cy = float(box['y']) + float(box['height']) / 2
+        except (KeyError, TypeError, ValueError):
+            return False
+        for person in people:
+            try:
+                px, py = float(person['x']), float(person['y'])
+                pw, ph = float(person['width']), float(person['height'])
+            except (KeyError, TypeError, ValueError):
+                continue
+            mx, my = pw * _FACE_PERSON_MARGIN, ph * _FACE_PERSON_MARGIN
+            if px - mx <= cx <= px + pw + mx and py - my <= cy <= py + ph + my:
+                return True
+        return False
+
+    return [face for face in faces if _on_person(face)]
 
 
 def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:

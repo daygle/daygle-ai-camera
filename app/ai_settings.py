@@ -79,6 +79,7 @@ from app.config_facades import effective_ai_config
 from app.detector import load_labels
 from app.runtime_config import settings_generation
 from app.settings import config_file_path
+from app.utils import normalize_bool_setting
 
 # Each entry describes one downloadable model. Required keys: ``pt`` (source
 # weight name), ``onnx`` (exported filename), ``label``, ``approx_mb``,
@@ -761,6 +762,8 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
         'face_model_path': ai_status['face_model_path'],
         'face_model_name': ai_status.get('face_model_name'),
         'face_model_loaded': ai_status['face_model_loaded'],
+        # Defaults on when never saved, so report the effective value.
+        'face_require_person': normalize_bool_setting(ai_settings.get('face_require_person'), True),
         # Surface the normalised tri-state so the settings form's NMS-dedupe
         # select reflects the persisted value (defaulting to 'auto') rather
         # than a raw legacy bool or a missing key.
@@ -817,6 +820,7 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'face_labels_path',
         'face_keypoint_count',
         'face_confidence',
+        'face_require_person',
     }
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
@@ -997,6 +1001,8 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         if not 0 <= face_confidence <= 1:
             raise HTTPException(status_code=400, detail='face_confidence must be between 0 and 1.')
         updated['face_confidence'] = face_confidence
+    # "Only accept faces on a person": on unless explicitly switched off.
+    updated['face_require_person'] = normalize_bool_setting(updated.get('face_require_person'), True)
     raw_model_path = updated.get('model_path') or current.get('model_path') or default_model_path()
     model_path = _canonical_models_path(raw_model_path, 'model_path')
     # Parallel-detector invariant: the PRIMARY slot must stay an object model.

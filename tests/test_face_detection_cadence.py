@@ -80,10 +80,13 @@ def test_zone_face_rule_keeps_the_face_pass_enabled(face_env):
         'object_rules': [{'label': 'face', 'enabled': True}],
     }])
     assert live_monitor.camera_uses_face_detections('front', settings) is True
+    # A person around the face: faces only count on a person (see the gate
+    # tests below), and this test is about the pass running at all.
+    person = {'label': 'person', 'box': {'x': 0, 'y': 0, 'width': 20, 'height': 40}}
     merged = live_monitor.merge_secondary_face_detections(
-        b'frame', [], camera_id='front', settings=settings, live_settings={},
+        b'frame', [person], camera_id='front', settings=settings, live_settings={},
     )
-    assert [d['label'] for d in merged] == ['face']
+    assert [d['label'] for d in merged] == ['person', 'face']
 
 
 def test_disabled_zone_face_rule_does_not_count(face_env):
@@ -261,3 +264,68 @@ def test_face_pass_stamp_does_not_disturb_object_detection_cadence(face_env, mon
     live_monitor.merge_secondary_face_detections(b'a', [], camera_id='front', settings=_camera(), live_settings={})
     assert _state.live_detection_last_checked['front'] == object_stamp, 'object cadence must be untouched'
     assert 'front' in _state.face_detection_last_checked
+
+
+
+# ─── "Only accept faces on a person" ────────────────────────────────────────
+
+
+def _box(x, y, w, h):
+    return {'x': x, 'y': y, 'width': w, 'height': h}
+
+
+def test_faces_off_any_person_are_dropped(monkeypatch):
+    # Night IR: the face model boxes gravel and the timestamp; no person there.
+    monkeypatch.setattr(live_monitor, 'recent_track_boxes', lambda *_a, **_k: [])
+    faces = [{'label': 'face', 'box': _box(0.7, 0.1, 0.2, 0.3)}, {'label': 'face', 'box': _box(0.85, 0.9, 0.1, 0.05)}]
+    assert live_monitor.faces_on_people('front', faces, [{'label': 'car', 'box': _box(0.6, 0.0, 0.4, 0.5)}]) == []
+
+
+def test_a_face_on_a_person_is_kept(monkeypatch):
+    monkeypatch.setattr(live_monitor, 'recent_track_boxes', lambda *_a, **_k: [])
+    person = {'label': 'person', 'box': _box(0.40, 0.20, 0.12, 0.50)}
+    head = {'label': 'face', 'box': _box(0.44, 0.19, 0.04, 0.05)}  # centre just above the box top
+    stray = {'label': 'face', 'box': _box(0.05, 0.05, 0.10, 0.10)}
+    assert live_monitor.faces_on_people('front', [head, stray], [person]) == [head]
+
+
+def test_a_person_the_detector_missed_this_cycle_still_counts(monkeypatch):
+    monkeypatch.setattr(live_monitor, 'recent_track_boxes', lambda *_a, **_k: [_box(0.40, 0.20, 0.12, 0.50)])
+    head = {'label': 'face', 'box': _box(0.44, 0.22, 0.04, 0.05)}
+    assert live_monitor.faces_on_people('front', [head], []) == [head]
+
+
+def test_the_person_gate_can_be_switched_off(face_env, monkeypatch):
+    settings = _camera(zones=[{'id': 'door', 'enabled': True, 'object_rules': [{'label': 'face', 'enabled': True}]}])
+    monkeypatch.setattr(live_monitor, 'recent_track_boxes', lambda *_a, **_k: [])
+    monkeypatch.setattr(live_monitor, 'effective_ai_config', lambda: {'face_require_person': True})
+    assert live_monitor.merge_secondary_face_detections(b'frame', [], camera_id='front', settings=settings, live_settings={}) == []
+    monkeypatch.setattr(live_monitor, 'effective_ai_config', lambda: {'face_require_person': False})
+    monkeypatch.setattr(_state, 'face_detection_last_checked', {})
+    merged = live_monitor.merge_secondary_face_detections(b'frame', [], camera_id='front', settings=settings, live_settings={})
+    assert [d['label'] for d in merged] == ['face']
+
+
+def test_person_gate_defaults_on():
+    assert live_monitor.face_requires_person({}) is True
+    assert live_monitor.face_requires_person({'face_require_person': 'false'}) is False
+
+
+def test_person_gate_setting_round_trips(tmp_path, monkeypatch):
+    from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
+
+    app, _ = _load_app(tmp_path, monkeypatch)
+    server, thread, base = _server(app)
+    client = LocalClient(base)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _h, body = client.request('/api/settings/ai')
+        assert status == 200 and body['face_require_person'] is True, 'on by default'
+        status, _h, _body = client.request('/api/settings/ai', method='PUT', json_body={'face_require_person': False}, headers={'X-CSRF-Token': csrf})
+        assert status == 200
+        status, _h, body = client.request('/api/settings/ai')
+        assert body['face_require_person'] is False
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
