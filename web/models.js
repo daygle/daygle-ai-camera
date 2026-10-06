@@ -31,8 +31,17 @@ const faceModelCount = document.getElementById('faceModelCount');
 const objectModelUpdatesMessage = document.getElementById('objectModelUpdatesMessage');
 const faceModelUpdatesMessage = document.getElementById('faceModelUpdatesMessage');
 let modelUpdateMap = {};
+// Families whose "Check for updates" banner has actually run this session, so
+// the post-action refresh only ever rewrites a banner the operator has seen.
+const updateCheckFamilies = new Set();
 // Track per-card message timeouts so rapid actions don't clear new messages
 const modelMessageTimeouts = {};
+// Per-card status messages, keyed by card id. Every card action ends in
+// loadModels(), which rebuilds all the card DOM; without this map the
+// confirmation written at the end of one action is destroyed by the next
+// action's rebuild (and by a follow-up update check), leaving the operator
+// with no in-page sign the previous download/update finished.
+const modelCardMessages = {};
 
 // api() is provided by web/utils.js (loaded before this script). 401 still
 // throws (after redirecting to /login); reload failures on PUT
@@ -109,6 +118,9 @@ function setModelMessage(modelId, text, type = 'info') {
   msgEl.className = `model-card-message model-card-message-${type}`;
   if (!text) {
     msgEl.classList.add('model-card-message-hidden');
+    delete modelCardMessages[modelId];
+  } else {
+    modelCardMessages[modelId] = { text, type };
   }
 }
 
@@ -314,6 +326,12 @@ function renderModelList(models) {
 
 function renderCard(m) {
   const cardKey = m.variant_id || m.id;
+  // Re-emit a message left by a previous action (see modelCardMessages) so a
+  // list rebuild does not erase the proof that the last operation finished.
+  const storedMessage = modelCardMessages[cardKey];
+  const messageHtml = storedMessage
+    ? `<div class="model-card-message model-card-message-${escapeHtml(storedMessage.type)}">${escapeHtml(storedMessage.text)}</div>`
+    : '<div class="model-card-message model-card-message-hidden"></div>';
     const updateInfo = modelUpdateMap[m.id] || {};
     const hasUpdate = updateInfo.update_available === true;
     const sizeMb = m.size_bytes ? `${(m.size_bytes / 1048576).toFixed(0)} MB` : `~${m.approx_mb} MB`;
@@ -409,7 +427,7 @@ function renderCard(m) {
           </div>
         </div>
         <p class="model-card-desc">${escapeHtml(m.description)}</p>
-        <div class="model-card-message model-card-message-hidden"></div>
+        ${messageHtml}
         <div class="model-card-actions">${actionsHtml}</div>
       </div>`;
 }
@@ -424,6 +442,9 @@ function bindModelCardActions() {
       const modelName = btn.dataset.modelName || modelId;
       const modelPath = btn.dataset.modelPath;
       const modelImgsz = btn.dataset.modelImgsz ? parseInt(btn.dataset.modelImgsz, 10) : null;
+      // Resolution this action wrote, so the post-render confirmation can find
+      // the card that now holds it (a download picks it from the dropdown).
+      let matchedImgsz = modelImgsz;
       const isFace = btn.dataset.modelFamily === 'face';
       const originalText = btn.textContent;
 
@@ -450,6 +471,7 @@ function bindModelCardActions() {
           // Read selected resolution from the dropdown next to the button
           const resSelect = document.querySelector(`.model-res-select[data-model-id="${modelId}"]`);
           const imgsz = resSelect ? parseInt(resSelect.value, 10) : 640;
+          matchedImgsz = imgsz;
           result = await api('/api/settings/ai/download-model', { method: 'POST', body: JSON.stringify({ model: modelName, imgsz }) });
         } else if (action === 'use') {
           btn.textContent = 'Switching\u2026';
@@ -468,30 +490,60 @@ function bindModelCardActions() {
           // if this flag is omitted, so omitting it still does the right
           // thing for the canonical catalog entries.
           result = await api('/api/settings/ai/update-model', { method: 'POST', body: JSON.stringify({ model: modelName, imgsz: modelImgsz || undefined, is_face_model: isFace }) });
+          // The update map and renderCard key on the CATALOG id (yolo26n) while
+          // the button carries the card's variant id (yolo26n-640), so deleting
+          // only the variant key cleared nothing and "Update Available" stayed
+          // up until a page refresh (the in-memory map dies with the page).
           delete modelUpdateMap[modelId];
+          delete modelUpdateMap[modelName];
         } else if (action === 'delete') {
           btn.textContent = 'Deleting\u2026';
           const query = modelImgsz ? `?imgsz=${encodeURIComponent(modelImgsz)}` : '';
           result = await api(`/api/settings/ai/models/${encodeURIComponent(modelName)}${query}`, { method: 'DELETE' });
+          // This card is about to disappear; drop its stored message so a later
+          // reinstall of the same resolution cannot resurrect "Deleted ...".
+          delete modelCardMessages[modelId];
         }
 
+        // Status card: "use" returns the saved settings and download/update
+        // return a detector status, but DELETE returns neither - rendering that
+        // empty payload painted "Model: Not Set / Device: N/A" over a healthy
+        // panel until a manual refresh, so re-fetch instead.
         if (action === 'use') {
           renderAi(result);
+        } else if (result.status) {
+          renderAi(result.status);
         } else {
-          renderAi(result.status || result);
+          try {
+            renderAi(await api('/api/settings/ai'));
+          } catch { /* keep the panel as it stands */ }
         }
-        // Show success inside the model card (no toast  -  feedback is local)
         const successMessages = {
           download: `${modelId} installed. It is not the default model - press Use to switch to it.`,
           use: isFace ? `${modelId} set as the Face Detection model.` : `Switched to ${modelId}.`,
           update: `${modelId} updated successfully.`,
           delete: `${modelId} deleted.`,
         };
-        setModelMessage(modelId, result.message || successMessages[action] || `${modelName} ${action}d.`, 'success');
-        window.showToast(result.message || successMessages[action] || `${modelName} ${action}d.`, false);
-        // Clear message after 5 seconds
-        setTimeout(() => setModelMessage(modelId, '', 'info'), 5000);
+        const successText = result.message || successMessages[action] || `${modelName} ${action}d.`;
+        // A re-export that could not hot-swap the running detector says so
+        // instead of claiming success. reload_succeeded is false whenever the
+        // model simply was not the active one, so only reload_error is a fault.
+        const feedback = result.reload_error
+          ? { text: `${successText} Detector reload failed: ${result.reload_error}`, type: 'error' }
+          : { text: successText, type: 'success' };
+        window.showToast(feedback.text, feedback.type === 'error');
+        // Rebuild FIRST, then confirm: loadModels() re-creates every card, so a
+        // message written before it was wiped the instant it appeared - the
+        // operator saw no sign the minutes-long download had finished and
+        // refreshed the page to find out. The card key can change too (a first
+        // install turns the catalog card into a "-new" download card plus an
+        // installed-variant card), so aim at whichever card holds it now.
         await loadModels();
+        setModelMessage(confirmationCardKey(modelName, matchedImgsz, modelId), feedback.text, feedback.type);
+        // The confirmation stays until the next action on that card, the way an
+        // error message already does: the toast only lives a few seconds and
+        // this may be the only in-page proof the operation finished.
+        refreshUpdateSummary(isFace ? 'face' : 'object');
       } catch (error) {
         if (window.daygleAuth?.redirecting) return;
         setModelMessage(modelId, error.message, 'error');
@@ -507,6 +559,23 @@ function bindModelCardActions() {
 // Populate the secondary-face-model dropdown from the installed model list:
 // only installed entries whose catalog entry ships the face labels file.
 let lastLoadedModels = [];
+
+// Which card should carry a confirmation AFTER the list has been rebuilt (see
+// bindModelCardActions). Card keys are variant ids (`yolo26n-640`) and a first
+// install swaps the catalog card (`yolo26n`) for a `-new` download card plus
+// the installed variant, so the key the clicked button carried may be gone by
+// the time the confirmation is written. Prefer the variant matching the
+// resolution just written, then any installed card for that model, then the
+// button's original card.
+function confirmationCardKey(modelName, imgsz, fallbackKey) {
+  const candidates = (lastLoadedModels || []).filter((model) => model.id === modelName);
+  if (!candidates.length) return fallbackKey;
+  const match = (Number.isFinite(imgsz) ? candidates.find((model) => model.exported_imgsz === imgsz) : null)
+    || candidates.find((model) => model.installed)
+    || candidates.find((model) => (model.variant_id || model.id) === fallbackKey)
+    || candidates[0];
+  return match.variant_id || match.id;
+}
 function populateFaceModelSelect(models, currentValue) {
   const select = document.getElementById('faceModelSelect');
   if (!select) return;
@@ -552,6 +621,47 @@ function updateCheckButton(button, isChecking) {
   if (label) label.textContent = isChecking ? 'Checking…' : 'Check for updates';
 }
 
+// Text for the library-level "updates" banner, shared by the manual check and
+// the refresh that runs after a card action. Without the shared maths the
+// banner kept saying "N models ready to update" long after those updates had
+// been applied, which read as "nothing happened - refresh the page".
+function updateCheckSummary(family, errorMessage = null) {
+  if (errorMessage) return { message: `Update check failed: ${errorMessage}`, isError: true };
+  const familyModels = (lastLoadedModels || []).filter((model) =>
+    family === 'face' ? model.family === 'face' : model.family !== 'face'
+  );
+  const installedCount = familyModels.filter((model) => model.installed).length;
+  // One model renders several cards (the catalog entry plus one per installed
+  // resolution) and all of them share its id, so count MODELS - counting cards
+  // made a single pending update read as "2 object models ready to update".
+  const updateCount = new Set(
+    familyModels.filter((model) => modelUpdateMap[model.id]?.update_available).map((model) => model.id)
+  ).size;
+  if (!installedCount) {
+    return {
+      message: family === 'face'
+        ? 'No face models installed yet. Download one, then turn on Face Detection under Settings.'
+        : 'No object models installed yet.',
+      isError: false,
+    };
+  }
+  if (updateCount) {
+    return { message: `${updateCount} ${family} model${updateCount === 1 ? '' : 's'} ready to update.`, isError: false };
+  }
+  return { message: `All installed ${family} models are up to date.`, isError: false };
+}
+
+// Re-run that maths after a download/update/delete changed what is installed,
+// so a finished update also settles the banner above the library.
+function refreshUpdateSummary(family) {
+  if (!updateCheckFamilies.has(family)) return;
+  const messageEl = family === 'face' ? faceModelUpdatesMessage : objectModelUpdatesMessage;
+  if (!messageEl) return;
+  const { message, isError } = updateCheckSummary(family);
+  messageEl.textContent = message;
+  messageEl.className = `model-library-message ${isError ? 'is-error' : 'is-success'}`;
+}
+
 async function checkForModelUpdates(family) {
   const buttonId = family === 'face' ? 'checkFaceModelUpdatesBtn' : 'checkObjectModelUpdatesBtn';
   const messageEl = family === 'face' ? faceModelUpdatesMessage : objectModelUpdatesMessage;
@@ -563,25 +673,8 @@ async function checkForModelUpdates(family) {
     const result = await api('/api/settings/ai/check-model-updates');
     modelUpdateMap = {};
     for (const model of result.models || []) modelUpdateMap[model.id] = model;
-    const familyModels = (lastLoadedModels || []).filter((model) =>
-      family === 'face' ? model.family === 'face' : model.family !== 'face'
-    );
-    const installedCount = familyModels.filter((model) => model.installed).length;
-    const updateCount = familyModels.filter((model) => modelUpdateMap[model.id]?.update_available).length;
-    let message;
-    let isError = false;
-    if (result.error) {
-      message = `Update check failed: ${result.error}`;
-      isError = true;
-    } else if (!installedCount) {
-      message = family === 'face'
-        ? 'No face models installed yet. Download one, then turn on Face Detection under Settings.'
-        : 'No object models installed yet.';
-    } else if (updateCount) {
-      message = `${updateCount} ${family} model${updateCount === 1 ? '' : 's'} ready to update.`;
-    } else {
-      message = `All installed ${family} models are up to date.`;
-    }
+    const { message, isError } = updateCheckSummary(family, result.error || null);
+    if (!result.error) updateCheckFamilies.add(family);
     messageEl.textContent = message;
     messageEl.className = `model-library-message ${isError ? 'is-error' : 'is-success'}`;
     window.showToast(message, isError);
