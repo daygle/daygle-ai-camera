@@ -90,7 +90,7 @@ def test_lingering_stranger_alerts_and_is_captured_once(monkeypatch):
     monkeypatch.setattr(face_identity, 'get_face_recognition_service', lambda: service)
     monkeypatch.setattr(face_identity, 'effective_face_detection_rules', lambda: {'rules': [{'id': '_unknown', 'enabled': True}]})
     import app.postprocess_pool as pool
-    monkeypatch.setattr(pool, 'enrichment_pool', lambda: SimpleNamespace(submit=lambda _fn, *args, **_kw: captures.append(args[1])))
+    monkeypatch.setattr(pool, 'enrichment_pool', lambda: SimpleNamespace(submit=lambda _fn, *args, **_kw: captures.append(args[1]) or True))
     monkeypatch.setattr(state, 'database', None)
     frame = np.zeros((100, 100, 3), dtype=np.uint8)
 
@@ -227,3 +227,42 @@ def test_matcher_reload_keeps_the_stranger_alert_guard(monkeypatch):
     assert service.recognitions == 4, 'unknown faces are retried; the reload itself must not break that'
     _reset_tracks(camera)
     face_identity.reset_camera_identities(camera)
+
+
+def test_a_capture_the_queue_rejects_is_offered_again(monkeypatch):
+    camera = 'cam-face-queue-full'
+    face_identity.reset_camera_identities(camera)
+    import app.postprocess_pool as pool
+    accepted = []
+    replies = iter([False, True])
+
+    def submit(_fn, *args, **_kw):
+        ok = next(replies)
+        if ok:
+            accepted.append(args[1])
+        return ok
+
+    monkeypatch.setattr(pool, 'enrichment_pool', lambda: SimpleNamespace(submit=submit))
+    monkeypatch.setattr(state, 'database', None)
+    crop = np.zeros((20, 20, 3), dtype=np.uint8)
+    face_identity._maybe_capture_unknown(camera, 5, {}, crop, None)
+    face_identity._maybe_capture_unknown(camera, 5, {}, crop, None)
+    assert accepted == [5], 'the rejected capture is retried on the next sighting'
+    face_identity._maybe_capture_unknown(camera, 5, {}, crop, None)
+    assert accepted == [5], 'and still only once per track once it is queued'
+    face_identity.reset_camera_identities(camera)
+
+
+def test_a_failed_capture_is_logged_as_a_warning(monkeypatch):
+    def broken(**_kwargs):
+        raise RuntimeError('disk full')
+
+    import importlib
+
+    # Patch the live module: other tests in this file reload the app package.
+    monkeypatch.setattr(importlib.import_module('app.state'), 'database', SimpleNamespace(store_unknown_face=broken))
+    service = SimpleNamespace(model_id='m', embed_face=lambda _crop: np.ones(4, dtype=np.float32))
+    warnings = []
+    monkeypatch.setattr(face_identity.logger, 'warning', lambda msg, *args: warnings.append(msg % args))
+    face_identity._store_unknown_face('cam', 1, {}, np.zeros((20, 20, 3), dtype=np.uint8), service)
+    assert any('Failed to capture unknown face on camera cam' in message for message in warnings)

@@ -11,6 +11,35 @@
 
 const frForm = document.getElementById('frForm');
 const frMessage = document.getElementById('frMessage');
+const frRuntime = document.getElementById('frRuntime');
+
+// What is actually running, not just what is switched on: "Enabled" above is
+// the setting, and a model that failed to load leaves recognition (and the
+// Review capture that depends on it) silently idle.
+function renderRuntimeStatus(status, aiStatus) {
+  if (!frRuntime) return;
+  const problems = [];
+  if (aiStatus && aiStatus.face_enabled === false) {
+    problems.push('the face detection model is switched off (Intelligence > Models > Face Models)');
+  } else if (aiStatus && aiStatus.face_model_loaded === false) {
+    problems.push('the face detection model is not loaded');
+  }
+  if (status.enabled && !status.model_loaded) {
+    problems.push(`recognition is enabled but not running: ${status.unavailable_reason || 'the embedding model did not load'}`);
+  }
+  let text;
+  if (!status.enabled) {
+    text = 'Recognition is off, so faces are not identified and nothing is captured for Review.';
+  } else if (problems.length) {
+    text = `Faces are not being recognised: ${problems.join('; ')}. Check the Application Log for details.`;
+  } else {
+    const people = Number(status.enrolled_people) || 0;
+    text = `Recognition is running · ${people} ${people === 1 ? 'person' : 'people'} enrolled. Unrecognised faces on a person are captured for Review.`;
+  }
+  frRuntime.textContent = text;
+  frRuntime.classList.toggle('is-problem', !status.enabled || problems.length > 0);
+  frRuntime.hidden = false;
+}
 const frSaveBtn = document.getElementById('frSaveBtn');
 const frReloadBtn = document.getElementById('frReloadBtn');
 
@@ -74,6 +103,7 @@ async function loadSettings() {
       api('/api/settings/ai').catch(() => ({})),
     ]);
     fillForm(status);
+    renderRuntimeStatus(status, aiStatus);
     // face_confidence lives in the AI settings store; populate the input
     // here so saveSettings can carry it back on the companion AI PUT.
     // Missing/blank falls back to the default of 0.45.

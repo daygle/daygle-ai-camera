@@ -7602,3 +7602,8 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
 
 /* People card: note + bulk remove for faces auto-enrichment learned. */
 .person-faces-auto { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+
+/* Faces settings: what recognition is actually doing right now. */
+.fr-runtime { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.4; background: var(--panel-strong); color: var(--text); border: 1px solid var(--border); }
+.fr-runtime.is-problem { border-color: var(--warning, #f59e0b); }
+.fr-runtime[hidden] { display: none; }

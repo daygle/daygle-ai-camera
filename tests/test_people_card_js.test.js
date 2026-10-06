@@ -61,3 +61,26 @@ test('the Alerts page calls recognised-face policies Face, not Person', () => {
   assert.match(alertsHtml, /＋ Add Face Alert/);
   assert.doesNotMatch(alertsHtml, /Add Person Alert/);
 });
+
+test('the Faces page says when recognition is enabled but not actually running', async () => {
+  const vm = await import('node:vm');
+  const source = readFileSync(path.resolve(here, '../web/face-recognition.js'), 'utf8');
+  const start = source.indexOf('function renderRuntimeStatus(');
+  const end = source.indexOf('\n}\n', start) + 2;
+  const el = { textContent: '', hidden: true, classes: new Set(), classList: { toggle(name, on) { if (on) el.classes.add(name); else el.classes.delete(name); } } };
+  const sandbox = { frRuntime: el };
+  vm.createContext(sandbox);
+  vm.runInContext(`${source.slice(start, end)}\nthis.render = renderRuntimeStatus;`, sandbox);
+
+  sandbox.render({ enabled: true, model_loaded: false, unavailable_reason: 'Failed to load the face embedding model.' }, { face_enabled: true, face_model_loaded: true });
+  assert.match(el.textContent, /enabled but not running: Failed to load the face embedding model\./);
+  assert.ok(el.classes.has('is-problem'));
+
+  sandbox.render({ enabled: true, model_loaded: true, enrolled_people: 1 }, { face_enabled: true, face_model_loaded: false });
+  assert.match(el.textContent, /face detection model is not loaded/);
+
+  sandbox.render({ enabled: true, model_loaded: true, enrolled_people: 1 }, { face_enabled: true, face_model_loaded: true });
+  assert.match(el.textContent, /Recognition is running · 1 person enrolled/);
+  assert.ok(!el.classes.has('is-problem'));
+  assert.equal(el.hidden, false);
+});
