@@ -27,8 +27,9 @@ const liveEls = {
   motionState: document.getElementById('liveMotionState'),
   motionBar: document.getElementById('liveMotionBar'),
   motionValue: document.getElementById('liveMotionValue'),
-  motionTriggerTick: document.getElementById('liveMotionTriggerTick'),
   motionCaption: document.getElementById('liveMotionCaption'),
+  motionFrame: document.getElementById('liveMotionFrame'),
+  motionZones: document.getElementById('liveMotionZones'),
   monitorPill: document.getElementById('liveMonitorPill'),
   monitorPillText: document.getElementById('liveMonitorPillText'),
   // Zones-page stats (null on live page - harmless)
@@ -78,9 +79,8 @@ let cameras = [];
 // eslint-disable-next-line no-unused-vars -- ESLint: exported for zones.js (zones page script)
 let availableLabels = [];
 let selectedCamera = null;
-// Motion-lane trigger reference: the minimum changed-pixel percentage needed
-// by the selected camera's easiest enabled motion zone.
-let motionTriggerPixelPct = 0;
+// Whether the selected camera has motion zones (and so per-zone meters).
+let selectedCameraHasMotionZones = false;
 // Runtime stream metadata is populated from /api/status. Camera configuration
 // may intentionally leave FPS on Auto, so never render the old 15 FPS fallback
 // when the backend has a better source-rate value.
@@ -534,6 +534,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     motion_confidence: payload.motion_confidence,
     motion_fraction: payload.motion_fraction,
     motion_signal: payload.motion_signal,
+    motion_zones: Array.isArray(payload.motion_zones) ? payload.motion_zones : null,
   };
 
   if (payload.state === 'alerted') {
@@ -742,45 +743,46 @@ function renderDetectionStatus(summary) {
   if (liveEls.faceBody) liveEls.faceBody.innerHTML = faceBodyHtml;
 
   // ── Motion lane ─────────────────────────────────────────────
-  // The bar is deliberately on the raw changed-pixel scale: 1% means 1% of
-  // the measured frame pixels changed. motion_confidence and motion_signal
-  // remain available for alert diagnostics, but neither is used to stretch the
-  // bar to the scale-fraction cap.
+  // With motion zones the lane shows one meter per zone, each in the units
+  // its trigger is set in (the share of THAT zone's pixels that changed), so
+  // "fill past the tick" really means the zone will fire. A camera without
+  // motion zones falls back to the whole-frame changed-pixel bar.
+  const motionZones = !isAllCameraMode() && Array.isArray(summary.motion_zones) ? summary.motion_zones : [];
   const motionFraction = summary.motion_fraction != null ? summary.motion_fraction : null;
-  const motionSignal = summary.motion_signal != null
-    ? summary.motion_signal
-    : (summary.motion_confidence != null ? summary.motion_confidence : null);
-  const displayFraction = motionFraction != null ? motionFraction : (motionSignal != null ? motionSignal : null);
-  if (liveEls.motionBar) {
-    const barPct = displayFraction != null ? Math.min(1, displayFraction) * 100 : 0;
+  if (isZonesPage && typeof updateZoneMotionMeters === 'function') {
+    updateZoneMotionMeters(motionZones); // defined in zones.js
+  }
+  if (liveEls.motionZones) {
+    liveEls.motionZones.hidden = motionZones.length === 0;
+    liveEls.motionZones.innerHTML = motionZones.map((level) => motionZoneMeterHtml(level)).join('');
+  }
+  if (liveEls.motionFrame) liveEls.motionFrame.hidden = motionZones.length > 0;
+  if (liveEls.motionBar && motionZones.length === 0) {
+    const barPct = motionFraction != null ? Math.min(1, motionFraction) * 100 : 0;
     liveEls.motionBar.style.width = barPct + '%';
     if (liveEls.motionValue) {
-      liveEls.motionValue.textContent = displayFraction != null ? formatMotionPixelPercent(displayFraction) : '0%';
+      liveEls.motionValue.textContent = motionFraction != null ? formatMotionShare(motionFraction) : '0%';
     }
-  }
-  // Trigger tick + caption: anchored to the camera's easiest motion zone
-  // (lowest Sensitivity), expressed in the same changed-pixel scale as the bar.
-  if (liveEls.motionTriggerTick) {
-    const showTrigger = !isAllCameraMode() && motionTriggerPixelPct > 0;
-    liveEls.motionTriggerTick.hidden = !showTrigger;
-    if (showTrigger) liveEls.motionTriggerTick.style.left = Math.min(99, motionTriggerPixelPct) + '%';
   }
   if (liveEls.motionCaption) {
     const parts = [];
-    if (motionFraction != null) parts.push(`${formatMotionPixelPercent(motionFraction)} of frame pixels`);
-    if (!isAllCameraMode() && motionTriggerPixelPct > 0) {
-      parts.push(`fires above ${formatMotionPixelPercent(motionTriggerPixelPct / 100)} pixel change`);
-    } else if (!isAllCameraMode()) {
+    if (motionFraction != null) parts.push(`Whole frame: ${formatMotionShare(motionFraction)} changed`);
+    if (!isAllCameraMode() && motionZones.length === 0 && !selectedCameraHasMotionZones) {
       parts.push('no motion zones configured');
     }
     liveEls.motionCaption.textContent = parts.join(' · ');
   }
   if (liveEls.motionState) {
-    const motionActive = displayFraction != null && displayFraction > 0;
-    liveEls.motionState.textContent = motionActive ? 'Active' : 'Waiting';
-    liveEls.motionState.className = 'sense-badge ' + (
-      motionActive ? 'sense-badge-detected' : 'sense-badge-idle'
-    );
+    let motionState = 'quiet';
+    if (motionZones.length) {
+      motionState = overallMotionZoneState(motionZones);
+    } else if (motionFraction != null && motionFraction >= MOTION_QUIET_FRACTION) {
+      motionState = 'moving';
+    }
+    const badge = MOTION_ZONE_STATES[motionState];
+    liveEls.motionState.textContent = badge.label;
+    liveEls.motionState.className = 'sense-badge ' + badge.badge;
+    liveEls.motionState.title = badge.help;
   }
 }
 
@@ -909,40 +911,78 @@ function renderInferenceTiming(payload) {
   el.textContent = `Wait ${format(wait)} / Run ${format(run)}`;
 }
 
-function formatMotionPixelPercent(fraction) {
+// A zone (or the whole frame) under this share of changed pixels reads Quiet:
+// sensor noise leaves a few stray pixels set on a still scene. Mirrors
+// QUIET_FRACTION in app/motion_levels.py.
+const MOTION_QUIET_FRACTION = 0.001;
+
+const MOTION_ZONE_STATES = {
+  quiet: { label: 'Quiet', badge: 'sense-badge-idle', help: 'Nothing is moving in this area.' },
+  moving: { label: 'Moving', badge: 'sense-badge-detected', help: 'Something is moving, but not enough (or not for long enough) to trigger.' },
+  triggered: { label: 'Triggered', badge: 'sense-badge-alert', help: 'Motion passed the trigger and can record or alert.' },
+};
+
+// A share of changed pixels for people: "0.4%", "2%", "12%".
+function formatMotionShare(fraction) {
   const percent = Math.max(0, Number(fraction) || 0) * 100;
-  if (percent >= 10) return `${percent.toFixed(1)}%`;
-  if (percent >= 1) return `${percent.toFixed(2)}%`;
-  return `${percent.toFixed(3)}%`;
+  if (percent === 0) return '0%';
+  if (percent < 0.1) return '<0.1%';
+  if (percent < 10) return `${Number(percent.toFixed(1))}%`;
+  return `${Math.round(percent)}%`;
 }
 
-// Minimum changed-pixel percentage among the selected camera's enabled motion
-// zones. This mirrors zone_detection.py: max(global gate, sensitivity * scale).
-function motionTriggerPixelPercent(camera) {
+function overallMotionZoneState(levels) {
+  if (levels.some((level) => level.state === 'triggered')) return 'triggered';
+  if (levels.some((level) => level.state === 'moving')) return 'moving';
+  return 'quiet';
+}
+
+// One zone's meter: the bar runs to twice the trigger, so the trigger tick
+// sits in the middle and "past the tick" reads as "will fire".
+function motionZoneMeterHtml(level, { showName = true } = {}) {
+  const state = MOTION_ZONE_STATES[level?.state] ? level.state : 'quiet';
+  const badge = MOTION_ZONE_STATES[state];
+  const trigger = Math.max(0, Number(level?.trigger) || 0);
+  const hasFraction = level?.fraction != null && Number.isFinite(Number(level.fraction));
+  const fraction = hasFraction ? Math.max(0, Number(level.fraction)) : 0;
+  const fullScale = trigger > 0 ? trigger * 2 : 0.01;
+  const barPct = Math.min(100, (fraction / fullScale) * 100);
+  const reading = hasFraction ? `${formatMotionShare(fraction)} moving` : 'Not measured';
+  const parts = [reading, `triggers at ${formatMotionShare(trigger)}`];
+  const needed = Number(level?.checks_needed) || 0;
+  const seen = Number(level?.checks_seen) || 0;
+  if (state === 'moving' && level?.above_trigger && needed > 1) parts.push(`check ${Math.max(1, seen)} of ${needed}`);
+  const peakMinutes = Math.round((Number(level?.peak_window_seconds) || 600) / 60);
+  const peak = level?.peak_fraction != null
+    ? `<p class="motion-zone-peak">Highest in the last ${peakMinutes} minutes: ${formatMotionShare(level.peak_fraction)}</p>`
+    : '';
+  return `<div class="motion-zone-meter is-${state}">
+    <div class="motion-zone-head">
+      ${showName ? `<span class="motion-zone-name">${escapeHtml(level?.zone_name || 'Zone')}</span>` : ''}
+      <span class="sense-badge ${badge.badge}" title="${escapeHtml(badge.help)}">${badge.label}</span>
+    </div>
+    <div class="motion-bar-wrap motion-zone-bar" role="meter" aria-valuemin="0" aria-valuemax="${(fullScale * 100).toFixed(3)}" aria-valuenow="${(fraction * 100).toFixed(3)}" aria-label="${escapeHtml(`${level?.zone_name || 'Zone'}: ${parts.join(', ')}`)}">
+      <div class="motion-bar" style="width: ${barPct.toFixed(1)}%"></div>
+      ${trigger > 0 ? '<span class="motion-trigger-tick" style="left: 50%"></span>' : ''}
+    </div>
+    <p class="motion-zone-reading">${escapeHtml(parts.join(' · '))}</p>
+    ${peak}
+  </div>`;
+}
+
+// True when the camera has at least one enabled motion zone, i.e. the live
+// monitor will publish per-zone meters for it.
+function cameraHasMotionZones(camera) {
   const zones = (camera && camera.detection && camera.detection.zones) || [];
-  let minSensitivity = null;
-  for (const zone of zones) {
-    if (zone.enabled === false || zone.monitor_motion === false) continue;
-    const rule = (zone.object_rules || []).find((r) => (
-      String(r.label || '').trim().toLowerCase() === 'motion' && r.enabled !== false
-    ));
-    const sensitivity = rule != null ? Number(rule.min_confidence ?? 0.45) : 0.45;
-    if (minSensitivity == null || sensitivity < minSensitivity) minSensitivity = sensitivity;
-  }
-  if (minSensitivity == null) return null;
-  const live = window.daygleLiveConfig || {};
-  const cameraMotion = camera?.motion || {};
-  const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-  const gate = numberOr(camera?.motion_gate_fraction ?? cameraMotion.gate_fraction, numberOr(live.motion_gate_fraction, 0.005));
-  const scale = numberOr(camera?.motion_scale_fraction ?? cameraMotion.scale_fraction, numberOr(live.motion_scale_fraction, 0.03));
-  return Math.max(gate, minSensitivity * scale) * 100;
+  return zones.some((zone) => zone.enabled !== false && zone.monitor_motion !== false && (zone.object_rules || []).some((r) => (
+    String(r.label || '').trim().toLowerCase() === 'motion' && r.enabled !== false
+  )));
 }
 
 function setSelectedCamera(cameraId) {
   selectedCamera = cameras.find((camera) => camera.id === cameraId) || cameras[0];
   if (!selectedCamera) return;
-  const pixelThreshold = motionTriggerPixelPercent(selectedCamera);
-  motionTriggerPixelPct = pixelThreshold != null ? pixelThreshold : 0;
+  selectedCameraHasMotionZones = cameraHasMotionZones(selectedCamera);
   rebuildConfiguredLabels();
   liveAiTrackDetections = null;
   liveAiTrackPrevDetections = null;

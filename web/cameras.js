@@ -193,27 +193,46 @@ function profileSectionHtml(camera, mode) {
     numberField('periodic_scan_interval_seconds', { label: 'Periodic Scan (s)', min: '0', max: '3600', step: '1', placeholder: 'Global Default (0)' }) +
     numberField('motion_frame_width', { label: 'Motion Frame Width', min: '40', max: '640', step: '1', placeholder: 'Global Default (320)' }) +
     numberField('motion_frame_height', { label: 'Motion Frame Height', min: '30', max: '480', step: '1', placeholder: 'Global Default (240)' });
+  // Per-camera motion overrides are limited to what genuinely differs between
+  // cameras (mostly night / IR noise). The other engine settings live on the
+  // global Advanced Motion Engine; a value an older version stored here still
+  // applies, so it rides along in a hidden field and is listed for the user.
+  const pixelThreshold = storedValue('motion_pixel_threshold');
   const motionControls =
-    numberField('motion_pixel_threshold', { label: 'Pixel Threshold', tip: 'Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras.', min: '1', max: '255', step: '1', placeholder: 'Global Default (30)' }) +
-    numberField('motion_gate_fraction', { label: 'Gate Fraction', tip: 'Minimum fraction of pixels that must change before motion is declared.', min: '0.0001', max: '0.5', step: '0.0001', placeholder: 'Global Default (0.005)' }) +
-    numberField('motion_scale_fraction', { label: 'Scale Fraction', tip: 'Pixel change fraction that maps to 100% motion confidence.', min: '0.001', max: '1.0', step: '0.001', placeholder: 'Global Default (0.03)' }) +
-    numberField('motion_background_alpha', { label: 'Background Alpha', tip: 'How fast the background model adapts when no motion is detected.', min: '0.001', max: '0.5', step: '0.001', placeholder: 'Global Default (0.05)' }) +
-    selectField('motion_algorithm', { label: 'Motion Engine', tip: 'Background-subtraction engine for this camera. Leave on Global Default unless this camera needs a different engine.', options: [
-      { value: 'mog2', attr: 'mog2', label: 'MOG2' },
-      { value: 'diff', attr: 'diff', label: 'Diff (Legacy)' },
+    '<label>' + labelSpan({ label: 'Ignore Small Light Changes', tip: 'How much a single pixel must brighten or darken before it counts as changed. Raise it (High) on a camera whose night picture is grainy or flickers under IR. Leave on Global Default to follow the global setting.' }) +
+    '<span class="pixel-threshold-picker">' + pixelThresholdPresetHtml(fieldName('motion_pixel_threshold'), { allowDefault: true }) +
+    '<input name="' + fieldName('motion_pixel_threshold') + '" type="number" min="1" max="255" step="1" placeholder="Global Default (30)" aria-label="Custom pixel change (1-255)" value="' + attr(pixelThreshold ?? '') + '" /></span></label>' +
+    selectField('motion_denoise', { label: 'Clean Up Speckle Noise', tip: 'Erase isolated changed pixels (sensor noise, common on IR night cameras) for this camera. Leave on Global Default to follow the global setting.', options: [
+      { value: true, attr: 'true', label: 'On' },
+      { value: false, attr: 'false', label: 'Off' },
     ] }) +
-    selectField('motion_denoise', { label: 'Denoise', tip: 'Morphological denoise of the motion mask for this camera. Leave on Global Default to follow the global setting.', options: boolOptions }) +
-    selectField('motion_shadow_suppression', { label: 'Shadow Suppression', tip: 'Reject cast shadows from motion alerts for this camera (MOG2 only). It does not filter YOLO object detections. On = always; Off = never (dark/IR scenes); Automatic = only while bright. Leave on Global Default to follow the global setting.', options: [
+    selectField('motion_shadow_suppression', { label: 'Ignore Shadows', tip: "Don't count moving shadows as motion on this camera (MOG2 only). It does not filter object detections. On = always; Off = never (dark/IR scenes); Automatic = only while bright. Leave on Global Default to follow the global setting.", options: [
       { value: 'on', attr: 'on', label: 'On' },
       { value: 'off', attr: 'off', label: 'Off' },
       { value: 'auto', attr: 'auto', label: 'Automatic (Day Only)' },
     ] });
+  const legacyMotionLabels = {
+    motion_gate_fraction: 'Wake-Up Threshold',
+    motion_scale_fraction: 'Motion Score Scale',
+    motion_background_alpha: 'Background Adapt Speed',
+    motion_algorithm: 'Background Model',
+  };
+  const legacyMotionKeys = Object.keys(legacyMotionLabels);
+  const legacyMotionHidden = legacyMotionKeys.map(function(key) {
+    return '<input type="hidden" name="' + fieldName(key) + '" data-legacy-motion-override="' + mode + '" value="' + attr(storedValue(key) ?? '') + '" />';
+  }).join('');
+  const legacyMotionSet = legacyMotionKeys.filter(function(key) { return storedValue(key) != null && storedValue(key) !== ''; });
+  const legacyMotionNote = legacyMotionSet.length
+    ? '<p class="form-help muted" data-legacy-motion-note="' + mode + '">This camera also overrides ' +
+      escapeHtml(legacyMotionSet.map(function(key) { return legacyMotionLabels[key] + ' (' + storedValue(key) + ')'; }).join(', ')) +
+      ', set before these moved to the global Advanced Motion Engine. <button type="button" class="secondary legacy-motion-clear" data-clear-legacy-motion="' + mode + '">Use the global values</button></p>'
+    : '';
   return '<div class="cam-edit-section">' +
     '<h4 class="cam-edit-section-title">' + label + ' Profile</h4>' +
     '<p class="form-help muted">' + label + ' settings apply while the ' + label + ' profile is active. Leave a value on Global Default to follow the live detection settings.</p>' +
     '<div class="form-grid">' + performanceControls + '</div>' +
-    '<p class="form-help muted">' + label + ' motion overrides for this camera only. Leave blank to use the global defaults from Live Detection settings.</p>' +
-    '<div class="form-grid">' + motionControls + '</div>' +
+    '<p class="form-help muted">' + label + ' motion overrides for this camera only. Leave on Global Default to use the Advanced Motion Engine settings.</p>' +
+    '<div class="form-grid">' + motionControls + '</div>' + legacyMotionHidden + legacyMotionNote +
     '</div>';
 }
 
@@ -466,6 +485,16 @@ function wireEditFormHandlers(index) {
   var collapseButton = panel.querySelector('.cam-edit-collapse-btn');
   if (collapseButton) collapseButton.addEventListener('click', closeAllEditForms);
 
+  bindPixelThresholdPresets(form);
+  form.querySelectorAll('[data-clear-legacy-motion]').forEach(function(button) {
+    button.addEventListener('click', function() {
+      var mode = button.dataset.clearLegacyMotion;
+      form.querySelectorAll('[data-legacy-motion-override="' + mode + '"]').forEach(function(input) { input.value = ''; });
+      var note = form.querySelector('[data-legacy-motion-note="' + mode + '"]');
+      if (note) note.textContent = 'Older engine overrides cleared. Save the camera to apply.';
+    });
+  });
+
   // Backend toggle
   var backendSelect = form.querySelector('[name="backend"]');
   if (backendSelect) {
@@ -554,6 +583,7 @@ function wireEditFormHandlers(index) {
       var hasValue = Object.prototype.hasOwnProperty.call(values, key) && values[key] != null;
       field.value = hasValue ? String(values[key]) : '';
     });
+    syncPixelThresholdPresets(form);
     form.__selectedPresetByMode = form.__selectedPresetByMode || {};
     form.__selectedPresetByMode[mode] = preset.id || null;
     var select = mode === 'day' ? dayPresetSelect : nightPresetSelect;

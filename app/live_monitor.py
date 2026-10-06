@@ -121,10 +121,12 @@ from app.motion_object_priority import (
     MAX_GRACE_SECONDS as MOTION_OBJECT_MAX_GRACE_SECONDS,
     object_zone_keys as motion_object_zone_keys,
 )
+from app.motion_levels import forget_camera as forget_motion_levels, motion_zone_levels
 from app.zone_detection import (
     detection_matches_zone,
     filter_detections_for_camera,
     filter_motion_detections_by_objects,
+    motion_zone_confirm_cycles,
     normalize_detection_boxes_for_frame,
     zone_alert_detections,
     zone_detection_alert_rule_names,
@@ -506,6 +508,7 @@ def _prune_frame_motion_state() -> None:
         _state._periodic_scan_last_ts.pop(cid, None)
         with _state._motion_confirm_lock:
             _state._motion_confirm_streaks.pop(cid, None)
+        forget_motion_levels(cid)
         _state.motion_object_arbiter.clear_camera(cid)
         with _state._object_tracks_lock:
             _state._object_tracks.pop(cid, None)
@@ -1004,17 +1007,32 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         if force_scan:
             diff_mask = None
     # Per-zone motion rules score independently of the frame-wide gate.
-    motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, frame_size=(_frame_w, _frame_h))
-    # Require the same motion zone to be active in two analyzed frames before
-    # allowing it to create an event or recording. The raw motion telemetry and
+    _motion_levels: list[dict[str, Any]] = []
+    motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, frame_size=(_frame_w, _frame_h), levels=_motion_levels)
+    # Require the same motion zone to be active in consecutive analyzed frames
+    # (each zone's "Must last: N checks", two by default) before allowing it
+    # to create an event or recording. The raw motion telemetry and
     # object-detection path remain immediate; only motion-zone actions wait for
     # confirmation, filtering one-frame stream/exposure artifacts.
-    motion_detections = confirm_motion_detections(camera_id, motion_detections)
+    _confirm_cycles = motion_zone_confirm_cycles(settings)
+    motion_detections = confirm_motion_detections(camera_id, motion_detections, required_by_zone=_confirm_cycles)
     # A moving camera invalidates both global motion-zone detections and the
     # object movement verdict. Keep the raw pixel telemetry above, but do not
     # allow camera motion to create a motion-only event or recording.
     if camera_motion['active']:
         motion_detections = []
+    # Per-zone meter for the live page: each zone's moving share against its
+    # own trigger, its state and its ten-minute peak.
+    try:
+        with _state._motion_confirm_lock:
+            _streaks = dict(_state._motion_confirm_streaks.get(camera_id, {}))
+        update_live_detection_status(camera_id, motion_zones=motion_zone_levels(
+            camera_id, _motion_levels,
+            triggered_zone_ids={str(item.get('zone_id') or '') for item in motion_detections},
+            streaks=_streaks, confirm_cycles=_confirm_cycles,
+        ))
+    except Exception as exc:  # noqa: BLE001 - a status meter must never break a cycle
+        logger.debug('Motion zone levels failed for %s: %s', camera_id, exc)
     # ``always_run_object_detection`` decouples object (YOLO) inference from the
     # motion gate: when set, inference runs every cycle regardless of pixel
     # motion, so a still/slow/low-contrast subject is never hidden from the

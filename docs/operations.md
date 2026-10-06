@@ -78,7 +78,7 @@ Filter by camera ID, event type, or severity when investigating a specific strea
 
 **Settings** (`/settings`) is organised into five tabs:
 
-- **Detection & Live** - live refresh rates, detection interval, event merge window, background detection, and (under *Advanced Motion Tuning*) the low-level motion-gate values documented in [motion-detection.md](motion-detection.md).
+- **Detection & Live** - live refresh rates, detection interval, event merge window, background detection, and (under *Advanced Motion Engine*) the motion engine settings documented in [motion-detection.md](motion-detection.md).
 - **Recording** - event clip timing (pre/post-event, keep-recording-after-motion, max clip length), retention/auto-purge, and storage directories. Retention purges expired recording media and removes events whose associated media is no longer retained.
 - **Zones** - draw zones directly in the zone editor with **Draw polygon** or **Full Frame**, use the per-zone **Shape** control to convert areas between full frame and polygon, manage zone rules, and use the per-zone visibility controls to show or hide overlays while configuring the scene.
 - **Notifications** - push (ntfy), camera offline alerts, and email (SMTP) delivery, each with a test action.

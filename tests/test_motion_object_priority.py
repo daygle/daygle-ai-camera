@@ -119,7 +119,7 @@ def _pipeline(tmp_path, monkeypatch, *, detector_available=True):
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     monkeypatch.setattr(mods.live_monitor, 'zone_motion_detections', lambda *_a, **_k: [dict(m) for m in plan['motion']])
-    monkeypatch.setattr(mods.live_monitor, 'confirm_motion_detections', lambda _cam, detections: detections)
+    monkeypatch.setattr(mods.live_monitor, 'confirm_motion_detections', lambda _cam, detections, **_kw: detections)
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx'}, main.utc_now())
     main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     # The shared test config pins the hold off for plumbing tests; this is the

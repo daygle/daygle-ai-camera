@@ -190,10 +190,12 @@ from app.zone_schema import (
     detection_label_in_allowed,
     label_matches,
     normalize_label_list,
+    zone_motion_confirm_cycles,
     zone_motion_gate_fraction,
     zone_motion_max_confidence,
     zone_motion_min_confidence,
     zone_motion_scale_fraction,
+    zone_motion_trigger_fraction,
 )
 
 
@@ -477,7 +479,16 @@ def zone_motion_detections(
     gate_fraction: float | None = None,
     scale_fraction: float | None = None,
     frame_size: tuple[int, int] | None = None,
+    levels: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    """Motion pseudo-detections for every motion zone over its trigger.
+
+    ``levels``, when given, is filled with one entry per motion zone --
+    ``{zone_id, zone_name, fraction, trigger}`` -- whether or not the zone
+    fired, so the live page can show how close each zone is to its trigger
+    in the same units the operator set it in. ``fraction`` is ``None`` when
+    there is no usable diff mask this cycle.
+    """
     if gate_fraction is None:
         gate_fraction = _state._MOTION_GATE_FRACTION
     if scale_fraction is None:
@@ -502,16 +513,35 @@ def zone_motion_detections(
         zone_scale = zone_motion_scale_fraction(zone)
         if zone_scale is None:
             zone_scale = scale_fraction
+        # "Trigger when X% of this zone moves" replaces the gate / scale /
+        # Sensitivity trio when set; otherwise the legacy maths below runs
+        # unchanged, so zones saved before the trigger existed fire exactly
+        # as they did.
+        trigger = zone_motion_trigger_fraction(zone)
         zone_fraction = -1.0
         if diff_mask is not None:
             zone_fraction = _zone_pixel_motion_fraction(diff_mask, zone, expected_shape=expected_shape)
-            if zone_fraction < zone_gate:
+        if levels is not None:
+            levels.append({
+                'zone_id': zone_id,
+                'zone_name': zone.get('name') or zone_id,
+                'fraction': round(zone_fraction, 6) if zone_fraction >= 0 else None,
+                'trigger': round(trigger if trigger is not None else max(
+                    zone_gate, zone_motion_min_confidence(zone) * zone_scale,
+                ), 6),
+            })
+        if diff_mask is not None:
+            if zone_fraction < (zone_gate if trigger is None else trigger):
                 continue
             zone_confidence = round(min(1.0, zone_fraction / max(zone_scale, 1e-09)), 3)
         else:
             zone_confidence = frame_motion_confidence
-        conf_threshold = zone_motion_min_confidence(zone)
-        if zone_confidence < conf_threshold:
+        # A trigger zone already gated on its own pixels above. Without a mask
+        # (first frame, fail-open, forced scan) there is nothing zone-local to
+        # compare, so it falls back to the frame-wide confidence at the
+        # canonical 0.45 default -- a forced scan's zero confidence never fires.
+        conf_threshold = zone_motion_min_confidence(zone) if trigger is None else 0.45
+        if (trigger is None or diff_mask is None) and zone_confidence < conf_threshold:
             logger.debug(
                 'Motion zone %r: zone_fraction=%.4f zone_confidence=%.3f below conf_threshold=%.3f (scale_fraction=%.4f)',
                 zone_id, zone_fraction, zone_confidence, conf_threshold, zone_scale,
@@ -525,7 +555,7 @@ def zone_motion_detections(
         # zone_motion_record_on_detect recording path). Defaults to 1.0, so
         # zones without a configured max are unaffected.
         max_threshold = zone_motion_max_confidence(zone)
-        if zone_confidence > max_threshold:
+        if trigger is None and zone_confidence > max_threshold:
             logger.debug(
                 'Motion zone %r: zone_confidence=%.3f above max_confidence=%.3f -- ignored',
                 zone_id, zone_confidence, max_threshold,
@@ -556,6 +586,17 @@ def zone_motion_detections(
             },
         })
     return result
+
+
+def motion_zone_confirm_cycles(settings: dict[str, Any]) -> dict[str, int]:
+    """Each enabled motion zone's "Must last: N checks", keyed the same way
+    ``zone_motion_detections`` keys its detections."""
+    detection_settings = settings.get('detection') or {}
+    return {
+        str(zone.get('id') or zone.get('name') or id(zone)): zone_motion_confirm_cycles(zone)
+        for zone in detection_settings.get('zones', [])
+        if zone.get('enabled', True) and zone.get('monitor_motion', True)
+    }
 
 
 def _has_enabled_face_rule(zone: dict[str, Any]) -> bool:

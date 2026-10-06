@@ -2319,6 +2319,67 @@ function getDaygleDatePrefs() {
   return window.daygleDatePrefs;
 }
 
+// "Ignore small light changes": a plain Low / Medium / High picker over the
+// motion pixel threshold (how much one pixel must brighten or darken, 1-255,
+// to count as changed). The picker is a nameless <select> paired with the
+// real numeric input, so forms keep submitting the number; Custom reveals it.
+const PIXEL_THRESHOLD_PRESETS = [
+  { value: 15, label: 'Low (catch faint movement)' },
+  { value: 30, label: 'Medium (recommended)' },
+  { value: 50, label: 'High (noisy or IR night cameras)' },
+];
+
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function pixelThresholdPresetHtml(inputName, { allowDefault = false, defaultLabel = 'Global Default' } = {}) {
+  const options = (allowDefault ? [`<option value="">${escapeHtml(defaultLabel)}</option>`] : [])
+    .concat(PIXEL_THRESHOLD_PRESETS.map((preset) => `<option value="${preset.value}">${escapeHtml(preset.label)}</option>`))
+    .concat(['<option value="custom">Custom...</option>']);
+  return `<select data-pixel-threshold-preset="${escapeHtml(inputName)}" aria-label="Ignore small light changes">${options.join('')}</select>`;
+}
+
+function _pixelThresholdPair(select) {
+  const form = select.closest('form') || document;
+  return form.querySelector(`[name="${select.dataset.pixelThresholdPreset}"]`);
+}
+
+// Point every picker under ``root`` at its input's current value (call after
+// a form is filled programmatically, which fires no change events).
+function syncPixelThresholdPresets(root = document) {
+  root.querySelectorAll('[data-pixel-threshold-preset]').forEach((select) => {
+    const input = _pixelThresholdPair(select);
+    if (!input) return;
+    const raw = String(input.value ?? '').trim();
+    const allowDefault = Boolean(select.querySelector('option[value=""]'));
+    let choice = 'custom';
+    if (raw === '' && allowDefault) choice = '';
+    else if (raw === '') choice = '30';
+    else if (PIXEL_THRESHOLD_PRESETS.some((preset) => String(preset.value) === String(Number(raw)))) choice = String(Number(raw));
+    select.value = choice;
+    input.hidden = choice !== 'custom';
+  });
+}
+
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function bindPixelThresholdPresets(root = document) {
+  root.querySelectorAll('[data-pixel-threshold-preset]').forEach((select) => {
+    if (select.dataset.pixelThresholdBound) return;
+    select.dataset.pixelThresholdBound = '1';
+    const input = _pixelThresholdPair(select);
+    if (!input) return;
+    select.addEventListener('change', () => {
+      if (select.value === 'custom') {
+        input.hidden = false;
+        input.focus();
+        return;
+      }
+      input.value = select.value;
+      input.hidden = true;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  });
+  syncPixelThresholdPresets(root);
+}
+
 window.daygleUi = {
   // Preserve methods registered by nav.js, which loads before this shared
   // utility bundle. The registry is intentionally additive so loading utils

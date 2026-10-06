@@ -49,6 +49,11 @@ const WEB_SHARED_GLOBALS = {
   // formatters, detection-pill/summary builders, auth/CSRF plumbing, DOM
   // utilities).
   api: 'readonly',
+  // web/utils.js - "Ignore small light changes" picker over the motion pixel
+  // threshold (Settings and per-camera profiles).
+  bindPixelThresholdPresets: 'readonly',
+  pixelThresholdPresetHtml: 'readonly',
+  syncPixelThresholdPresets: 'readonly',
   // web/utils.js - incremental list rendering and media lifecycle (Item 15).
   // Long lists (activity feed, events, snapshots, recordings) paint their first
   // screen synchronously and append the rest across frames; offscreen <video>
@@ -167,7 +172,9 @@ const WEB_SHARED_GLOBALS = {
   CLOSE_DRAFT_DISTANCE_PX: 'readonly',
   cameraDetection: 'readonly',
   clamp: 'readonly',
+  formatMotionShare: 'readonly',
   liveEls: 'readonly',
+  motionZoneMeterHtml: 'readonly',
   normalizeLabelList: 'readonly',
   normalizePoint: 'readonly',
   refreshDetectionStatus: 'readonly',
@@ -186,6 +193,7 @@ const WEB_SHARED_GLOBALS = {
   bindZoneDrawing: 'readonly',
   renderZones: 'readonly',
   syncZoneOverlayToImage: 'readonly',
+  updateZoneMotionMeters: 'readonly',
   updateZonesStats: 'readonly',
 };
 

@@ -332,6 +332,9 @@ function renderPolicies() {
     // so they show only a Notify window (no Detect-from/until) - just how each
     // one notifies you.
     const behaviour = tripwire || loiter || time || activity || aiTags;
+    // A motion policy fires on its area's trigger ("trigger when X% of this
+    // area moves"), set on the Zones page; it has no confidence window to edit.
+    const motionPolicy = alertType === 'object' && String(rule.label || '').trim().toLowerCase() === 'motion';
     const confidence = people ? rule.min_confidence : sound ? rule.confidence_threshold : rule.min_confidence;
     const cooldown = people ? rule.cooldown_minutes : rule.cooldown_seconds;
     const confidenceLabel = people ? 'Minimum Recognition Confidence' : sound ? 'Confidence Threshold' : 'Minimum Confidence';
@@ -370,8 +373,9 @@ function renderPolicies() {
       <div class="alerts-policy-head"><div><span class="zones-panel-kicker">${escapeHtml(scopeLabel())} · Policy ${index + 1}</span><h3>${escapeHtml(ruleLabel(rule))}</h3></div><button type="button" class="secondary alerts-policy-collapse" data-collapse-policy="${index}" title="Collapse policy settings" aria-label="Collapse ${escapeHtml(ruleLabel(rule))} settings">${ICONS.chevronUp}</button></div>
       <div class="alerts-policy-grid">
         ${people ? `<label><span>Person</span><select data-field="person_id">${ruleOptions(rule)}</select></label>` : ''}
-        ${behaviour ? '' : `<label><span>${confidenceLabel}</span><input data-field="${people ? 'min_confidence' : sound ? 'confidence_threshold' : 'min_confidence'}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(confidence ?? (people ? '' : 0.5)))}"></label>`}
-        ${!people && !sound && !behaviour ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
+        ${motionPolicy ? '<p class="form-help muted alerts-motion-trigger-note">Motion fires when its area passes the trigger set on the Zones page (&ldquo;Trigger when X% of this area moves&rdquo;).</p>' : ''}
+        ${behaviour || motionPolicy ? '' : `<label><span>${confidenceLabel}</span><input data-field="${people ? 'min_confidence' : sound ? 'confidence_threshold' : 'min_confidence'}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(confidence ?? (people ? '' : 0.5)))}"></label>`}
+        ${!people && !sound && !behaviour && !motionPolicy ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
         ${aiVerifiable(rule) ? `<label><span>AI Verify Skip Above <span class="info-tip" data-tip="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" title="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" tabindex="0" aria-label="Help: With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1"></span></span><input data-field="ai_verify_skip_above" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(rule.ai_verify_skip_above ?? 1))}"></label>` : ''}
         <label><span>${cooldownLabel}</span><input data-field="${people ? 'cooldown_minutes' : 'cooldown_seconds'}" type="number" min="0" max="${people ? '1440' : '3600'}" step="${people ? '1' : '5'}" value="${escapeHtml(String(cooldown ?? (people ? 5 : 60)))}"></label>
       </div>

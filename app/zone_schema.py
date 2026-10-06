@@ -143,6 +143,23 @@ def _optional_fraction(value: Any, low: float, high: float) -> float | None:
         return None
 
 
+# Per-zone motion trigger bounds (a fraction of the zone's pixels) and the
+# "must last N checks" confirmation window. Two checks was the hard-coded rule
+# before it became a per-zone setting, so it stays the default.
+MOTION_TRIGGER_MIN = 0.0005
+MOTION_TRIGGER_MAX = 0.5
+DEFAULT_MOTION_CONFIRM_CYCLES = 2
+MAX_MOTION_CONFIRM_CYCLES = 5
+
+
+def _motion_confirm_cycles(value: Any) -> int:
+    try:
+        cycles = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MOTION_CONFIRM_CYCLES
+    return max(1, min(MAX_MOTION_CONFIRM_CYCLES, cycles))
+
+
 def canonical_label(value: Any) -> str:
     """Lowercase, strip, and apply ``_LABEL_ALIASES`` to a single label."""
     text = str(value or '').strip().lower()
@@ -330,6 +347,19 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         scale_fraction = _optional_fraction(
             rule.get('scale_fraction'), 0.001, 1.0,
         ) if label == 'motion' else None
+        # The plain-language motion trigger: "trigger when X% of this zone
+        # moves". When set it replaces the gate / scale / Sensitivity trio for
+        # this zone (see zone_motion_effective_trigger), so the confidence
+        # window is opened fully -- the zone already gated on the trigger and
+        # the alert / record axes must not re-gate on a scaled confidence the
+        # operator no longer sees. ``None`` keeps the legacy behaviour.
+        trigger_fraction = _optional_fraction(
+            rule.get('trigger_fraction'), MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX,
+        ) if label == 'motion' else None
+        if trigger_fraction is not None:
+            min_confidence = 0.0
+            max_confidence = 1.0
+        confirm_cycles = _motion_confirm_cycles(rule.get('confirm_cycles')) if label == 'motion' else None
         # Per-rule AI alert verification (app.ai_verification): the vision
         # model double-checks this rule's alerts before they notify, and
         # alerts at or above ``ai_verify_skip_above`` are sent unchecked (1.0 =
@@ -356,6 +386,8 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             'max_confidence': max_confidence,
             'gate_fraction': gate_fraction,
             'scale_fraction': scale_fraction,
+            'trigger_fraction': trigger_fraction,
+            'confirm_cycles': confirm_cycles,
             'cooldown_seconds': max(0, cooldown_seconds),
             'ai_verify': ai_verify,
             'ai_verify_skip_above': ai_verify_skip_above,
@@ -443,6 +475,56 @@ def zone_motion_scale_fraction(zone: dict[str, Any]) -> float | None:
         ):
             return _optional_fraction(rule.get('scale_fraction'), 0.001, 1.0)
     return None
+
+
+def _enabled_motion_rule(zone: dict[str, Any]) -> dict[str, Any] | None:
+    for rule in zone.get('object_rules') or []:
+        if (
+            isinstance(rule, dict)
+            and str(rule.get('label') or '').strip().lower() == 'motion'
+            and rule.get('enabled', True)
+        ):
+            return rule
+    return None
+
+
+def zone_motion_trigger_fraction(zone: dict[str, Any]) -> float | None:
+    """Return the zone's "trigger when X% moves" fraction, or ``None`` when
+    the zone still uses the legacy gate / scale / Sensitivity trio."""
+    rule = _enabled_motion_rule(zone)
+    if rule is None:
+        return None
+    return _optional_fraction(rule.get('trigger_fraction'), MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX)
+
+
+def zone_motion_confirm_cycles(zone: dict[str, Any]) -> int:
+    """How many consecutive motion checks must see the zone above its
+    trigger before it counts ("Must last: N checks")."""
+    rule = _enabled_motion_rule(zone)
+    if rule is None:
+        return DEFAULT_MOTION_CONFIRM_CYCLES
+    return _motion_confirm_cycles(rule.get('confirm_cycles', DEFAULT_MOTION_CONFIRM_CYCLES))
+
+
+def zone_motion_effective_trigger(
+    zone: dict[str, Any],
+    gate_fraction: float,
+    scale_fraction: float,
+) -> float:
+    """The share of the zone's pixels that must change for motion to count.
+
+    A zone with ``trigger_fraction`` uses it directly. Older zones keep their
+    exact behaviour: the larger of the gate and Sensitivity x scale, with the
+    per-zone gate / scale overrides winning over the camera values.
+    """
+    trigger = zone_motion_trigger_fraction(zone)
+    if trigger is not None:
+        return trigger
+    gate = zone_motion_gate_fraction(zone)
+    scale = zone_motion_scale_fraction(zone)
+    gate = gate_fraction if gate is None else gate
+    scale = scale_fraction if scale is None else scale
+    return max(float(gate), zone_motion_min_confidence(zone) * float(scale))
 
 
 def zone_motion_max_confidence(zone: dict[str, Any]) -> float:
@@ -828,6 +910,8 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
                 'max_confidence': 1.0,
                 'gate_fraction': None,
                 'scale_fraction': None,
+                'trigger_fraction': None,
+                'confirm_cycles': DEFAULT_MOTION_CONFIRM_CYCLES,
                 'cooldown_seconds': 60,
                 'email_enabled': False,
                 'email_recipients': [],
