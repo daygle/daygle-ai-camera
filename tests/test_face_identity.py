@@ -220,9 +220,21 @@ def test_cache_pruned_when_faces_leave(monkeypatch):
     fi.reset_camera_identities('camH')
     fi.annotate_face_identities('camH', [_face(1)], _frame())
     assert fi._cache.get('camH')  # cached
-    # A cycle with no faces clears the camera's cache.
+    # A cycle with no faces drops the entries of face tracks the tracker has
+    # retired (here: it holds none for this camera).
     fi.annotate_face_identities('camH', [{'label': 'person', 'track_id': 2}], _frame())
-    assert 'camH' not in fi._cache
+    assert not fi._cache.get('camH')
+
+
+def test_cache_kept_while_the_tracker_still_holds_the_face(monkeypatch):
+    # The face model runs on its own, slower clock, so most cycles carry no
+    # face while one is on screen; its cached identity must survive them.
+    _use_service(monkeypatch, _StubService(MatchResult(7, 'Alex', 0.9, 3)))
+    fi.reset_camera_identities('camK')
+    monkeypatch.setattr(fi, 'live_track_ids', lambda _cam, _label: {1})
+    fi.annotate_face_identities('camK', [_face(1)], _frame())
+    fi.annotate_face_identities('camK', [{'label': 'person', 'track_id': 2}], _frame())
+    assert set(fi._cache.get('camK') or {}) == {1}
 
 
 def test_face_identity_metadata_summary():
