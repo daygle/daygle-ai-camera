@@ -52,3 +52,12 @@ test('the People and Review cards refresh each other', () => {
   assert.match(review, /new CustomEvent\('daygle:people-changed', \{ detail: \{ source: 'review' \} \}\)/);
   assert.match(review, /addEventListener\('daygle:people-changed'/);
 });
+
+test('the Alerts page calls recognised-face policies Face, not Person', () => {
+  // "Person" is also an object label (the object detector's person class),
+  // so the face-recognition alert type must not share its name.
+  const alertsHtml = readFileSync(path.resolve(here, '../web/alerts.html'), 'utf8');
+  assert.match(alertsHtml, /<option value="people">Face<\/option>/);
+  assert.match(alertsHtml, /＋ Add Face Alert/);
+  assert.doesNotMatch(alertsHtml, /Add Person Alert/);
+});

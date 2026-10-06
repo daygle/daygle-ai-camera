@@ -461,6 +461,7 @@ def update_object_tracks(
     *,
     iou_threshold: float = 0.3,
     max_age: int = 5,
+    hold_labels: frozenset[str] | set[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Assign/refresh stable track ids for ``detections`` on ``camera_id``.
 
@@ -470,7 +471,15 @@ def update_object_tracks(
     than ``max_age`` consecutive cycles are
     dropped. Returns the same detection dicts, annotated with ``track_id`` /
     ``track_age`` / ``track_new`` / ``track_displacement`` (see module
-    docstring)."""
+    docstring).
+
+    ``hold_labels`` are labels whose detector did not run this cycle (the face
+    model runs on its own, slower clock): their tracks are not aged, since an
+    absent face on such a cycle says nothing about whether it left. Without
+    this, a face interval longer than ``max_age`` detection cycles would give
+    the same face a new track id on every face pass, defeating every
+    per-track guard (one stranger alert per track, one Review capture per
+    track, the identity cache)."""
     if not detections:
         # Still age out existing tracks on an empty cycle so a track that left
         # the frame is retired instead of lingering forever.
@@ -479,7 +488,8 @@ def update_object_tracks(
             if state:
                 survivors = []
                 for track in state["tracks"]:
-                    track["misses"] += 1
+                    if track["label"] not in hold_labels:
+                        track["misses"] += 1
                     if track["misses"] <= max_age:
                         survivors.append(track)
                 state["tracks"] = survivors
@@ -640,10 +650,22 @@ def update_object_tracks(
         # Age out tracks that were not matched this cycle.
         survivors = []
         for track in tracks:
-            if track["id"] not in matched_track_ids:
+            if track["id"] not in matched_track_ids and track["label"] not in hold_labels:
                 track["misses"] += 1
             if track["misses"] <= max_age:
                 survivors.append(track)
         state["tracks"] = survivors
 
     return detections
+
+
+def live_track_ids(camera_id: str, label: str) -> set[Any]:
+    """Ids of the tracks with ``label`` the tracker still holds for a camera.
+
+    A track survives a few missed cycles, so this is the set a per-track cache
+    should be pruned to -- not just the tracks seen this very cycle.
+    """
+    key = str(label or "").strip().lower()
+    with _state._object_tracks_lock:
+        state = _state._object_tracks.get(camera_id) or {}
+        return {track["id"] for track in state.get("tracks", []) if track.get("label") == key}

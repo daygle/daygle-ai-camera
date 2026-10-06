@@ -1169,10 +1169,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # without the breakdown simply contributes no extra stages.
     _cycle_timer.account_for(_base_inference_timing)
     _face_started = time.perf_counter()
+    _face_pass_stamp = _state.face_detection_last_checked.get(camera_id)
     detections = merge_secondary_face_detections(
         image, detections,
         camera_id=camera_id, settings=settings, live_settings=live_settings,
     )
+    # The face model runs on its own clock; on a cycle it skipped, no face is
+    # not evidence the face left, so the tracker must not age face tracks.
+    _face_pass_ran = _state.face_detection_last_checked.get(camera_id) != _face_pass_stamp
     _cycle_timer.add(STAGE_FACE_PASS, (time.perf_counter() - _face_started) * 1000.0)
     detections = normalize_detection_boxes_for_frame(detections, frame)
     _telemetry_candidates['detected'] = len(detections)
@@ -1191,7 +1195,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # place -- it never adds or drops detections -- so it cannot change what any
     # downstream gate counts.
     _tracking_started = time.perf_counter()
-    detections = update_object_tracks(camera_id, detections)
+    detections = update_object_tracks(
+        camera_id, detections,
+        hold_labels=frozenset() if _face_pass_ran else frozenset({'face'}),
+    )
     _cycle_timer.add(STAGE_TRACKING, (time.perf_counter() - _tracking_started) * 1000.0)
     _behaviour_started = time.perf_counter()
     # Behavioural engines consume tracked geometry, so pause them while the
@@ -1693,7 +1700,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         _tid = _det.get('track_id')
         if _lbl and isinstance(_tid, int) and _tid > 0:
             _track_ids_by_label.setdefault(_lbl, set()).add(_tid)
-    if dwell_detections:
+    # Face alerts (an unknown face, or an enrolled person's rule) bypass it for
+    # the same reason: each already fires once per face track (unknown) or per
+    # its own cooldown (known), and recognition usually lands a cycle or two
+    # AFTER the event for the person who walked in -- the normal gate would
+    # swallow "Alice detected" as a duplicate of that event, and the per-track
+    # guard, already spent, would never let it fire again.
+    if dwell_detections or _unknown_face_alerts or _known_face_rule_alerts:
         pass
     elif (
         resolved_cooldowns

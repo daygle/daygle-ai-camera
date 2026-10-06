@@ -29,6 +29,7 @@ from app.face_detection_rules import (
     rule_scope_matches,
 )
 from app.face_recognition_service import get_face_recognition_service
+from app.object_tracking import live_track_ids
 
 try:
     import numpy as np
@@ -311,6 +312,21 @@ def _clear_camera_identity_state(camera_id: str, *, clear_generation: bool = Fal
         _cache_generation.pop(camera_id, None)
 
 
+def _prune_camera_identity_state(camera_id: str, live: set[Any]) -> None:
+    """Drop per-track identity state for tracks the tracker no longer holds.
+
+    Callers must hold ``_lock``.
+    """
+    for store in (_cache, _alerted_unknown):
+        entries = store.get(camera_id)
+        if entries is not None:
+            store[camera_id] = {tid: value for tid, value in entries.items() if tid in live}
+    for store in (_captured_unknown, _enriched_tracks):
+        entries = store.get(camera_id)
+        if entries is not None:
+            store[camera_id] = entries & live
+
+
 def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], frame: Any) -> list[dict[str, Any]]:
     """Annotate ``face`` detections in ``detections`` with recognised identities.
 
@@ -329,15 +345,26 @@ def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], f
     # happens after settings/model changes. In either case cached identities are
     # no longer authoritative, even if the tracker reuses the same track id.
     generation = (id(service), int(getattr(service, 'matcher_generation', 0)))
+    # Only the recognition results go stale: which stranger tracks already
+    # alerted or were captured for Review still holds, so keep those -- else
+    # any enrolment (or auto-enrich on another camera) re-alerted every
+    # stranger still on screen.
     with _lock:
         if _cache_generation.get(camera_id) != generation:
-            _clear_camera_identity_state(camera_id)
+            _cache.pop(camera_id, None)
             _cache_generation[camera_id] = generation
 
     faces = [d for d in detections if _is_face(d)]
+    # Per-track state is kept for every face track the tracker still holds,
+    # not just the faces seen this cycle: the face model runs on its own,
+    # slower clock (and misses the odd frame), so most cycles carry no face
+    # even while one is on screen. Clearing on those cycles re-alerted a
+    # lingering stranger, re-captured them for Review and re-embedded every
+    # known face on each face pass.
+    live = live_track_ids(camera_id, _FACE_LABEL)
     if not faces:
         with _lock:
-            _clear_camera_identity_state(camera_id)
+            _prune_camera_identity_state(camera_id, live)
         return detections
 
     # Phase 1 (under lock): consult the per-track cache and collect the faces
@@ -384,7 +411,7 @@ def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], f
     if results_by_track:
         with _lock:
             _cache.setdefault(camera_id, {}).update(results_by_track)
-    seen: set[Any] = {d.get('track_id') for d in faces}
+    seen: set[Any] = {d.get('track_id') for d in faces} | live
     with _lock:
         cam_cache = _cache.get(camera_id)
         if cam_cache is not None:
@@ -515,10 +542,13 @@ def unknown_face_alerts(camera_id: str, detections: list[dict[str, Any]]) -> lis
                 fired_ids.append(rule_id)
             if fired_ids:
                 new_alerts.append({**detection, 'face_rule_ids': fired_ids, 'zone_id': det_zone})
-        # Forget tracks no longer present so a returning stranger re-alerts and
-        # the map cannot grow unbounded.
+        # Forget tracks the tracker has retired so a returning stranger
+        # re-alerts and the map cannot grow unbounded; a face merely missing
+        # from this cycle (the face model runs on its own clock) keeps its
+        # entry, or a lingering stranger would re-alert on every face pass.
+        live = face_track_ids | live_track_ids(camera_id, _FACE_LABEL)
         _alerted_unknown[camera_id] = {
-            tid: rule_ids for tid, rule_ids in alerted.items() if tid in face_track_ids
+            tid: rule_ids for tid, rule_ids in alerted.items() if tid in live
         }
     return new_alerts
 

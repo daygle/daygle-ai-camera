@@ -357,7 +357,13 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
         # callers processing the same camera concurrently (thread overlap
         # during a camera restart, API-triggered passes) cannot BOTH see an
         # expired window between the read and the write and double-alert.
-        cooldown_sec = max(0, int(rule.get('cooldown_minutes') or 5)) * 60
+        # ``or 5`` would turn an explicit 0 ("no cooldown") into five minutes.
+        raw_cooldown = rule.get('cooldown_minutes')
+        try:
+            cooldown_minutes = 5 if raw_cooldown in (None, '') else int(raw_cooldown)
+        except (TypeError, ValueError):
+            cooldown_minutes = 5
+        cooldown_sec = max(0, cooldown_minutes) * 60
         with _face_rule_cooldown_lock:
             last_fired = cooldowns.get(track_id, 0)
             if now - last_fired < cooldown_sec:
