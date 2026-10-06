@@ -252,13 +252,18 @@ def _maybe_capture_unknown(
     # the per-track guard means it is re-offered on the next sighting.
     from app.postprocess_pool import PRIORITY_BACKGROUND, enrichment_pool
 
-    enrichment_pool().submit(
+    queued = enrichment_pool().submit(
         _store_unknown_face,
         camera_id, track_id, dict(detection), _detached(crop_bgr), service,
         priority=PRIORITY_BACKGROUND,
         label=f'unknown-face-{camera_id}',
         block=False,
     )
+    if not queued:
+        # The background queue was full: forget the track so its next sighting
+        # offers the capture again, instead of the visit never reaching Review.
+        with _lock:
+            _captured_unknown.get(camera_id, set()).discard(track_id)
 
 
 def _store_unknown_face(
@@ -276,6 +281,7 @@ def _store_unknown_face(
             return
         embedding = service.embed_face(crop_bgr)
         if embedding is None:
+            logger.info('Unknown face on camera %s not captured for Review: the face could not be embedded', camera_id)
             return
         emb_bytes = embedding_to_bytes(embedding)
         dim = int(embedding.shape[0])
@@ -297,7 +303,9 @@ def _store_unknown_face(
         )
         logger.debug('Captured unknown face track %s on camera %s', track_id, camera_id)
     except Exception as exc:
-        logger.debug('Failed to capture unknown face: %s', exc)
+        # Warning, not debug: a failing capture is why Review stays empty, and
+        # it must show in the Application Log.
+        logger.warning('Failed to capture unknown face on camera %s for Review: %s', camera_id, exc)
 
 
 def _clear_camera_identity_state(camera_id: str, *, clear_generation: bool = False) -> None:
