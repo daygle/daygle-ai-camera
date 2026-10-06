@@ -142,7 +142,7 @@ def _store_enriched_embedding(
     """Background: embed the face and store it for the recognized person."""
     try:
         import app.state as _state
-        from app.face_recognition import embedding_to_bytes
+        from app.face_recognition import embedding_to_bytes, encode_face_thumbnail
         if _state.database is None or crop_bgr is None:
             return
         model = str(service.model_id)
@@ -160,6 +160,9 @@ def _store_enriched_embedding(
             dim=dim,
             model=model,
             source_snapshot=f'auto-enrich:cam={camera_id},track={track_id}',
+            # Keep the crop it learned from, so the person's face list shows
+            # what was added and a wrong match can be spotted and removed.
+            thumbnail=encode_face_thumbnail(crop_bgr),
         )
         # Refresh the matcher so the new embedding is active immediately.
         from app.face_recognition_service import refresh_face_recognition_matcher

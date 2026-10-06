@@ -186,6 +186,28 @@ def get_face_thumbnail(person_id: int, face_id: int, request: Request, db=Depend
     )
 
 
+@router.delete('/api/persons/{person_id}/faces')
+def delete_faces_by_source(
+    person_id: int,
+    request: Request,
+    source: str = Query(...),
+    db=Depends(get_database),
+):
+    """Remove a person's faces of one source in one go -- for clearing the
+    embeddings auto-enrichment learned (``source=auto``) when it learned from
+    the wrong person."""
+    require_admin(request)
+    if db.get_person(person_id) is None:
+        raise HTTPException(status_code=404, detail='Person not found.')
+    if source not in ('auto', 'review'):
+        raise HTTPException(status_code=400, detail="source must be 'auto' or 'review'.")
+    removed = db.delete_person_faces_by_source(person_id, source)
+    if removed:
+        refresh_face_recognition_matcher()
+    write_audit_log(request, db, 'delete', 'person.face', resource_id=str(person_id), details={'source': source, 'removed': removed})
+    return {'ok': True, 'removed': removed, 'faces': db.list_person_faces(person_id)}
+
+
 @router.delete('/api/persons/{person_id}/faces/{face_id}')
 def delete_face(person_id: int, face_id: int, request: Request, db=Depends(get_database)):
     require_admin(request)

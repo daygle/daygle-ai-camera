@@ -6,6 +6,30 @@ from typing import Any
 from app.auth import utc_now
 
 
+
+# Where an enrolled face came from, read off ``person_faces.source_snapshot``:
+# a photo uploaded on the People card (no source), a capture assigned from
+# Review (``unknown-face:<id>``), or an embedding auto-enrichment learned from
+# a confident live match (``auto-enrich:cam=...,track=...``).
+_SOURCE_PREFIXES = {'review': 'unknown-face:', 'auto': 'auto-enrich:'}
+
+
+def person_face_source(source_snapshot: Any) -> str:
+    text = str(source_snapshot or '')
+    for source, prefix in _SOURCE_PREFIXES.items():
+        if text.startswith(prefix):
+            return source
+    return 'enrolled'
+
+
+# A face's thumbnail; for one assigned from Review before the picture was
+# copied across, fall back to that capture's own thumbnail while it is kept.
+_FACE_THUMBNAIL_SQL = (
+    "COALESCE(f.thumbnail, CASE WHEN f.source_snapshot LIKE 'unknown-face:%' THEN "
+    "(SELECT u.thumbnail FROM unknown_faces u "
+    "WHERE u.id = CAST(substr(f.source_snapshot, 14) AS INTEGER)) END)"
+)
+
 class PersonsMixin:
     """Face-recognition enrolment store (Stage 2).
 
@@ -132,12 +156,12 @@ class PersonsMixin:
         """
         with self.connect() as db:
             rows = db.execute(
-                """
-                SELECT id, person_id, dim, model, source_snapshot, created_at,
-                       (thumbnail IS NOT NULL) AS has_thumbnail
-                FROM person_faces
-                WHERE person_id = ?
-                ORDER BY created_at ASC
+                f"""
+                SELECT f.id, f.person_id, f.dim, f.model, f.source_snapshot, f.created_at,
+                       ({_FACE_THUMBNAIL_SQL} IS NOT NULL) AS has_thumbnail
+                FROM person_faces f
+                WHERE f.person_id = ?
+                ORDER BY f.created_at ASC
                 """,
                 (person_id,),
             ).fetchall()
@@ -146,6 +170,7 @@ class PersonsMixin:
                 face = dict(row)
                 # SQLite returns 0/1 for the boolean expression; expose a real bool.
                 face['has_thumbnail'] = bool(face.get('has_thumbnail'))
+                face['source'] = person_face_source(face.get('source_snapshot'))
                 faces.append(face)
             return faces
 
@@ -157,13 +182,28 @@ class PersonsMixin:
         """
         with self.connect() as db:
             row = db.execute(
-                "SELECT thumbnail FROM person_faces WHERE id = ?",
+                f"SELECT {_FACE_THUMBNAIL_SQL} AS thumbnail FROM person_faces f WHERE f.id = ?",
                 (face_id,),
             ).fetchone()
         if row is None:
             return None
         blob = row['thumbnail']
         return bytes(blob) if blob is not None else None
+
+    def delete_person_faces_by_source(self, person_id: int, source: str) -> int:
+        """Delete one person's faces that came from ``source`` (see
+        :func:`person_face_source`); returns how many were removed."""
+        prefix = _SOURCE_PREFIXES.get(source)
+        if prefix is None:
+            raise ValueError(f'Unknown face source: {source!r}')
+        with self.write_slot(), self.connect() as db:
+            cursor = db.execute(
+                # substr, not LIKE: the prefixes are fixed strings, and LIKE
+                # would treat any future ``_`` / ``%`` in one as a wildcard.
+                "DELETE FROM person_faces WHERE person_id = ? AND substr(source_snapshot, 1, ?) = ?",
+                (int(person_id), len(prefix), prefix),
+            )
+            return int(cursor.rowcount or 0)
 
     def delete_person_face(self, face_id: int) -> bool:
         with self.write_slot(), self.connect() as db:

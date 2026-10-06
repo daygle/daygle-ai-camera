@@ -159,7 +159,7 @@ class UnknownFacesMixin:
             raise UnknownFaceAssignmentError('Provide person_id or name.')
         with self.write_slot(), self.connect() as db:
             face = db.execute(
-                "SELECT embedding, dim, model, status FROM unknown_faces WHERE id = ?",
+                "SELECT embedding, dim, model, status, thumbnail FROM unknown_faces WHERE id = ?",
                 (face_id,),
             ).fetchone()
             if face is None:
@@ -189,8 +189,8 @@ class UnknownFacesMixin:
             db.execute(
                 """
                 INSERT INTO person_faces
-                    (person_id, embedding, dim, model, source_snapshot, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (person_id, embedding, dim, model, source_snapshot, thumbnail, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     person_id,
@@ -198,6 +198,9 @@ class UnknownFacesMixin:
                     int(face['dim']),
                     str(face['model']),
                     f'unknown-face:{face_id}',
+                    # Keep the picture the admin assigned, so the person's face
+                    # list shows it (it used to be dropped, leaving a blank).
+                    bytes(face['thumbnail']) if face['thumbnail'] is not None else None,
                     now,
                 ),
             )

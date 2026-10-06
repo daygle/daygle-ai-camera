@@ -7599,3 +7599,6 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
 .pixel-threshold-picker > [hidden] { display: none; }
 .legacy-motion-clear { margin-left: 6px; padding: 4px 10px; font-size: 12px; }
 .alerts-motion-trigger-note { grid-column: 1 / -1; margin: 0; }
+
+/* People card: note + bulk remove for faces auto-enrichment learned. */
+.person-faces-auto { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
