@@ -25,7 +25,7 @@ test('the stream details card has a slot for the detection queue timing', () => 
 test('renderInferenceTiming reads both numbers off the status payload', () => {
   const start = liveSource.indexOf('function renderInferenceTiming(');
   assert.ok(start !== -1, 'renderInferenceTiming should exist');
-  const body = liveSource.slice(start, liveSource.indexOf('function formatMotionPixelPercent', start));
+  const body = liveSource.slice(start, liveSource.indexOf('const MOTION_QUIET_FRACTION', start));
   // Wait and run must be read as two separate fields: averaging them into one
   // number is exactly the diagnostic this feature exists to avoid.
   assert.match(body, /inference_wait_ms/);
@@ -39,7 +39,7 @@ test('the queue readout labels Wait and Run in title case', () => {
   // fields rather than the lowercase fragments this readout started with.
   const start = liveSource.indexOf('function renderInferenceTiming(');
   assert.ok(start !== -1, 'renderInferenceTiming should exist');
-  const body = liveSource.slice(start, liveSource.indexOf('function formatMotionPixelPercent', start));
+  const body = liveSource.slice(start, liveSource.indexOf('const MOTION_QUIET_FRACTION', start));
   assert.doesNotMatch(body, /`wait /);
   assert.doesNotMatch(body, / \/ run /);
 });

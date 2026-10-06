@@ -486,6 +486,7 @@ def confirm_motion_detections(
     detections: list[dict[str, Any]],
     *,
     required_frames: int = 2,
+    required_by_zone: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Require each motion zone to persist across consecutive frames.
 
@@ -493,12 +494,24 @@ def confirm_motion_detections(
     a one-frame decoder or exposure artifact. Keeping the streak per zone means
     a genuine subject moving through a zone is confirmed on the second sample,
     while a transient zone diff never reaches the event/recording path.
+
+    ``required_by_zone`` carries each zone's own "Must last: N checks" value;
+    zones missing from it use ``required_frames``.
     """
     try:
         required = max(1, int(required_frames))
     except (TypeError, ValueError):
         required = 2
-    if required <= 1:
+
+    def _required_for(zone_id: str) -> int:
+        if required_by_zone and zone_id in required_by_zone:
+            try:
+                return max(1, int(required_by_zone[zone_id]))
+            except (TypeError, ValueError):
+                return required
+        return required
+
+    if required <= 1 and not any(_required_for(key) > 1 for key in (required_by_zone or {})):
         return detections
 
     current_zone_ids = {
@@ -509,7 +522,7 @@ def confirm_motion_detections(
     with _state._motion_confirm_lock:
         previous = _state._motion_confirm_streaks.get(camera_id, {})
         current = {
-            zone_id: min(required, int(previous.get(zone_id, 0)) + 1)
+            zone_id: min(_required_for(zone_id), int(previous.get(zone_id, 0)) + 1)
             for zone_id in current_zone_ids
         }
         _state._motion_confirm_streaks[camera_id] = current
@@ -517,7 +530,7 @@ def confirm_motion_detections(
     if detections and not current_zone_ids:
         return []
     confirmed_zone_ids = {
-        zone_id for zone_id, streak in current.items() if streak >= required
+        zone_id for zone_id, streak in current.items() if streak >= _required_for(zone_id)
     }
     if detections and not confirmed_zone_ids:
         logger.debug(

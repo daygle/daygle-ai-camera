@@ -59,12 +59,12 @@ const FIELD_LABELS = {
   detection_history_minutes: 'Detection History (min)',
   background_detection_enabled: 'Background Detection',
   periodic_scan_interval_seconds: 'Periodic Scan Interval (s)',
-  motion_pixel_threshold: 'Motion Pixel Threshold',
-  motion_gate_fraction: 'Motion Gate Fraction',
-  motion_scale_fraction: 'Motion Scale Fraction',
-  motion_background_alpha: 'Motion Background Alpha',
-  motion_frame_width: 'Motion Frame Width',
-  motion_frame_height: 'Motion Frame Height',
+  motion_pixel_threshold: 'Ignore Small Light Changes',
+  motion_gate_fraction: 'Wake-Up Threshold',
+  motion_scale_fraction: 'Motion Score Scale',
+  motion_background_alpha: 'Background Adapt Speed',
+  motion_frame_width: 'Analysis Width',
+  motion_frame_height: 'Analysis Height',
   ingest_frame_fps: 'Detection Frame Rate (fps)',
   snapshot_quality: 'Snapshot Quality',
   video_decode: 'Video Decoding',
@@ -163,6 +163,7 @@ const forms = {
   network: document.getElementById('networkAccessForm'),
   gpu: document.getElementById('gpuHealthForm'),
 };
+if (forms.live) bindPixelThresholdPresets(forms.live);
 
 // api() is provided by web/utils.js (loaded before this script). It reads
 // window.daygleAuth.csrfToken for state-changing verbs, redirects to /login
@@ -393,6 +394,7 @@ async function loadSettings() {
   const versionEl = document.getElementById('currentVersion');
   if (versionEl && settings.version) versionEl.textContent = settings.version;
   fillForm(forms.live, settings.live, FORM_DEFAULTS.live);
+  syncPixelThresholdPresets(forms.live);
   fillForm(forms.recording, settings.recording, FORM_DEFAULTS.recording);
   fillForm(forms.retention, settings.recording, FORM_DEFAULTS.recording);
   fillForm(forms.storage, settings.storage, FORM_DEFAULTS.storage);
@@ -597,6 +599,7 @@ function bindDefaultsReset(buttonId, formName, label) {
 document.getElementById('resetLiveDefaultsBtn')?.addEventListener('click', guard(() => {
   if (!window.confirm('Reset the Live Performance form to the defaults? Nothing changes until you save.')) return;
   fillForm(forms.live, {}, FORM_DEFAULTS.live);
+  syncPixelThresholdPresets(forms.live);
   setMessage('Live Performance fields reset to defaults. Save to apply.');
 }));
 bindDefaultsReset('resetRecordingDefaultsBtn', 'recording', 'Recording Clips');

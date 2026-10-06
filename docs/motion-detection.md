@@ -72,9 +72,20 @@ line-crossing.
 
 This is an optional alert that fires from Layer 1's pixel-diff result, without caring what YOLO found.
 
-You configure it on the **Zones** page: each area has its own **Motion detection** card with a single toggle. Flip it on and the motion rule is created with sensible defaults; use the **Sensitivity** field to set the minimum confidence, and the **Advanced** expander for cooldown, email/push, time windows, and the per-zone **Gate override** / **Scale override**. When a zone's pixel-diff confidence reaches the sensitivity threshold, the alert fires without needing YOLO to identify anything - after a short hold that lets an object in the same zone take priority (see below). The system normally computes this confidence from the changed pixels inside the zone's own rectangle, so motion elsewhere in the camera view does not raise this zone's score.
+You configure it on the **Zones** page: each area has a **Motion** row with a single toggle. Flip it on and the motion rule is created on **Normal**. Each area has one setting, its **trigger**: *trigger when X% of this area moves*. It is measured on the changed pixels inside the area's own outline, so motion elsewhere in the camera view never counts towards it. Pick a preset in the Threshold column:
 
-**Per-zone sensitivity.** The **Gate override** and **Scale override** fields (under a motion card's **Advanced** expander) let one zone use a different pixel-diff sensitivity than the rest of the camera. Leave them blank to inherit the camera/global values. This is what lets a sensitive doorway (low gate) and a noisy tree-line (high gate) coexist on a single camera - the whole-camera **Motion Gate Fraction** / **Motion Scale Fraction** no longer have to be a compromise. The live hint under the Sensitivity slider shows the resulting "approx. X% of this zone's pixels must change", and marks the zone as a *per-zone override* when either field is set.
+| Preset | Trigger |
+|---|---|
+| Very sensitive | 0.5% of the area |
+| Sensitive | 1% |
+| Normal | 2% |
+| Relaxed | 4% |
+
+**Custom** (or the cog button) lets you type any percentage. Under the cog you also set **Must last: 1 / 2 / 3 checks**: how many motion checks in a row must see the area above its trigger before it counts. Two is the default. One reacts on the first check. Three ignores brief flickers such as headlights or a bug on the lens, at the cost of reacting a moment later. When the trigger has been passed for long enough, the alert fires without needing YOLO to identify anything, after a short hold that lets an object in the same zone take priority (see below). Recording, cooldown, email/push and time windows are set on the Alerts page.
+
+**The live meter.** Under the Motion row, and for each motion area in the Live page's *AI Detection Status* card, a meter shows how much of the area is moving right now, in the same units as the trigger. For example, *Driveway: 0.4% moving · triggers at 2%*. The trigger tick sits in the middle of the bar, so a bar past the tick will fire. Each area reads **Quiet** (nothing moving), **Moving** (movement below the trigger, or above it but still waiting for its next check) or **Triggered** (passed the trigger for long enough to record or alert). The meter also shows *Highest in the last 10 minutes*. To pick a trigger, watch that peak while the scene is quiet and set the trigger just above it.
+
+**Areas saved before the trigger existed** keep firing exactly where they did. Their old *Sensitivity* × scale and gate (including any per-zone gate/scale override) are folded into the equivalent trigger. The editor shows that value (usually as *Custom*) and stores it the next time the area is saved.
 
 Use this when you want to be notified any time *anything* moves in an area, regardless of what it is.
 
@@ -101,8 +112,7 @@ python scripts/evaluate_detection.py --input clip.mp4 \
 
 It reports the motion rate, changed-pixel-fraction distribution, per-label
 detection counts and mean confidence, and per-frame timing - so you can pick
-**Motion Gate Fraction**, **Motion Scale Fraction**, and the object
-**confidence** floor from real numbers instead of guessing. Pass `--annotate
+each area's motion trigger and the object **confidence** floor from real numbers instead of guessing. Pass `--annotate
 <dir>` to write frames with the detection boxes drawn on, `--gated` to measure
 the legacy motion-gated path, or `--json` for machine-readable output. It only
 reads frames - nothing is written to the app database or config.
@@ -201,12 +211,12 @@ Out of the box, Daygle runs object detection on **every** cycle, decoupled from 
 
 ## The background model
 
-Layer 1 compares each frame against a learned background - a model of what the camera sees when nothing is happening. With the default **MOG2** engine each pixel is modelled as a mixture of Gaussians; with the legacy **Diff** engine it is a single exponential moving average. Either way, the adaptation speed is controlled by **Motion Background Alpha**.
+Layer 1 compares each frame against a learned background - a model of what the camera sees when nothing is happening. With the default **MOG2** engine each pixel is modelled as a mixture of Gaussians; with the legacy **Diff** engine it is a single exponential moving average. Either way, the adaptation speed is controlled by **Background Adapt Speed** (background alpha).
 
-**Important behaviour (MOG2):** the model adapts every frame at **Motion Background Alpha**, and MOG2 distinguishes a moving subject from a stopped one by how long each pixel stays changed:
+**Important behaviour (MOG2):** the model adapts every frame at **Background Adapt Speed** (background alpha), and MOG2 distinguishes a moving subject from a stopped one by how long each pixel stays changed:
 
 - A subject that keeps **moving** lands on new pixels each frame, so no pixel is ever learned - it stays visible as motion the whole time it moves.
-- A subject that **stops** (a car that parks, a person who stands still) sits on the same pixels, so it is gradually absorbed into the background over roughly `1 / Motion Background Alpha` frames, and the motion signal returns to its baseline. This is why a parked car does **not** pin the motion bar at ~30% forever - it fades within seconds. (An earlier "freeze during motion" behaviour caused exactly that stuck-bar bug and has been removed; the legacy **Diff** engine still freezes and can show the old behaviour.)
+- A subject that **stops** (a car that parks, a person who stands still) sits on the same pixels, so it is gradually absorbed into the background over roughly `1 / background alpha` frames, and the motion signal returns to its baseline. This is why a parked car does **not** pin the motion bar at ~30% forever - it fades within seconds. (An earlier "freeze during motion" behaviour caused exactly that stuck-bar bug and has been removed; the legacy **Diff** engine still freezes and can show the old behaviour.)
 - Recording continuity for a subject that stops is handled by **Minimum Post-Event Seconds** / **Keep Recording After Motion**, not by holding the motion signal.
 
 Because a stopped subject fades from *motion*, catching it while it's still there is the job of object detection (Always-On, or the **Periodic Scan** below).
@@ -244,7 +254,7 @@ alerts.
 diff mask. An object whose bounding box overlaps a meaningful share of changed
 pixels is *moving*; otherwise it is *still*. A subject that stops (a parked
 car, someone standing still) is absorbed into the background model over
-roughly `1 / Motion Background Alpha` frames and naturally reads as still,
+roughly `1 / background alpha` frames and naturally reads as still,
 while a subject that keeps moving lands on fresh pixels every frame and stays
 moving. When no pixel change was measured at all (a periodic scan on a quiet
 frame, the first frame after a camera reconnect), the detection is treated as
@@ -311,7 +321,7 @@ driveway" zone rule.
 
 ## Settings reference
 
-All of these live under **Settings → Detection & Live → Live Performance**. The **Motion Engine**, **Denoise**, **Shadow Suppression**, **Periodic Scan Interval**, and the low-level motion tuning values (**Motion Pixel Threshold**, **Motion Gate Fraction**, **Motion Scale Fraction**, **Motion Background Alpha**, **Motion Frame Width**, and **Motion Frame Height**) are grouped under the **Advanced Motion Tuning** disclosure on that card. The card's **Reset Defaults** button refills the form with the built-in defaults; nothing is applied until you press **Save**.
+All of these live under **Settings → Detection & Live → Live Performance**. The motion engine settings are grouped under the **Advanced Motion Engine** disclosure on that card, with plain names: **Ignore Small Light Changes** (pixel threshold), **Clean Up Speckle Noise** (denoise), **Ignore Shadows** (shadow suppression), **Background Model** (MOG2 / Simple Difference), **Background Adapt Speed** (background alpha), **Wake-Up Threshold** (gate fraction), **Motion Score Scale** (scale fraction), **Periodic Scan Interval**, and **Analysis Width / Height** (motion frame size). How much movement counts as motion is not set here; it is each area's trigger on the Zones page. The card's **Reset Defaults** button refills the form with the built-in defaults; nothing is applied until you press **Save**.
 
 These remain the global defaults. Each camera can override the detection-performance settings from **Cameras → Edit Camera → Advanced**, where the **Day Profile** and **Night Profile** sections are edited independently: each keeps its own values, so a daytime tuning change never overwrites the night tuning (and vice versa), and changing **Active Profile** only picks which one runs - it never reloads or discards what is typed in either section. The camera stores separate Day and Night values for background detection, detection interval, ingest frame rate, confirmation frames/window/IoU, always-run object detection, region boost, tiling, periodic scans, motion-frame dimensions, and all motion tuning fields. A value left on **Global Default** inherits the global Live Performance setting and stays that way across saves.
 
@@ -481,7 +491,7 @@ out while leaving a real, stationary-ish subject untouched.
 - Only applies when Confirm Frames is above `1`; `face` detections and any
   detection without a box bypass the spatial test and fall back to label-only
   confirmation.
-- Pairs well with raising [Motion Pixel Threshold](#motion-pixel-threshold) to
+- Pairs well with raising [Ignore Small Light Changes](#ignore-small-light-changes-pixel-threshold) to
   `40`-`60` on IR cameras and setting a sensible per-object **Confidence**
   threshold on the Zones page.
 
@@ -503,37 +513,37 @@ Default: `0` (disabled)
 
 ---
 
-### Motion Pixel Threshold
+### Ignore Small Light Changes (pixel threshold)
 
-How much a single pixel's intensity must change (on a 0-255 scale) to be counted as a changed pixel.
+How much a single pixel's intensity must change (on a 0-255 scale) to be counted as a changed pixel. The setting offers **Low** (15), **Medium** (30) and **High** (50), or **Custom** for any value. This is one of the three motion settings a camera's Day / Night profile can override, alongside **Clean Up Speckle Noise** and **Ignore Shadows**, because night and IR noise genuinely differ between cameras.
 
 - **Too low:** Sensor noise, IR flicker, and minor lighting changes trigger the gate constantly
 - **Too high:** Subtle or distant motion is missed
 
 Default: `30`
 
-**Tuning tip:** On IR or night-vision cameras, raise this to `40`-`60` to filter out sensor noise.
+**Tuning tip:** On IR or night-vision cameras, choose **High** (or a custom `40`-`60`), often just in the camera's Night profile, to filter out sensor noise.
 
 ---
 
-### Motion Gate Fraction
+### Wake-Up Threshold (gate fraction)
 
-The minimum fraction of pixels that must change before motion is declared. `0.005` means 0.5% of the thumbnail pixels must exceed the pixel threshold.
+The minimum fraction of the **whole picture** that must change before a check counts as having motion at all. `0.005` means 0.5% of the thumbnail pixels must exceed the pixel threshold. It decides when object detection wakes up if *Always Run Object Detection* is off. Whether an area records or alerts is decided by that area's own trigger on the Zones page.
 
 - **Too low:** A flickering light in one corner of the frame triggers the gate constantly
 - **Too high:** Small or distant subjects (a person at the far end of a long driveway) are missed
 
 Default: `0.005`
 
-**Tuning tip:** If you have a scene with a tree or flag in the corner that constantly triggers alerts, raise this to `0.008` or `0.01`.
+**Tuning tip:** For a tree or flag that keeps an area firing, raise that **area's trigger** (or move the area away from it) rather than this whole-picture value.
 
 ---
 
-### Motion Scale Fraction
+### Motion Score Scale (scale fraction)
 
 The pixel change fraction that maps to 100% motion confidence. At `0.03`, if 3% of pixels changed, confidence is 1.0. At 1.5%, confidence is 0.5.
 
-This does not affect whether motion fires - that is controlled by Gate Fraction. It only affects the confidence score that Layer 3 motion rules compare against.
+This does not affect when an area with a trigger fires. It only sets the confidence score stored on motion events (and, for an area not yet converted to a trigger, the old Sensitivity maths).
 
 Because confidence is capped at 100%, most real movement scores 100%. The Recordings, Events, Snapshots and Timeline pages therefore show the **share of the zone's pixels that changed** on the Motion pill (for example **Motion · 4.2%**) rather than the confidence. Hover the pill to see what the number means. Motion saved before this was added has no stored share, so those clips still show the confidence.
 
@@ -544,7 +554,7 @@ Default: `0.03`
 
 ---
 
-### Motion Background Alpha
+### Background Adapt Speed (background alpha)
 
 How fast the background model adapts to scene changes when no motion is detected. `0.05` means each new frame contributes 5% to the background.
 
@@ -555,7 +565,7 @@ Default: `0.05`
 
 ---
 
-### Motion Frame Width / Motion Frame Height
+### Analysis Width / Analysis Height (motion frame size)
 
 The size in pixels of the thumbnail used for the Layer 1 pixel-diff. Larger dimensions give finer per-zone precision but cost more CPU on every frame.
 
@@ -571,9 +581,9 @@ Defaults: `320` × `240`
 
 Symptom: YOLO runs constantly, live detection status shows "motion detected" on every quiet frame.
 
-1. Raise **Motion Pixel Threshold** from `30` to `50`
-2. If still triggering, raise **Motion Gate Fraction** from `0.005` to `0.008`
-3. Save and watch the detection status - it should settle to "no motion detected" during quiet periods
+1. Set **Ignore Small Light Changes** to **High** (in the camera's Night profile if only nights are noisy)
+2. If an area still fires, watch its *Highest in the last 10 minutes* on a quiet night and raise that area's trigger just above it, or set **Must last** to 3 checks
+3. Save and watch the live meter - the area should read **Quiet** during quiet periods
 
 ---
 
@@ -581,9 +591,10 @@ Symptom: YOLO runs constantly, live detection status shows "motion detected" on 
 
 Symptom: A person at the far end of the driveway isn't triggering alerts.
 
-1. Lower **Motion Gate Fraction** from `0.005` to `0.001` - fewer pixels need to change
-2. Lower **Motion Pixel Threshold** from `30` to `15` - subtler pixel changes count
-3. Consider also lowering the object rule's **min confidence** in zone settings
+1. Draw a smaller area around where the subject appears - a distant person is a much larger share of a small area
+2. Lower that area's trigger (**Sensitive** or **Very sensitive**)
+3. Set **Ignore Small Light Changes** to **Low** - subtler pixel changes count
+4. Consider also lowering the object rule's **min confidence** in zone settings
 
 ---
 
@@ -599,8 +610,8 @@ Enable **Periodic Scan Interval** - set to `30` or `60` seconds. YOLO will conti
 
 Symptom: A waving tree or flag in the corner of frame keeps triggering motion alerts even with nothing happening.
 
-1. Raise **Motion Gate Fraction** - the tree may change only 0.5% of pixels; requiring 1% filters it out
-2. Alternatively, adjust your detection zone in Zones settings to exclude that corner of the frame
+1. Watch the area's *Highest in the last 10 minutes* while only the tree moves, then raise the area's trigger above it (for example **Relaxed**)
+2. Alternatively, adjust the area's outline on the Zones page to exclude that corner of the frame
 
 ---
 
@@ -609,7 +620,7 @@ Symptom: A waving tree or flag in the corner of frame keeps triggering motion al
 Symptom: Motion fires when a room light turns on, even with no person present.
 
 This is correct behaviour - lights genuinely change a large fraction of pixels. Two options:
-- Raise **Motion Pixel Threshold** so minor brightness changes below a threshold don't count
+- Set **Ignore Small Light Changes** higher so minor brightness changes don't count
 - Use a zone that only covers the area you care about (a doorway, not the whole room), and set object rules rather than motion rules so only identified people/objects trigger alerts
 
 ---
@@ -720,7 +731,7 @@ This per-zone path requires the internal diff mask - a 240×320 boolean array pr
 
 With the default **MOG2** engine and **Shadow Suppression** on, cast shadows are classified separately and dropped, so a person's moving shadow no longer triggers Layer 1 by itself. This does not prevent the independent YOLO pass from producing a false object label: **Always Run Object Detection** is enabled by default, and YOLO can still label a texture or shadow edge as (for example) `cat` at low confidence. A hard-edged shadow or a headlight sweeping a wall can also be misread as motion, and on very dark/IR scenes shadow suppression can occasionally drop a genuine subject (disable it there).
 
-**Workaround:** Keep **Shadow Suppression** on for daytime/colour scenes; raise **Motion Pixel Threshold** to filter minor brightness changes; and use zone geometry to avoid placing motion zones in areas prone to shadows or reflections. For false object labels, raise the matching object's minimum confidence (the screenshot's `Cat 35%` should not pass a rule configured above 0.35), or disable **Always Run Object Detection** to restore motion-gated inference. Using object rules (person/car) instead of motion rules still avoids motion-only shadow alerts, but it cannot make a low-confidence YOLO classification correct.
+**Workaround:** Keep **Shadow Suppression** on for daytime/colour scenes; set **Ignore Small Light Changes** higher to filter minor brightness changes; and use zone geometry to avoid placing motion zones in areas prone to shadows or reflections. For false object labels, raise the matching object's minimum confidence (the screenshot's `Cat 35%` should not pass a rule configured above 0.35), or disable **Always Run Object Detection** to restore motion-gated inference. Using object rules (person/car) instead of motion rules still avoids motion-only shadow alerts, but it cannot make a low-confidence YOLO classification correct.
 
 ### First frame after startup or camera reconnect
 

@@ -4395,6 +4395,9 @@ button.activity-item-action.activity-item-action-delete:hover {
 .live-detection-card {
   display: grid;
   gap: 16px;
+}
+/* The zone editor reuses the live card's per-zone motion meter. */
+.live-detection-card, .zone-motion-meter {
   /* Sense-lane palette. Scoped tokens keep the two themes readable without
      repeating every hue at each use site; light overrides follow below. */
   --v-fg: #47d6ff; --v-bg: rgba(71,214,255,.1); --v-bd: rgba(71,214,255,.32);
@@ -4405,7 +4408,7 @@ button.activity-item-action.activity-item-action-delete:hover {
   --sense-track: rgba(255,255,255,.08);
   --sense-lane-bg: rgba(255,255,255,.03);
 }
-:root.light .live-detection-card {
+:root.light .live-detection-card, :root.light .zone-motion-meter {
   --v-fg: #0284c7; --v-bg: rgba(2,132,199,.08); --v-bd: rgba(2,132,199,.28);
   --s-fg: #7c3aed; --s-bg: rgba(124,58,237,.1); --s-bd: rgba(124,58,237,.28);
   --f-fg: #db2777; --f-bg: rgba(219,39,119,.1); --f-bd: rgba(219,39,119,.3);
@@ -4566,6 +4569,18 @@ button.activity-item-action.activity-item-action-delete:hover {
   color: var(--text);
   text-align: center;
 }
+/* Per-zone motion meters: one bar per motion zone, in the zone's own units,
+   with the trigger tick in the middle (the bar runs to twice the trigger). */
+.motion-frame-meter[hidden], .motion-zone-list[hidden] { display: none; }
+.motion-zone-list { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+.motion-zone-meter { display: flex; flex-direction: column; }
+.motion-zone-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.motion-zone-name { font-size: 13px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.motion-zone-bar { flex: none; height: 12px; margin: 6px 0 4px; }
+.motion-zone-meter.is-quiet .motion-bar { background: var(--muted); opacity: 0.45; }
+.motion-zone-meter.is-triggered .motion-bar { background: linear-gradient(90deg, var(--a-bd), var(--a-fg)); }
+.motion-zone-reading { margin: 0; font-size: 12px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.motion-zone-peak { margin: 2px 0 0; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .motion-lane-caption {
   margin: 8px 0 0;
   font-size: 11px;
@@ -6994,6 +7009,13 @@ button.secondary:disabled, a.secondary:disabled {
 }
 .zone-rule-toggle { display: inline-flex; padding: 5px 12px; font-size: 12px; }
 .zone-rule-conf { width: 88px; }
+.zone-rule-conf.zone-motion-trigger { width: 100%; max-width: 200px; }
+/* Motion's live meter row in the zone editor: the same per-zone meter as the
+   live page, without the zone name (the row already belongs to the zone). */
+.zone-motion-meter-row td { padding-top: 0; }
+.zone-motion-meter { width: 100%; max-width: 520px; }
+.zone-motion-meter .motion-zone-meter, .zone-motion-meter .motion-zone-bar { width: 100%; }
+.zone-motion-meter .motion-zone-head { justify-content: flex-start; }
 .zones-shell .zone-rule-table .cell-actions,
 .sounds-shell .zone-rule-table .cell-actions {
   display: table-cell;
@@ -7556,3 +7578,11 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
   .library-segment { width: 100%; }
   .library-segment-btn { flex: 1 1 auto; justify-content: center; }
 }
+
+/* "Ignore small light changes" picker: a preset select with the raw pixel
+   threshold input beside it, shown only for Custom. */
+.pixel-threshold-picker { display: flex; gap: 8px; }
+.pixel-threshold-picker > * { flex: 1 1 0; min-width: 0; }
+.pixel-threshold-picker > [hidden] { display: none; }
+.legacy-motion-clear { margin-left: 6px; padding: 4px 10px; font-size: 12px; }
+.alerts-motion-trigger-note { grid-column: 1 / -1; margin: 0; }

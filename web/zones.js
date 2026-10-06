@@ -36,25 +36,93 @@ function effectiveZoneMotionTuning() {
   };
 }
 
-function formatMotionPercent(fraction) {
-  const percent = Math.max(0, Number(fraction) || 0) * 100;
-  if (percent >= 10) return `${percent.toFixed(1)}%`;
-  if (percent >= 1) return `${percent.toFixed(2)}%`;
-  return `${percent.toFixed(3)}%`;
+// "Trigger when X% of this zone moves" presets. Mirrors the backend bounds in
+// app/zone_schema.py (MOTION_TRIGGER_MIN / MOTION_TRIGGER_MAX).
+const MOTION_TRIGGER_PRESETS = [
+  { value: 0.005, label: 'Very sensitive' },
+  { value: 0.01, label: 'Sensitive' },
+  { value: 0.02, label: 'Normal' },
+  { value: 0.04, label: 'Relaxed' },
+];
+const MOTION_TRIGGER_MIN = 0.0005;
+const MOTION_TRIGGER_MAX = 0.5;
+const DEFAULT_MOTION_TRIGGER = 0.02;
+const MAX_MOTION_CONFIRM_CYCLES = 5;
+const DEFAULT_MOTION_CONFIRM_CYCLES = 2;
+
+// The share of the zone's pixels that must change for its motion to count.
+// A zone saved before the trigger existed still runs the old maths on the
+// backend -- max(gate, Sensitivity x scale), per-zone overrides first -- so
+// show (and on the next save, store) that same value.
+function effectiveMotionTrigger(rule) {
+  const stored = optionalFraction(rule?.trigger_fraction, MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX);
+  if (stored != null) return stored;
+  if (!rule) return DEFAULT_MOTION_TRIGGER;
+  const { gateFraction, scaleFraction } = effectiveZoneMotionTuning();
+  const ruleGate = optionalFraction(rule.gate_fraction, 0.0001, 0.5);
+  const ruleScale = optionalFraction(rule.scale_fraction, 0.001, 1.0);
+  const gate = ruleGate != null ? ruleGate : gateFraction;
+  const scale = ruleScale != null ? ruleScale : scaleFraction;
+  const sensitivity = clamp(Number(rule.min_confidence ?? 0.45), 0, 1);
+  const legacy = Math.max(gate, sensitivity * scale);
+  return Math.round(clamp(legacy, MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX) * 1e6) / 1e6;
 }
 
-function motionPixelThresholdText(rule) {
-  const { gateFraction, scaleFraction } = effectiveZoneMotionTuning();
-  // Per-zone gate/scale overrides win over the camera/global values when set.
-  const ruleGate = Number(rule?.gate_fraction);
-  const ruleScale = Number(rule?.scale_fraction);
-  const gate = rule?.gate_fraction != null && Number.isFinite(ruleGate) ? ruleGate : gateFraction;
-  const scale = rule?.scale_fraction != null && Number.isFinite(ruleScale) ? ruleScale : scaleFraction;
-  const sensitivity = clamp(Number(rule?.min_confidence ?? 0.45), 0, 1);
-  const sensitivityFraction = sensitivity * scale;
-  const requiredFraction = Math.max(gate, sensitivityFraction);
-  const overridden = (rule?.gate_fraction != null && Number.isFinite(ruleGate)) || (rule?.scale_fraction != null && Number.isFinite(ruleScale));
-  return `Approx. ${formatMotionPercent(requiredFraction)} of this zone's pixels must change (${Math.round(sensitivity * 100)}% sensitivity × ${formatMotionPercent(scale)} scale; ${formatMotionPercent(gate)} minimum gate)${overridden ? ' - per-zone override' : ''}.`;
+function motionTriggerPreset(trigger) {
+  return MOTION_TRIGGER_PRESETS.find((preset) => Math.abs(preset.value - trigger) < 1e-6) || null;
+}
+
+function motionConfirmCycles(rule) {
+  const cycles = Number.parseInt(rule?.confirm_cycles ?? DEFAULT_MOTION_CONFIRM_CYCLES, 10);
+  if (!Number.isFinite(cycles)) return DEFAULT_MOTION_CONFIRM_CYCLES;
+  return Math.max(1, Math.min(MAX_MOTION_CONFIRM_CYCLES, cycles));
+}
+
+// Store a trigger on the rule. The trigger replaces the old gate / scale /
+// Sensitivity trio for this zone, so those stop being knobs: the backend
+// opens the confidence window to match (app/zone_schema.py).
+function setMotionTrigger(rule, trigger) {
+  rule.trigger_fraction = optionalFraction(trigger, MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX) ?? DEFAULT_MOTION_TRIGGER;
+  rule.min_confidence = 0;
+  rule.max_confidence = 1;
+  rule.gate_fraction = null;
+  rule.scale_fraction = null;
+}
+
+function motionTriggerSummary(rule) {
+  const cycles = motionConfirmCycles(rule);
+  const lasting = cycles === 1 ? 'on a single check' : `for ${cycles} checks in a row`;
+  return `Triggers when ${formatMotionShare(effectiveMotionTrigger(rule))} of this area moves ${lasting}.`;
+}
+
+// Latest per-zone motion levels from /api/live/detection-status, keyed by zone
+// id (or name), so a re-render can repaint the meters without waiting a poll.
+let latestMotionZoneLevels = new Map();
+
+function motionMeterHtml(zone, rule) {
+  const key = String(zone?.id || zone?.name || '');
+  const level = latestMotionZoneLevels.get(key);
+  if (!level) return '<p class="motion-zone-reading muted">Waiting for the next motion check...</p>';
+  // The meter compares against the trigger being edited, saved or not.
+  const trigger = effectiveMotionTrigger(rule);
+  const fraction = level.fraction != null ? Number(level.fraction) : null;
+  return motionZoneMeterHtml({
+    ...level,
+    trigger,
+    above_trigger: fraction != null && fraction >= trigger,
+  }, { showName: false });
+}
+
+// Called by live.js on every status poll (zones page only).
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for earlier scripts (live.js hooks)
+function updateZoneMotionMeters(levels) {
+  latestMotionZoneLevels = new Map((levels || []).map((level) => [String(level.zone_id || ''), level]));
+  const zones = cameraDetection().zones || [];
+  document.querySelectorAll('[data-zone-motion-meter]').forEach((el) => {
+    const zone = zones[Number(el.dataset.zoneMotionMeter)];
+    if (!zone) return;
+    el.innerHTML = motionMeterHtml(zone, motionRuleOf(zone));
+  });
 }
 
 // Update only the label text on the Draw polygon button so its icon (a sibling
@@ -195,7 +263,7 @@ function defaultObjectRule(label = '') {
   // Motion and faces are non-object-class axes with a 0.45 canonical default
   // (matching zone_motion_min_confidence and the global Face Confidence
   // setting); object classes default to 0.5.
-  const baseConfidence = (normalized === 'motion' || normalized === 'face') ? 0.45 : 0.5;
+  const baseConfidence = normalized === 'motion' ? 0 : (normalized === 'face' ? 0.45 : 0.5);
   return {
     label: normalized,
     enabled: true,
@@ -206,6 +274,10 @@ function defaultObjectRule(label = '') {
     // inherit the camera/global gate/scale.
     gate_fraction: null,
     scale_fraction: null,
+    // "Trigger when X% of this zone moves" and "Must last: N checks" (motion
+    // rule only). A new motion rule starts on Normal.
+    trigger_fraction: normalized === 'motion' ? DEFAULT_MOTION_TRIGGER : null,
+    confirm_cycles: normalized === 'motion' ? DEFAULT_MOTION_CONFIRM_CYCLES : null,
     cooldown_seconds: 60,
     email_enabled: false,
     email_recipients: [],
@@ -508,7 +580,9 @@ function normalizeAlertSchedules(rule) {
 
 function normalizeObjectRules(zone) {
   if (Array.isArray(zone.object_rules) && zone.object_rules.length) {
-    return zone.object_rules.map((rule, ruleIndex) => ({ ...defaultObjectRule(rule?.label), ...rule, id: rule?.id || `${String(rule?.label || 'rule').trim().toLowerCase()}-${ruleIndex + 1}` }))
+    // trigger_fraction: null ahead of the saved rule so a motion rule saved
+    // before the trigger existed is converted below, not handed the default.
+    return zone.object_rules.map((rule, ruleIndex) => ({ ...defaultObjectRule(rule?.label), trigger_fraction: null, ...rule, id: rule?.id || `${String(rule?.label || 'rule').trim().toLowerCase()}-${ruleIndex + 1}` }))
       .map((rule) => ({
         ...rule,
         label: String(rule.label || '').trim().toLowerCase(),
@@ -527,6 +601,10 @@ function normalizeObjectRules(zone) {
           ? optionalFraction(rule.gate_fraction, 0.0001, 0.5) : null,
         scale_fraction: String(rule.label || '').trim().toLowerCase() === 'motion'
           ? optionalFraction(rule.scale_fraction, 0.001, 1.0) : null,
+        trigger_fraction: String(rule.label || '').trim().toLowerCase() === 'motion'
+          ? optionalFraction(rule.trigger_fraction, MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX) : null,
+        confirm_cycles: String(rule.label || '').trim().toLowerCase() === 'motion'
+          ? motionConfirmCycles(rule) : null,
         cooldown_seconds: Math.max(0, Number.parseInt(rule.cooldown_seconds ?? 60, 10) || 0),
         email_enabled: rule.email_enabled === true,
         email_recipients: normalizeEmailList(rule.email_recipients),
@@ -537,6 +615,13 @@ function normalizeObjectRules(zone) {
         notify_end: rule.notify_end || null,
         alert_schedules: normalizeAlertSchedules(rule),
       }))
+      .map((rule) => {
+        // Convert an older motion rule to the single trigger it effectively
+        // runs at today (gate / scale / Sensitivity folded together), so the
+        // editor shows one number and the next save stores it unchanged.
+        if (rule.label === 'motion' && rule.trigger_fraction == null) setMotionTrigger(rule, effectiveMotionTrigger(rule));
+        return rule;
+      })
       .filter((rule) => Boolean(rule.label));
   }
   return normalizeLabelList(zone.object_labels).map(defaultObjectRule);
@@ -794,25 +879,41 @@ function renderObjectRules(zone, zoneIndex) {
   }).join('');
 }
 
-// Motion row for the detection table, plus a hidden "Advanced" row that holds
-// the per-zone gate/scale overrides and the pixel-threshold hint.
+// Motion row for the detection table: a "Trigger when X% of this area moves"
+// preset in the threshold column, then a live meter row (how much of the area
+// is moving right now against that trigger, plus the ten-minute peak) and a
+// hidden "Advanced" row holding the custom percentage and "Must last".
 function renderMotionCard(zone, zoneIndex) {
   const rule = motionRuleOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
-  const conf = rule?.min_confidence ?? 0.45;
-  const advancedRow = enabled ? `
+  const trigger = effectiveMotionTrigger(rule);
+  const preset = motionTriggerPreset(trigger);
+  const presetOptions = MOTION_TRIGGER_PRESETS.map((item) => (
+    `<option value="${item.value}"${preset?.value === item.value ? ' selected' : ''}>${escapeHtml(item.label)} · ${formatMotionShare(item.value)}</option>`
+  )).join('');
+  const customLabel = preset ? 'Custom...' : `Custom · ${formatMotionShare(trigger)}`;
+  const cycles = motionConfirmCycles(rule);
+  const cycleOptions = [1, 2, 3].map((count) => (
+    `<option value="${count}"${cycles === count ? ' selected' : ''}>${count} ${count === 1 ? 'check' : 'checks'}</option>`
+  )).join('') + (cycles > 3 ? `<option value="${cycles}" selected>${cycles} checks</option>` : '');
+  const detailRows = enabled ? `
+    <tr class="zone-motion-meter-row" data-zone-motion-meter-for="${zoneIndex}">
+      <td colspan="5">
+        <div class="zone-motion-meter" data-zone-motion-meter="${zoneIndex}">${motionMeterHtml(zone, rule)}</div>
+        <small class="form-help muted" data-zone-motion-summary="${zoneIndex}">${escapeHtml(motionTriggerSummary(rule))}</small>
+      </td>
+    </tr>
     <tr class="zone-rule-advanced-row" data-zone-motion-advanced-for="${zoneIndex}" hidden>
       <td colspan="5">
         <div class="zone-rule-advanced">
-          <label class="sound-rule-field" title="Per-zone gate: minimum fraction of THIS zone's pixels that must change before motion counts. Leave blank to use the camera/global gate. Lower = more sensitive for this zone only.">
-            <span>Gate override</span>
-            <input type="number" data-zone-motion-gate="${zoneIndex}" value="${rule.gate_fraction != null ? escapeHtml(rule.gate_fraction) : ''}" min="0.0001" max="0.5" step="0.0001" placeholder="Inherit" />
+          <label class="sound-rule-field" title="The share of this area's pixels that must change for motion to count. Use the live meter's ten-minute peak on a quiet scene as a guide: set the trigger just above it.">
+            <span>Trigger at (% of area)</span>
+            <input type="number" data-zone-motion-trigger-custom="${zoneIndex}" value="${escapeHtml(Number((trigger * 100).toFixed(3)))}" min="${MOTION_TRIGGER_MIN * 100}" max="${MOTION_TRIGGER_MAX * 100}" step="0.1" />
           </label>
-          <label class="sound-rule-field" title="Per-zone scale: pixel-change fraction in THIS zone that maps to 100% motion confidence. Leave blank to use the camera/global scale. Lower = stronger confidence for small motion in this zone.">
-            <span>Scale override</span>
-            <input type="number" data-zone-motion-scale="${zoneIndex}" value="${rule.scale_fraction != null ? escapeHtml(rule.scale_fraction) : ''}" min="0.001" max="1.0" step="0.001" placeholder="Inherit" />
+          <label class="sound-rule-field" title="How many motion checks in a row must see movement above the trigger before it counts. More checks ignore brief flickers (headlights, a bug on the lens) but react a moment later.">
+            <span>Must last</span>
+            <select data-zone-motion-cycles="${zoneIndex}">${cycleOptions}</select>
           </label>
-          <small class="form-help muted zone-motion-pixel-help" data-zone-motion-pixel-help="${zoneIndex}">${escapeHtml(motionPixelThresholdText(rule))}</small>
         </div>
       </td>
     </tr>` : '';
@@ -820,10 +921,10 @@ function renderMotionCard(zone, zoneIndex) {
     <tr class="zone-rule-row zone-rule-structural${enabled ? ' is-enabled' : ''}" data-zone-motion-for="${zoneIndex}">
       <td class="cell-label"><span class="zone-rule-icon" aria-hidden="true">⟳</span>Motion</td>
       <td>${ruleToggleCell(`data-zone-motion-toggle="${zoneIndex}"`, enabled, 'Enable or disable motion detection in this area', false)}</td>
-      <td><input class="zone-rule-conf" type="number" data-zone-motion-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(conf)}" title="Sensitivity: only motion with at least this confidence counts (0-1). Lower = more sensitive."${enabled ? '' : ' disabled'} /></td>
+      <td><select class="zone-rule-conf zone-motion-trigger" data-zone-motion-trigger="${zoneIndex}" title="Trigger when this much of the area moves. Smaller = more sensitive." aria-label="Motion trigger for this area"${enabled ? '' : ' disabled'}>${presetOptions}<option value="custom"${preset ? '' : ' selected'}>${escapeHtml(customLabel)}</option></select></td>
       <td>${ruleToggleCell(`data-zone-motion-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when motion is detected in this area', !enabled)}</td>
-      <td class="cell-actions">${enabled ? `<button class="secondary zone-action-btn zone-rule-advanced-toggle zone-rule-advanced-icon-btn" type="button" data-zone-motion-advanced-toggle="${zoneIndex}" title="Per-zone motion pixel overrides" aria-label="Per-zone motion pixel overrides" aria-expanded="false">${ICONS.cog}</button>` : ''}</td>
-    </tr>${advancedRow}`;
+      <td class="cell-actions">${enabled ? `<button class="secondary zone-action-btn zone-rule-advanced-toggle zone-rule-advanced-icon-btn" type="button" data-zone-motion-advanced-toggle="${zoneIndex}" title="Custom trigger and how long motion must last" aria-label="Custom trigger and how long motion must last" aria-expanded="false">${ICONS.cog}</button>` : ''}</td>
+    </tr>${detailRows}`;
 }
 
 // Face row for the detection table.
@@ -1168,7 +1269,7 @@ function renderObjectDetectionRules() {
         </div>
         <div class="cameras-table-wrap">
           <table class="rule-table zone-rule-table">
-            <thead><tr><th scope="col">Detection</th><th scope="col">Detect</th><th scope="col">Min confidence</th><th scope="col">Record</th><th scope="col" class="cell-actions" aria-label="Actions"></th></tr></thead>
+            <thead><tr><th scope="col">Detection</th><th scope="col">Detect</th><th scope="col">Threshold</th><th scope="col">Record</th><th scope="col" class="cell-actions" aria-label="Actions"></th></tr></thead>
             <tbody>
               ${renderObjectRules(zone, zoneIndex)}
               ${renderMotionCard(zone, zoneIndex)}
@@ -1240,8 +1341,8 @@ function bindObjectRuleControls() {
   bindRuleFields();
 }
 
-// Motion card controls are limited to detection sensitivity and per-zone
-// pixel gate/scale overrides, plus the Record toggle. Alert delivery,
+// Motion card controls are limited to the trigger (preset or custom %), how
+// long motion must last, and the Record toggle. Alert delivery,
 // schedules, and cooldowns are edited on Alerts. Data attributes carry the
 // bare zone index; the motion rule itself is looked up by label so reordering
 // object rules never breaks these bindings.
@@ -1270,16 +1371,63 @@ function bindMotionControls() {
       markZoneUnsaved();
     });
   });
-  // Sensitivity number input: commit on change and refresh the pixel hint.
-  document.querySelectorAll('[data-zone-motion-confidence]').forEach((inp) => {
-    inp.addEventListener('change', () => {
-      const zoneIndex = Number(inp.dataset.zoneMotionConfidence);
+  const refreshMotionHints = (zoneIndex) => {
+    const zone = cameraDetection().zones[zoneIndex];
+    const rule = motionRuleOf(zone);
+    if (!rule) return;
+    const summary = document.querySelector(`[data-zone-motion-summary="${zoneIndex}"]`);
+    if (summary) summary.textContent = motionTriggerSummary(rule);
+    const meter = document.querySelector(`[data-zone-motion-meter="${zoneIndex}"]`);
+    if (meter) meter.innerHTML = motionMeterHtml(zone, rule);
+  };
+  // Trigger preset: picking one stores it; "Custom" opens the Advanced row
+  // so the percentage can be typed.
+  document.querySelectorAll('[data-zone-motion-trigger]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const zoneIndex = Number(select.dataset.zoneMotionTrigger);
       const rule = motionRuleOf(cameraDetection().zones[zoneIndex]);
       if (!rule) return;
-      rule.min_confidence = clamp(Number(inp.value || 0.45), 0, 1);
-      inp.value = rule.min_confidence;
-      const help = document.querySelector(`[data-zone-motion-pixel-help="${zoneIndex}"]`);
-      if (help) help.textContent = motionPixelThresholdText(rule);
+      if (select.value === 'custom') {
+        setMotionTrigger(rule, effectiveMotionTrigger(rule));
+        const row = document.querySelector(`[data-zone-motion-advanced-for="${zoneIndex}"]`);
+        row?.removeAttribute('hidden');
+        document.querySelector(`[data-zone-motion-advanced-toggle="${zoneIndex}"]`)?.setAttribute('aria-expanded', 'true');
+        document.querySelector(`[data-zone-motion-trigger-custom="${zoneIndex}"]`)?.focus();
+      } else {
+        setMotionTrigger(rule, Number(select.value));
+        const custom = document.querySelector(`[data-zone-motion-trigger-custom="${zoneIndex}"]`);
+        if (custom) custom.value = Number((rule.trigger_fraction * 100).toFixed(3));
+      }
+      refreshMotionHints(zoneIndex);
+      markZoneUnsaved();
+    });
+  });
+  document.querySelectorAll('[data-zone-motion-trigger-custom]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const zoneIndex = Number(inp.dataset.zoneMotionTriggerCustom);
+      const rule = motionRuleOf(cameraDetection().zones[zoneIndex]);
+      if (!rule) return;
+      const percent = Number(inp.value);
+      setMotionTrigger(rule, Number.isFinite(percent) ? percent / 100 : DEFAULT_MOTION_TRIGGER);
+      inp.value = Number((rule.trigger_fraction * 100).toFixed(3));
+      const select = document.querySelector(`[data-zone-motion-trigger="${zoneIndex}"]`);
+      if (select) {
+        const preset = motionTriggerPreset(rule.trigger_fraction);
+        select.value = preset ? String(preset.value) : 'custom';
+        const customOption = select.querySelector('option[value="custom"]');
+        if (customOption) customOption.textContent = preset ? 'Custom...' : `Custom · ${formatMotionShare(rule.trigger_fraction)}`;
+      }
+      refreshMotionHints(zoneIndex);
+      markZoneUnsaved();
+    });
+  });
+  document.querySelectorAll('[data-zone-motion-cycles]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const zoneIndex = Number(select.dataset.zoneMotionCycles);
+      const rule = motionRuleOf(cameraDetection().zones[zoneIndex]);
+      if (!rule) return;
+      rule.confirm_cycles = motionConfirmCycles({ confirm_cycles: select.value });
+      refreshMotionHints(zoneIndex);
       markZoneUnsaved();
     });
   });
@@ -1292,25 +1440,6 @@ function bindMotionControls() {
       if (show) row.removeAttribute('hidden'); else row.setAttribute('hidden', '');
       btn.setAttribute('aria-expanded', String(show));
       btn.classList.toggle('is-open', show);
-    });
-  });
-  // Per-zone motion gate/scale overrides. Blank clears the override (inherit).
-  [
-    ['zoneMotionGate', 'gate_fraction', 0.0001, 0.5],
-    ['zoneMotionScale', 'scale_fraction', 0.001, 1.0],
-  ].forEach(([datasetKey, ruleKey, min, max]) => {
-    const attr = `input[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`;
-    document.querySelectorAll(attr).forEach((inp) => {
-      inp.addEventListener('change', () => {
-        const zoneIndex = Number(inp.dataset[datasetKey]);
-        const rule = motionRuleOf(cameraDetection().zones[zoneIndex]);
-        if (!rule) return;
-        rule[ruleKey] = optionalFraction(inp.value, min, max);
-        // Refresh the "% of pixels must change" hint so it reflects the override.
-        const help = document.querySelector(`[data-zone-motion-pixel-help="${zoneIndex}"]`);
-        if (help) help.textContent = motionPixelThresholdText(rule);
-        markZoneUnsaved();
-      });
     });
   });
 }

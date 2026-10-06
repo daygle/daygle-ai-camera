@@ -44,7 +44,11 @@ test('camera table exposes day and night profiles and editor can collapse', () =
   assert.match(source, /camera-profile-pill/);
   assert.match(source, /Solar \(Daily Sunrise\/Sunset\)/);
   assert.match(source, /ONVIF IR State \(Fallback Schedule\)/);
-  assert.match(source, /Diff \(Legacy\)/);
+  // Per-camera motion overrides are trimmed to what differs per camera (night
+  // / IR noise); the engine choice lives on the global Advanced Motion Engine.
+  assert.match(source, /Ignore Small Light Changes/);
+  assert.doesNotMatch(source, /selectField\('motion_algorithm'/);
+  assert.match(source, /data-legacy-motion-override/);
   assert.match(source, /Global Default/);
   assert.match(source, /Choose a Preset…/);
   assert.doesNotMatch(source, /Choose a preset…/);

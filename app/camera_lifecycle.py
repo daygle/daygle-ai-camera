@@ -29,6 +29,7 @@ from app.camera_policy import clear_camera_policy_cache
 from app.config_facades import effective_recording_config, effective_storage_config
 from app.detector import create_detector
 from app.diagnostics import log_camera_diagnostic
+from app.motion_levels import forget_camera as forget_motion_levels
 from app.recording_settings import normalize_camera_recording_settings
 from app.recordings import RecordingService
 from app.sound_monitor import apply_sound_settings
@@ -182,6 +183,8 @@ def _cleanup_camera_runtime_state(removed_ids: set[str]) -> None:
     with _state._motion_confirm_lock:
         for cam_id in removed_ids:
             _state._motion_confirm_streaks.pop(cam_id, None)
+    for cam_id in removed_ids:
+        forget_motion_levels(cam_id)
     # Held motion and object sightings (self-locking): a deleted and re-added
     # camera must not release or suppress motion from its previous life.
     for cam_id in removed_ids:
