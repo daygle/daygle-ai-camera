@@ -4712,7 +4712,6 @@ button.activity-item-action.activity-item-action-delete:hover {
   justify-content: flex-end;
 }
 /* ─── Sounds page ───────────────────────────────────────────────────────── */
-.sounds-stats { margin-top: 4px; }
 .sounds-layout {
   display: grid;
   grid-template-columns: 1fr;

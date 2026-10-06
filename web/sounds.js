@@ -12,10 +12,6 @@ const soundDetectionInterval = document.getElementById('soundDetectionInterval')
 const statusPanel = document.getElementById('soundStatusPanel');
 const saveBtn = document.getElementById('saveSoundSettingsBtn');
 const reloadBtn = document.getElementById('reloadSoundsBtn');
-const statSoundRules = document.getElementById('statSoundRules');
-const statActiveRules = document.getElementById('statActiveRules');
-const statDetection = document.getElementById('statDetection');
-const statCamera = document.getElementById('statCamera');
 const soundCameraStatusList = document.getElementById('soundCameraStatusList');
 const soundClassSelect = document.getElementById('soundClassSelect');
 const addSoundClassBtn = document.getElementById('addSoundClassBtn');
@@ -67,12 +63,7 @@ function detectorSoundConfig(camera) {
   return camera?.detection?.sound || {};
 }
 
-function detectorEnabledRules(camera) {
-  return (detectorSoundConfig(camera).rules || []).filter((rule) => rule.enabled === true);
-}
-
-function detectorSoundClassCount(camera) {
-  return (detectorSoundConfig(camera).rules || []).length;
+function detectorEnabledRules(camera) {return (detectorSoundConfig(camera).rules || []).filter((rule) => rule.enabled === true);
 }
 
 function detectorSoundConfigured(camera) {
@@ -308,13 +299,6 @@ function addSoundClass() {
 
 function renderStatus() {
   const camera = currentCamera();
-  const config = detectorSoundConfig(camera);
-  const totalRules = detectorSoundClassCount(camera);
-  const activeRules = detectorEnabledRules(camera).length;
-  if (statSoundRules) statSoundRules.textContent = camera ? String(totalRules) : '-';
-  if (statActiveRules) statActiveRules.textContent = camera ? String(activeRules) : '-';
-  if (statDetection) statDetection.textContent = !camera ? '-' : config.enabled === true ? 'Enabled' : 'Disabled';
-  if (statCamera) statCamera.textContent = camera ? (camera.name || camera.id || '-') : '-';
 
   if (!camera || !selectedStatus) {
     statusPanel.innerHTML = '';
