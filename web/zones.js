@@ -818,7 +818,8 @@ function ruleToggleCell(attr, on, title, disabled) {
 }
 
 // Object-class rows for a zone's detection table. Motion and face get their own
-// rows (renderMotionCard/renderFaceCard); this returns only object-class <tr>s.
+// cards below the table (renderMotionCard/renderFaceCard); this returns only
+// object-class <tr>s.
 function renderObjectRules(zone, zoneIndex) {
   zone.object_rules = normalizeObjectRules(zone);
   const rules = zone.object_rules
@@ -843,10 +844,12 @@ function renderObjectRules(zone, zoneIndex) {
   }).join('');
 }
 
-// Motion row for the detection table: a "Trigger when X% of this area moves"
-// preset in the threshold column and a hidden "Advanced" row holding the
-// custom percentage and "Must last". Live movement is shown by the per-zone
-// meters on the Live page, not here.
+// Motion card for a zone, rendered under the detection table like the
+// behavioural cards (tripwire, loitering, ...). The head carries the Detect
+// toggle; the enabled body holds the "Trigger when X% of this area moves"
+// preset, the Record toggle, and an expandable "Custom trigger" row with the
+// exact percentage and "Must last" checks. Live movement is shown by the
+// per-zone meters on the Live page, not here.
 function renderMotionCard(zone, zoneIndex) {
   const rule = motionRuleOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
@@ -860,9 +863,17 @@ function renderMotionCard(zone, zoneIndex) {
   const cycleOptions = [1, 2, 3].map((count) => (
     `<option value="${count}"${cycles === count ? ' selected' : ''}>${count} ${count === 1 ? 'check' : 'checks'}</option>`
   )).join('') + (cycles > 3 ? `<option value="${cycles}" selected>${cycles} checks</option>` : '');
-  const detailRows = enabled ? `
-    <tr class="zone-rule-advanced-row" data-zone-motion-advanced-for="${zoneIndex}" hidden>
-      <td colspan="5">
+  const body = enabled ? `
+    <div class="zone-tripwire-body">
+      <label class="sound-rule-field">
+        <span>Trigger at</span>
+        <select class="zone-motion-trigger" data-zone-motion-trigger="${zoneIndex}" title="Trigger when this much of the area moves. Smaller = more sensitive." aria-label="Motion trigger for this area">${presetOptions}<option value="custom"${preset ? '' : ' selected'}>${escapeHtml(customLabel)}</option></select>
+      </label>
+      <div class="tripwire-toggles">
+        ${tripwireToggleField('Record', `data-zone-motion-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when motion is detected in this area')}
+      </div>
+      <button class="secondary zone-action-btn zone-rule-advanced-toggle" type="button" data-zone-motion-advanced-toggle="${zoneIndex}" title="Custom trigger and how long motion must last" aria-label="Custom trigger and how long motion must last" aria-expanded="false">${ICONS.cog}<span>Custom trigger…</span></button>
+      <div data-zone-motion-advanced-for="${zoneIndex}" hidden>
         <div class="zone-rule-advanced">
           <label class="sound-rule-field" title="The share of this area's pixels that must change for motion to count. Use the zone meter's ten-minute peak on the Live page as a guide: set the trigger just above it.">
             <span>Trigger at (% of area)</span>
@@ -873,31 +884,46 @@ function renderMotionCard(zone, zoneIndex) {
             <select data-zone-motion-cycles="${zoneIndex}">${cycleOptions}</select>
           </label>
         </div>
-      </td>
-    </tr>` : '';
+      </div>
+      <p class="muted tripwire-hint">Email, push and quiet-hours for this area are set on the <a class="zone-assigned-link" href="/alerts">Alerts page</a>.</p>
+    </div>` : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to trigger when this area of the footage moves.</p>';
   return `
-    <tr class="zone-rule-row zone-rule-structural${enabled ? ' is-enabled' : ''}" data-zone-motion-for="${zoneIndex}">
-      <td class="cell-label"><span class="zone-rule-icon" aria-hidden="true">⟳</span>Motion</td>
-      <td>${ruleToggleCell(`data-zone-motion-toggle="${zoneIndex}"`, enabled, 'Enable or disable motion detection in this area', false)}</td>
-      <td><select class="zone-rule-conf zone-motion-trigger" data-zone-motion-trigger="${zoneIndex}" title="Trigger when this much of the area moves. Smaller = more sensitive." aria-label="Motion trigger for this area"${enabled ? '' : ' disabled'}>${presetOptions}<option value="custom"${preset ? '' : ' selected'}>${escapeHtml(customLabel)}</option></select></td>
-      <td>${ruleToggleCell(`data-zone-motion-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when motion is detected in this area', !enabled)}</td>
-      <td class="cell-actions">${enabled ? `<button class="secondary zone-action-btn zone-rule-advanced-toggle zone-rule-advanced-icon-btn" type="button" data-zone-motion-advanced-toggle="${zoneIndex}" title="Custom trigger and how long motion must last" aria-label="Custom trigger and how long motion must last" aria-expanded="false">${ICONS.cog}</button>` : ''}</td>
-    </tr>${detailRows}`;
+    <div class="zone-tripwire-card${enabled ? ' is-enabled' : ''}" data-zone-motion-for="${zoneIndex}">
+      <div class="zone-tripwire-head">
+        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">⟳</span><strong>Motion</strong><span class="muted zone-tripwire-sub">Trigger when this area moves</span></div>
+        ${ruleToggleCell(`data-zone-motion-toggle="${zoneIndex}"`, enabled, 'Enable or disable motion detection in this area', false)}
+      </div>
+      ${body}
+    </div>`;
 }
 
-// Face row for the detection table.
+// Face card for a zone, rendered under the detection table like the motion
+// card. A camera with at least one enabled Face rule scopes ALL face
+// processing to those zones -- faces detected elsewhere are dropped before
+// recognition runs.
 function renderFaceCard(zone, zoneIndex) {
   const rule = faceRuleOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
   const conf = rule?.min_confidence ?? 0.45;
+  const body = enabled ? `
+    <div class="zone-tripwire-body">
+      <label class="sound-rule-field">
+        <span>Face confidence</span>
+        <input type="number" data-zone-face-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(conf)}" title="Only faces with at least this confidence are processed in this area (0-1). Faces detected outside Face-enabled areas are ignored entirely." />
+      </label>
+      <div class="tripwire-toggles">
+        ${tripwireToggleField('Record', `data-zone-face-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when a face is detected in this area')}
+      </div>
+      <p class="muted tripwire-hint">Email, push and quiet-hours for this area are set on the <a class="zone-assigned-link" href="/alerts">Alerts page</a>.</p>
+    </div>` : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to detect and recognize faces in this area.</p>';
   return `
-    <tr class="zone-rule-row zone-rule-structural${enabled ? ' is-enabled' : ''}" data-zone-face-for="${zoneIndex}">
-      <td class="cell-label"><span class="zone-rule-icon" aria-hidden="true">👤</span>Face</td>
-      <td>${ruleToggleCell(`data-zone-face-toggle="${zoneIndex}"`, enabled, 'Enable or disable face detection in this area', false)}</td>
-      <td><input class="zone-rule-conf" type="number" data-zone-face-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(conf)}" title="Only faces with at least this confidence are processed in this area (0-1). Faces detected outside Face-enabled areas are ignored entirely."${enabled ? '' : ' disabled'} /></td>
-      <td>${ruleToggleCell(`data-zone-face-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when a face is detected in this area', !enabled)}</td>
-      <td class="cell-actions"></td>
-    </tr>`;
+    <div class="zone-tripwire-card" data-zone-face-for="${zoneIndex}">
+      <div class="zone-tripwire-head">
+        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">👤</span><strong>Face</strong><span class="muted zone-tripwire-sub">Detect and recognize faces in this area</span></div>
+        ${ruleToggleCell(`data-zone-face-toggle="${zoneIndex}"`, enabled, 'Enable or disable face detection in this area', false)}
+      </div>
+      ${body}
+    </div>`;
 }
 
 // Segmented direction control for a tripwire card. Forward = an object moving
@@ -1214,8 +1240,9 @@ function renderObjectDetectionRules() {
     zone.object_rules = normalizeObjectRules(zone);
     const zoneName = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
     const addOptions = objectRuleOptions('');
-    // One table per area. Object rows come first, then the Motion and Face
-    // rows (which are always present so they can be toggled on).
+    // One table per area for object classes; Motion and Face follow below as
+    // their own cards (always present so they can be toggled on), then the
+    // behavioural cards.
     return `
       <div class="zone-object-rules" data-zone-rules-for="${zoneIndex}">
         <div class="zone-rules-header">
@@ -1230,11 +1257,11 @@ function renderObjectDetectionRules() {
             <thead><tr><th scope="col">Detection</th><th scope="col">Detect</th><th scope="col">Threshold</th><th scope="col">Record</th><th scope="col" class="cell-actions" aria-label="Actions"></th></tr></thead>
             <tbody>
               ${renderObjectRules(zone, zoneIndex)}
-              ${renderMotionCard(zone, zoneIndex)}
-              ${renderFaceCard(zone, zoneIndex)}
             </tbody>
           </table>
         </div>
+        ${renderMotionCard(zone, zoneIndex)}
+        ${renderFaceCard(zone, zoneIndex)}
         ${renderTripwireCard(zone, zoneIndex)}
         ${renderLoiterCard(zone, zoneIndex)}
         ${renderTimeCard(zone, zoneIndex)}
