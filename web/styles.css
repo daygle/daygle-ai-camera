@@ -4095,10 +4095,24 @@ button.activity-item-action.activity-item-action-delete:hover {
 .live-frame-ptz-layout:has(.live-ptz-card[hidden]) {
   grid-template-columns: 1fr;
 }
-@media (max-width: 900px) {
+/* Below ~1100px the PTZ column squeezed the video into a narrow strip (a
+   wide picture letterboxed inside a tall black box), so stack it under the
+   video until there is genuinely room beside it. */
+@media (max-width: 1100px) {
   .live-frame-ptz-layout {
     grid-template-columns: 1fr;
   }
+}
+/* Live page: size the video box from the stream's own shape (set by live.js
+   as --live-aspect once a frame loads; 16:9 until then) instead of from the
+   screen height. A height in vh made a tall black box around a wide picture
+   on phones and narrow columns; the cap keeps a tall/portrait stream on
+   screen on a desktop. The Zones page keeps its own fixed editor heights. */
+.live-frame-card:not(.zones-frame-card) .live-frame {
+  height: auto;
+  min-height: 0;
+  aspect-ratio: var(--live-aspect, 16 / 9);
+  max-height: max(240px, calc(100vh - 320px));
 }
 /* Stream details card spans the full width of the frame+PTZ grid, sitting
    on its own row below the AI Detection Status card instead of only filling

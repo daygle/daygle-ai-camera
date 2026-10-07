@@ -169,3 +169,13 @@ test('cameras: the filter row stays one column and Reset fills it', () => {
   assert.match(html, /\.cameras-filter-actions \.button-row \{ width: 100%; \}/);
   assert.match(html, /\.cameras-filter-actions \.button-row button \{ width: 100%; justify-content: center; \}/);
 });
+
+test('the live video box takes the stream shape, not the screen height', () => {
+  // A height in vh made a tall black box around a wide picture on phones;
+  // the box now follows the stream's aspect ratio, capped to stay on screen.
+  const css = readFileSync(path.resolve(here, '../web/styles.css'), 'utf8');
+  const live = readFileSync(path.resolve(here, '../web/live.js'), 'utf8');
+  assert.match(css, /\.live-frame-card:not\(\.zones-frame-card\) \.live-frame \{[^}]*aspect-ratio: var\(--live-aspect, 16 \/ 9\);/);
+  assert.match(css, /@media \(max-width: 1100px\) \{\s*\.live-frame-ptz-layout \{\s*grid-template-columns: 1fr;/);
+  assert.match(live, /setProperty\('--live-aspect', `\$\{naturalWidth\} \/ \$\{naturalHeight\}`\)/);
+});
