@@ -104,3 +104,34 @@ test('a persisted pageshow (bfcache restore) triggers the re-verify', () => {
 test('refreshed auth state restores admin nav groups for admins', () => {
   assert.match(navSource, /nav\.querySelectorAll\('\[data-admin="true"\]'\)\.forEach\(\(el\) => \{\s*el\.hidden = user\.role !== 'admin';/);
 });
+
+test('a failed page-load auth check keeps retrying instead of leaving "Sign in"', () => {
+  // Regression: one 502 (app restarting behind a proxy) or a dropped
+  // connection on the page-load /api/auth/me left the nav at "Sign in" with
+  // every admin group hidden, and nothing retried until the tab regained
+  // focus - which a phone that stays on the page never does.
+  assert.match(navSource, /let daygleInitialAuthFailed = false;/);
+  assert.match(navSource, /if \(response\.status !== 401\) daygleInitialAuthFailed = true;/);
+  assert.match(navSource, /catch \{\s*daygleInitialAuthFailed = true;\s*return null;/);
+  assert.match(navSource, /if \(daygleInitialAuthFailed && !window\.daygleAuth\?\.user\?\.username\) retryFailedAuthCheck\(\);/);
+  const start = navSource.indexOf('function retryFailedAuthCheck(');
+  assert.ok(start !== -1, 'retryFailedAuthCheck should exist');
+  const body = navSource.slice(start, navSource.indexOf('\n  }\n', start));
+  // Stops once signed in or when a real session loss is redirecting.
+  assert.match(body, /if \(window\.daygleAuth\?\.user\?\.username \|\| window\.daygleAuth\?\.redirecting\) return;/);
+  // Re-verifies through the shared path (repaint on 200, /login on a 401).
+  assert.match(body, /await window\.refreshDaygleAuth\(\)/);
+  assert.match(body, /retryFailedAuthCheck\(attempt \+ 1\)/);
+  assert.match(navSource, /const AUTH_RETRY_DELAYS_MS = \[1000, 2000, 4000, 8000, 15000\];/);
+});
+
+test('regaining a connection re-verifies auth', () => {
+  assert.match(navSource, /window\.addEventListener\('online', onReturnToForeground\);/);
+});
+
+test('a restored session clears the signed-out "go to Sign in" click', () => {
+  const start = navSource.indexOf('function renderNavAccount(user)');
+  const body = navSource.slice(start);
+  const signedIn = body.slice(body.indexOf('if (navUser) navUser.textContent = user.username;'));
+  assert.match(signedIn, /if \(accountTrigger\) accountTrigger\.onclick = null;/);
+});

@@ -151,6 +151,13 @@ if (document.readyState === 'loading') {
 //
 // The try/catch / !response.ok guards leave window.daygleAuth empty when the
 // user is unauthenticated - every page bundle already handles that case.
+//
+// A failed check is NOT a signed-out answer: a 502 while the app restarts
+// (or a proxy in front of it hiccups) or a connection dropped on a phone
+// leaves the session perfectly valid. ``daygleInitialAuthFailed`` records
+// that case so the nav keeps retrying instead of sitting at "Sign in" with
+// every admin group hidden until something happens to focus the tab.
+let daygleInitialAuthFailed = false;
 window.daygleAuthReady = (async () => {
   try {
     const response = await fetch('/api/auth/me');
@@ -167,6 +174,7 @@ window.daygleAuthReady = (async () => {
           return null;
         }
       }
+      if (response.status !== 401) daygleInitialAuthFailed = true;
       return null;
     }
     const payload = await response.json();
@@ -216,6 +224,7 @@ window.daygleAuthReady = (async () => {
     }
     return { user, csrfToken, expiresAt };
   } catch {
+    daygleInitialAuthFailed = true;
     return null;
   }
 })();
@@ -840,6 +849,37 @@ window.daygleAuthReady = (async () => {
   window.addEventListener('pageshow', (event) => {
     if (event.persisted) onReturnToForeground();
   });
+  // A phone that drops and regains its connection fires no focus event.
+  window.addEventListener('online', onReturnToForeground);
+
+  /* ── Retry a failed first check ─────────────────────────────────────
+   * When the page-load /api/auth/me failed (not a 401: that redirects to
+   * /login), keep re-verifying with a backoff until the server answers.
+   * refreshDaygleAuth repaints the nav on success and redirects on a real
+   * 401; a transient failure leaves the state alone for the next attempt. */
+  const AUTH_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
+  const AUTH_RETRY_STEADY_MS = 30000;
+  function retryFailedAuthCheck(attempt = 0) {
+    if (window.daygleAuth?.user?.username || window.daygleAuth?.redirecting) return;
+    if (PUBLIC_AUTH_PATHS.has(window.location?.pathname)) return;
+    const delay = AUTH_RETRY_DELAYS_MS[attempt] ?? AUTH_RETRY_STEADY_MS;
+    setTimeout(async () => {
+      if (window.daygleAuth?.user?.username || window.daygleAuth?.redirecting) return;
+      if (typeof window.refreshDaygleAuth === 'function') {
+        try { await window.refreshDaygleAuth(); } catch { /* retried below */ }
+      }
+      const user = window.daygleAuth?.user;
+      if (user?.username) {
+        // The first paint applied the default theme for want of a profile.
+        const theme = user.theme || 'light';
+        if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref(theme);
+        setActiveThemeButton(theme);
+        return;
+      }
+      retryFailedAuthCheck(attempt + 1);
+    }, delay);
+  }
+  if (daygleInitialAuthFailed && !window.daygleAuth?.user?.username) retryFailedAuthCheck();
 })();
 
 // ─── Top-level account-area renderer ────────────────────────────────────
@@ -882,6 +922,10 @@ function renderNavAccount(user) {
     return;
   }
   if (navUser) navUser.textContent = user.username;
+  // Drop the "go to Sign in" click the signed-out paint installed, or the
+  // account menu would bounce through /login after the session is restored.
+  const accountTrigger = nav?.querySelector('.nav-dropdown[data-dropdown="account"] .nav-dropdown-trigger');
+  if (accountTrigger) accountTrigger.onclick = null;
   if (navAvatar) {
     // Prefer personal names for the avatar initial: first_name if available,
     // first+last initials (e.g. "JD") when both are set, fall back to the
