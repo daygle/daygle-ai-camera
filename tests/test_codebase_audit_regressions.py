@@ -114,7 +114,14 @@ def test_malformed_origin_and_proxy_headers_fail_closed(headers):
 def _body_request(body: bytes):
     async def read_body():
         return body
-    return SimpleNamespace(body=read_body)
+
+    async def stream():
+        if body:
+            yield body
+
+    # ``headers``/``stream`` back the form_data body-size cap (Content-Length
+    # pre-check + streaming cap); ``body`` backs read_json_body.
+    return SimpleNamespace(body=read_body, stream=stream, headers={})
 
 
 @pytest.mark.parametrize('body', [b'{"value":1e999}', b'{"value":-1e999}', b'{"nested":[1e999]}'])
@@ -256,3 +263,103 @@ def test_backup_manifest_size_is_bounded(tmp_path, monkeypatch):
         zf.writestr('database/source.sqlite3', b'database')
     with pytest.raises(HTTPException, match='manifest is too large'):
         backup.validate_full_backup(archive)
+
+
+# ── Audit follow-up: cross-role credential redaction ───────────────────────
+
+def test_redact_camera_secrets_masks_stream_url_credentials():
+    """A credentialed ``stream_url`` (accepted at save time by
+    ``validate_camera_stream_source``) must never reach a viewer-role
+    response with its userinfo intact: ``redact_camera_secrets`` strips the
+    password field AND masks embedded URL credentials."""
+    camera_config = importlib.import_module('app.camera_config')
+    out = camera_config.redact_camera_secrets({
+        'id': 'front', 'name': 'Front', 'username': 'svc', 'password': 'hunter2',
+        'stream_url': 'rtsp://svc:hunter2@cam.lan:8554/stream1',
+    })
+    assert 'password' not in out
+    assert out['has_password'] is True
+    assert out['has_stream_url_credentials'] is True
+    assert 'hunter2' not in out['stream_url']
+    assert '@' not in out['stream_url']
+    assert out['stream_url'] == 'rtsp://cam.lan:8554/stream1'
+    # Non-secret identity fields survive (consumers render camera names).
+    assert out['id'] == 'front'
+    assert out['name'] == 'Front'
+
+
+def test_redact_camera_secrets_leaves_clean_stream_url_unchanged():
+    camera_config = importlib.import_module('app.camera_config')
+    plain = 'rtsp://cam.lan/stream1'
+    out = camera_config.redact_camera_secrets({'id': 'front', 'stream_url': plain})
+    assert out['stream_url'] == plain
+    assert out['has_stream_url_credentials'] is False
+    assert out['has_password'] is False
+
+
+def test_redact_alerts_block_strips_smtp_and_ntfy_secrets():
+    """``GET /api/config`` serves ``config['alerts']`` to viewer-role users,
+    so the SMTP and ntfy credentials an operator bootstrapped via config.yaml
+    must be replaced with configured/not-configured hints."""
+    admin_router = importlib.import_module('app.api.admin_router')
+    alerts = {
+        'enabled': True,
+        'email': {'enabled': True, 'host': 'smtp.example', 'username': 'alerts@example', 'password': 'smtp-secret'},
+        'push_notification': {'enabled': True, 'server_url': 'https://ntfy.sh', 'username': 'user', 'password': 'ntfy-secret'},
+        'rules': [{'id': 'r1'}],
+    }
+    out = admin_router._redact_alerts_block(alerts)
+    assert out['email']['password'] == ''
+    assert out['email']['has_password'] is True
+    assert out['email']['username'] == ''
+    assert out['email']['has_username'] is True
+    assert out['push_notification']['password'] == ''
+    assert out['push_notification']['has_password'] is True
+    assert out['push_notification']['username'] == ''
+    # Non-secret alert config is preserved for consumers.
+    assert out['email']['host'] == 'smtp.example'
+    assert out['push_notification']['server_url'] == 'https://ntfy.sh'
+    assert out['rules'] == [{'id': 'r1'}]
+    # The input dict is not mutated.
+    assert alerts['email']['password'] == 'smtp-secret'
+
+
+def test_form_data_rejects_oversized_preauth_body():
+    """``POST /login`` and ``POST /setup`` are pre-auth: their form body must
+    be capped so an unauthenticated client cannot force an unbounded memory
+    allocation (streaming cap)."""
+    helpers = importlib.import_module('app.request_helpers')
+
+    async def stream(chunks):
+        for chunk in chunks:
+            yield chunk
+
+    over_cap = [b'a' * (helpers.MAX_FORM_BYTES // 2)] * 3  # 1.5x the cap
+    request = SimpleNamespace(stream=lambda: stream(over_cap), headers={})
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(helpers.form_data(request))
+    assert error.value.status_code == 413
+
+
+def test_form_data_rejects_oversized_content_length_upfront():
+    helpers = importlib.import_module('app.request_helpers')
+
+    async def stream():
+        yield b'x'  # must never be read
+        raise AssertionError('stream must not be consumed when Content-Length already exceeds the cap')
+
+    request = SimpleNamespace(stream=stream, headers={'content-length': str(helpers.MAX_FORM_BYTES + 1)})
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(helpers.form_data(request))
+    assert error.value.status_code == 413
+
+
+def test_form_data_still_parses_small_bodies():
+    helpers = importlib.import_module('app.request_helpers')
+
+    async def stream():
+        yield b'username=admin&password=Admin123%21'
+
+    request = SimpleNamespace(stream=stream, headers={'content-length': '35'})
+    data = asyncio.run(helpers.form_data(request))
+    assert data == {'username': 'admin', 'password': 'Admin123!'}

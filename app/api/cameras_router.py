@@ -13,12 +13,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from app.auth import utc_now
-from app.auth_gates import require_admin
+from app.auth_gates import require_admin, require_user
 from app.camera_config import (
     _migrate_camera_id,
     _redact_camera,
     camera_id_renames,
     normalize_camera_id,
+    redact_camera_secrets,
 )
 from app.config_facades import effective_cameras_config, get_camera_config
 from app.media_utils import ffmpeg_decoder_available, is_hevc_codec, video_codec_label
@@ -52,13 +53,19 @@ router = APIRouter()
 
 
 @router.get('/api/cameras')
-def list_cameras():
-    return {
-        'cameras': [
-            {**_redact_camera(camera), 'profile_status': profile_status(str(camera.get('id') or ''))}
-            for camera in effective_cameras_config()
-        ],
-    }
+def list_cameras(request: Request):
+    # M1 fix: handler-level gate (defence-in-depth alongside the middleware's
+    # session requirement) because the response body now depends on the
+    # caller's role.
+    user = require_user(request)
+    is_admin = str(user.get('role') or '').strip().lower() == 'admin'
+    cameras = []
+    for camera in effective_cameras_config():
+        redacted = _redact_camera(camera) if is_admin else redact_camera_secrets(camera)
+        cameras.append(
+            {**redacted, 'profile_status': profile_status(str(camera.get('id') or ''))}
+        )
+    return {'cameras': cameras}
 
 
 @router.get('/api/cameras/health')

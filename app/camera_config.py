@@ -27,6 +27,9 @@ Cluster membership:
 - ``_redact_camera`` -- strips the ``password`` field from a camera
   record before sending it over the wire, replacing it with a
   ``has_password`` boolean for UI hints.
+- ``redact_camera_secrets`` -- stricter redaction for responses that
+  cross a role boundary to viewer accounts: ``_redact_camera`` plus
+  masking of credentials embedded in ``stream_url``.
 
 The Pool A rebinds in ``app/main.py`` (top-of-file, after the
 ``from app.storage import Storage`` import) wire
@@ -39,6 +42,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import app.state as _state
 from app.camera_id import camera_storage_key, normalize_camera_id  # re-export
@@ -257,4 +261,44 @@ def _redact_camera(cam: dict[str, Any]) -> dict[str, Any]:
     """
     out = {k: v for k, v in cam.items() if k != 'password'}
     out['has_password'] = bool(cam.get('password'))
+    return out
+
+
+def redact_camera_secrets(cam: dict[str, Any]) -> dict[str, Any]:
+    """Strict redaction for camera records served across role boundaries.
+
+    ``_redact_camera`` covers the operator-facing cameras endpoints where an
+    admin's own UI needs the stored fields back. This stricter variant is for
+    responses that reach **viewer-role** accounts (``/api/config``, the
+    viewer branch of ``GET /api/cameras``): on top of the password strip it
+    masks any credentials EMBEDDED in ``stream_url`` (e.g.
+    ``rtsp://user:secret@cam/stream``), which the stream-source validator
+    accepts and which would otherwise echo the camera password verbatim to
+    every signed-in user. The masked URL keeps scheme/host/port/path so
+    non-admin consumers still see which camera the record describes; the
+    stored configuration is never modified.
+    """
+    out = _redact_camera(cam)
+    stream_url = str(out.get('stream_url') or '')
+    if stream_url:
+        try:
+            parsed = urlsplit(stream_url)
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed.username is not None:
+            out['has_stream_url_credentials'] = True
+            netloc = parsed.hostname or ''
+            # A bare IPv6 literal must stay bracketed in the rebuilt authority
+            # (mirrors ``build_stream_url``) or colons read as port separators.
+            if ':' in netloc and not netloc.startswith('['):
+                netloc = f'[{netloc}]'
+            if parsed.port is not None:
+                netloc = f'{netloc}:{parsed.port}'
+            out['stream_url'] = urlunsplit((
+                parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment,
+            ))
+        else:
+            out['has_stream_url_credentials'] = False
+    else:
+        out['has_stream_url_credentials'] = False
     return out

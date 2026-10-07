@@ -1328,3 +1328,96 @@ def test_label_groups_settings_update(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_viewer_responses_redact_camera_and_alert_credentials(tmp_path, monkeypatch):
+    """Viewer-role accounts must never receive camera ONVIF/stream or alert
+    channel credentials: ``GET /api/config`` redacts the camera records and
+    the SMTP/ntfy secrets, and ``GET /api/cameras`` additionally masks any
+    credentials embedded in a saved ``stream_url`` for non-admin callers."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        admin_csrf = _login(client)
+
+        status, _headers, _camera = client.request(
+            "/api/cameras/camera-1",
+            method="PUT",
+            json_body={
+                "backend": "rtsp",
+                "width": 640,
+                "height": 360,
+                "fps": 12,
+                "device": "rtsp",
+                "flip": "none",
+                "stream_url": "rtsp://svc:streamsecret@127.0.0.1:554/stream1",
+                "username": "onvifsvc",
+                "password": "onvifsecret",
+            },
+            headers={"X-CSRF-Token": admin_csrf},
+        )
+        assert status == 200
+
+        status, _headers, _alerts = client.request(
+            "/api/settings/alert-email",
+            method="PUT",
+            json_body={
+                "enabled": True,
+                "host": "smtp.example",
+                "port": 587,
+                "username": "alerts@example",
+                "password": "smtpsecret",
+                "from_address": "alerts@example",
+                "use_tls": True,
+                "use_ssl": False,
+            },
+            headers={"X-CSRF-Token": admin_csrf},
+        )
+        assert status == 200
+
+        status, _headers, viewer = client.request(
+            "/api/users",
+            method="POST",
+            json_body={"username": "watcher", "password": "Viewer123!", "role": "viewer"},
+            headers={"X-CSRF-Token": admin_csrf},
+        )
+        assert status == 200
+        assert viewer["role"] == "viewer"
+
+        viewer_client = LocalClient(base_url)
+        viewer_csrf = _login(viewer_client, "watcher", "Viewer123!")
+
+        status, _headers, config = viewer_client.request("/api/config")
+        assert status == 200
+        serialized = json.dumps(config)
+        assert "onvifsecret" not in serialized
+        assert "streamsecret" not in serialized
+        assert "smtpsecret" not in serialized
+        for camera_entry in config["cameras"]:
+            assert "password" not in camera_entry
+            assert "streamsecret" not in str(camera_entry.get("stream_url") or "")
+        assert "password" not in config["camera"]
+        assert config["alerts"]["email"]["password"] == ""
+        assert config["alerts"]["push_notification"]["password"] == ""
+        # The live tuning block (the only field the dashboard consumes) is intact.
+        assert "live" in config
+
+        status, _headers, cameras = viewer_client.request("/api/cameras")
+        assert status == 200
+        serialized = json.dumps(cameras)
+        assert "onvifsecret" not in serialized
+        assert "streamsecret" not in serialized
+        assert cameras["cameras"][0]["stream_url"] == "rtsp://127.0.0.1:554/stream1"
+
+        # The admin-facing cameras endpoint keeps its established contract:
+        # username is visible, the password stays stripped.
+        status, _headers, admin_cameras = client.request("/api/cameras")
+        assert status == 200
+        assert admin_cameras["cameras"][0]["username"] == "onvifsvc"
+        assert "password" not in admin_cameras["cameras"][0]
+        assert admin_cameras["cameras"][0]["has_password"] is True
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

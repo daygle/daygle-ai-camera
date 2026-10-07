@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.ai_settings import ai_status_payload
 from app.auth_gates import require_admin, require_session, require_user
+from app.camera_config import redact_camera_secrets
 from app.config_facades import (
     effective_ai_config,
     effective_auth_config,
@@ -29,6 +30,32 @@ active_rtsp_recordings = _state.active_rtsp_recordings
 active_rtsp_recordings_lock = _state.active_rtsp_recordings_lock
 
 router = APIRouter()
+
+# Secret-bearing keys inside ``config['alerts']``. ``runtime_config`` serves
+# this block to EVERY signed-in user (viewer role included), so the SMTP and
+# ntfy credentials an operator may have bootstrapped via config.yaml must be
+# stripped before the block crosses a role boundary -- mirroring the
+# ``_redact_camera`` password contract for camera records. Each secret is
+# replaced by a ``has_password``/``has_username`` hint pair so the frontend
+# can still show a configured/not-configured state.
+_ALERTS_SECRET_KEYS = ('password', 'username')
+_ALERTS_SECRET_SECTIONS = ('email', 'push_notification')
+
+
+def _redact_alerts_block(alerts: dict) -> dict:
+    """Return a copy of ``config['alerts']`` with credential values removed."""
+    redacted = {**alerts}
+    for section_key in _ALERTS_SECRET_SECTIONS:
+        section = redacted.get(section_key)
+        if not isinstance(section, dict):
+            continue
+        section = dict(section)
+        for secret_key in _ALERTS_SECRET_KEYS:
+            section[f'has_{secret_key}'] = bool(section.get(secret_key))
+            if secret_key in section:
+                section[secret_key] = ''
+        redacted[section_key] = section
+    return redacted
 
 
 @router.get('/api/audit')
@@ -106,8 +133,13 @@ def runtime_config(request: Request, auth_enabled: bool = Depends(get_auth_enabl
     ai_cfg = effective_ai_config()
     return {
         'server': {'host': _state.config.get('server', {}).get('host'), 'port': _state.config.get('server', {}).get('port')},
-        'camera': get_camera_config(None),
-        'cameras': effective_cameras_config(),
+        # ``runtime_config`` is served to every signed-in user (viewer role
+        # included). Camera records carry ONVIF/stream credentials and the
+        # alerts block carries SMTP/ntfy credentials, so both are redacted
+        # here regardless of the caller's role -- admins read the raw values
+        # through the admin-gated /api/settings/system endpoint instead.
+        'camera': redact_camera_secrets(get_camera_config(None)),
+        'cameras': [redact_camera_secrets(camera) for camera in effective_cameras_config()],
         'ai': {
             'enabled': ai_cfg.get('enabled'),
             'backend': ai_cfg.get('backend'),
@@ -123,7 +155,7 @@ def runtime_config(request: Request, auth_enabled: bool = Depends(get_auth_enabl
             'error': ai_state['error'],
             'categories': ai_cfg.get('categories', []),
         },
-        'alerts': _state.config.get('alerts', {}),
+        'alerts': _redact_alerts_block(_state.config.get('alerts', {})),
         'auth': {
             'enabled': auth_enabled,
             'session_timeout_hours': effective_auth_config().get('session_timeout_hours'),

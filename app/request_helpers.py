@@ -22,6 +22,10 @@ from app.auth import utc_now
 from app.auth_gates import _request_ip
 from app.database import EventDatabase
 
+# Pre-auth form cap (see ``form_data``): generous ceiling for a login/setup
+# POST so an unauthenticated client can never force an unbounded allocation.
+MAX_FORM_BYTES: int = 64 * 1024
+
 # Audit-log redactor: any key whose lowercase name matches one of these
 # patterns has its value replaced by ``***`` so credentials never reach
 # SQLite (and therefore never reach DB backups, ops copies, or sysadmin
@@ -118,9 +122,41 @@ async def read_json_object(request: Request) -> dict[str, Any]:
 
 
 async def form_data(request: Request) -> dict[str, str]:
-    """Parse an application/x-www-form-urlencoded (or plain text) body into a dict."""
+    """Parse an application/x-www-form-urlencoded (or plain text) body into a dict.
+
+    Both call sites (``POST /login`` and ``POST /setup``) are PRE-AUTH, so the
+    body must be bounded before it is buffered: ``request.body()`` reads the
+    whole request into memory and Uvicorn imposes no default body limit, so an
+    unauthenticated client behind a tunnel / LAN could otherwise force a
+    large allocation per request (memory-exhaustion DoS). Login forms are a
+    handful of fields; 64 KiB is a generous ceiling. Mirrors the streaming
+    upload cap pattern used by ``_read_uploaded_image``.
+    """
+    declared_length = request.headers.get('content-length')
+    if declared_length is not None:
+        try:
+            if int(declared_length) > MAX_FORM_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f'Form body exceeds {MAX_FORM_BYTES} bytes.',
+                )
+        except ValueError:
+            # Malformed Content-Length -> fall through to the streaming cap below.
+            pass
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > MAX_FORM_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f'Form body exceeds {MAX_FORM_BYTES} bytes.',
+            )
+        chunks.append(chunk)
     try:
-        body = (await request.body()).decode('utf-8')
+        body = b''.join(chunks).decode('utf-8')
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=400, detail='Form body must be valid UTF-8.') from exc
     return {key: values[-1] for key, values in parse_qs(body, keep_blank_values=True).items()}
