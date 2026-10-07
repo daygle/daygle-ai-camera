@@ -84,3 +84,10 @@ test('the Faces page says when recognition is enabled but not actually running',
   assert.ok(!el.classes.has('is-problem'));
   assert.equal(el.hidden, false);
 });
+
+test('an empty Review card says when nothing is being captured', () => {
+  assert.match(review, /async function explainEmptyQueue\(\)/);
+  assert.match(review, /face recognition is off/);
+  assert.match(review, /enabled but not running \(\$\{reason\}\)/);
+  assert.match(review, /explainEmptyQueue\(\);/);
+});

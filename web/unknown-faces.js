@@ -233,10 +233,31 @@
     } catch { return iso; }
   }
 
+  // An empty Review card is ambiguous: no strangers yet, or nothing is being
+  // captured at all. Captures need recognition actually running (not just
+  // switched on), so when it is not, say so here with the reason.
+  async function explainEmptyQueue() {
+    if (!emptyMsg) return;
+    try {
+      const status = await api('/api/settings/face-recognition');
+      if (!status.enabled) {
+        emptyMsg.textContent = 'Nothing is being captured: face recognition is off. Turn it on in Settings above.';
+        emptyMsg.classList.add('review-empty-problem');
+      } else if (!status.model_loaded) {
+        const reason = status.unavailable_reason || 'the embedding model did not load';
+        emptyMsg.textContent = `Nothing is being captured: face recognition is enabled but not running (${reason}). Choose an embedding model on the ArcFace page, then Save the settings above.`;
+        emptyMsg.classList.add('review-empty-problem');
+      }
+    } catch {
+      // Leave the default empty message: the settings card reports load errors.
+    }
+  }
+
   // ── Initialise ────────────────────────────────────────────────────
   // Review is a card on the face page rather than a tab, so the list simply
   // loads with the page instead of on tab activation.
   loadPersons().then(() => loadFaces());
+  explainEmptyQueue();
 
   // A person added, renamed or deleted on the People card (people.js) changes
   // the assign dropdown, so reload the list and redraw the cards.

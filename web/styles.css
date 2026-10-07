@@ -7621,3 +7621,6 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
 .fr-runtime { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.4; background: var(--panel-strong); color: var(--text); border: 1px solid var(--border); }
 .fr-runtime.is-problem { border-color: var(--warning, #f59e0b); }
 .fr-runtime[hidden] { display: none; }
+
+/* Review card: why nothing is being captured (recognition off / not running). */
+.review-empty-problem { color: var(--text); border-left: 3px solid var(--warning, #f59e0b); padding-left: 10px; }
