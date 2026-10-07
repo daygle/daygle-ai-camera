@@ -39,6 +39,19 @@ _DEFAULT_EMBEDDING_DIM = 512
 # Pixel normalisation used by ArcFace: map [0, 255] -> [-1, 1].
 _PIXEL_MEAN = 127.5
 _PIXEL_SCALE = 127.5
+# How a model wants its pixels. Most ArcFace exports take the [-1, 1] input
+# above, but the mxnet-converted ONNX Model Zoo models (arcfaceresnet100-8 and
+# its INT8 build) subtract 127.5 and scale inside the graph and expect raw
+# 0-255 pixels. Normalising those twice squeezes every face into an almost
+# uniform image, so every face embeds alike and strangers "match" whoever is
+# enrolled. ``choose_input_scaling`` measures which one the loaded model wants.
+INPUT_SCALING_NORMALIZED = 'normalized'
+INPUT_SCALING_RAW = 'raw'
+# Calibration: under the wrong scaling, visibly different test images embed
+# almost identically. Switch to raw only when the normalised input collapses
+# like that AND raw input clearly separates the images.
+_COLLAPSED_SIMILARITY = 0.9
+_REQUIRED_SEPARATION = 0.15
 # Default cosine-similarity acceptance threshold. ArcFace cosine scores for the
 # same identity are typically well above this; different identities fall below.
 # Exposed as a parameter so a deployment can tune precision/recall.
@@ -289,6 +302,45 @@ class FaceMatcher:
         )
 
 
+def _calibration_images(size: int) -> list[Any]:
+    """Visibly different BGR test images for :func:`choose_input_scaling`."""
+    npmod = _require_numpy()
+    ramp = npmod.linspace(0, 255, size, dtype=npmod.float32)
+    horizontal = npmod.repeat(npmod.tile(ramp, (size, 1))[:, :, None], 3, axis=2)
+    vertical = npmod.transpose(horizontal, (1, 0, 2))
+    cells = (npmod.indices((size, size)) // max(1, size // 8)).sum(axis=0) % 2
+    checker = npmod.repeat((40 + 175 * cells)[:, :, None], 3, axis=2)
+    noise = npmod.random.default_rng(112).integers(0, 256, (size, size, 3))
+    return [image.astype(npmod.uint8) for image in (horizontal, vertical, checker, noise)]
+
+
+def _mean_pairwise_similarity(vectors: list[Any]) -> float:
+    total = 0.0
+    pairs = 0
+    for index, first in enumerate(vectors):
+        for second in vectors[index + 1:]:
+            total += float(first @ second)
+            pairs += 1
+    return total / pairs if pairs else 1.0
+
+
+def choose_input_scaling(embeddings: dict[str, list[Any]]) -> tuple[str, dict[str, float]]:
+    """Choose ``'normalized'`` or ``'raw'`` input from test-image embeddings.
+
+    ``embeddings`` maps each scaling to the L2-normalised embeddings of the
+    same set of different test images. A model fed the scaling it expects
+    tells the images apart; one fed pixels it normalises a second time sees
+    near-uniform images and embeds them all alike. Returns the choice and the
+    mean pairwise similarity under each scaling.
+    """
+    similarity = {scaling: _mean_pairwise_similarity(vectors) for scaling, vectors in embeddings.items()}
+    normalized = similarity.get(INPUT_SCALING_NORMALIZED, 0.0)
+    raw = similarity.get(INPUT_SCALING_RAW, 1.0)
+    if normalized >= _COLLAPSED_SIMILARITY and raw <= normalized - _REQUIRED_SEPARATION:
+        return INPUT_SCALING_RAW, similarity
+    return INPUT_SCALING_NORMALIZED, similarity
+
+
 class FaceEmbedder:
     """ArcFace-style ONNX face embedding model wrapped for the app.
 
@@ -324,6 +376,7 @@ class FaceEmbedder:
         self.unavailable_reason: str | None = None
         self._embedding_dim: int | None = None
         self._inference_semaphore = threading.Semaphore(max(1, int(max_concurrency)))
+        self.input_scaling = INPUT_SCALING_NORMALIZED
 
         if np is None:
             self.unavailable_reason = "numpy is not installed. Install requirements.txt or run pip install numpy."
@@ -369,6 +422,8 @@ class FaceEmbedder:
             logger.warning('Failed to load face embedding model %s: %s', self.model_path, exc)
             self.unavailable_reason = "Failed to load the face embedding model."
             self.session = None
+            return
+        self.calibrate_input_scaling()
 
     @property
     def available(self) -> bool:
@@ -384,11 +439,13 @@ class FaceEmbedder:
             return ['CUDAExecutionProvider', 'CPUExecutionProvider']
         return ['CPUExecutionProvider']
 
-    def preprocess(self, face_bgr: Any) -> Any:
+    def preprocess(self, face_bgr: Any, *, scaling: str | None = None) -> Any:
         """Turn an OpenCV BGR face crop into the model's input tensor.
 
         Resizes to ``input_size`` square, converts BGR->RGB, scales pixels to
-        [-1, 1] the ArcFace way, and returns an ``[1, 3, H, W]`` float32 tensor.
+        [-1, 1] the ArcFace way (or leaves them 0-255 for a model that
+        normalises inside its graph, see ``input_scaling``), and returns an
+        ``[1, 3, H, W]`` float32 tensor.
         """
         npmod = _require_numpy()
         import cv2
@@ -398,8 +455,39 @@ class FaceEmbedder:
         resized = cv2.resize(face_bgr, (self.input_size, self.input_size), interpolation=cv2.INTER_LINEAR)
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
         chw = npmod.transpose(rgb, (2, 0, 1)).astype(npmod.float32)
-        chw = (chw - _PIXEL_MEAN) / _PIXEL_SCALE
+        if (scaling or self.input_scaling) != INPUT_SCALING_RAW:
+            chw = (chw - _PIXEL_MEAN) / _PIXEL_SCALE
         return npmod.ascontiguousarray(chw[None, ...], dtype=npmod.float32)
+
+    def _embed_tensor(self, tensor: Any) -> Any:
+        with self._inference_semaphore:
+            outputs = self.session.run(self.output_names, {self.input_name: tensor})  # type: ignore[union-attr]
+        return normalize_embedding(outputs[0])
+
+    def calibrate_input_scaling(self) -> str:
+        """Pick the pixel scaling the loaded model expects; see
+        :func:`choose_input_scaling`. Keeps the ArcFace default if the probe
+        itself fails."""
+        try:
+            images = _calibration_images(self.input_size)
+            embeddings = {
+                scaling: [self._embed_tensor(self.preprocess(image, scaling=scaling)) for image in images]
+                for scaling in (INPUT_SCALING_NORMALIZED, INPUT_SCALING_RAW)
+            }
+            scaling, similarity = choose_input_scaling(embeddings)
+        except Exception as exc:
+            logger.warning('Could not check the face embedding model input scaling; using [-1, 1]: %s', exc)
+            return self.input_scaling
+        self.input_scaling = scaling
+        if scaling == INPUT_SCALING_RAW:
+            logger.info(
+                'Face embedding model %s normalises pixels itself (test images looked %.0f%% alike when '
+                'normalised twice); feeding it raw 0-255 pixels.',
+                self.model_path.name, similarity[INPUT_SCALING_NORMALIZED] * 100,
+            )
+        else:
+            logger.info('Face embedding model %s takes [-1, 1] pixels.', self.model_path.name)
+        return scaling
 
     def embed(self, face_bgr: Any) -> Any:
         """Return the L2-normalised embedding for a single BGR face crop."""
@@ -408,9 +496,7 @@ class FaceEmbedder:
                 self.unavailable_reason or "Face embedding model is not available"
             )
         tensor = self.preprocess(face_bgr)
-        with self._inference_semaphore:
-            outputs = self.session.run(self.output_names, {self.input_name: tensor})  # type: ignore[union-attr]
-        vector = normalize_embedding(outputs[0])
+        vector = self._embed_tensor(tensor)
         if self._embedding_dim is None:
             self._embedding_dim = int(vector.shape[0])
         return vector

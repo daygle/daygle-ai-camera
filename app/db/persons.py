@@ -269,3 +269,42 @@ class PersonsMixin:
             else:
                 row = db.execute("SELECT COUNT(*) AS count FROM person_faces WHERE model = ?", (model,)).fetchone()
             return int(row['count'])
+
+    def stored_face_embeddings_for_refresh(self, model: str) -> list[dict[str, Any]]:
+        """Every stored face embedding for ``model`` with the picture it can be
+        re-embedded from: enrolled faces (``table='person_faces'``, with
+        ``source``) and Review captures (``table='unknown_faces'``)."""
+        with self.connect() as db:
+            faces = db.execute(
+                f"""
+                SELECT 'person_faces' AS tbl, f.id, f.source_snapshot, {_FACE_THUMBNAIL_SQL} AS thumbnail
+                FROM person_faces f WHERE f.model = ?
+                """,
+                (model,),
+            ).fetchall()
+            captures = db.execute(
+                "SELECT 'unknown_faces' AS tbl, id, NULL AS source_snapshot, thumbnail FROM unknown_faces WHERE model = ?",
+                (model,),
+            ).fetchall()
+        rows: list[dict[str, Any]] = []
+        for row in [*faces, *captures]:
+            blob = row['thumbnail']
+            rows.append({
+                'table': row['tbl'],
+                'id': int(row['id']),
+                'source': person_face_source(row['source_snapshot']) if row['tbl'] == 'person_faces' else 'review',
+                'thumbnail': bytes(blob) if blob is not None else None,
+            })
+        return rows
+
+    def replace_face_embedding(self, table: str, row_id: int, *, embedding: bytes, dim: int) -> bool:
+        """Overwrite one stored embedding (``table`` is ``person_faces`` or
+        ``unknown_faces``) after it was re-computed from its picture."""
+        if table not in ('person_faces', 'unknown_faces'):
+            raise ValueError(f'Unknown face table: {table!r}')
+        with self.write_slot(), self.connect() as db:
+            cursor = db.execute(
+                f"UPDATE {table} SET embedding = ?, dim = ? WHERE id = ?",
+                (embedding, int(dim), int(row_id)),
+            )
+            return cursor.rowcount > 0
