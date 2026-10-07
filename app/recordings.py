@@ -74,6 +74,13 @@ class RecordingService:
     # camera stays well under this; a larger value means a corrupt or
     # mis-timestamped file, and the timeline falls back to its estimate.
     PREBUFFER_SEGMENT_MAX_PROBED_SECONDS = 60.0
+    # A prebuffer segment is fragmented MP4: an empty moov header first, its
+    # video only when ffmpeg flushes the fragment at the next keyframe. When
+    # the ingest stops mid-segment (the camera stream drops and reconnects)
+    # the file it was writing is left as just that header -- about a kilobyte,
+    # no footage. A closed segment that cannot be probed and is smaller than
+    # this holds no video (even 4s at 64 kbit/s is ~32 KB), so it is skipped.
+    PREBUFFER_EMPTY_SEGMENT_MAX_BYTES = 16 * 1024
     SEGMENT_TIMELINE_CACHE_MAX_ENTRIES = 64
     # One event used to launch up to six ffprobe processes while validating and
     # measuring the render, then validating the mux. Keep completed probe
@@ -2058,6 +2065,9 @@ class RecordingService:
         self._prune_segment_duration_cache(camera_dir, {segment for segment, _, _ in timed})
         refined: list[tuple[Path, float, float]] = []
         newest = timed[-1][0] if timed else None
+        # Without ffprobe every probe "fails", which says nothing about the
+        # file, so a segment is only judged footage-less when ffprobe ran.
+        can_probe = shutil.which('ffprobe') is not None
         for segment, start, end in timed:
             if end > start_ts and end - self.PREBUFFER_SEGMENT_MAX_PROBED_SECONDS < end_ts:
                 try:
@@ -2065,10 +2075,15 @@ class RecordingService:
                 except OSError:
                     continue
                 end = stat_result.st_mtime
+                still_writing = segment == newest
                 probed = self._segment_duration_seconds(
                     segment, stat_result,
-                    estimated_seconds=end - start, still_writing=segment == newest,
+                    estimated_seconds=end - start, still_writing=still_writing,
                 )
+                if probed is None and can_probe and not still_writing and self._is_empty_segment(stat_result):
+                    # Left behind by an interrupted ingest: no footage, so
+                    # keep it out of the clip rather than count it as seconds.
+                    continue
                 if probed is not None:
                     start = end - probed
             refined.append((segment, start, end))
@@ -2127,6 +2142,12 @@ class RecordingService:
                 segment.name, duration, self.PREBUFFER_SEGMENT_MAX_PROBED_SECONDS, estimate,
             )
             duration = None
+        elif duration is None and not still_writing and self._is_empty_segment(stat_result):
+            # Expected after a camera reconnect, not a fault: say so quietly.
+            logger.debug(
+                'Prebuffer segment %s has no footage (left by an interrupted ingest); skipping it.',
+                segment.name,
+            )
         elif duration is None:
             logger.log(
                 logging.DEBUG if still_writing else logging.WARNING,
@@ -2137,6 +2158,10 @@ class RecordingService:
         with self._segment_duration_lock:
             self._segment_duration_cache[key] = (signature, duration)
         return duration
+
+    def _is_empty_segment(self, stat_result: os.stat_result) -> bool:
+        """True for a segment too small to hold any video fragment."""
+        return stat_result.st_size < self.PREBUFFER_EMPTY_SEGMENT_MAX_BYTES
 
     def _prune_segment_duration_cache(self, camera_dir: Path, present: set[Path]) -> None:
         """Forget probed durations for this directory's segments that are gone."""
