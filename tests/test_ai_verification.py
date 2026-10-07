@@ -560,7 +560,10 @@ def test_ai_page_is_admin_only_and_served(tmp_path, monkeypatch):
         assert 'id="aiSettingsForm"' in body and '/static/ai.js' in body
         settings_status, _h, settings_body = client.request('/settings')
         assert settings_status == 200
-        assert 'aiVerificationForm' not in settings_body and 'href="/ai"' in settings_body
+        # The AI form lives on /ai only. (Settings used to carry a "moved to
+        # Intelligence > AI" note; it was retired once the sidebar link was
+        # the established way there.)
+        assert 'aiVerificationForm' not in settings_body
     finally:
         server.should_exit = True
         thread.join(timeout=5)
