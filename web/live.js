@@ -749,9 +749,6 @@ function renderDetectionStatus(summary) {
   // motion zones falls back to the whole-frame changed-pixel bar.
   const motionZones = !isAllCameraMode() && Array.isArray(summary.motion_zones) ? summary.motion_zones : [];
   const motionFraction = summary.motion_fraction != null ? summary.motion_fraction : null;
-  if (isZonesPage && typeof updateZoneMotionMeters === 'function') {
-    updateZoneMotionMeters(motionZones); // defined in zones.js
-  }
   if (liveEls.motionZones) {
     liveEls.motionZones.hidden = motionZones.length === 0;
     liveEls.motionZones.innerHTML = motionZones.map((level) => motionZoneMeterHtml(level)).join('');

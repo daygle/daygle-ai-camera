@@ -193,7 +193,6 @@ const WEB_SHARED_GLOBALS = {
   bindZoneDrawing: 'readonly',
   renderZones: 'readonly',
   syncZoneOverlayToImage: 'readonly',
-  updateZoneMotionMeters: 'readonly',
   updateZonesStats: 'readonly',
 };
 

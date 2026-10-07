@@ -44,8 +44,8 @@ function loadHelpers({ live = {}, camera = null } = {}) {
   vm.createContext(sandbox);
   const meter = slice(liveSource, 'const MOTION_QUIET_FRACTION', '// True when the camera has at least one enabled motion zone');
   const tuning = slice(zonesSource, 'const DEFAULT_MOTION_GATE_FRACTION', '// "Trigger when X% of this zone moves" presets.');
-  const trigger = slice(zonesSource, '// "Trigger when X% of this zone moves" presets.', '// Latest per-zone motion levels');
-  vm.runInContext(`${meter}\n${tuning}\n${trigger}\nthis.api = { formatMotionShare, overallMotionZoneState, motionZoneMeterHtml, effectiveMotionTrigger, setMotionTrigger, motionTriggerPreset, motionConfirmCycles, motionTriggerSummary };`, sandbox);
+  const trigger = slice(zonesSource, '// "Trigger when X% of this zone moves" presets.', '// Update only the label text on the Draw polygon button');
+  vm.runInContext(`${meter}\n${tuning}\n${trigger}\nthis.api = { formatMotionShare, overallMotionZoneState, motionZoneMeterHtml, effectiveMotionTrigger, setMotionTrigger, motionTriggerPreset, motionConfirmCycles };`, sandbox);
   return sandbox.api;
 }
 
@@ -112,23 +112,28 @@ test('a camera override feeds the converted trigger', () => {
 });
 
 test('setting a trigger retires the old knobs', () => {
-  const { setMotionTrigger, motionTriggerSummary } = loadHelpers();
+  const { setMotionTrigger } = loadHelpers();
   const rule = { label: 'motion', min_confidence: 0.6, max_confidence: 0.9, gate_fraction: 0.01, scale_fraction: 0.05, confirm_cycles: 3 };
   setMotionTrigger(rule, 0.04);
   assert.equal(JSON.stringify(rule), JSON.stringify({
     label: 'motion', min_confidence: 0, max_confidence: 1, gate_fraction: null, scale_fraction: null, confirm_cycles: 3, trigger_fraction: 0.04,
   }));
-  assert.equal(motionTriggerSummary(rule), 'Triggers when 4% of this area moves for 3 checks in a row.');
   setMotionTrigger(rule, 9);
   assert.equal(rule.trigger_fraction, 0.5, 'clamped to the backend maximum');
 });
 
 test('must-last checks clamp to 1-5 and default to 2', () => {
-  const { motionConfirmCycles, motionTriggerSummary } = loadHelpers();
+  const { motionConfirmCycles } = loadHelpers();
   assert.equal(motionConfirmCycles({}), 2);
   assert.equal(motionConfirmCycles({ confirm_cycles: 0 }), 1);
   assert.equal(motionConfirmCycles({ confirm_cycles: 12 }), 5);
-  assert.equal(motionTriggerSummary({ trigger_fraction: 0.005, confirm_cycles: 1 }), 'Triggers when 0.5% of this area moves on a single check.');
+});
+
+test('the zones editor leaves live movement to the Live page', () => {
+  assert.doesNotMatch(zonesSource, /zone-motion-meter-row/, 'no live meter row in the zone editor');
+  assert.doesNotMatch(zonesSource, /motionZoneMeterHtml/, 'no per-zone meter rendering in the zone editor');
+  assert.doesNotMatch(zonesSource, /updateZoneMotionMeters/, 'no status-poll meter hook in the zone editor');
+  assert.match(liveSource, /motionZoneMeterHtml/, 'the Live page keeps its per-zone meters');
 });
 
 test('the live lane has a per-zone meter list beside the whole-frame bar', () => {

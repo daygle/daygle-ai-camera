@@ -89,42 +89,6 @@ function setMotionTrigger(rule, trigger) {
   rule.scale_fraction = null;
 }
 
-function motionTriggerSummary(rule) {
-  const cycles = motionConfirmCycles(rule);
-  const lasting = cycles === 1 ? 'on a single check' : `for ${cycles} checks in a row`;
-  return `Triggers when ${formatMotionShare(effectiveMotionTrigger(rule))} of this area moves ${lasting}.`;
-}
-
-// Latest per-zone motion levels from /api/live/detection-status, keyed by zone
-// id (or name), so a re-render can repaint the meters without waiting a poll.
-let latestMotionZoneLevels = new Map();
-
-function motionMeterHtml(zone, rule) {
-  const key = String(zone?.id || zone?.name || '');
-  const level = latestMotionZoneLevels.get(key);
-  if (!level) return '<p class="motion-zone-reading muted">Waiting for the next motion check...</p>';
-  // The meter compares against the trigger being edited, saved or not.
-  const trigger = effectiveMotionTrigger(rule);
-  const fraction = level.fraction != null ? Number(level.fraction) : null;
-  return motionZoneMeterHtml({
-    ...level,
-    trigger,
-    above_trigger: fraction != null && fraction >= trigger,
-  }, { showName: false });
-}
-
-// Called by live.js on every status poll (zones page only).
-// eslint-disable-next-line no-unused-vars -- ESLint: exported for earlier scripts (live.js hooks)
-function updateZoneMotionMeters(levels) {
-  latestMotionZoneLevels = new Map((levels || []).map((level) => [String(level.zone_id || ''), level]));
-  const zones = cameraDetection().zones || [];
-  document.querySelectorAll('[data-zone-motion-meter]').forEach((el) => {
-    const zone = zones[Number(el.dataset.zoneMotionMeter)];
-    if (!zone) return;
-    el.innerHTML = motionMeterHtml(zone, motionRuleOf(zone));
-  });
-}
-
 // Update only the label text on the Draw polygon button so its icon (a sibling
 // <svg>) survives. Setting button.textContent would replace all child nodes,
 // wiping the icon.
@@ -880,9 +844,9 @@ function renderObjectRules(zone, zoneIndex) {
 }
 
 // Motion row for the detection table: a "Trigger when X% of this area moves"
-// preset in the threshold column, then a live meter row (how much of the area
-// is moving right now against that trigger, plus the ten-minute peak) and a
-// hidden "Advanced" row holding the custom percentage and "Must last".
+// preset in the threshold column and a hidden "Advanced" row holding the
+// custom percentage and "Must last". Live movement is shown by the per-zone
+// meters on the Live page, not here.
 function renderMotionCard(zone, zoneIndex) {
   const rule = motionRuleOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
@@ -897,16 +861,10 @@ function renderMotionCard(zone, zoneIndex) {
     `<option value="${count}"${cycles === count ? ' selected' : ''}>${count} ${count === 1 ? 'check' : 'checks'}</option>`
   )).join('') + (cycles > 3 ? `<option value="${cycles}" selected>${cycles} checks</option>` : '');
   const detailRows = enabled ? `
-    <tr class="zone-motion-meter-row" data-zone-motion-meter-for="${zoneIndex}">
-      <td colspan="5">
-        <div class="zone-motion-meter" data-zone-motion-meter="${zoneIndex}">${motionMeterHtml(zone, rule)}</div>
-        <small class="form-help muted" data-zone-motion-summary="${zoneIndex}">${escapeHtml(motionTriggerSummary(rule))}</small>
-      </td>
-    </tr>
     <tr class="zone-rule-advanced-row" data-zone-motion-advanced-for="${zoneIndex}" hidden>
       <td colspan="5">
         <div class="zone-rule-advanced">
-          <label class="sound-rule-field" title="The share of this area's pixels that must change for motion to count. Use the live meter's ten-minute peak on a quiet scene as a guide: set the trigger just above it.">
+          <label class="sound-rule-field" title="The share of this area's pixels that must change for motion to count. Use the zone meter's ten-minute peak on the Live page as a guide: set the trigger just above it.">
             <span>Trigger at (% of area)</span>
             <input type="number" data-zone-motion-trigger-custom="${zoneIndex}" value="${escapeHtml(Number((trigger * 100).toFixed(3)))}" min="${MOTION_TRIGGER_MIN * 100}" max="${MOTION_TRIGGER_MAX * 100}" step="0.1" />
           </label>
@@ -1371,15 +1329,6 @@ function bindMotionControls() {
       markZoneUnsaved();
     });
   });
-  const refreshMotionHints = (zoneIndex) => {
-    const zone = cameraDetection().zones[zoneIndex];
-    const rule = motionRuleOf(zone);
-    if (!rule) return;
-    const summary = document.querySelector(`[data-zone-motion-summary="${zoneIndex}"]`);
-    if (summary) summary.textContent = motionTriggerSummary(rule);
-    const meter = document.querySelector(`[data-zone-motion-meter="${zoneIndex}"]`);
-    if (meter) meter.innerHTML = motionMeterHtml(zone, rule);
-  };
   // Trigger preset: picking one stores it; "Custom" opens the Advanced row
   // so the percentage can be typed.
   document.querySelectorAll('[data-zone-motion-trigger]').forEach((select) => {
@@ -1398,7 +1347,6 @@ function bindMotionControls() {
         const custom = document.querySelector(`[data-zone-motion-trigger-custom="${zoneIndex}"]`);
         if (custom) custom.value = Number((rule.trigger_fraction * 100).toFixed(3));
       }
-      refreshMotionHints(zoneIndex);
       markZoneUnsaved();
     });
   });
@@ -1417,7 +1365,6 @@ function bindMotionControls() {
         const customOption = select.querySelector('option[value="custom"]');
         if (customOption) customOption.textContent = preset ? 'Custom...' : `Custom · ${formatMotionShare(rule.trigger_fraction)}`;
       }
-      refreshMotionHints(zoneIndex);
       markZoneUnsaved();
     });
   });
@@ -1427,7 +1374,6 @@ function bindMotionControls() {
       const rule = motionRuleOf(cameraDetection().zones[zoneIndex]);
       if (!rule) return;
       rule.confirm_cycles = motionConfirmCycles({ confirm_cycles: select.value });
-      refreshMotionHints(zoneIndex);
       markZoneUnsaved();
     });
   });

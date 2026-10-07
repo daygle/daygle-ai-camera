@@ -596,7 +596,6 @@ textarea {
 .ai-settings-form { display: grid; gap: inherit; }
 .ai-save-row { justify-content: flex-end; }
 .ai-page-note { margin: 8px 0 0; }
-.settings-moved-note { margin: 4px 2px 0; }
 .ai-backfill-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 12px; }
 .ai-backfill-hours { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .ai-backfill-hours select { width: auto; }
@@ -4423,8 +4422,7 @@ button.activity-item-action.activity-item-action-delete:hover {
   display: grid;
   gap: 16px;
 }
-/* The zone editor reuses the live card's per-zone motion meter. */
-.live-detection-card, .zone-motion-meter {
+.live-detection-card {
   /* Sense-lane palette. Scoped tokens keep the two themes readable without
      repeating every hue at each use site; light overrides follow below. */
   --v-fg: #47d6ff; --v-bg: rgba(71,214,255,.1); --v-bd: rgba(71,214,255,.32);
@@ -4435,7 +4433,7 @@ button.activity-item-action.activity-item-action-delete:hover {
   --sense-track: rgba(255,255,255,.08);
   --sense-lane-bg: rgba(255,255,255,.03);
 }
-:root.light .live-detection-card, :root.light .zone-motion-meter {
+:root.light .live-detection-card {
   --v-fg: #0284c7; --v-bg: rgba(2,132,199,.08); --v-bd: rgba(2,132,199,.28);
   --s-fg: #7c3aed; --s-bg: rgba(124,58,237,.1); --s-bd: rgba(124,58,237,.28);
   --f-fg: #db2777; --f-bg: rgba(219,39,119,.1); --f-bd: rgba(219,39,119,.3);
@@ -7037,12 +7035,6 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-rule-toggle { display: inline-flex; padding: 5px 12px; font-size: 12px; }
 .zone-rule-conf { width: 88px; }
 .zone-rule-conf.zone-motion-trigger { width: 100%; max-width: 200px; }
-/* Motion's live meter row in the zone editor: the same per-zone meter as the
-   live page, without the zone name (the row already belongs to the zone). */
-.zone-motion-meter-row td { padding-top: 0; }
-.zone-motion-meter { width: 100%; max-width: 520px; }
-.zone-motion-meter .motion-zone-meter, .zone-motion-meter .motion-zone-bar { width: 100%; }
-.zone-motion-meter .motion-zone-head { justify-content: flex-start; }
 .zones-shell .zone-rule-table .cell-actions,
 .sounds-shell .zone-rule-table .cell-actions {
   display: table-cell;
