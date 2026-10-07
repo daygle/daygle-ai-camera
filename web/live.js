@@ -1021,6 +1021,12 @@ function revokePreviousLiveFrameUrl() {
 
 liveEls.frame.addEventListener('load', () => {
   liveEls.frame.dataset.loading = 'false';
+  // Shape the video box to the stream (see .live-frame in styles.css) so a
+  // wide picture is not letterboxed inside a tall black box on phones.
+  const { naturalWidth, naturalHeight } = liveEls.frame;
+  if (naturalWidth > 0 && naturalHeight > 0) {
+    liveEls.frame.style.setProperty('--live-aspect', `${naturalWidth} / ${naturalHeight}`);
+  }
   liveAiTrackFrameTimestamp = Number(liveEls.frame.dataset.frameTimestamp) || 0;
   liveAiTrackFramePerformanceMs = performance.now();
   revokePreviousLiveFrameUrl();

@@ -36,12 +36,18 @@ def _service(tmp_path: Path) -> RecordingService:
     )
 
 
-def _write_segments(camera_dir: Path, ends: list[float]) -> list[Path]:
+# Big enough to hold a video fragment: smaller closed segments that cannot be
+# probed are footage-less leftovers of an interrupted ingest and are skipped.
+_SEGMENT_BYTES = b'\0' * (64 * 1024)
+
+
+def _write_segments(camera_dir: Path, ends: list[float], sizes: dict[int, int] | None = None) -> list[Path]:
     camera_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for index, end in enumerate(ends):
         segment = camera_dir / f'segment-{index:03d}.mp4'
-        segment.write_bytes(b'segment')
+        size = (sizes or {}).get(index)
+        segment.write_bytes(_SEGMENT_BYTES if size is None else b'\0' * size)
         os.utime(segment, (end, end))
         paths.append(segment)
     return paths
@@ -310,3 +316,43 @@ def test_unreadable_segment_warns_unless_it_is_still_being_written(tmp_path, mon
     assert len(by_level['WARNING']) == 1, by_level
     assert 'segment-001.mp4 could not be probed' in by_level['WARNING'][0]
     assert any('segment-002.mp4' in m and 'still being written' in m for m in by_level['DEBUG']), by_level
+
+
+def test_empty_leftover_segment_is_skipped_quietly(tmp_path, monkeypatch, caplog):
+    """A camera reconnect leaves the segment being written as just its empty
+    moov header: no footage. It is dropped from the clip and logged at DEBUG,
+    not WARNING."""
+    service = _service(tmp_path)
+    camera_dir = service.prebuffer_dir / 'cam'
+    now = time.time()
+    # segment-001 is the ~1 KB header an interrupted ingest leaves behind;
+    # segment-003 is the newest (still being written).
+    _write_segments(camera_dir, [now - 12, now - 8, now - 4, now], sizes={1: 1200, 3: 900})
+    _fake_ffprobe(monkeypatch, {'segment-000.mp4': '4.0', 'segment-002.mp4': '4.0'})
+
+    with caplog.at_level('DEBUG', logger='daygle.ai'):
+        refined = _refined(service, camera_dir, now - 30, now)
+
+    assert [segment.name for segment, _, _ in refined] == ['segment-000.mp4', 'segment-002.mp4', 'segment-003.mp4']
+    assert not [r for r in caplog.records if r.levelname == 'WARNING']
+    assert any('segment-001.mp4 has no footage' in r.getMessage() for r in caplog.records if r.levelname == 'DEBUG')
+
+
+def test_zero_byte_closed_segment_is_skipped(tmp_path, monkeypatch):
+    service = _service(tmp_path)
+    camera_dir = service.prebuffer_dir / 'cam'
+    now = time.time()
+    _write_segments(camera_dir, [now - 8, now - 4, now], sizes={1: 0})
+    _fake_ffprobe(monkeypatch, {'segment-000.mp4': '4.0', 'segment-002.mp4': '4.0'})
+    assert [segment.name for segment, _, _ in _refined(service, camera_dir, now - 20, now)] == ['segment-000.mp4', 'segment-002.mp4']
+
+
+def test_nothing_is_skipped_without_ffprobe(tmp_path, monkeypatch):
+    """Without ffprobe every probe fails, which says nothing about a file, so
+    even a small closed segment keeps its place in the clip."""
+    service = _service(tmp_path)
+    camera_dir = service.prebuffer_dir / 'cam'
+    now = time.time()
+    _write_segments(camera_dir, [now - 8, now - 4, now], sizes={1: 1200})
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: None)
+    assert len(_refined(service, camera_dir, now - 20, now)) == 3

@@ -16,6 +16,11 @@ import pytest
 from tests.support import _load_app, _m
 
 
+
+# A realistic segment size: a closed segment ffprobe cannot read that is
+# smaller than a video fragment is treated as an empty leftover and skipped.
+_SEGMENT_BYTES = b'\0' * (64 * 1024)
+
 def test_detection_backoff_keeps_prebuffer_warm(tmp_path, monkeypatch):
     # A camera in *detection* backoff (transient frame-read/inference errors)
     # must still have its recording prebuffer maintained, otherwise the next
@@ -157,7 +162,7 @@ def test_ingest_frame_and_audio_accessors(tmp_path):
     now = time.time()
     for index in range(3):
         seg = audio_dir / f'aud-{index:02d}.wav'
-        seg.write_bytes(b'x')
+        seg.write_bytes(_SEGMENT_BYTES)
         os.utime(seg, (now - 3 + index, now - 3 + index))
     after = service.audio_segments_after('Front Yard', now - 2.5)
     assert [path.name for path, _mtime in after] == ['aud-01.wav', 'aud-02.wav']
@@ -286,7 +291,7 @@ def test_prebuffer_first_segment_uses_full_segment_length(tmp_path):
     # Two contiguous 4s segments ending at now-4 and now.
     for index, end in enumerate((now - 4, now)):
         seg = cam_dir / f'segment-{index:02d}.mp4'
-        seg.write_bytes(b'x')
+        seg.write_bytes(_SEGMENT_BYTES)
         os.utime(seg, (end, end))
 
     segments, content_start = service._collect_prebuffer_segments(key, now - 7, now)
@@ -314,7 +319,7 @@ def test_collect_prebuffer_segments_selects_by_content_overlap(tmp_path):
     for offset in range(7):  # contiguous 1s segments ending at now-6 .. now
         end_ts = now - 6 + offset
         segment = camera_dir / f'segment-{offset:02d}.mp4'
-        segment.write_bytes(b'ts')
+        segment.write_bytes(_SEGMENT_BYTES)
         os.utime(segment, (end_ts, end_ts))
         segments.append(segment)
 
@@ -352,7 +357,7 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     for offset in range(17):  # contiguous 1s segments ending at now-16.5 .. now-0.5
         end_ts = now - 16.5 + offset
         segment = camera_dir / f'segment-{offset:02d}.mp4'
-        segment.write_bytes(b'ts')
+        segment.write_bytes(_SEGMENT_BYTES)
         os.utime(segment, (end_ts, end_ts))
     audio_dir = service.audio_dir / 'cam'
     audio_dir.mkdir(parents=True, exist_ok=True)
@@ -471,7 +476,7 @@ def test_degenerate_prebuffer_render_keeps_partial_clip_instead_of_late_live_cap
     for offset in range(12):
         end_ts = now - 11.5 + offset
         segment = camera_dir / f'segment-{offset:02d}.mp4'
-        segment.write_bytes(b'ts')
+        segment.write_bytes(_SEGMENT_BYTES)
         os.utime(segment, (end_ts, end_ts))
 
     def fake_run(command, *_args, **_kwargs):
@@ -527,7 +532,7 @@ def test_prebuffer_concat_list_uses_ffmpeg_safe_absolute_paths(tmp_path, monkeyp
     for offset in range(4):
         end_ts = now - 3 + offset
         segment = camera_dir / f"segment-{offset:02d}.mp4"
-        segment.write_bytes(b'ts')
+        segment.write_bytes(_SEGMENT_BYTES)
         os.utime(segment, (end_ts, end_ts))
 
     concat_text = ''

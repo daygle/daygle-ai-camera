@@ -23,10 +23,20 @@ import math
 import threading
 from typing import Any
 
-from app.face_recognition import FaceEmbedder, FaceMatcher, MatchResult
+from app.face_recognition import (
+    INPUT_SCALING_NORMALIZED,
+    FaceEmbedder,
+    FaceMatcher,
+    MatchResult,
+    decode_bgr_image,
+    embedding_to_bytes,
+)
 from app.utils import normalize_bool_setting as _coerce_bool
 
 logger = logging.getLogger('daygle.ai')
+
+# app_settings key: {model_id: input scaling} the stored embeddings were made with.
+INPUT_SCALING_SETTING = 'face_embedding_input_scaling'
 
 
 class FaceRecognitionService:
@@ -66,6 +76,8 @@ class FaceRecognitionService:
             self.embedder = FaceEmbedder(self.model_path, model_id=self.model_id)
             if not self.embedder.available:
                 self.unavailable_reason = self.embedder.unavailable_reason
+            else:
+                self._sync_stored_embeddings()
 
         self._matcher: FaceMatcher | None = None
         self.refresh_matcher()
@@ -120,6 +132,63 @@ class FaceRecognitionService:
             with self._lock:
                 self._matcher = matcher
                 self._matcher_generation += 1
+
+    def _sync_stored_embeddings(self) -> None:
+        """Re-embed stored faces when the model's input scaling changed.
+
+        Embeddings made with the wrong pixel scaling are near-identical, so
+        they must not be compared with correctly made ones. Enrolled photos,
+        Review assignments and pending Review captures are re-embedded from
+        their pictures. Auto-learned faces are dropped instead: the matcher
+        that accepted them could not tell faces apart, so they may be someone
+        else entirely.
+        """
+        if self._database is None or self.embedder is None:
+            return
+        scaling = self.embedder.input_scaling
+        try:
+            recorded = self._database.get_setting(INPUT_SCALING_SETTING)
+            recorded = dict(recorded) if isinstance(recorded, dict) else {}
+            if recorded.get(self.model_id, INPUT_SCALING_NORMALIZED) == scaling:
+                return
+            rows = self._database.stored_face_embeddings_for_refresh(self.model_id)
+        except Exception as exc:  # pragma: no cover - defensive DB guard
+            logger.warning('Could not check stored face embeddings against the model input scaling: %s', exc)
+            return
+        redone = removed = left = 0
+        for row in rows:
+            try:
+                if row['source'] == 'auto' and row['table'] == 'person_faces':
+                    removed += int(self._database.delete_person_face(row['id']))
+                    continue
+                if not row['thumbnail']:
+                    left += 1
+                    continue
+                vector = self.embedder.embed(decode_bgr_image(row['thumbnail']))
+                self._database.replace_face_embedding(
+                    row['table'], row['id'], embedding=embedding_to_bytes(vector), dim=int(vector.shape[0]),
+                )
+                redone += 1
+            except Exception as exc:
+                left += 1
+                logger.warning('Could not re-embed stored face %s/%s: %s', row['table'], row['id'], exc)
+        recorded[self.model_id] = scaling
+        try:
+            from app.auth import utc_now
+
+            self._database.set_setting(INPUT_SCALING_SETTING, recorded, utc_now())
+        except Exception as exc:  # pragma: no cover - defensive DB guard
+            logger.warning('Could not record the face embedding input scaling: %s', exc)
+        logger.info(
+            'Face embedding input scaling is now %s: re-embedded %d stored face(s) from their pictures and '
+            'removed %d auto-learned face(s) learned under the old scaling.',
+            scaling, redone, removed,
+        )
+        if left:
+            logger.warning(
+                '%d stored face(s) have no picture to re-embed from and will not match reliably; '
+                'delete them on the People card and add a new photo.', left,
+            )
 
     # -- recognition -----------------------------------------------------
     def recognize(self, face_bgr: Any) -> MatchResult | None:
