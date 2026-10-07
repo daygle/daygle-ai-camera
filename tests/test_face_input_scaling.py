@@ -78,7 +78,26 @@ def test_a_standard_arcface_model_keeps_the_minus_one_to_one_input(tmp_path):
     assert float(embedder.preprocess(_face(1)).max()) <= 1.0
 
 
-def test_choice_needs_a_collapse_and_a_clear_improvement():
+def _with_similarity(similarity: float, count: int = 4) -> list:
+    """Unit vectors whose every pair has cosine ``similarity``."""
+    basis = np.eye(count + 1, dtype=np.float32)
+    return [np.sqrt(similarity) * basis[0] + np.sqrt(1 - similarity) * basis[i + 1] for i in range(count)]
+
+
+def test_the_catalog_models_measured_gaps_switch_to_raw():
+    # Measured on arcfaceresnet100-8 (fp32) and -11-int8: the test images
+    # were 89% / 81% alike normalised twice, 29% alike as raw pixels.
+    for normalized in (0.886, 0.809):
+        scaling, measured = choose_input_scaling({'normalized': _with_similarity(normalized), 'raw': _with_similarity(0.293)})
+        assert scaling == INPUT_SCALING_RAW
+        assert abs(measured['normalized'] - normalized) < 1e-4
+    # And the mirror image, a model that wants [-1, 1], stays put.
+    assert choose_input_scaling({'normalized': _with_similarity(0.291), 'raw': _with_similarity(0.768)})[0] == INPUT_SCALING_NORMALIZED
+    # A small difference is not evidence either way.
+    assert choose_input_scaling({'normalized': _with_similarity(0.5), 'raw': _with_similarity(0.4)})[0] == INPUT_SCALING_NORMALIZED
+
+
+def test_choice_needs_a_clear_improvement():
     same = [np.ones(4, dtype=np.float32) / 2] * 3
     spread = [np.eye(4, dtype=np.float32)[i] for i in range(3)]
     assert choose_input_scaling({'normalized': same, 'raw': spread})[0] == INPUT_SCALING_RAW
