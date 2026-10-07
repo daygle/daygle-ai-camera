@@ -47,11 +47,12 @@ _PIXEL_SCALE = 127.5
 # enrolled. ``choose_input_scaling`` measures which one the loaded model wants.
 INPUT_SCALING_NORMALIZED = 'normalized'
 INPUT_SCALING_RAW = 'raw'
-# Calibration: under the wrong scaling, visibly different test images embed
-# almost identically. Switch to raw only when the normalised input collapses
-# like that AND raw input clearly separates the images.
-_COLLAPSED_SIMILARITY = 0.9
-_REQUIRED_SEPARATION = 0.15
+# Calibration: the scaling a model expects tells visibly different test images
+# apart far better than the wrong one. Measured on the catalog models, the
+# mean similarity of the test images is 0.89 (fp32) / 0.81 (INT8) normalised
+# twice against 0.29 with raw pixels, and the mirror image (0.29 against 0.77)
+# for a model that wants [-1, 1]. Switch to raw only on a gap this clear.
+_REQUIRED_SEPARATION = 0.25
 # Default cosine-similarity acceptance threshold. ArcFace cosine scores for the
 # same identity are typically well above this; different identities fall below.
 # Exposed as a parameter so a deployment can tune precision/recall.
@@ -330,13 +331,13 @@ def choose_input_scaling(embeddings: dict[str, list[Any]]) -> tuple[str, dict[st
     ``embeddings`` maps each scaling to the L2-normalised embeddings of the
     same set of different test images. A model fed the scaling it expects
     tells the images apart; one fed pixels it normalises a second time sees
-    near-uniform images and embeds them all alike. Returns the choice and the
-    mean pairwise similarity under each scaling.
+    low-contrast images and embeds them much more alike. Returns the choice
+    and the mean pairwise similarity under each scaling.
     """
     similarity = {scaling: _mean_pairwise_similarity(vectors) for scaling, vectors in embeddings.items()}
     normalized = similarity.get(INPUT_SCALING_NORMALIZED, 0.0)
     raw = similarity.get(INPUT_SCALING_RAW, 1.0)
-    if normalized >= _COLLAPSED_SIMILARITY and raw <= normalized - _REQUIRED_SEPARATION:
+    if raw <= normalized - _REQUIRED_SEPARATION:
         return INPUT_SCALING_RAW, similarity
     return INPUT_SCALING_NORMALIZED, similarity
 
@@ -479,14 +480,17 @@ class FaceEmbedder:
             logger.warning('Could not check the face embedding model input scaling; using [-1, 1]: %s', exc)
             return self.input_scaling
         self.input_scaling = scaling
+        measured = (
+            f'test images {similarity[INPUT_SCALING_NORMALIZED]:.0%} alike at [-1, 1], '
+            f'{similarity[INPUT_SCALING_RAW]:.0%} alike at 0-255'
+        )
         if scaling == INPUT_SCALING_RAW:
             logger.info(
-                'Face embedding model %s normalises pixels itself (test images looked %.0f%% alike when '
-                'normalised twice); feeding it raw 0-255 pixels.',
-                self.model_path.name, similarity[INPUT_SCALING_NORMALIZED] * 100,
+                'Face embedding model %s normalises pixels itself (%s); feeding it raw 0-255 pixels.',
+                self.model_path.name, measured,
             )
         else:
-            logger.info('Face embedding model %s takes [-1, 1] pixels.', self.model_path.name)
+            logger.info('Face embedding model %s takes [-1, 1] pixels (%s).', self.model_path.name, measured)
         return scaling
 
     def embed(self, face_bgr: Any) -> Any:
