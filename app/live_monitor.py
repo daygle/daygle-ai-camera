@@ -43,8 +43,10 @@ from app.pipeline_timing import (
     STAGE_FACE_PASS,
     STAGE_FILTERING,
     STAGE_INFERENCE,
+    STAGE_LOW_LIGHT,
     STAGE_MOTION,
     STAGE_REGION_BOOST,
+    STAGE_SECOND_LOOK,
     STAGE_TILING,
     STAGE_TRACKING,
     STAGE_ZONE_RULES,
@@ -96,6 +98,12 @@ from app.region_detection import (
     region_boost_enabled,
     tiling_grid,
 )
+from app.second_look import (
+    confirm_borderline_detections,
+    second_look_enabled,
+    second_look_floor,
+)
+from app.low_light import low_light_detection_frame, normalize_low_light_mode
 from app.camera_models import camera_detector
 from app.detector import DetectorUnavailableError
 from app.event_debounce import (
@@ -128,6 +136,7 @@ from app.zone_detection import (
     filter_motion_detections_by_objects,
     motion_zone_confirm_cycles,
     normalize_detection_boxes_for_frame,
+    stamp_frame_aspect,
     zone_alert_detections,
     zone_detection_alert_rule_names,
     zone_motion_detections,
@@ -1167,9 +1176,38 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _base_inference_timing: Any = None
     try:
         if detector_ready and frame_is_numpy and hasattr(detector, 'detect_frame'):
-            detections = detector.detect_frame(image, confidence=min_conf)
+            # Low-light / IR enhancement (opt-in): the detector, and the crop
+            # passes below, see a contrast-equalised copy of a dark frame. The
+            # original ``image`` still feeds snapshots, recordings and faces.
+            detector_frame = image
+            _low_light_mode = live_settings.get('object_detection_low_light')
+            if normalize_low_light_mode(_low_light_mode) != 'off':
+                _low_light_started = time.perf_counter()
+                detector_frame, _low_light_applied = low_light_detection_frame(image, _low_light_mode)
+                _cycle_timer.add(STAGE_LOW_LIGHT, (time.perf_counter() - _low_light_started) * 1000.0)
+            # Second look (opt-in): the full-frame pass runs at a lower floor so
+            # near-misses survive long enough to be re-checked at higher
+            # resolution below; anything still unconfirmed is dropped there.
+            _second_look = min_conf is not None and second_look_enabled(live_settings)
+            _inference_started = time.perf_counter()
+            detections = detector.detect_frame(
+                detector_frame,
+                confidence=second_look_floor(min_conf) if _second_look else min_conf,
+            )
             _base_inference_timing = getattr(detector, 'last_timing', None)
             _cycle_timer.add(STAGE_INFERENCE, (time.perf_counter() - _inference_started) * 1000.0)
+            if _second_look:
+                _second_look_started = time.perf_counter()
+                detections = confirm_borderline_detections(
+                    detector, detector_frame, detections,
+                    threshold=min_conf,
+                    # Only spend the re-check on a box some rule could use: a
+                    # watched label inside a watched zone.
+                    is_relevant=lambda candidates: filter_detections_for_camera(
+                        normalize_detection_boxes_for_frame(candidates, frame), settings,
+                    ),
+                )
+                _cycle_timer.add(STAGE_SECOND_LOOK, (time.perf_counter() - _second_look_started) * 1000.0)
             # Motion-region high-res boost (opt-in): re-run the detector zoomed
             # into the moving regions so small/distant subjects that vanish in
             # the full-frame downscale are recovered, then merge + de-dup. Safe
@@ -1178,7 +1216,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             if diff_mask is not None and region_boost_enabled(live_settings):
                 _boost_started = time.perf_counter()
                 detections = detect_with_region_boost(
-                    detector, image, diff_mask, detections, confidence=min_conf,
+                    detector, detector_frame, diff_mask, detections, confidence=min_conf,
                 )
                 _cycle_timer.add(STAGE_REGION_BOOST, (time.perf_counter() - _boost_started) * 1000.0)
             # Tiled / sliced inference (opt-in): re-run the detector on a grid of
@@ -1190,7 +1228,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             if _tile_grid is not None:
                 _tiling_started = time.perf_counter()
                 detections = detect_with_tiling(
-                    detector, image, detections,
+                    detector, detector_frame, detections,
                     cols=_tile_grid[0], rows=_tile_grid[1], confidence=min_conf,
                 )
                 _cycle_timer.add(STAGE_TILING, (time.perf_counter() - _tiling_started) * 1000.0)
@@ -1234,6 +1272,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _face_pass_ran = _state.face_detection_last_checked.get(camera_id) != _face_pass_stamp
     _cycle_timer.add(STAGE_FACE_PASS, (time.perf_counter() - _face_started) * 1000.0)
     detections = normalize_detection_boxes_for_frame(detections, frame)
+    stamp_frame_aspect(detections, frame)
     _telemetry_candidates['detected'] = len(detections)
     # Stamp stable track ids on EVERY detection BEFORE the moving/still filter so
     # the tracker's ``track_displacement`` annotation (net box motion over recent

@@ -60,6 +60,7 @@ const PROFILE_PERFORMANCE_FIELDS = [
   'detection_confirm_iou', 'always_run_object_detection',
   'adaptive_detection_enabled',
   'object_detection_region_boost', 'object_detection_tiling',
+  'object_detection_low_light', 'object_detection_second_look',
   'periodic_scan_interval_seconds', 'motion_frame_width', 'motion_frame_height',
 ];
 const PROFILE_MOTION_FIELDS = [
@@ -116,6 +117,7 @@ function parseProfileFieldValue(key, raw) {
     case 'always_run_object_detection':
     case 'adaptive_detection_enabled':
     case 'object_detection_region_boost':
+    case 'object_detection_second_look':
     case 'motion_denoise':
       return raw === 'true';
     default:
@@ -186,6 +188,20 @@ function profileSectionHtml(camera, mode) {
       { value: '3x3', attr: '3x3', label: '3 × 3' },
       { value: '4x4', attr: '4x4', label: '4 × 4' },
     ] }) +
+    selectField('object_detection_low_light', {
+      label: 'Low-Light Enhancement',
+      tip: 'Boost contrast on the copy of the frame the object detector sees. Auto only enhances dark frames. Snapshots and recordings are unchanged.',
+      options: [
+        { value: 'off', attr: 'off', label: 'Off' },
+        { value: 'auto', attr: 'auto', label: 'Auto (Dark Frames)' },
+        { value: 'on', attr: 'on', label: 'Always' },
+      ],
+    }) +
+    selectField('object_detection_second_look', {
+      label: 'Second Look',
+      tip: 'Re-check a watched object that scores just under its threshold on a zoomed, full-resolution crop before dropping it.',
+      options: boolOptions,
+    }) +
     numberField('periodic_scan_interval_seconds', { label: 'Periodic Scan (s)', min: '0', max: '3600', step: '1', placeholder: 'Global Default (0)' }) +
     numberField('motion_frame_width', { label: 'Motion Frame Width', min: '40', max: '640', step: '1', placeholder: 'Global Default (320)' }) +
     numberField('motion_frame_height', { label: 'Motion Frame Height', min: '30', max: '480', step: '1', placeholder: 'Global Default (240)' });

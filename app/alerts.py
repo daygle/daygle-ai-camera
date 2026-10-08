@@ -7,7 +7,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import app.state as _state
-from app.zone_schema import canonical_label, label_matches
+from app.zone_schema import canonical_label, detection_within_box_limits, label_matches
 
 ALERT_DATETIME_PREFS_TTL_SECONDS = 30.0
 _alert_datetime_prefs_cache: tuple[tuple[str, str, str], float] | None = None
@@ -133,6 +133,8 @@ class AlertEngine:
                 if confidence < float(rule.get('min_confidence', 0.5)):
                     continue
                 if confidence > float(rule.get('max_confidence', 1.0)):
+                    continue
+                if not detection_within_box_limits(detection, rule):
                     continue
 
                 rule_name = str(rule.get('name') or label)

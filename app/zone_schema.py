@@ -38,7 +38,9 @@ Cluster membership:
 - ``normalize_zone_object_rules`` -- per-zone object-detection rules
   builder. Reads ``zone.object_rules`` OR synthesizes one rule per
   label in ``zone.object_labels``. For each rule: parses min_confidence
-  (float [0,1]) + cooldown_seconds (int >=0), composes the canonical
+  (float [0,1]) + cooldown_seconds (int >=0) + the optional object size /
+  shape limits (``min_box_area`` ... ``max_aspect_ratio``, checked by
+  ``detection_within_box_limits``), composes the canonical
   shape with normalized en-/disable + e-mail / push flags + 4
   notification-window optional strings.
 
@@ -158,6 +160,79 @@ def _motion_confirm_cycles(value: Any) -> int:
     except (TypeError, ValueError):
         return DEFAULT_MOTION_CONFIRM_CYCLES
     return max(1, min(MAX_MOTION_CONFIRM_CYCLES, cycles))
+
+
+# Per-rule object size / shape limits. Area is the box's share of the frame
+# (0.0001 = 0.01%); aspect is the box's width divided by its height in real
+# pixels, so a standing person reads ~0.3-0.6 and a car side-on ~1.5-3.
+BOX_AREA_MIN = 0.0001
+BOX_AREA_MAX = 1.0
+BOX_ASPECT_MIN = 0.05
+BOX_ASPECT_MAX = 20.0
+BOX_LIMIT_KEYS = ('min_box_area', 'max_box_area', 'min_aspect_ratio', 'max_aspect_ratio')
+
+
+def _object_box_limits(rule: dict[str, Any]) -> dict[str, float | None]:
+    """Normalize a rule's optional size / shape limits (``None`` = no limit).
+
+    A max below its min would define a window nothing can match, so the max is
+    raised to the min - the same rule ``max_confidence`` follows.
+    """
+    min_area = _optional_fraction(rule.get('min_box_area'), BOX_AREA_MIN, BOX_AREA_MAX)
+    max_area = _optional_fraction(rule.get('max_box_area'), BOX_AREA_MIN, BOX_AREA_MAX)
+    if min_area is not None and max_area is not None:
+        max_area = max(min_area, max_area)
+    min_aspect = _optional_fraction(rule.get('min_aspect_ratio'), BOX_ASPECT_MIN, BOX_ASPECT_MAX)
+    max_aspect = _optional_fraction(rule.get('max_aspect_ratio'), BOX_ASPECT_MIN, BOX_ASPECT_MAX)
+    if min_aspect is not None and max_aspect is not None:
+        max_aspect = max(min_aspect, max_aspect)
+    return {
+        'min_box_area': min_area,
+        'max_box_area': max_area,
+        'min_aspect_ratio': min_aspect,
+        'max_aspect_ratio': max_aspect,
+    }
+
+
+def detection_within_box_limits(detection: dict[str, Any], rule: dict[str, Any]) -> bool:
+    """True when ``detection``'s box satisfies ``rule``'s size / shape limits.
+
+    A rule with no limits, or a detection without a usable box, always passes,
+    so rules that never set a limit behave exactly as before. Boxes are
+    normalized to the frame; the live pipeline stamps ``_frame_aspect`` (frame
+    width / height) so the aspect check compares real pixel proportions. Without
+    it the normalized proportions are used.
+    """
+    limits = [rule.get(key) for key in BOX_LIMIT_KEYS]
+    if all(limit is None for limit in limits):
+        return True
+    box = detection.get('box') if isinstance(detection, dict) else None
+    if not isinstance(box, dict):
+        return True
+    try:
+        width = float(box.get('width') or 0)
+        height = float(box.get('height') or 0)
+    except (TypeError, ValueError):
+        return True
+    if width <= 0 or height <= 0:
+        return True
+    min_area, max_area, min_aspect, max_aspect = limits
+    area = width * height
+    if min_area is not None and area < float(min_area):
+        return False
+    if max_area is not None and area > float(max_area):
+        return False
+    if min_aspect is not None or max_aspect is not None:
+        try:
+            frame_aspect = float(detection.get('_frame_aspect') or 1.0)
+        except (TypeError, ValueError):
+            frame_aspect = 1.0
+        aspect = (width / height) * (frame_aspect if frame_aspect > 0 else 1.0)
+        if min_aspect is not None and aspect < float(min_aspect):
+            return False
+        if max_aspect is not None and aspect > float(max_aspect):
+            return False
+    return True
 
 
 def canonical_label(value: Any) -> str:
@@ -360,6 +435,12 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             min_confidence = 0.0
             max_confidence = 1.0
         confirm_cycles = _motion_confirm_cycles(rule.get('confirm_cycles')) if label == 'motion' else None
+        # Size / shape limits only make sense for an object box: motion boxes
+        # are pixel-diff extents and faces have their own confidence gate.
+        box_limits = (
+            _object_box_limits(rule) if label not in ('motion', 'face')
+            else dict.fromkeys(BOX_LIMIT_KEYS)
+        )
         # Per-rule AI alert verification (app.ai_verification): the vision
         # model double-checks this rule's alerts before they notify, and
         # alerts at or above ``ai_verify_skip_above`` are sent unchecked (1.0 =
@@ -388,6 +469,7 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             'scale_fraction': scale_fraction,
             'trigger_fraction': trigger_fraction,
             'confirm_cycles': confirm_cycles,
+            **box_limits,
             'cooldown_seconds': max(0, cooldown_seconds),
             'ai_verify': ai_verify,
             'ai_verify_skip_above': ai_verify_skip_above,

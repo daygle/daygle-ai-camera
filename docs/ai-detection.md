@@ -259,6 +259,36 @@ failures in either region boost or tiling are also logged at debug level with
 normalized and pixel coordinates plus a stack trace; the failed crop/tile is
 still skipped so the existing per-frame failure isolation is unchanged.
 
+## Object size and shape limits
+
+Each object rule on the Zones page has a **Size & Shape** panel with four
+optional limits. A box outside them still shows on the live view, but never
+alerts or records for that rule:
+
+- **Min Size / Max Size (% of Frame)** - the box's share of the whole picture.
+  A "person" covering 60% of the frame is almost always a misread up close (a
+  coat on a hook, a moth on the lens); a max size catches it.
+- **Min / Max Width ÷ Height** - the box's proportions in real pixels. A
+  standing person is about 0.3-0.6 and a car side-on 1.5-3, so a person rule
+  with a max of about 1.2 ignores a "person" lying flat across a bench or
+  fence.
+
+Blank means no limit, and rules without limits behave exactly as before. Motion
+and face rules have no size limits. The limits are checked wherever a rule's
+confidence window is: the zone matcher, the alert engine and the record check.
+
+## Low-light enhancement and second look
+
+Two opt-in Live Performance settings help the detector on hard frames; see
+`docs/motion-detection.md` for the details:
+
+- **Low-Light Enhancement** (Off / Auto / Always) boosts local contrast on the
+  copy of a dark or IR frame the detector sees.
+- **Second Look** re-checks detections that score just under the threshold on a
+  zoomed crop and a mirrored crop, and keeps them only when both agree.
+
+Both are timed in the pipeline breakdown as `low_light` and `second_look`.
+
 ## Investigating missed detections
 
 The live pipeline records detector output before downstream filtering, so a

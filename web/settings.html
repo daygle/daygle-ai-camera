@@ -106,6 +106,19 @@
               <option value="4x4">4 × 4 (16 tiles)</option>
             </select></label>
           <label>
+            <span>Low-Light Enhancement <span class="info-tip" data-tip="Boost local contrast (CLAHE) on the copy of the frame the object detector sees, so a dim subject at night or at the edge of the IR light stands out. Snapshots and recordings are not changed. Auto only enhances dark frames. Can also lift sensor noise - check the result on your own night footage. Default: Off" title="Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off" tabindex="0" aria-label="Help: Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off"></span></span>
+            <select name="object_detection_low_light">
+              <option value="off">Off</option>
+              <option value="auto">Auto (Dark Frames Only)</option>
+              <option value="on">Always</option>
+            </select></label>
+          <label>
+            <span>Second Look <span class="info-tip" data-tip="When a watched object scores just under its threshold, zoom in on it at full resolution and check it again (plus a mirrored copy) before giving up. Catches small or dim subjects without lowering thresholds for everything. Adds up to 4 extra inferences on a cycle with a near-miss. Default: Disabled" title="Re-check near-miss detections on a zoomed crop before dropping them. Up to 4 extra inferences per cycle. Default: Disabled" tabindex="0" aria-label="Help: Re-check near-miss detections on a zoomed crop before dropping them. Default: Disabled"></span></span>
+            <select name="object_detection_second_look">
+              <option value="false">Disabled</option>
+              <option value="true">Enabled</option>
+            </select></label>
+          <label>
             <span>Detection History (min) <span class="info-tip" data-tip="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" title="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" tabindex="0" aria-label="Help: How many minutes of detection data to keep per camera for recording playback ove..."></span></span>
             <input name="detection_history_minutes" type="number" min="1" max="120" step="1" placeholder="10" /></label>
           <label>

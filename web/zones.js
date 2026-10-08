@@ -542,6 +542,37 @@ function normalizeAlertSchedules(rule) {
   return schedules;
 }
 
+// Optional object size / shape limits (object rules only). Mirrors
+// app/zone_schema.py::_object_box_limits: area is the box's share of the frame,
+// aspect is width / height in real pixels, null = no limit, and a max below its
+// min is raised to the min.
+const BOX_AREA_MIN = 0.0001;
+const BOX_AREA_MAX = 1;
+const BOX_ASPECT_MIN = 0.05;
+const BOX_ASPECT_MAX = 20;
+
+function objectBoxLimits(rule) {
+  const label = String(rule?.label || '').trim().toLowerCase();
+  if (label === 'motion' || label === 'face') {
+    return { min_box_area: null, max_box_area: null, min_aspect_ratio: null, max_aspect_ratio: null };
+  }
+  const minArea = optionalFraction(rule.min_box_area, BOX_AREA_MIN, BOX_AREA_MAX);
+  let maxArea = optionalFraction(rule.max_box_area, BOX_AREA_MIN, BOX_AREA_MAX);
+  if (minArea != null && maxArea != null) maxArea = Math.max(minArea, maxArea);
+  const minAspect = optionalFraction(rule.min_aspect_ratio, BOX_ASPECT_MIN, BOX_ASPECT_MAX);
+  let maxAspect = optionalFraction(rule.max_aspect_ratio, BOX_ASPECT_MIN, BOX_ASPECT_MAX);
+  if (minAspect != null && maxAspect != null) maxAspect = Math.max(minAspect, maxAspect);
+  return { min_box_area: minArea, max_box_area: maxArea, min_aspect_ratio: minAspect, max_aspect_ratio: maxAspect };
+}
+
+function objectBoxLimitCount(rule) {
+  return ['min_box_area', 'max_box_area', 'min_aspect_ratio', 'max_aspect_ratio'].filter((key) => rule[key] != null).length;
+}
+
+// Size & Shape panels the operator has open, keyed by "zoneIndex:rule id", so a
+// re-render (toggling Detect, editing a value) does not snap them shut.
+const openObjectLimitPanels = new Set();
+
 function normalizeObjectRules(zone) {
   if (Array.isArray(zone.object_rules) && zone.object_rules.length) {
     // trigger_fraction: null ahead of the saved rule so a motion rule saved
@@ -569,6 +600,7 @@ function normalizeObjectRules(zone) {
           ? optionalFraction(rule.trigger_fraction, MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX) : null,
         confirm_cycles: String(rule.label || '').trim().toLowerCase() === 'motion'
           ? motionConfirmCycles(rule) : null,
+        ...objectBoxLimits(rule),
         cooldown_seconds: Math.max(0, Number.parseInt(rule.cooldown_seconds ?? 60, 10) || 0),
         email_enabled: rule.email_enabled === true,
         email_recipients: normalizeEmailList(rule.email_recipients),
@@ -843,6 +875,9 @@ function renderObjectRules(zone, zoneIndex) {
     const lower = label.toLowerCase();
     const enabled = rule.enabled !== false;
     const colour = OBJECT_CARD_COLOURS[order % OBJECT_CARD_COLOURS.length];
+    const panelKey = `${zoneIndex}:${rule.id || ruleIndex}`;
+    const limitsOpen = openObjectLimitPanels.has(panelKey);
+    const limitCount = objectBoxLimitCount(rule);
     return `
       <div class="zone-detect-card zone-card--${colour}${enabled ? ' is-enabled' : ''}" data-zone-object-for="${key}">
         <div class="zone-detect-card-name">
@@ -862,10 +897,29 @@ function renderObjectRules(zone, zoneIndex) {
             <span class="zone-detect-field-label">Min Confidence</span>
             <input class="zone-rule-conf" type="number" data-zone-rule-confidence-value="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" title="Minimum confidence (0.01-1). Overrides the global ONNX slider for this object in this zone." />
           </label>
+          <button class="zone-rule-advanced-toggle${limitsOpen ? ' is-open' : ''}" type="button" data-zone-rule-limits-toggle="${key}" data-limits-panel="${escapeHtml(panelKey)}" aria-expanded="${limitsOpen}" title="Ignore ${lower} boxes that are too small, too big or the wrong shape">${ICONS.cog}<span>${limitCount ? `Size &amp; Shape · ${limitCount}` : 'Size &amp; Shape'}</span></button>
           <button class="delete-btn secondary zone-action-btn zone-rule-remove" type="button" data-delete-zone-rule="${key}" title="Remove ${label} from this area" aria-label="Remove ${label} from this area">${ICONS.remove}</button>
+        </div>
+        <div class="zone-rule-advanced zone-object-limits" data-zone-rule-limits-for="${key}"${limitsOpen ? '' : ' hidden'}>
+          ${boxLimitField('Min Size (% of Frame)', 'zone-rule-min-area', key, percentValue(rule.min_box_area), `Ignore a ${lower} whose box covers less of the picture than this. Blank = no limit.`, 0.01, 100, 0.1)}
+          ${boxLimitField('Max Size (% of Frame)', 'zone-rule-max-area', key, percentValue(rule.max_box_area), `Ignore a ${lower} whose box covers more of the picture than this - usually a misread up close. Blank = no limit.`, 0.01, 100, 1)}
+          ${boxLimitField('Min Width ÷ Height', 'zone-rule-min-aspect', key, rule.min_aspect_ratio, `Ignore a ${lower} box narrower than this. A standing person is about 0.3-0.6, a car side-on 1.5-3. Blank = no limit.`, BOX_ASPECT_MIN, BOX_ASPECT_MAX, 0.05)}
+          ${boxLimitField('Max Width ÷ Height', 'zone-rule-max-aspect', key, rule.max_aspect_ratio, `Ignore a ${lower} box wider than this, such as a "person" lying flat across the frame. Blank = no limit.`, BOX_ASPECT_MIN, BOX_ASPECT_MAX, 0.05)}
+          <p class="muted zone-object-limits-hint">Boxes outside these limits still show on the live view but never alert or record for this rule.</p>
         </div>
       </div>`;
   }).join('');
+}
+
+function percentValue(fraction) {
+  return fraction == null ? '' : Number((fraction * 100).toFixed(4));
+}
+
+function boxLimitField(label, attr, key, value, title, min, max, step) {
+  return `<label class="sound-rule-field" title="${escapeHtml(title)}">
+            <span>${escapeHtml(label)}</span>
+            <input type="number" data-${attr}="${key}" min="${min}" max="${max}" step="${step}" value="${escapeHtml(value ?? '')}" placeholder="No limit" />
+          </label>`;
 }
 
 // Motion card for a zone, rendered under the detection table like the
@@ -2020,7 +2074,19 @@ function bindRuleFields() {
       markZoneUnsaved();
     });
   });
-  const numberBindings = [];
+  // Size & Shape limits: blank clears a limit; areas are typed as a percentage
+  // of the frame and stored as a fraction.
+  const percentToFraction = (value) => {
+    const percent = optionalFraction(value, BOX_AREA_MIN * 100, BOX_AREA_MAX * 100);
+    return percent == null ? null : Math.round(percent * 1e4) / 1e6;
+  };
+  const aspectValue = (value) => optionalFraction(value, BOX_ASPECT_MIN, BOX_ASPECT_MAX);
+  const numberBindings = [
+    ['zoneRuleMinArea', 'min_box_area', percentToFraction],
+    ['zoneRuleMaxArea', 'max_box_area', percentToFraction],
+    ['zoneRuleMinAspect', 'min_aspect_ratio', aspectValue],
+    ['zoneRuleMaxAspect', 'max_aspect_ratio', aspectValue],
+  ];
   // Note: ``max_confidence`` is intentionally not exposed in the GUI -- the
   // frontend always writes the 1.0 (no upper limit) default so rules keep
   // their legacy behavior. The backend still normalizes and honors the field
@@ -2031,9 +2097,28 @@ function bindRuleFields() {
         const { zoneIndex, rule } = parseZoneRuleKey(inp.dataset[datasetKey]);
         if (!rule) return;
         rule[ruleKey] = transform(inp.value);
+        Object.assign(rule, objectBoxLimits(rule));
         cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+        // Show the clamped value and refresh the toggle's limit count in place
+        // (a full re-render would steal focus while tabbing between fields).
+        const shown = rule[ruleKey];
+        inp.value = shown == null ? '' : (ruleKey.endsWith('_box_area') ? percentValue(shown) : shown);
+        const label = document.querySelector(`[data-zone-rule-limits-toggle="${inp.dataset[datasetKey]}"] span`);
+        const count = objectBoxLimitCount(rule);
+        if (label) label.textContent = count ? `Size & Shape · ${count}` : 'Size & Shape';
         markZoneUnsaved();
       });
+    });
+  });
+  document.querySelectorAll('[data-zone-rule-limits-toggle]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const panel = document.querySelector(`[data-zone-rule-limits-for="${btn.dataset.zoneRuleLimitsToggle}"]`);
+      if (!panel) return;
+      const show = panel.hasAttribute('hidden');
+      if (show) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', '');
+      btn.setAttribute('aria-expanded', String(show));
+      btn.classList.toggle('is-open', show);
+      if (show) openObjectLimitPanels.add(btn.dataset.limitsPanel); else openObjectLimitPanels.delete(btn.dataset.limitsPanel);
     });
   });
 }

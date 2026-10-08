@@ -66,10 +66,12 @@ OVERHEAD_BUDGET_MS = 10.0
 # "is the camera feeding us fast enough" question answerable without blurring
 # the per-cycle budget.
 STAGE_MOTION = 'motion_detection'
+STAGE_LOW_LIGHT = 'low_light'
 STAGE_PREPROCESS = 'preprocess'
 STAGE_INFERENCE = 'inference'
 STAGE_POSTPROCESS = 'postprocess'
 STAGE_FACE_PASS = 'face_pass'
+STAGE_SECOND_LOOK = 'second_look'
 STAGE_REGION_BOOST = 'region_boost'
 STAGE_TILING = 'tiling'
 STAGE_TRACKING = 'tracking'
@@ -86,10 +88,12 @@ STAGE_TOTAL = 'total'
 # a reader sees the pipeline in its real sequence rather than in dict order.
 STAGE_ORDER: tuple[str, ...] = (
     STAGE_MOTION,
+    STAGE_LOW_LIGHT,
     STAGE_PREPROCESS,
     STAGE_INFERENCE,
     STAGE_POSTPROCESS,
     STAGE_FACE_PASS,
+    STAGE_SECOND_LOOK,
     STAGE_REGION_BOOST,
     STAGE_TILING,
     STAGE_TRACKING,
