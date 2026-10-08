@@ -482,6 +482,13 @@ function initDaygleTabs() {
       tab.setAttribute('aria-selected', selected ? 'true' : 'false');
       tab.tabIndex = selected ? 0 : -1;
       if (selected && focus) tab.focus();
+      // The tab row scrolls sideways on phones; keep the selected tab
+      // visible (horizontal only, so the page itself does not jump).
+      const strip = tab.parentElement;
+      if (selected && strip && strip.scrollWidth > strip.clientWidth) {
+        const offset = tab.getBoundingClientRect().left - strip.getBoundingClientRect().left;
+        strip.scrollLeft += offset - (strip.clientWidth - tab.offsetWidth) / 2;
+      }
     });
     panels.forEach((panel, key) => { panel.hidden = key !== name; });
     if (updateHash) {

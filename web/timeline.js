@@ -984,6 +984,7 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
       ></button>
     `;
   }).join('');
+  scrollTrackToLatest(card, recordings, totalSeconds, `${cameraName}|${formattedDay}|${fromSeconds}|${toSeconds}`);
 
   // Success path: per-card "Ready / Filtered / Windowed" chip + a status
   // blurb that mirrors the global stats grid's clip count but for this
@@ -999,6 +1000,20 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
     const windowPart = isWindowed ? ` from ${formatUserClock(fromSeconds)} to ${formatUserClock(toSeconds)}` : '';
     card.status.textContent = `${cardRecordings.length} ${kindWord} clip${cardRecordings.length === 1 ? '' : 's'}${filterPart}${windowPart} for ${escapeHtml(cameraName)} on ${escapeHtml(formattedDay)}.`;
   }
+}
+
+// On a phone the day bar is wider than the screen and scrolls sideways,
+// opening at 00:00 - so the day's clips were often off-screen. Bring the
+// latest segment into view, once per camera/day/window so a background
+// refresh never yanks a scroll position the user chose.
+function scrollTrackToLatest(card, recordings, totalSeconds, viewKey) {
+  const scroller = card.rows?.closest('.timeline-scroll');
+  if (!scroller || card.autoScrollKey === viewKey) return;
+  card.autoScrollKey = viewKey;
+  if (scroller.scrollWidth <= scroller.clientWidth) return;
+  const latest = Math.max(...recordings.map((recording) => Number(recording.timeline_start_seconds || 0)));
+  const target = (latest / totalSeconds) * scroller.scrollWidth - scroller.clientWidth / 2;
+  scroller.scrollLeft = Math.max(0, target);
 }
 
 function renderRecordingDetails(recording) {

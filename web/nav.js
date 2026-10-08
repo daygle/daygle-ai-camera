@@ -447,6 +447,14 @@ window.daygleAuthReady = (async () => {
     const hero = main.querySelector(':scope > .hero');
     if (hero) hero.after(strip);
     else main.prepend(strip);
+    // On a phone the strip scrolls sideways (scrollbar hidden), so a later
+    // tab such as Timeline or Audit Log could load with the current page's
+    // own tab out of view. Centre the active tab without moving the page.
+    const activeTab = strip.querySelector('.page-tab.active');
+    if (activeTab && strip.scrollWidth > strip.clientWidth) {
+      const offset = activeTab.getBoundingClientRect().left - strip.getBoundingClientRect().left;
+      strip.scrollLeft += offset - (strip.clientWidth - activeTab.offsetWidth) / 2;
+    }
   }
 
   /* ── Breadcrumb: the page's eyebrow names its place in the menu, e.g.

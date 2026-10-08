@@ -7,7 +7,8 @@ const cameraFps = {};
 const messageEl = document.getElementById('cameraMessage');
 const gridEl = document.getElementById('cameraGrid');
 
-// On phones the camera table keeps its columns (its headers are the sort
+// Below 600px the table stacks into one card per camera (.stack-table); in
+// the narrow-tablet range it keeps its columns (its headers are the sort
 // controls) and scrolls sideways inside its card. Tell the operator that, but
 // only while it ACTUALLY overflows - a hint promising a scroll the layout does
 // not need is worse than none. A ResizeObserver covers the table appearing and
@@ -880,11 +881,11 @@ function renderCameraRow(camera, index) {
   rowHtml += '<div class="cam-info"><span class="cam-name">' + name + '</span>' + (id ? '<span class="cam-id">ID · ' + id + '</span>' : '') + '</div>';
   rowHtml += '<div class="cell-actions"><button class="secondary cam-edit-btn" data-index="' + index + '" type="button" title="Edit camera" aria-label="Edit ' + name + '">' + ICONS.edit + '</button><button class="secondary cam-toggle-btn' + (isEnabled ? ' is-enabled' : ' is-disabled') + '" data-index="' + index + '" type="button" title="' + (isEnabled ? 'Disable camera' : 'Enable camera') + '" aria-label="' + (isEnabled ? 'Disable ' : 'Enable ') + name + '">' + ICONS.power + '</button><button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera" aria-label="Remove ' + name + '">' + ICONS.remove + '</button></div>';
   rowHtml += '</td>';
-  rowHtml += '<td class="cell-connection"><span class="chip camera-backend-chip">' + backend + '</span><span class="camera-endpoint">' + endpoint + '</span></td>';
-  rowHtml += '<td class="cell-video"><strong>' + resolution + '</strong><span>' + escapeHtml(fpsText) + '</span></td>';
-  rowHtml += '<td class="cell-state">' + healthHtml + '<span class="camera-enabled-label">' + (isEnabled ? 'Enabled' : 'Configuration paused') + '</span></td>';
-  rowHtml += '<td class="cell-profiles">' + profilesHtml + '</td>';
-  rowHtml += '<td class="cell-ptz"><span class="camera-feature-pill ' + (ptzEnabled ? 'is-ready' : '') + '">' + (ptzEnabled ? 'PTZ Enabled' : 'Fixed') + '</span></td>';
+  rowHtml += '<td class="cell-connection" data-label="Connection"><span class="chip camera-backend-chip">' + backend + '</span><span class="camera-endpoint">' + endpoint + '</span></td>';
+  rowHtml += '<td class="cell-video" data-label="Video"><strong>' + resolution + '</strong><span>' + escapeHtml(fpsText) + '</span></td>';
+  rowHtml += '<td class="cell-state" data-label="Status">' + healthHtml + '<span class="camera-enabled-label">' + (isEnabled ? 'Enabled' : 'Configuration paused') + '</span></td>';
+  rowHtml += '<td class="cell-profiles" data-label="Profiles">' + profilesHtml + '</td>';
+  rowHtml += '<td class="cell-ptz" data-label="PTZ"><span class="camera-feature-pill ' + (ptzEnabled ? 'is-ready' : '') + '">' + (ptzEnabled ? 'PTZ Enabled' : 'Fixed') + '</span></td>';
   rowHtml += '</tr>';
   return rowHtml;
 }
@@ -1017,7 +1018,7 @@ function renderGrid() {
       ? row + buildEditFormHtml(cam, realIndex)
       : row;
   }).join('');
-  var tableHtml = '<div class="cameras-table-wrap"><table class="cameras-table"><thead><tr>' +
+  var tableHtml = '<div class="cameras-table-wrap"><table class="cameras-table stack-table"><thead><tr>' +
     renderCameraSortHeader('Camera', 'camera') +
     renderCameraSortHeader('Connection', 'connection') +
     renderCameraSortHeader('Video', 'video') +

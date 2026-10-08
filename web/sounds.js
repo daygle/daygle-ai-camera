@@ -126,18 +126,18 @@ function renderDetectorStatuses(rows) {
   const rowsHtml = rows.map(({ camera, status }) => `
     <tr class="${escapeHtml(detectorStatusClass(camera, status))}">
       <td class="cell-label">${escapeHtml(detectorCameraLabel(camera))}</td>
-      <td>${escapeHtml(detectorSoundConfigured(camera) ? 'Yes' : 'No')}</td>
-      <td>${escapeHtml(detectorEnabledRules(camera).length)}</td>
-      <td>${escapeHtml(titleCase(String(status.backend || 'None').replace(/[_-]+/g, ' ')))}</td>
-      <td>${escapeHtml(status.running ? 'Yes' : 'No')}</td>
-      <td>${escapeHtml(detectorStatusReason(camera, status))}</td>
-      <td>${escapeHtml(status.last_class_label || titleCase(String(status.last_class || 'None').replace(/[_-]+/g, ' ')))}</td>
-      <td>${escapeHtml(detectorConfidenceMap(status.last_confidences))}</td>
-      <td>${escapeHtml(status.backend_reason || '')}</td>
+      <td data-label="Configured">${escapeHtml(detectorSoundConfigured(camera) ? 'Yes' : 'No')}</td>
+      <td data-label="Enabled sounds">${escapeHtml(detectorEnabledRules(camera).length)}</td>
+      <td data-label="Backend">${escapeHtml(titleCase(String(status.backend || 'None').replace(/[_-]+/g, ' ')))}</td>
+      <td data-label="Running">${escapeHtml(status.running ? 'Yes' : 'No')}</td>
+      <td data-label="Status">${escapeHtml(detectorStatusReason(camera, status))}</td>
+      <td data-label="Last sound">${escapeHtml(status.last_class_label || titleCase(String(status.last_class || 'None').replace(/[_-]+/g, ' ')))}</td>
+      <td data-label="Recent scores">${escapeHtml(detectorConfidenceMap(status.last_confidences))}</td>
+      <td data-label="Detail">${escapeHtml(status.backend_reason || '')}</td>
     </tr>
   `).join('');
-  soundCameraStatusList.innerHTML = '<div style="overflow-x:auto">'
-    + '<table class="rule-table">'
+  soundCameraStatusList.innerHTML = '<div class="stack-table-wrap" style="overflow-x:auto">'
+    + '<table class="rule-table stack-table">'
     + '<thead><tr><th>Camera</th><th>Configured</th><th>Enabled Sounds</th><th>Backend</th>'
     + '<th>Running</th><th>Status</th><th>Last Sound</th><th>Recent Scores</th><th>Detail</th></tr></thead>'
     + '<tbody>' + rowsHtml + '</tbody></table></div>';
@@ -216,17 +216,17 @@ function renderClassEditor(camera) {
     return `
       <tr class="zone-rule-row${enabled ? ' is-enabled' : ''}" data-class-index="${index}">
         <td class="cell-label"><span class="zone-rule-icon" aria-hidden="true">🔊</span>${label}</td>
-        <td><label class="toggle-control zone-rule-toggle" title="Enable or disable detection of this sound on this camera"><input type="checkbox" data-class-toggle="${index}" ${enabled ? 'checked' : ''} /><span>${enabled ? 'On' : 'Off'}</span></label></td>
-        <td><input class="zone-rule-conf" type="number" data-class-confidence="${index}" min="0.01" max="1" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" title="Only sounds detected with at least this confidence (0.01-1) count on this camera. Overrides the detector default for this class." /></td>
-        <td><label class="toggle-control zone-rule-toggle" title="Record a clip when this sound is detected on this camera"><input type="checkbox" data-class-record="${index}" ${record ? 'checked' : ''} /><span>${record ? 'On' : 'Off'}</span></label></td>
-        <td class="cell-actions"><button class="delete-btn secondary zone-action-btn zone-rule-remove" type="button" data-class-remove="${index}" title="Remove ${label} from this camera" aria-label="Remove ${label} from this camera">${ICONS.remove}</button></td>
+        <td data-label="Detect"><label class="toggle-control zone-rule-toggle" title="Enable or disable detection of this sound on this camera"><input type="checkbox" data-class-toggle="${index}" ${enabled ? 'checked' : ''} /><span>${enabled ? 'On' : 'Off'}</span></label></td>
+        <td data-label="Min confidence"><input class="zone-rule-conf" type="number" data-class-confidence="${index}" aria-label="Minimum confidence for ${label}" min="0.01" max="1" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" title="Only sounds detected with at least this confidence (0.01-1) count on this camera. Overrides the detector default for this class." /></td>
+        <td data-label="Record"><label class="toggle-control zone-rule-toggle" title="Record a clip when this sound is detected on this camera"><input type="checkbox" data-class-record="${index}" ${record ? 'checked' : ''} /><span>${record ? 'On' : 'Off'}</span></label></td>
+        <td class="cell-actions stack-actions"><button class="delete-btn secondary zone-action-btn zone-rule-remove" type="button" data-class-remove="${index}" title="Remove ${label} from this camera" aria-label="Remove ${label} from this camera">${ICONS.remove}</button></td>
       </tr>`;
   }).join('');
   // Build the markup in a local first (rows are already escapeHtml'd); the XSS
   // static guard forbids assigning a raw `${}` template literal to .innerHTML.
   const tableHtml = `
     <div class="cameras-table-wrap">
-      <table class="rule-table zone-rule-table">
+      <table class="rule-table zone-rule-table stack-table">
         <thead><tr><th scope="col">Sound</th><th scope="col">Detect</th><th scope="col">Min confidence</th><th scope="col">Record</th><th scope="col" class="cell-actions">Actions</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>

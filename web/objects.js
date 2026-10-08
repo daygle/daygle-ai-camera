@@ -131,7 +131,7 @@ function renderTable() {
           </select>
         </td>
         <td><span class="model-status ${effective === 'any' ? 'model-status-installed' : 'model-status-active'}">${escapeHtml(modeLabel(effective))}</span></td>
-        <td>
+        <td data-label="Still alert after (min)">
           <input type="number" min="0" step="1" inputmode="numeric" class="still-alert-input" value="${stillMinutes}" data-still-alert="${escapeHtml(label)}" aria-label="Still alert after minutes for ${title}" title="Alert after this object has been detected continuously still for this many minutes (0 = off)">
         </td>
       </tr>`;
