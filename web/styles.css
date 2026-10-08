@@ -41,7 +41,6 @@
 .alerts-policy-actions { padding-top: 12px; }
 .alerts-policy-table { min-width: 760px; table-layout: fixed; }
 .alerts-policy-table-wrap { min-width: 0; }
-.alerts-policy-table { min-width: 760px; }
 .alerts-policy-table tbody tr.alerts-policy-row { transition: background 0.12s; }
 .alerts-policy-table tbody tr.alerts-policy-row:hover td { background: rgba(71, 214, 255, 0.055); }
 .alerts-policy-table tbody tr.alerts-policy-row.is-enabled td:first-child,
@@ -76,6 +75,11 @@
 .alerts-policy-table.has-ai-column th:nth-child(2), .alerts-policy-table.has-ai-column td:nth-child(2) { width: 20%; }
 .alerts-policy-table .alerts-ai-verify-col { width: 10%; }
 .alerts-policy-table th:last-child, .alerts-policy-table td:last-child { width: 18%; }
+/* The AI Verify column adds a sixth data column; trim the actions column so
+   every width sums to exactly 100% instead of 102% (fixed layout would
+   otherwise rescale the columns behind our back). */
+.alerts-policy-table.has-ai-column th:last-child,
+.alerts-policy-table.has-ai-column td:last-child { width: 16%; }
 .alerts-policy-table td { vertical-align: middle; }
 .alerts-policy-row td { border-bottom: 1px solid var(--border); }
 .alerts-policy-table .alerts-policy-details-row > td { padding: 0 !important; border-bottom: 2px solid var(--accent); background: var(--panel-strong); }
@@ -2136,13 +2140,16 @@ tr.drag-over {
   /* Settings section headers: wrap hero action below title */
   .settings-section-header { flex-wrap: wrap; gap: 10px; }
   .settings-section-header .hero-action { width: 100%; }
+  .cameras-toolbar-actions { width: 100%; }
+  .cameras-toolbar-actions button { width: 100%; justify-content: center; }
+  .users-toolbar-actions { width: 100%; }
+  .users-toolbar-actions button { width: 100%; justify-content: center; }
   /* Zone editor footer: full-width button on phones */
   .zone-editor-footer { display: flex; justify-content: stretch; }
   .zone-editor-footer button { flex: 1; justify-content: center; }
-  /* Alerts editor footer: hint above a full-width save button */
+  /* Alerts editor footer: full-width save button */
   .alerts-editor-footer { flex-wrap: wrap; justify-content: stretch; }
   .alerts-editor-footer button { flex: 1 1 100%; width: 100%; justify-content: center; }
-  .alerts-editor-footer .zones-save-copy { flex: 1 1 100%; margin: 0; }
   /* Sound editor footer: full-width stacked buttons */
   .sound-editor-footer { display: flex; flex-wrap: wrap; gap: 10px; justify-content: stretch; }
   .sound-editor-footer button { flex: 1; justify-content: center; }
@@ -2234,6 +2241,23 @@ tr.drag-over {
 .users-list-card .settings-section-header {
   align-items: center;
   gap: 14px;
+}
+.settings-section-header .button-row.users-toolbar-actions {
+  flex-shrink: 0;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-end;
+}
+.users-toolbar-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+}
+.users-toolbar-actions button svg {
+  display: block;
+  flex-shrink: 0;
 }
 .users-list-status {
   margin: 0;
@@ -4722,6 +4746,24 @@ button.activity-item-action.activity-item-action-delete:hover {
 /* ─── Cameras page ──────────────────────────────────────────────────────── */
 
 .cameras-list-card { display: grid; gap: 16px; }
+.cameras-list-card .settings-section-header { align-items: center; }
+.settings-section-header .button-row.cameras-toolbar-actions {
+  flex-shrink: 0;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-end;
+}
+.cameras-toolbar-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+}
+.cameras-toolbar-actions button svg {
+  display: block;
+  flex-shrink: 0;
+}
 .cameras-list-status {
   margin: 0;
   min-height: 1.2em;
@@ -6589,8 +6631,6 @@ button.secondary:disabled, a.secondary:disabled {
 .cameras-table-wrap .rule-table th { background: rgba(255,255,255,.035); }
 .cameras-table-wrap .rule-table tbody tr:hover td { background: rgba(71,214,255,.035); }
 .zone-editor-footer { align-items: center; gap: 14px; margin-top: 4px; padding-top: 16px; }
-.zones-save-copy { display: flex; align-items: center; gap: 8px; margin-right: auto; color: var(--muted); font-size: 11px; }
-.zones-save-indicator { width: 7px; height: 7px; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 3px rgba(73,230,163,.13); }
 
 :root.light .zones-workflow { background: linear-gradient(90deg, rgba(2,132,199,.06), rgba(5,150,105,.045)); box-shadow: 0 8px 26px rgba(0,0,0,.06); }
 :root.light .zone-camera-card,
@@ -6637,7 +6677,6 @@ button.secondary:disabled, a.secondary:disabled {
   .zone-motion-advanced { justify-self: start; }
   .zone-motion-head { align-items: stretch; flex-direction: column; }
   .zone-motion-toggle { justify-content: center; width: 100%; }
-  .zones-save-copy { flex: 1 1 100%; margin: 0; }
   .zone-editor-footer button { width: 100%; }
 }
 @media (max-width: 600px) {

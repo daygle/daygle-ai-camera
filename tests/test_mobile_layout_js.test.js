@@ -115,6 +115,30 @@ test('alerts: the toolbar becomes one column and the toggles keep a label', () =
   assert.match(html, /#alertsList \.alerts-policy-grid \{ grid-template-columns: 1fr; \}/);
 });
 
+test('alerts: stacked cells reclaim the row width from the table column rules', () => {
+  // The alerts table reuses `.cameras-table-wrap .rule-table`, whose mobile
+  // rules and column percentages keep applying once the table is un-tabled:
+  //  - the shared <=760px rule floors thead/tbody/tr at `min-width: 820px`, and
+  //    since the tbody becomes a grid container every stacked row inherited
+  //    that width - leaving ~485px of blank sideways scroll inside the card;
+  //  - the desktop column widths (24/20/10/16%) still land on the cells, so
+  //    each one shrank to a fraction of the row and its label/value grid
+  //    collapsed to zero width.
+  const { html } = pages.alerts;
+  assert.match(
+    html,
+    /#alertsList \.alerts-policy-table tbody \{ display: grid; gap: 12px; min-width: 0; \}/,
+  );
+  assert.match(html, /tbody td:not\(\[colspan\]\) \{[\s\S]*?width: auto;/);
+  assert.match(
+    html,
+    /td\.alerts-policy-name \{ grid-column: 1 \/ -1; grid-template-columns: minmax\(0, 1fr\); \}/,
+  );
+  // The first cell draws the status bar as a 3px inset shadow, so the stacked
+  // cells carry left padding to keep their text off it.
+  assert.match(html, /padding: 8px 0 8px 12px;/);
+});
+
 // ── 3. The trap: an author `display` rule beats the UA `[hidden]` rule ───────
 
 test('alerts: the collapsible settings row stays collapsed on a phone', () => {

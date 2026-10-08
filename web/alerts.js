@@ -147,6 +147,7 @@ function ensureAlertSchedules(rule) {
   return rule.alert_schedules;
 }
 
+// eslint-disable-next-line no-unused-vars -- ESLint: tests/test_alert_schedules_js.test.js slices the schedule helpers up to this definition
 function policyHasChannel(rule, channel) {
   if (Array.isArray(rule.alert_schedules) && rule.alert_schedules.length) {
     return rule.alert_schedules.some((schedule) => schedule[channel]);
@@ -184,27 +185,6 @@ function timeSelect(value, attr) {
     options.push(`<option value="${time}" ${time === value ? 'selected' : ''}>${time}</option>`);
   }
   return `<select ${attr}>${options.join('')}</select>`;
-}
-
-function allPolicies() {
-  const objectPolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).flatMap((zone) => zone.object_rules || []));
-  const soundPolicies = cameras.flatMap((camera) => camera.detection?.sound?.rules || []);
-  const tripwirePolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.tripwire).filter(Boolean));
-  const loiterPolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.loiter).filter(Boolean));
-  const timePolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.time_of_day).filter(Boolean));
-  const aiTagPolicies = cameras.flatMap((camera) => (camera.detection?.zones || []).map((zone) => zone.ai_tags).filter(Boolean));
-  return [...objectPolicies, ...soundPolicies, ...tripwirePolicies, ...loiterPolicies, ...timePolicies, ...aiTagPolicies, ...(faceRulesPayload.rules || [])].filter((rule) => (
-    Array.isArray(rule.alert_schedules) && rule.alert_schedules.length
-      ? rule.alert_schedules.some((schedule) => schedule.email_enabled || schedule.push_enabled)
-      : rule.email_enabled || rule.push_enabled
-  ));
-}
-
-function updateStats() {
-  const policies = allPolicies();
-  $('alertCount').textContent = String(policies.length);
-  $('enabledCount').textContent = String(policies.filter((rule) => rule.enabled !== false).length);
-  $('channelCount').textContent = String(policies.filter((rule) => policyHasChannel(rule, 'email_enabled')).length + policies.filter((rule) => policyHasChannel(rule, 'push_enabled')).length);
 }
 
 function renderSelectors() {
@@ -286,7 +266,6 @@ function refreshPolicyStatuses() {
 
 function renderPolicies() {
   const rules = currentRules();
-  updateStats();
   if (!currentCamera()) {
     $('alertsList').innerHTML = '<div class="empty">Add a camera first.</div>';
     return;
@@ -437,7 +416,6 @@ function renderPolicies() {
     } else rule[key] = field.value || null;
     if (key === 'class') rule.name = soundClasses.find((sound) => sound.id === field.value)?.label || field.value;
     if (summary) updatePolicyStatus(summary, rule);
-    updateStats();
   }));
   $('alertsList').querySelectorAll('[data-add-schedule]').forEach((button) => button.addEventListener('click', () => {
     const rule = rules[Number(button.dataset.addSchedule)];

@@ -35,13 +35,8 @@ if (gridEl) {
 const emptyEl = document.getElementById('cameraEmpty');
 const deleteModal = document.getElementById('deleteModal');
 
-// Stats + filter state
+// Health + filter state
 const cameraHealth = {};
-const stats = {
-  total: document.getElementById('statTotalCameras'),
-  online: document.getElementById('statOnlineCameras'),
-  offline: document.getElementById('statOfflineCameras'),
-};
 const filter = {
   text: document.getElementById('cameraFilter'),
   backend: document.getElementById('cameraBackendFilter'),
@@ -701,7 +696,6 @@ function wireEditFormHandlers(index) {
     try {
       var result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras: cameras }) });
       cameras = result.cameras || cameras;
-      updateStats();
       renderGrid();
       setMessage(index >= camerasBefore.length ? 'Camera added.' : 'Camera updated.');
     } catch (err) {
@@ -966,7 +960,7 @@ function bindCameraSortHeaders() {
   });
 }
 
-// ─── Filter + stats ───────────────────────────────────────────────────────────
+// ─── Filter ───────────────────────────────────────────────────────────
 
 function currentFilterValues() {
   return {
@@ -1056,7 +1050,6 @@ function renderGrid() {
       try {
         var result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras: next }) });
         cameras = result.cameras || next;
-        updateStats();
         renderGrid();
         setMessage(newEnabled ? 'Camera enabled.' : 'Camera disabled.');
       } catch (err) {
@@ -1072,10 +1065,6 @@ function renderGrid() {
   bindCameraSortHeaders();
 
 
-}
-
-function updateStats() {
-  if (stats.total) stats.total.textContent = String(cameras.length);
 }
 
 // ─── Delete modal ─────────────────────────────────────────────────────────────
@@ -1107,7 +1096,6 @@ document.getElementById('deleteConfirmBtn').addEventListener('click', async func
   try {
     var result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras: payloadCameras }) });
     cameras = result.cameras || payloadCameras;
-    updateStats();
     renderGrid();
     setMessage('Camera removed.');
   } catch (err) {
@@ -1198,7 +1186,6 @@ async function loadCameras() {
   // Clear stale entries so removed cameras don't linger.
   Object.keys(cameraResolutions).forEach(function(key) { delete cameraResolutions[key]; });
   Object.keys(cameraFps).forEach(function(key) { delete cameraFps[key]; });
-  updateStats();
   renderGrid();
   fetchCameraResolutions().catch(function() {});
 }
@@ -1206,21 +1193,10 @@ async function loadCameras() {
 async function updateHealthStats() {
   try {
     var data = await api('/api/cameras/health');
-    var s = data.summary;
     Object.keys(cameraHealth).forEach(function(key) { delete cameraHealth[key]; });
     Object.keys(data.cameras || {}).forEach(function(cameraId) {
       cameraHealth[cameraId] = data.cameras[cameraId];
     });
-    if (stats.online) {
-      var online = s.online || 0;
-      stats.online.textContent = String(online);
-      stats.online.style.color = online > 0 ? 'var(--success-color, #2ecc71)' : '';
-    }
-    if (stats.offline) {
-      var offline = s.offline || 0;
-      stats.offline.textContent = String(offline);
-      stats.offline.style.color = offline > 0 ? 'var(--danger-color, #e74c3c)' : '';
-    }
     // Keep an open inline editor intact during the periodic health refresh.
     if (!document.querySelector('.camera-edit-row')) renderGrid();
   } catch (_err) {

@@ -27,7 +27,12 @@
          here (ID selectors win) so the rows really do stack. */
       #alertsList .alerts-policy-table { display: block; min-width: 0; overflow-x: visible; }
       #alertsList .alerts-policy-table thead { display: none; }
-      #alertsList .alerts-policy-table tbody { display: grid; gap: 12px; }
+      /* The shared ``.cameras-table-wrap .rule-table`` mobile rule (<=760px)
+         floors thead/tbody/tr at min-width 820px. The table and its rows are
+         reset here, but the tbody is a grid container, so without its own
+         reset it stays 820px wide and each stacked row inherits that width -
+         leaving ~485px of blank sideways scroll inside the card. */
+      #alertsList .alerts-policy-table tbody { display: grid; gap: 12px; min-width: 0; }
       #alertsList .alerts-policy-table tbody tr:not([hidden]) {
         display: grid;
         table-layout: auto;
@@ -48,8 +53,14 @@
         grid-template-columns: minmax(96px, 34%) minmax(0, 1fr);
         gap: 10px;
         align-items: center;
-        padding: 8px 0;
+        /* Left padding keeps the label/value clear of the 3px status bar the
+           row's first cell draws via an inset shadow. */
+        padding: 8px 0 8px 12px;
         border-bottom: 1px solid rgba(255,255,255,.07);
+        /* The desktop column percentages (24/28/10/18%) still apply to these
+           cells, so without this the stacked rows shrink to 10-28% of the row
+           and their label/value grids collapse to zero width. */
+        width: auto;
       }
       #alertsList .alerts-policy-table tbody td::before {
         content: attr(data-label);
@@ -60,8 +71,10 @@
         text-transform: uppercase;
         letter-spacing: .05em;
       }
-      /* The policy name heads the card; the scope line rides under it. */
-      #alertsList .alerts-policy-table tbody td.alerts-policy-name { grid-column: 1 / -1; }
+      /* The policy name heads the card; the scope line rides under it. The
+         cell spans the row and stacks its three lines instead of reusing the
+         generic two-column label/value template. */
+      #alertsList .alerts-policy-table tbody td.alerts-policy-name { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr); }
       #alertsList .alerts-policy-table tbody td.alerts-policy-name::before { display: none; }
       /* Actions: full-width row, phone-sized tap targets, no label. */
       #alertsList .alerts-policy-table tbody td.alerts-table-actions {
@@ -103,12 +116,6 @@
       </div>
     </header>
 
-    <section class="grid stats-grid">
-      <article class="card stat-card"><span class="stat-card-label">Alert Policies</span><strong id="alertCount" class="stat-card-value">0</strong><small class="muted stat-card-sub">Across All Cameras</small></article>
-      <article class="card stat-card"><span class="stat-card-label">Enabled</span><strong id="enabledCount" class="stat-card-value">0</strong><small class="muted stat-card-sub">Ready To Notify</small></article>
-      <article class="card stat-card"><span class="stat-card-label">Delivery Paths</span><strong id="channelCount" class="stat-card-value">0</strong><small class="muted stat-card-sub">Email And Push Enabled</small></article>
-    </section>
-
     <section class="card alerts-editor-card">
       <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">🔔</div>
@@ -123,7 +130,6 @@
       <p id="alertScopeHint" class="form-help muted">Objects, motion, and faces are assigned - and set to record - per area on the Zones page; sound classes on the Sounds page. This page configures how each assigned item notifies you - email, push, schedules, and cooldowns.</p>
       <div id="alertsList" class="alerts-policy-list"></div>
       <div class="alerts-editor-footer">
-        <div class="zones-save-copy"><span class="zones-save-indicator"></span><span>Remember to save your changes.</span></div>
         <button id="saveAlertsBtn" class="primary" type="button">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
           Save Alert Rules
