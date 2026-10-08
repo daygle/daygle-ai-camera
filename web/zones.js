@@ -885,7 +885,6 @@ function renderMotionCard(zone, zoneIndex) {
           </label>
         </div>
       </div>
-      <p class="muted tripwire-hint">Email, push and quiet-hours for this area are set on the <a class="zone-assigned-link" href="/alerts">Alerts page</a>.</p>
     </div>` : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to trigger when this area of the footage moves.</p>';
   return `
     <div class="zone-tripwire-card${enabled ? ' is-enabled' : ''}" data-zone-motion-for="${zoneIndex}">
@@ -914,7 +913,6 @@ function renderFaceCard(zone, zoneIndex) {
       <div class="tripwire-toggles">
         ${tripwireToggleField('Record', `data-zone-face-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when a face is detected in this area')}
       </div>
-      <p class="muted tripwire-hint">Email, push and quiet-hours for this area are set on the <a class="zone-assigned-link" href="/alerts">Alerts page</a>.</p>
     </div>` : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to detect and recognize faces in this area.</p>';
   return `
     <div class="zone-tripwire-card" data-zone-face-for="${zoneIndex}">
