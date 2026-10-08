@@ -39,8 +39,8 @@
         <label class="application-log-date-field">To
           <input id="filterDateTo" type="date" aria-label="To date" />
         </label>
-        <input id="filterCamera" placeholder="Filter by camera id" />
-        <select id="filterEventType">
+        <input id="filterCamera" placeholder="Filter by camera id" aria-label="Filter by camera id" />
+        <select id="filterEventType" aria-label="Event type">
           <option value="">All event types</option>
           <option value="prebuffer_fallback">Prebuffer Fallback</option>
           <option value="prebuffer_short_preroll">Prebuffer Short Pre-roll</option>
@@ -53,7 +53,7 @@
           <option value="camera_offline">Camera Offline</option>
           <option value="camera_online">Camera Online</option>
         </select>
-        <select id="filterSeverity">
+        <select id="filterSeverity" aria-label="Severity">
           <option value="">All severities</option>
           <option value="info">Info</option>
           <option value="warning">Warning</option>

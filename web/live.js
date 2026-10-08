@@ -370,11 +370,14 @@ function renderCameraGrid() {
 
 function syncViewMode() {
   const allMode = isAllCameraMode();
-  if (liveEls.frameWrap) liveEls.frameWrap.hidden = allMode;
-  if (liveEls.cameraGrid) liveEls.cameraGrid.hidden = !allMode;
-  if (liveEls.cameraControlGroup) liveEls.cameraControlGroup.hidden = allMode;
-  if (liveEls.liveAiTrackGroup) liveEls.liveAiTrackGroup.hidden = allMode;
-  if (liveEls.streamDetailsCard) liveEls.streamDetailsCard.hidden = allMode;
+  // With no cameras the empty state owns the card: keep the black frame,
+  // camera picker and stream details hidden whichever view is selected.
+  const noCameras = cameras.length === 0;
+  if (liveEls.frameWrap) liveEls.frameWrap.hidden = allMode || noCameras;
+  if (liveEls.cameraGrid) liveEls.cameraGrid.hidden = !allMode || noCameras;
+  if (liveEls.cameraControlGroup) liveEls.cameraControlGroup.hidden = allMode || noCameras;
+  if (liveEls.liveAiTrackGroup) liveEls.liveAiTrackGroup.hidden = allMode || noCameras;
+  if (liveEls.streamDetailsCard) liveEls.streamDetailsCard.hidden = allMode || noCameras;
   if (allMode) {
     clearLiveOverlay();
     renderCameraGrid();
@@ -412,6 +415,12 @@ function updateEmptyState() {
     if (liveEls.liveAiTrackGroup) liveEls.liveAiTrackGroup.hidden = true;
     if (liveEls.livePtzToggleGroup) liveEls.livePtzToggleGroup.hidden = true;
     if (liveEls.streamDetailsCard) liveEls.streamDetailsCard.hidden = true;
+    const detectionCard = document.getElementById('liveDetectionCard');
+    if (detectionCard) detectionCard.hidden = true;
+    // Zones page: the whole editor needs a camera, so the empty state
+    // replaces it rather than leaving a black canvas and live Draw buttons.
+    const zonesLayout = document.getElementById('zonesLayout');
+    if (zonesLayout) zonesLayout.hidden = true;
   } else {
     liveEls.cameraEmpty.hidden = true;
   }

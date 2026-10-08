@@ -68,6 +68,8 @@ async function loadEntries(offset = 0) {
 
 function makeCell(text, opts = {}) {
   const td = document.createElement('td');
+  // Column name for the stacked phone layout (.stack-table).
+  if (opts.label) td.dataset.label = opts.label;
   if (opts.noWrap) td.style.whiteSpace = 'nowrap';
   if (opts.className) td.className = opts.className;
   if (opts.code) {
@@ -95,14 +97,14 @@ function renderEntries(entries) {
   for (const entry of entries) {
     const tr = document.createElement('tr');
     const statusClass = entry.status === 'success' ? 'status-success' : 'status-failed';
-    tr.appendChild(makeCell(formatLogTime(entry.created_at), { noWrap: true }));
-    tr.appendChild(makeCell(entry.username || '-'));
-    tr.appendChild(makeCell(entry.action || '-', { code: true }));
-    tr.appendChild(makeCell(entry.resource || '-', { code: true }));
-    tr.appendChild(makeCell(entry.resource_id != null ? String(entry.resource_id) : '-'));
-    tr.appendChild(makeCell(entry.status || 'success', { badge: statusClass }));
-    tr.appendChild(makeCell(entry.ip_address || '-', { noWrap: true }));
-    tr.appendChild(makeCell(formatDetails(entry.details), { className: 'details-cell' }));
+    tr.appendChild(makeCell(formatLogTime(entry.created_at), { label: 'Time', noWrap: true }));
+    tr.appendChild(makeCell(entry.username || '-', { label: 'User' }));
+    tr.appendChild(makeCell(entry.action || '-', { label: 'Action', code: true }));
+    tr.appendChild(makeCell(entry.resource || '-', { label: 'Resource', code: true }));
+    tr.appendChild(makeCell(entry.resource_id != null ? String(entry.resource_id) : '-', { label: 'ID' }));
+    tr.appendChild(makeCell(entry.status || 'success', { label: 'Status', badge: statusClass }));
+    tr.appendChild(makeCell(entry.ip_address || '-', { label: 'IP address', noWrap: true }));
+    tr.appendChild(makeCell(formatDetails(entry.details), { label: 'Details', className: 'details-cell' }));
     tbody.appendChild(tr);
   }
 }

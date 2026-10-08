@@ -28,7 +28,7 @@
         <div class="settings-section-icon" aria-hidden="true">🎥</div>
         <div>
           <h2>Camera Configuration</h2>
-          <p class="settings-section-subtitle">Review connection details, stream profiles, and runtime status. Search or drag to reorder your cameras, toggle them on or off, or click Edit to expand camera settings inline.</p>
+          <p class="settings-section-subtitle">Review connection details, stream profiles, and runtime status. Search or filter your cameras, click a column header to sort, toggle them on or off, or click Edit to expand camera settings inline.</p>
         </div>
         <div class="button-row cameras-toolbar-actions">
           <button id="addCameraBtn" type="button">
@@ -109,15 +109,16 @@
       .camera-edit-panel .camera-edit-form { grid-template-columns: 1fr; }
     }
 
-    /* ── Phones ─────────────────────────────────────────────────────────────
-       The camera table keeps its columns (unlike the stacked tables on the
-       users / alerts / camera-models pages) because every column header is a
-       sort control, and a stacked layout would take sorting away on the
-       smallest screens. Instead the widest secondary column is dropped, the
-       row actions move out of the name cell's reserved right gutter so the
-       name column can shrink, and the whole thing scrolls inside the card
-       rather than stretching the page. */
-    @media (max-width: 760px) {
+    /* ── Narrow tablets / large phones (601-760px) ───────────────────────────
+       The camera table keeps its columns here because every column header is
+       a sort control. The widest secondary column is dropped, the row actions
+       move out of the name cell's reserved right gutter so the name column can
+       shrink, and the whole thing scrolls inside the card rather than
+       stretching the page. At 600px and below the table stacks into one card
+       per camera instead (.stack-table in styles.css): sideways scrolling
+       there left only the camera name on screen, and a camera list is short
+       enough that seeing every camera's status beats column sorting. */
+    @media (min-width: 601px) and (max-width: 760px) {
       /* Profiles (day/night pills, schedule source, preset names) is the widest
          cell and is also fully visible in the camera's own edit panel. */
       #cameraGrid .cameras-table th:nth-child(5),

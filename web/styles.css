@@ -35,10 +35,10 @@
 .alerts-channel-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-start; margin: 18px 0; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .alerts-channel-row label { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; }
 .alerts-recipient-field { margin-bottom: 18px; }
-.alerts-policy-head, .alerts-policy-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.alerts-policy-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .alerts-policy-head { margin-bottom: 18px; }
 .alerts-policy h3 { margin: 4px 0 0; }
-.alerts-policy-actions { padding-top: 12px; }
+
 .alerts-policy-table { min-width: 760px; table-layout: fixed; }
 .alerts-policy-table-wrap { min-width: 0; }
 .alerts-policy-table tbody tr.alerts-policy-row { transition: background 0.12s; }
@@ -88,7 +88,6 @@
 .alerts-policy-table .alerts-policy-details-row .alerts-policy-head { margin-bottom: 12px; }
 .alerts-policy-table .alerts-policy-collapse { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 8px; }
 .alerts-policy-table .alerts-policy-collapse svg { display: block; }
-
 
 .alerts-policy-name strong, .alerts-policy-name span { display: block; }
 .alerts-policy-name strong { color: var(--text); }
@@ -319,10 +318,6 @@
   background: rgba(2,132,199,.04);
 }
 
-@media (max-width: 640px) {
-
-}
-
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body {
@@ -447,8 +442,7 @@ button.delete-btn:hover { background: rgba(248,113,113,.12); border-color: #f871
 /* ─── Touch feedback (active states) ─────────────────────────────────── */
 button:active,
 a.button-link:active,
-a.secondary:active,
-a.button-link.secondary-link:active {
+a.secondary:active {
   transform: scale(0.97);
   transition-duration: 0.08s;
 }
@@ -531,6 +525,8 @@ textarea {
 /* Objects page: per-row "still alert after" minutes input. Compact so the
    four-column rule table stays readable next to the mode dropdowns. */
 .still-alert-input { width: 68px; padding: 6px 8px; }
+/* Touch screens: a 26px-tall number box is a hard tap target. */
+@media (pointer: coarse), (max-width: 600px) { .still-alert-input { min-height: 40px; } }
 .empty { color: var(--muted); padding: 12px; }
 
 .form-stack { display: grid; gap: 14px; margin-top: 18px; }
@@ -638,22 +634,6 @@ textarea {
   flex: none;
 }
 
-.range-field {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.range-field input[type="range"] {
-  flex: 1;
-  min-width: 0;
-  accent-color: var(--accent);
-}
-.range-field output {
-  min-width: 42px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-weight: 800;
-}
 .field-help {
   color: var(--muted);
   font-size: 12px;
@@ -752,7 +732,7 @@ textarea {
 .form-grid button { justify-self: start; min-height: 44px; }
 .error { color: var(--danger); font-weight: 800; }
 .button-link { display: inline-flex; align-items: center; text-decoration: none; border-radius: 14px; padding: 12px 16px; color: #04111c; background: linear-gradient(135deg, var(--accent), var(--success)); font-family: inherit; font-size: 14px; font-weight: 800; }
-.button-link.secondary-link { background: var(--panel-strong); color: var(--text); border: 1px solid var(--border); }
+
 .user-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 170px) auto auto; align-items: center; gap: 12px; }
 input[type="file"] { padding: 10px; }
 .status-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
@@ -819,7 +799,6 @@ input[type="file"] { padding: 10px; }
   display: block;
   font-size: 14px;
 }
-.cloudflare-tunnel-status-detail,
 .cloudflare-tunnel-status-main > div > span {
   display: block;
   margin-top: 3px;
@@ -1212,8 +1191,8 @@ input[type="file"] { padding: 10px; }
      that took the shared emblem without a page-local block. */
   .hero .onnx-hero-mark { margin: 0 auto; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
-  .recording-timeline-layout { grid-template-columns: 1fr; }
-  .form-grid, .user-row, .status-panel { grid-template-columns: 1fr; }
+
+  .form-grid, .user-row { grid-template-columns: 1fr; }
   .yamnet-status-grid.status-panel { grid-template-columns: 1fr; }
 
   .timeline-controls-card .settings-section-header { flex-wrap: wrap; }
@@ -1819,45 +1798,13 @@ input[type="file"] { padding: 10px; }
   gap: 6px;
   line-height: 1;
 }
-/* Drag-and-drop reorder styles for rule tables */
-.cell-drag-header {
-  width: 32px;
-}
-.cell-drag {
-  width: 32px;
-  padding: 0 2px;
-  text-align: center;
-  vertical-align: middle;
-}
-.drag-handle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: grab;
-  color: var(--muted);
-  border-radius: 6px;
-  padding: 3px;
-  transition: color 0.12s, background 0.12s;
-}
-.drag-handle:hover {
-  color: var(--text);
-  background: rgba(255,255,255,.08);
-}
-.drag-handle:active {
-  cursor: grabbing;
-}
-tr.dragging {
-  opacity: 0.4;
-}
-tr.drag-over {
-  box-shadow: inset 0 -2px 0 0 var(--accent);
-}
+
 .zone-action-btn svg,
 .zone-editor-footer button svg {
   display: block;
   flex-shrink: 0;
 }
-.compact-empty { padding: 6px 0; }
+
 .compact-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 .button-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
 .page-stack .button-row { padding-top: 14px; border-top: 1px solid var(--border); justify-content: flex-end; }
@@ -2103,7 +2050,6 @@ tr.drag-over {
   }
   .zone-object-rule { grid-template-columns: 1fr; }
   .zone-object-rules-header select { max-width: none; }
-
 }
 
 /* Small phones (≤600px): compact nav, tighter cards, section headers that wrap */
@@ -2153,23 +2099,24 @@ tr.drag-over {
   /* Sound editor footer: full-width stacked buttons */
   .sound-editor-footer { display: flex; flex-wrap: wrap; gap: 10px; justify-content: stretch; }
   .sound-editor-footer button { flex: 1; justify-content: center; }
-  /* Sound rule select: full width */
-  .rule-select-wrapper { width: 100%; }
-  .rule-select-wrapper select { width: 100%; }
 }
-/* Tiny phones (≤400px): single-column stat cards */
-@media (max-width: 400px) {
+/* Tiny phones (≤360px): single-column stat cards. Common 375-414px phones
+   keep the 2×2 grid so four stat cards don't push content a screen down. */
+@media (max-width: 360px) {
   .stats-grid { grid-template-columns: 1fr; }
+  /* Short status tiles (resolution, FPS, model, device) stay 2-up on
+     phones; only the narrowest screens stack them. */
+  .status-panel { grid-template-columns: 1fr; }
 }
-
-/* ─── Sounds page layout ──────────────────────────────────────────────────── */
-.sounds-layout {
-  display: grid;
-  gap: 28px;
-  align-items: start;
+/* Narrow phones: the decorative section icon squeezed every card title and
+   description into a ~190px column; give the text the full card width. */
+@media (max-width: 420px) {
+  .settings-section-icon { display: none; }
 }
-@media (max-width: 899px) {
-  .sounds-layout { grid-template-columns: 1fr; }
+/* Phones: the hero emblem is decorative (aria-hidden) and cost ~130px above
+   every page's content once the hero stacked. */
+@media (max-width: 600px) {
+  .hero .onnx-hero-mark { display: none; }
 }
 
 /* ─── Rule tables (zones + sounds) ────────────────────────────────────────── */
@@ -2215,9 +2162,7 @@ tr.drag-over {
      and page grids, stretching the whole page (header included) wide enough
      to scroll horizontally. Letting these containers shrink below their
      content keeps the overflow confined to the table's own scroll box. */
-  .sounds-layout,
-  .sound-settings-card,
-  .sound-rules-card { min-width: 0; }
+  .sound-settings-card { min-width: 0; }
   #soundRulesWrap { min-width: 0; }
 }
 
@@ -2261,8 +2206,10 @@ tr.drag-over {
 }
 .users-list-status {
   margin: 0;
-  min-height: 1.2em;
 }
+/* Status lines only take a grid row while they have something to say. */
+.users-list-status:empty,
+.cameras-list-status:empty { display: none; }
 .users-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);
@@ -2345,6 +2292,8 @@ tr.drag-over {
   white-space: nowrap;
 }
 .user-role-admin { color: #c9b8ff; border-color: rgba(168,85,247,.35); background: rgba(168,85,247,.12); }
+/* The dark-theme lilac is ~1.6:1 on a light card; use a deep violet instead. */
+:root.light .user-role-admin { color: #6d28d9; }
 .user-role-viewer { color: var(--accent); border-color: rgba(71,214,255,.3); background: rgba(71,214,255,.08); }
 .user-status-active { color: var(--success); border-color: rgba(73,230,163,.28); background: rgba(73,230,163,.08); }
 .user-status-disabled { color: var(--muted); background: rgba(255,255,255,.035); }
@@ -2645,14 +2594,7 @@ tr.drag-over {
     flex-basis: calc(50% - 6px);
   }
 }
-.cameras-table .cell-drag {
-  width: 32px;
-  padding: 0 2px;
-  text-align: center;
-  vertical-align: middle;
-  color: var(--muted);
-  cursor: grab;
-}
+
 .cameras-table .cell-camera {
   min-width: 220px;
   display: table-cell;
@@ -2829,23 +2771,13 @@ tr.drag-over {
   font-size: 11px;
   padding: 4px 8px;
 }
-.cameras-table tbody tr.dragging {
-  opacity: 0.4;
-}
-.cameras-table tbody tr.drag-over {
-  box-shadow: inset 0 -2px 0 0 var(--accent);
-}
-.cameras-table tbody tr.drag-over:first-child {
-  box-shadow: inset 0 2px 0 0 var(--accent);
-}
+
 @media (max-width: 760px) {
   .cameras-table th,
   .cameras-table td {
     padding: 8px 6px;
   }
-  .cameras-table .cell-drag {
-    display: none;
-  }
+
   .cameras-table .cell-actions button {
     padding: 5px;
   }
@@ -2902,18 +2834,7 @@ tr.drag-over {
 .cameras-table-wrap .rule-table tr:last-child td {
   border-bottom: 0;
 }
-/* The expand row (per-rule inline settings) must keep its own zero padding
-   and divider; the generic td padding above would otherwise crush it. Every
-   rule row is followed by its expand row, so the tbody's last row is always
-   an expand row - drop its bottom border so it doesn't poke at the wrap's
-   rounded corners. */
-.cameras-table-wrap .rule-table .rule-expand-row > td {
-  padding: 0;
-  border-bottom: 1px solid var(--border);
-}
-.cameras-table-wrap .rule-table .rule-expand-row:last-child > td {
-  border-bottom: 0;
-}
+
 .cameras-table-wrap .rule-table .cell-actions button {
   display: inline-flex;
   align-items: center;
@@ -3047,17 +2968,7 @@ tr.drag-over {
 .cameras-table th button.table-sort-btn.is-active {
   color: var(--accent);
 }
-/* While a column sort is active the rows are not draggable (dragging would
-   splice the config array against the sorted visual order) - dim the grip so
-   the disabled state reads as intentional. */
-.cameras-table tr.camera-row-sorted .drag-handle {
-  cursor: default;
-  opacity: 0.35;
-}
-.cameras-table tr.camera-row-sorted .drag-handle:hover {
-  color: var(--muted);
-  background: none;
-}
+
 .table-sort-glyph {
   font-size: 9px;
   line-height: 1;
@@ -3121,10 +3032,7 @@ tr.drag-over {
   .cameras-table-wrap .rule-table td {
     padding: 8px 6px;
   }
-  .cameras-table-wrap .rule-table .cell-drag,
-  .cameras-table-wrap .rule-table .cell-drag-header {
-    display: none;
-  }
+
   .cameras-table-wrap .rule-table .cell-actions button {
     padding: 5px;
   }
@@ -3310,7 +3218,6 @@ tr.drag-over {
 }
 
 @media (max-width: 600px) {
-
   .cam-name { max-width: none; }
   .modal-tabs { overflow-x: auto; scrollbar-width: none; }
   .modal-tabs::-webkit-scrollbar { display: none; }
@@ -3326,7 +3233,6 @@ tr.drag-over {
   border-radius: 20px;
   letter-spacing: 0.03em;
 }
-.badge-active { background: var(--accent); color: #000; }
 
 /* ─── Toast notifications ───────────────────────────────────────────────────── */
 .toast-container {
@@ -3542,14 +3448,7 @@ tr.drag-over {
   text-decoration: underline;
 }
 
-@media (max-width: 900px) {
-
-}
-
 @media (max-width: 600px) {
-  .status-panel {
-    grid-template-columns: 1fr;
-  }
   .modal-body {
     padding: 14px 14px 0;
   }
@@ -3572,12 +3471,6 @@ tr.drag-over {
 @media (max-width: 360px) {
   .ptz-dpad { grid-template-columns: repeat(3, 32px); grid-template-rows: repeat(3, 32px); }
   .ptz-btn { width: 32px; height: 32px; }
-}
-
-/* ─── Video Panel (side drawer / bottom sheet) ──────────────────────────── */
-
-@media (max-width: 640px) {
-
 }
 
 /* ─── Dashboard ────────────────────────────────────────────────────────── */
@@ -3675,7 +3568,6 @@ tr.drag-over {
 
 /* Activity feed card + filter pills */
 .activity-card { display: grid; gap: 16px; }
-.page-stack .button-row.activity-toolbar-actions,
 .page-stack .button-row.timeline-controls-actions,
 .page-stack .button-row.timeline-card-status {
   border-top: 0;
@@ -3686,19 +3578,7 @@ tr.drag-over {
 .page-stack #clipPlayerCard > .settings-section-header > .button-row {
   border-top: 0;
 }
-.activity-toolbar-actions {
-  flex-shrink: 0;
-  margin: 0 0 0 auto;
-  padding: 0;
-  justify-content: flex-end;
-}
-.activity-toolbar-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  line-height: 1;
-}
-.activity-toolbar-actions button svg,
+
 .activity-item-action svg {
   display: block;
   flex-shrink: 0;
@@ -3816,17 +3696,6 @@ button.activity-item-action.activity-item-action-snapshot:hover {
   background: rgba(73, 230, 163, 0.18);
   border-color: var(--success);
 }
-a.activity-item-action.activity-item-action-recording,
-button.activity-item-action.activity-item-action-recording {
-  background: rgba(168, 85, 247, 0.12);
-  color: #c9b8ff;
-  border: 1px solid rgba(168, 85, 247, 0.4);
-}
-a.activity-item-action.activity-item-action-recording:hover,
-button.activity-item-action.activity-item-action-recording:hover {
-  background: rgba(168, 85, 247, 0.2);
-  border-color: #a855f7;
-}
 
 /* Play (cyan/accent): opens the inline clip player. Shared by the dashboard
    feed and the recordings library so the same action reads the same colour. */
@@ -3847,12 +3716,7 @@ button.activity-item-action.activity-item-action-play:hover {
   color: #047857;
   border-color: rgba(5, 150, 105, 0.35);
 }
-:root.light a.activity-item-action.activity-item-action-recording,
-:root.light button.activity-item-action.activity-item-action-recording {
-  background: rgba(124, 58, 237, 0.10);
-  color: #6d28d9;
-  border-color: rgba(124, 58, 237, 0.35);
-}
+
 :root.light a.activity-item-action.activity-item-action-play,
 :root.light button.activity-item-action.activity-item-action-play {
   background: rgba(2, 132, 199, 0.10);
@@ -4027,14 +3891,6 @@ button.activity-item-action.activity-item-action-delete:hover {
 @media (max-width: 760px) {
   /* Dismiss buttons: wrap onto their own full-width row below the section title */
   .activity-card .settings-section-header { flex-wrap: wrap; }
-  .activity-toolbar-actions {
-    flex: 0 0 100%;
-    margin: 8px 0 0;
-    padding-top: 10px;
-    border-top: 1px solid var(--border);
-    justify-content: flex-start;
-  }
-  .activity-toolbar-actions button { flex: 1; justify-content: center; }
 }
 
 /* ─── Live page ───────────────────────────────────────────────────────── */
@@ -4125,6 +3981,9 @@ button.activity-item-action.activity-item-action-delete:hover {
   gap: 10px;
   min-width: 0;
 }
+/* Zones wraps the title in a kicker block; let it shrink so the h2 ellipsis
+   applies instead of the camera name running past the card. */
+.live-frame-title > div { min-width: 0; }
 .live-frame-title h2 {
   margin: 0;
   font-size: 18px;
@@ -4366,11 +4225,6 @@ button.activity-item-action.activity-item-action-delete:hover {
   box-shadow: 0 0 0 2px rgba(120, 200, 255, 0.55) inset;
 }
 
-/* Fade the overlay label while a control is actively held. */
-.ptz-overlay.ptz-overlay--active .ptz-label {
-  opacity: 0.55;
-}
-
 /* "Moving" status pill shown in the top-right of the PTZ overlay. */
 .ptz-status {
   display: inline-flex;
@@ -4524,6 +4378,8 @@ button.activity-item-action.activity-item-action-delete:hover {
   gap: 16px;
 }
 .live-empty-state h2 { margin: 0; font-size: 20px; }
+/* No frame yet: hide the browser's broken-image icon and alt text. */
+.live-frame:not([src]), .live-frame[src=""] { visibility: hidden; }
 .live-empty-state p { margin: 0; font-size: 13px; max-width: 38ch; }
 .live-empty-icon {
   display: grid;
@@ -4735,7 +4591,6 @@ button.activity-item-action.activity-item-action-delete:hover {
   text-align: center;
 }
 @media (max-width: 760px) {
-
   .live-frame { height: 50vh; min-height: 280px; }
   .live-controls-row { gap: 14px; }
   .live-control-camera { flex-basis: 100%; }
@@ -4745,7 +4600,10 @@ button.activity-item-action.activity-item-action-delete:hover {
 
 /* ─── Cameras page ──────────────────────────────────────────────────────── */
 
-.cameras-list-card { display: grid; gap: 16px; }
+/* minmax(0, 1fr) at every width: the camera table's 900px min-width must
+   scroll inside .cameras-table-wrap, not widen the card (it pushed the page
+   353px past the screen at 1024px with the sidebar open). */
+.cameras-list-card { display: grid; gap: 16px; min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .cameras-list-card .settings-section-header { align-items: center; }
 .settings-section-header .button-row.cameras-toolbar-actions {
   flex-shrink: 0;
@@ -4766,7 +4624,6 @@ button.activity-item-action.activity-item-action-delete:hover {
 }
 .cameras-list-status {
   margin: 0;
-  min-height: 1.2em;
   font-size: 12px;
 }
 .cameras-filter-grid {
@@ -4889,20 +4746,9 @@ button.activity-item-action.activity-item-action-delete:hover {
   display: flex;
   justify-content: flex-end;
 }
-/* ─── Sounds page ───────────────────────────────────────────────────────── */
-.sounds-layout {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 28px;
-  align-items: start;
-}
-@media (min-width: 900px) {
-  .sounds-layout { grid-template-columns: 300px 1fr; }
-}
-.sound-settings-card,
-.sound-rules-card { margin-top: 0; }
 
-.sound-rule-row-disabled { opacity: .55; }
+/* ─── Sounds page ───────────────────────────────────────────────────────── */
+.sound-settings-card { margin-top: 0; }
 
 .sound-rule-field {
   display: flex;
@@ -5065,10 +4911,6 @@ button.activity-item-action.activity-item-action-delete:hover {
   padding: 6px 8px;
   font-size: 13px;
 }
-.sound-rule-email-field {
-  flex: 1 1 16rem;
-  min-width: min(16rem, 100%);
-}
 
 .sound-editor-footer {
   display: flex;
@@ -5160,13 +5002,7 @@ button.activity-item-action.activity-item-action-delete:hover {
   font-size: .85em;
   margin: .4rem 0;
 }
-.rule-select-wrapper {
-  display: flex;
-  align-items: center;
-  gap: .6rem;
-  margin-bottom: 1.125rem;
-}
-.rule-select-wrapper select,
+
 .rule-add-select {
   font-size: .87em;
   max-width: 220px;
@@ -5177,31 +5013,6 @@ button.activity-item-action.activity-item-action-delete:hover {
   align-items: center;
   justify-content: flex-end;
   white-space: nowrap;
-}
-.rule-expand-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: .25rem .55rem;
-  border-radius: 8px;
-  font-size: .8em;
-  line-height: 1;
-}
-.rule-expand-row > td {
-  padding: 0;
-  border-bottom: 1px solid var(--border);
-}
-.rule-table tr:last-child .rule-expand-row > td,
-.rule-expand-row:last-child > td {
-  border-bottom: none;
-}
-.rule-expand-body {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  padding: 12px 16px 14px;
-  background: rgba(255,255,255,.02);
-  border-top: 1px solid var(--border);
 }
 
 /* ─── Timeline page ─────────────────────────────────────────────────────── */
@@ -5340,19 +5151,10 @@ button.activity-item-action.activity-item-action-delete:hover {
   .audit-table { font-size: 0.75rem; }
   .audit-table th, .audit-table td { padding: 0.35rem 0.5rem; }
   .details-cell { max-width: 140px; }
-  /* Hide ID (col 5) and IP Address (col 7) on small phones */
-  #auditTable th:nth-child(5),
-  #auditTable td:nth-child(5),
-  #auditTable th:nth-child(7),
-  #auditTable td:nth-child(7) { display: none; }
-}
-@media (max-width: 480px) {
-  /* Also hide Resource (col 4) and Details (col 8) on very small phones;
-     leaves Time, User, Action, Status which are the most scannable columns. */
-  #auditTable th:nth-child(4),
-  #auditTable td:nth-child(4),
-  #auditTable th:nth-child(8),
-  #auditTable td:nth-child(8) { display: none; }
+  /* The audit table stacks into one card per entry (.stack-table), so
+     every column stays readable instead of being hidden. */
+  #auditTable .details-cell { max-width: none; }
+  #auditTable td { white-space: normal !important; }
 }
 @media (max-width: 700px) {
   .audit-filters {
@@ -5444,7 +5246,10 @@ button.activity-item-action.activity-item-action-delete:hover {
   .page-stack .button-row button {
     flex: 1 1 100%;
   }
-  #logTable td {
+  /* Short fields (time, camera, event, severity) stay label | value on one
+     line; only the long message/details text stacks under its label. */
+  #logTable td { grid-template-columns: 76px minmax(0, 1fr); padding: 5px 0; }
+  #logTable td.details-cell {
     grid-template-columns: minmax(0, 1fr);
     gap: 3px;
   }
@@ -5841,12 +5646,6 @@ button.activity-item-action.activity-item-action-delete:hover {
 .model-action-btn:disabled { opacity: .55; cursor: not-allowed; }
 .model-action-loading { pointer-events: none; }
 
-.model-action-active {
-  background: rgba(73,230,163,.1);
-  border-color: rgba(73,230,163,.4);
-  color: var(--success);
-  font-weight: 900;
-}
 :root.light .model-card {
   background: rgba(255,255,255,.7);
   box-shadow: 0 2px 12px rgba(0,0,0,.04);
@@ -5984,7 +5783,7 @@ button:active:not(:disabled) {
 }
 
 /* --- Secondary - panel background --- */
-button.secondary, a.secondary, a.button-link.secondary-link {
+button.secondary, a.secondary {
   background: var(--panel-strong);
   color: var(--text);
   border: 1px solid var(--border);
@@ -6079,7 +5878,7 @@ button.delete-btn:hover:not(:disabled) {
 /* --- Button size variants --- */
 
 /* --- Touch feedback for link-style buttons --- */
-a.button-link:active, a.secondary:active, a.button-link.secondary-link:active {
+a.button-link:active, a.secondary:active {
   transform: scale(0.97);
   transition-duration: 0.08s;
 }
@@ -6107,16 +5906,14 @@ button.secondary:disabled, a.secondary:disabled {
 
   /* Secondary / panel buttons  -  lift + accent border instead of brightness */
   button.secondary:hover:not(:disabled),
-  a.secondary:hover,
-  a.button-link.secondary-link:hover {
+  a.secondary:hover {
     filter: none;
     background: rgba(255, 255, 255, 0.12);
     border-color: var(--accent);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.20);
   }
   :root.light button.secondary:hover:not(:disabled),
-  :root.light a.secondary:hover,
-  :root.light a.button-link.secondary-link:hover {
+  :root.light a.secondary:hover {
     background: rgba(0, 0, 0, 0.05);
     border-color: var(--accent);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -6171,31 +5968,6 @@ button.secondary:disabled, a.secondary:disabled {
 .zones-hero-action button svg,
 .zone-editor-footer button svg,
 .sound-editor-footer button svg { flex: 0 0 auto; }
-
-/* In-page workflow stepper. zones.html does not ship one today, but a
-   .zones-shell whose only child is a bare .zones-workflow (i.e. an editorial
-   header-only variant) would show an empty gradient strip - so only lay it
-   out when it actually has steps. */
-.zones-workflow:has(.zones-workflow-step) {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 18px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: linear-gradient(90deg, rgba(71,214,255,.08), rgba(73,230,163,.055));
-  box-shadow: 0 10px 30px rgba(0,0,0,.12);
-}
-.zones-workflow-step { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.zones-workflow-step > span {
-  display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px;
-  border-radius: 999px; border: 1px solid rgba(71,214,255,.35);
-  background: rgba(71,214,255,.12); color: var(--accent); font-size: 12px; font-weight: 900;
-}
-.zones-workflow-step.is-current > span { background: linear-gradient(135deg, var(--accent), var(--success)); color: #04111c; border-color: transparent; }
-.zones-workflow-step strong { display: block; font-size: 12px; white-space: nowrap; }
-.zones-workflow-step small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; white-space: nowrap; }
-.zones-workflow-line { flex: 1; min-width: 18px; height: 1px; background: linear-gradient(90deg, rgba(71,214,255,.35), var(--border)); }
 
 /* Every zone card spans the full page and stacks vertically, matching the
    Objects page: camera picker, live footage, Zone Editor, Detection Settings. */
@@ -6424,13 +6196,6 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-row-main .zone-visibility-toggle.is-hidden span { color: var(--muted); }
 .live-detection-status { margin-top: 13px; padding: 11px 12px; border-radius: 12px; font-size: 11px; }
 
-.zones-rules-tip {
-  display: flex; align-items: flex-start; gap: 9px; margin: -2px 0 18px; padding: 11px 12px;
-  border: 1px solid rgba(71,214,255,.17); border-radius: 13px; background: rgba(71,214,255,.055);
-  color: var(--muted); font-size: 12px; line-height: 1.45;
-}
-.zones-rules-tip strong { color: var(--text); }
-.zones-tip-icon { display: grid; place-items: center; flex: 0 0 auto; width: 18px; height: 18px; border: 1px solid rgba(71,214,255,.45); border-radius: 999px; color: var(--accent); font-size: 11px; font-weight: 900; }
 .zone-object-rules { margin-bottom: 20px; padding: 14px; border: 1px solid var(--border); border-radius: 17px; background: rgba(255,255,255,.018); }
 .zone-object-rules:last-child { margin-bottom: 0; }
 .zone-rules-header {
@@ -6579,60 +6344,12 @@ button.secondary:disabled, a.secondary:disabled {
    like the global ``input`` chrome (width: 100%). */
 .zone-motion-advanced-body .sound-rule-field input[type="checkbox"] { width: auto; }
 
-/* Compact confidence sliders (object-rules table, sounds table). Native
-   range inputs get the same reset as the Motion card so the global ``input``
-   chrome (padding / border / full-width / background) never boxes them. */
-.conf-slider {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  white-space: nowrap;
-}
-.conf-slider input[type="range"] {
-  width: 130px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  accent-color: var(--accent);
-}
-.conf-slider output,
-.conf-slider input.conf-slider-value {
-  width: 46px;
-  min-width: 46px;
-  padding: 2px 5px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: rgba(255,255,255,.05);
-  color: var(--text);
-  font-size: 10px;
-  font-weight: 800;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-/* Editable confidence value box: keep the compact readout look, drop the
-   number-spinner chrome so it fits the cell (the slider handles coarse
-   adjustment; typing handles precise values). */
-.conf-slider input.conf-slider-value {
-  appearance: textfield;
-  -moz-appearance: textfield;
-  font-family: inherit;
-}
-.conf-slider input.conf-slider-value::-webkit-outer-spin-button,
-.conf-slider input.conf-slider-value::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  appearance: none;
-  margin: 0;
-}
 :root.light .zone-motion-card { background: rgba(255,255,255,.7); }
 .cameras-table-wrap { border: 1px solid var(--border); border-radius: 13px; background: rgba(0,0,0,.08); }
 .cameras-table-wrap .rule-table th { background: rgba(255,255,255,.035); }
 .cameras-table-wrap .rule-table tbody tr:hover td { background: rgba(71,214,255,.035); }
 .zone-editor-footer { align-items: center; gap: 14px; margin-top: 4px; padding-top: 16px; }
 
-:root.light .zones-workflow { background: linear-gradient(90deg, rgba(2,132,199,.06), rgba(5,150,105,.045)); box-shadow: 0 8px 26px rgba(0,0,0,.06); }
 :root.light .zone-camera-card,
 :root.light .zones-frame-card { box-shadow: 0 12px 32px rgba(0,0,0,.08); }
 :root.light .zones-list .item { background: rgba(255,255,255,.72); }
@@ -6640,7 +6357,7 @@ button.secondary:disabled, a.secondary:disabled {
 :root.light .zone-object-chip { border-color: rgba(2,132,199,.3); background: rgba(2,132,199,.08); color: #0369a1; }
 :root.light .zone-object-rules { background: rgba(255,255,255,.7); }
 :root.light .cameras-table-wrap { background: rgba(0,0,0,.018); }
-:root.light .zones-rules-tip { background: rgba(2,132,199,.045); border-color: rgba(2,132,199,.16); }
+
 :root.light .zone-shape-toggle { background: rgba(0,0,0,.03); }
 :root.light .zone-shape-option.is-active { background: rgba(2,132,199,.08); box-shadow: inset 0 0 0 1px rgba(2,132,199,.28); }
 
@@ -6658,12 +6375,12 @@ button.secondary:disabled, a.secondary:disabled {
   .zones-hero { align-items: stretch; flex-direction: column; gap: 14px; }
   .zones-hero-action { justify-content: stretch; }
   .zones-hero-action button { flex: 1; }
-  .zones-workflow { align-items: stretch; flex-direction: column; gap: 10px; }
-  .zones-workflow-line { width: 1px; height: 10px; min-height: 10px; margin-left: 13px; flex: 0 0 auto; }
-  .zones-workflow-step small { white-space: normal; }
+
   .zones-canvas-hint { display: none; }
   .zones-canvas-footer { flex-wrap: wrap; }
   .zone-card-actions { align-items: stretch; flex-direction: column; }
+  /* The row layout's 200px flex-basis became a 200px HEIGHT once stacked. */
+  .zone-card-actions > div:first-child { flex: 0 0 auto; }
   .zone-card-action-buttons { width: 100%; }
   .zone-card-action-buttons button { flex: 1; }
   .zone-row-main .zone-visibility-toggle { width: 100%; }
@@ -6682,8 +6399,11 @@ button.secondary:disabled, a.secondary:disabled {
 @media (max-width: 600px) {
   .zones-shell { gap: 14px; }
   .zone-settings-card, .zone-rules-card { padding: 16px; }
-  .zones-frame-wrap, .zones-frame-wrap .live-frame { min-height: 290px; }
-  .zones-frame-wrap .live-frame { height: min(58vh, 470px); }
+  /* A fixed vh height on a 300px-wide phone made a tall black box with the
+     picture letterboxed in the middle; follow the stream's aspect instead
+     (the zone overlay tracks the rendered image rect either way). */
+  .zones-frame-wrap, .zones-frame-wrap .live-frame { min-height: 0; }
+  .zones-frame-wrap .live-frame { height: auto; aspect-ratio: var(--live-aspect, 16 / 9); }
   .zones-list .zone-shape-toggle { max-width: none; }
 }
 
@@ -6917,25 +6637,7 @@ button.secondary:disabled, a.secondary:disabled {
   gap: 24px;
 }
 .onnx-hero-copy { flex: 1 1 420px; min-width: 0; }
-.onnx-hero-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 18px;
-  margin-top: 14px;
-  font-size: 12.5px;
-  color: var(--muted);
-}
-.onnx-hero-meta span { display: inline-flex; align-items: center; gap: 7px; }
-.onnx-meta-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  display: inline-block;
-}
-.onnx-meta-dot-object { background: var(--accent); box-shadow: 0 0 8px rgba(71, 214, 255, .5); }
-.onnx-meta-dot-face { background: #a78bfa; box-shadow: 0 0 8px rgba(167, 139, 250, .5); }
-.onnx-meta-dot-neutral { background: var(--muted); }
+
 .onnx-hero-mark {
   position: relative;
   width: 108px;
@@ -7051,11 +6753,6 @@ button.secondary:disabled, a.secondary:disabled {
   color: var(--muted);
 }
 .settings-tab[aria-selected="true"] .settings-tab-copy small { color: var(--accent); }
-.onnx-tabs .settings-tab-icon { font-size: 18px; }
-.onnx-tab-icon-object { color: var(--accent); }
-.onnx-tab-icon-face { color: #a78bfa; }
-:root.light .onnx-tab-icon-object { color: #0284c7; }
-:root.light .onnx-tab-icon-face { color: #7c3aed; }
 
 /* Library header above each model card grid */
 .model-library-toolbar {
@@ -7138,8 +6835,7 @@ button.secondary:disabled, a.secondary:disabled {
    ===================================================================== */
 .arcface-toolbar { border-left: 3px solid #a78bfa; }
 .arcface-hero-copy { flex: 1 1 420px; min-width: 0; }
-.arcface-tab-icon { color: #a78bfa; }
-:root.light .arcface-tab-icon { color: #7c3aed; }
+
 .arcface-badge {
   display: inline-flex;
   align-items: center;
@@ -7551,10 +7247,17 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
     background: var(--surface);
     border-right: 1px solid var(--border);
     transform: translateX(-100%);
-    transition: transform 0.2s ease;
+    /* Closed drawer is hidden from Tab/screen readers; visibility flips
+       instantly on open and only after the slide-out on close. */
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .app-nav.nav-open .app-nav-body {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.2s ease, visibility 0s;
     box-shadow: 0 0 40px rgba(0,0,0,.4);
   }
-  .app-nav.nav-open .app-nav-body { transform: none; }
   .app-nav.nav-open .app-nav-scrim { display: block; position: fixed; inset: 0; z-index: 75; background: rgba(0,0,0,.45); }
   body.nav-drawer-open { overflow: hidden; }
   body.has-sidebar .shell { padding: 16px 16px 32px; }
@@ -7574,6 +7277,10 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
   gap: 12px;
   margin: 14px 0 12px;
 }
+/* Inside a grid card the card's own gap already spaces the bar; the extra
+   margins (which don't collapse in grid) left a ~50px hole under the header. */
+.activity-card > .library-filters,
+.recordings-list-card > .library-filters { margin: 0; }
 .library-search {
   display: flex;
   align-items: center;
@@ -7798,3 +7505,272 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
 
 /* Review card: why nothing is being captured (recognition off / not running). */
 .review-empty-problem { color: var(--text); border-left: 3px solid var(--warning, #f59e0b); padding-left: 10px; }
+
+/* ─── Phones: Events / Recordings tables become stacked cards ─────────────
+   The 880px-wide activity table only showed the Type column and a clipped
+   camera name on a phone, with everything else behind a sideways scroll.
+   Each row becomes a card instead; the column headers are hidden (newest/
+   oldest sorting stays available in the filter panel). */
+@media (max-width: 600px) {
+  .cameras-table-wrap:has(> .rule-table.activity-table) {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+  .cameras-table-wrap .rule-table.activity-table,
+  .cameras-table-wrap .rule-table.activity-table tbody {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    width: 100%;
+  }
+  .cameras-table-wrap .rule-table.activity-table thead { display: none; }
+  .cameras-table-wrap .rule-table.activity-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "type when"
+      "camera actions"
+      "detections actions"
+      "zone duration";
+    gap: 6px 12px;
+    width: auto;
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+  .cameras-table-wrap .rule-table.activity-table tbody td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    text-align: left;
+    white-space: normal;
+  }
+  .cameras-table-wrap .rule-table.activity-table tbody tr:hover td { background: none; }
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-type { grid-area: type; }
+  .cameras-table-wrap .rule-table.activity-table .activity-item-type-row { flex-wrap: wrap; }
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-when { grid-area: when; text-align: right; }
+  .cameras-table-wrap .rule-table.activity-table .activity-item-when { align-items: flex-end; }
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-camera {
+    grid-area: camera;
+    font-weight: 700;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-detections { grid-area: detections; }
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-zone { grid-area: zone; color: var(--muted); font-size: 12px; }
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-duration { grid-area: duration; text-align: right; }
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-actions { grid-area: actions; align-self: end; }
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-actions .cell-actions { justify-content: flex-end; }
+  /* A fixed-height inner scroll box inside the scrolling page is awkward to
+     use with a thumb; let the card list flow with the page instead. */
+  .recordings-list,
+  .activity-list { max-height: none; overflow: visible; }
+}
+
+/* ─── Phones: Detection page object / group tables become cards ───────────
+   The 4-column override tables scrolled sideways, so on a phone only the
+   object name and the edge of its mode picker were visible. Each row becomes
+   a card: name + effective mode on top, the mode picker full width below,
+   and (objects only) the still-alert minutes with its own caption. */
+@media (max-width: 600px) {
+  :is(#objectsTableWrap, #groupModesTableWrap) {
+    overflow: visible;
+    border: 0;
+    background: none;
+  }
+  :is(#objectsTableWrap, #groupModesTableWrap) .rule-table,
+  :is(#objectsTableWrap, #groupModesTableWrap) .rule-table tbody {
+    display: grid;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+  }
+  :is(#objectsTableWrap, #groupModesTableWrap) .rule-table thead { display: none; }
+  :is(#objectsTableWrap, #groupModesTableWrap) .rule-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 10px;
+    width: auto;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+  }
+  :is(#objectsTableWrap, #groupModesTableWrap) .rule-table tbody td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    white-space: normal;
+  }
+  :is(#objectsTableWrap, #groupModesTableWrap) .rule-table tbody tr:hover td { background: none; }
+  :is(#objectsTableWrap, #groupModesTableWrap) .rule-table select { width: 100%; }
+  /* Objects: name | effective, then picker, then still-alert. */
+  #objectsTableWrap .rule-table td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  #objectsTableWrap .rule-table td:nth-child(3) { grid-column: 2; grid-row: 1; }
+  #objectsTableWrap .rule-table td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  #objectsTableWrap .rule-table td:nth-child(4) {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  #objectsTableWrap .rule-table td:nth-child(4)::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  /* Groups: name | effective, members, then picker. */
+  #groupModesTableWrap .rule-table td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  #groupModesTableWrap .rule-table td:nth-child(4) { grid-column: 2; grid-row: 1; }
+  #groupModesTableWrap .rule-table td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; font-size: 12px; }
+  #groupModesTableWrap .rule-table td:nth-child(3) { grid-column: 1 / -1; grid-row: 3; }
+}
+
+/* ─── Phones: .stack-table turns a wide table into one card per row ───────
+   Opt-in for tables whose columns don't fit a phone (cameras, alert
+   policies, sound detectors/classes, camera models). Header cells are
+   hidden; each body cell shows its column name from data-label beside the
+   value. A cell without data-label (the row's title, or a colspan detail
+   row) spans the card. The doubled class outranks the per-table min-width
+   and display:table rules written for the sideways-scrolling layout. */
+@media (max-width: 600px) {
+  :is(.cameras-table-wrap, .stack-table-wrap, .audit-table-wrap):has(> table.stack-table) {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+  table.stack-table.stack-table,
+  table.stack-table.stack-table > tbody {
+    display: grid;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    table-layout: auto;
+  }
+  table.stack-table.stack-table > thead { display: none; }
+  table.stack-table.stack-table > tbody > tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    width: auto;
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+  table.stack-table.stack-table > tbody > tr[hidden] { display: none; }
+  table.stack-table.stack-table > tbody > tr > td {
+    display: block;
+    width: auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  table.stack-table.stack-table > tbody > tr:hover > td { background: none; }
+  table.stack-table.stack-table > tbody > tr > td[data-label]:empty { display: none; }
+  table.stack-table.stack-table > tbody > tr > td[data-label] {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    align-items: center;
+    gap: 4px 10px;
+  }
+  /* Every part of the value stays in the value column (a cell may hold a
+     chip plus a caption) and keeps its natural width. */
+  table.stack-table.stack-table > tbody > tr > td[data-label] > * {
+    grid-column: 2;
+    justify-self: start;
+    max-width: 100%;
+  }
+  table.stack-table.stack-table > tbody > tr > td[data-label]::before {
+    grid-row: 1 / span 4;
+    align-self: start;
+    padding-top: 2px;
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  /* Row actions read as a button bar, not a labelled field. */
+  table.stack-table.stack-table > tbody > tr > td.stack-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 4px;
+  }
+  table.stack-table.stack-table > tbody > tr > td.stack-actions::before { content: none; }
+  /* A detail/edit row that follows its summary card. */
+  table.stack-table.stack-table > tbody > tr:has(> td[colspan]) {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+}
+@media (max-width: 600px) {
+  /* Camera card header: name on the left, edit/power/remove on the right. */
+  .cameras-table.stack-table td.cell-camera {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cameras-table.stack-table td.cell-camera .cam-info { min-width: 0; }
+  /* The ID is already on the card just above the editor; give the
+     "Editing <name>" title the room instead of truncating it to "Edi…". */
+  .cameras-table.stack-table .cam-edit-head-id { display: none; }
+  .cameras-table.stack-table .cam-edit-head-title { min-width: 0; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+  .cameras-table.stack-table td.cell-camera .cam-name { white-space: normal; overflow-wrap: anywhere; }
+  .cameras-table.stack-table td.cell-camera .cell-actions {
+    position: static;
+    transform: none;
+    flex: none;
+  }
+  .cameras-table.stack-table td.cell-camera .cell-actions button { min-width: 40px; min-height: 40px; }
+  .cameras-table.stack-table :is(.cell-connection, .cell-video, .cell-state) > * { margin-right: 6px; }
+}
+
+/* iOS Safari zooms the whole page when a focused field's text is under 16px,
+   and every field here was 12.6-14px - so each tap on a phone zoomed in and
+   left the user to pinch back out. Touch phones get 16px form text. The
+   !important is deliberate: dozens of per-component rules set smaller
+   sizes, and this has to win over all of them on touch screens only. */
+@media (pointer: coarse) and (max-width: 900px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Tiny phones (≤360px): stat cards stack one per row (see above); keep them
+   compact so four of them don't fill the first screen before any content. */
+@media (max-width: 360px) {
+  .stats-grid .card,
+  body.has-sidebar .stats-grid .card { padding: 12px 14px; }
+  .stats-grid .stat-card .stat-card-value,
+  body.has-sidebar .stats-grid .card strong { font-size: 22px; margin-top: 2px; }
+}

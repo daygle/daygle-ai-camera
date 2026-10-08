@@ -39,14 +39,14 @@
         <label class="application-log-date-field">To
           <input id="filterDateTo" type="date" aria-label="To date" />
         </label>
-        <select id="filterLevel">
+        <select id="filterLevel" aria-label="Log level">
           <option value="">All levels</option>
           <option value="error">Error and above</option>
           <option value="warning">Warning and above</option>
           <option value="info">Info and above</option>
           <option value="debug">Debug (all)</option>
         </select>
-        <input id="filterSearch" type="search" placeholder="Search messages…" />
+        <input id="filterSearch" type="search" placeholder="Search messages…" aria-label="Search messages" />
         <button id="applyFiltersBtn" type="button">Apply Filters</button>
         <button id="clearFiltersBtn" class="secondary" type="button">Reset Filters</button>
       </div>

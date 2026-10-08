@@ -447,6 +447,14 @@ window.daygleAuthReady = (async () => {
     const hero = main.querySelector(':scope > .hero');
     if (hero) hero.after(strip);
     else main.prepend(strip);
+    // On a phone the strip scrolls sideways (scrollbar hidden), so a later
+    // tab such as Timeline or Audit Log could load with the current page's
+    // own tab out of view. Centre the active tab without moving the page.
+    const activeTab = strip.querySelector('.page-tab.active');
+    if (activeTab && strip.scrollWidth > strip.clientWidth) {
+      const offset = activeTab.getBoundingClientRect().left - strip.getBoundingClientRect().left;
+      strip.scrollLeft += offset - (strip.clientWidth - activeTab.offsetWidth) / 2;
+    }
   }
 
   /* ── Breadcrumb: the page's eyebrow names its place in the menu, e.g.
@@ -509,9 +517,17 @@ window.daygleAuthReady = (async () => {
   /* ── Mobile drawer ── */
   const toggle = nav.querySelector('.app-nav-toggle');
   function setDrawer(open) {
+    const wasOpen = nav.classList.contains('nav-open');
     nav.classList.toggle('nav-open', open);
     document.body.classList.toggle('nav-drawer-open', open);
     if (toggle) toggle.setAttribute('aria-expanded', String(open));
+    // Keyboard users land inside the drawer when it opens and back on the
+    // menu button when it closes (the closed drawer is visibility:hidden).
+    if (open && !wasOpen) {
+      nav.querySelector('.app-nav-body .nav-item')?.focus({ preventScroll: true });
+    } else if (!open && wasOpen && nav.querySelector('.app-nav-body')?.contains(document.activeElement)) {
+      toggle?.focus({ preventScroll: true });
+    }
   }
   toggle?.addEventListener('click', (e) => {
     e.stopPropagation();

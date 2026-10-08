@@ -64,6 +64,12 @@
       #cameraModelsTable .camera-model-actions { display: grid; grid-template-columns: 1fr; }
       #cameraModelsTable .camera-model-actions button { min-height: 40px; }
     }
+    /* Narrow phones: a 96px label column left the model pills and the model
+       picker ~110px, squashing the pills into circles and clipping the
+       select. Put each label above its value instead. */
+    @media (max-width: 420px) {
+      #cameraModelsTable tbody td { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    }
   </style>
 </head>
 <body>
