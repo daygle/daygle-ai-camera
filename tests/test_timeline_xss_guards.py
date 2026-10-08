@@ -102,33 +102,5 @@ class _SoundsFileGuard(unittest.TestCase):
         )
 
 
-class _UtilsRuleExpandRowGuard(unittest.TestCase):
-    """``renderRuleExpandRow`` in utils.js interpolates the row ``key`` into
-    a ``data-*-email-recipients`` attribute. The sibling time-select fields
-    already route ``key`` through ``escapeHtml`` (via ``renderTimeSelect``'s
-    ``escapeHtml(dataAttrValue)``); this guard keeps the email-recipients
-    attribute consistent so a future caller passing a non-numeric key can't
-    break out of the attribute."""
-
-    path = REPO_ROOT / 'web' / 'utils.js'
-
-    def test_email_recipients_key_is_escaped(self) -> None:
-        source = _read(self.path)
-        self.assertIn(
-            'data-${prefix}-email-recipients="${escapeHtml(key)}"',
-            source,
-            msg=(
-                'renderRuleExpandRow no longer escapes the row key in the '
-                'email-recipients data-attribute - restore escapeHtml(key) '
-                'so it matches the escaped time-select fields'
-            ),
-        )
-        self.assertNotIn(
-            'data-${prefix}-email-recipients="${key}"',
-            source,
-            msg='renderRuleExpandRow regressed to raw ${key} interpolation',
-        )
-
-
 if __name__ == '__main__':
     unittest.main()

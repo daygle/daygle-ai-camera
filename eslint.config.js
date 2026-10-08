@@ -118,7 +118,6 @@ const WEB_SHARED_GLOBALS = {
   recordingTriggerLabel: 'readonly',
   recordingTriggerType: 'readonly',
   recordingZoneNames: 'readonly',
-  renderRuleExpandFields: 'readonly',
   renderTimeSelect: 'readonly',
   requireElements: 'readonly',
   safeHtml: 'readonly',

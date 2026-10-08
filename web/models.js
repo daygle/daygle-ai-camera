@@ -254,7 +254,9 @@ function renderAi(settings) {
   if (aiForm) fillAiForm(settings);
   renderStatus(settings);
   if (settings.reload_succeeded === false) setMessage(`Settings saved, but detector reload failed: ${settings.reload_error || settings.last_detector_error}`);
-  else if (messageEl) messageEl.textContent = settings.last_detector_error ? `Detector warning: ${settings.last_detector_error}` : '';
+  // Where the status panel is shown it already carries the error in its
+  // Last Detector Error row; only echo it on pages without that panel.
+  else if (messageEl) messageEl.textContent = settings.last_detector_error && !objectStatusPanel ? `Detector warning: ${settings.last_detector_error}` : '';
 }
 
 // The Settings tab's form; the other pages only show status.

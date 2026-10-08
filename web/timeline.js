@@ -1200,7 +1200,7 @@ async function loadTimeline({ preserveSelection = true } = {}) {
     if (session !== timelineLoadSession) return;
     // Special-cases benign 'No cameras configured' inline; re-throws to outer guarded .catch().
     if (err.message === 'No cameras configured') {
-      const msg = 'No cameras configured. Add a camera in Settings to use the timeline.';
+      const msg = 'No cameras configured. Add a camera on the Cameras page to use the timeline.';
       TIMELINE_CARDS.forEach((card) => {
         if (card.status) card.status.textContent = msg;
         setTimelineStatusChip(card, { kind: 'empty', label: 'No cameras' });

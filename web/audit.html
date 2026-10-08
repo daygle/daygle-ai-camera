@@ -33,8 +33,8 @@
       </div>
 
       <div class="audit-filters">
-        <input id="filterUsername" placeholder="Filter by username" />
-        <select id="filterAction">
+        <input id="filterUsername" placeholder="Filter by username" aria-label="Filter by username" />
+        <select id="filterAction" aria-label="Action">
           <option value="">All actions</option>
           <option value="login">Login</option>
           <option value="logout">Logout</option>
@@ -45,7 +45,7 @@
           <option value="backup">Backup</option>
           <option value="restore">Restore</option>
         </select>
-        <input id="filterResource" placeholder="Filter by resource (e.g. user, settings)" />
+        <input id="filterResource" placeholder="Filter by resource (e.g. user, settings)" aria-label="Filter by resource" />
         <button id="applyFiltersBtn" type="button">Apply</button>
         <button id="clearFiltersBtn" class="secondary" type="button">Clear</button>
       </div>

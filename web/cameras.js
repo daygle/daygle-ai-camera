@@ -891,11 +891,9 @@ function renderCameraRow(camera, index) {
 
 // ─── Click-to-sort column headers ─────────────────────────────────────────
 // Headers re-order the currently displayed cameras client-side. `null` means
-// the config order (the order saved by drag-and-drop) applies; clicking a
-// column cycles asc → desc → back to config order. The sort survives health /
-// resolution refreshes and filter changes, and clears when the user drags a
-// camera to reorder (drag is the config-order control, like the Sort By
-// select on the recordings page).
+// the saved config order applies; clicking a column cycles asc → desc → back
+// to config order. The sort survives health / resolution refreshes and filter
+// changes, and clears on Reset Filters.
 let cameraSortState = null;
 let openCameraEditIndex = null;
 

@@ -41,7 +41,10 @@ test('section tabs render under the heading and the eyebrow becomes a breadcrumb
 
 test('the sidebar is fixed on desktop and a drawer on phones', () => {
   assert.match(css, /body\.has-sidebar \{ padding-left: var\(--sidebar-w\);/);
-  assert.match(css, /\.app-nav\.nav-open \.app-nav-body \{ transform: none; \}/);
+  assert.match(css, /\.app-nav\.nav-open \.app-nav-body \{[^}]*transform: none;[^}]*visibility: visible;/);
+  // The closed drawer is visibility:hidden so Tab and screen readers skip
+  // its off-screen links.
+  assert.match(css, /\.app-nav-body \{[^}]*transform: translateX\(-100%\);[^}]*visibility: hidden;/);
   assert.match(css, /body\.has-sidebar \.shell \{ width: auto; max-width: none;/);
 });
 

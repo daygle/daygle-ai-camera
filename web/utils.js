@@ -1612,12 +1612,12 @@ function renderTimeSelect(value, dataAttr, dataAttrValue) {
     hourOpts = Array.from({ length: 12 }, (_, i) => i + 1)
       .map((h) => `<option value="${h}"${h12 === h ? ' selected' : ''}>${h}</option>`)
       .join('');
-    ampmSel = `<select class="time-select-ampm"><option value="am"${!isPm && selH >= 0 ? ' selected' : ''}>AM</option><option value="pm"${isPm ? ' selected' : ''}>PM</option></select>`;
+    ampmSel = `<select class="time-select-ampm" aria-label="AM or PM"><option value="am"${!isPm && selH >= 0 ? ' selected' : ''}>AM</option><option value="pm"${isPm ? ' selected' : ''}>PM</option></select>`;
   } else {
     hourOpts = Array.from({ length: 24 }, (_, i) => `<option value="${String(i).padStart(2, '0')}"${selH === i ? ' selected' : ''}>${String(i).padStart(2, '0')}</option>`).join('');
   }
 
-  return `<span class="time-select-wrap" ${dataAttr}="${escapeHtml(dataAttrValue)}"><select class="time-select-hour"><option value="">--</option>${hourOpts}</select><span class="time-select-colon">:</span><select class="time-select-minute"><option value="">--</option>${minutes}</select>${ampmSel}</span>`;
+  return `<span class="time-select-wrap" ${dataAttr}="${escapeHtml(dataAttrValue)}"><select class="time-select-hour" aria-label="Hour"><option value="">--</option>${hourOpts}</select><span class="time-select-colon">:</span><select class="time-select-minute" aria-label="Minute"><option value="">--</option>${minutes}</select>${ampmSel}</span>`;
 }
 
 function timeSelectValue(wrap) {
@@ -2105,44 +2105,6 @@ function daygleSinceParamForRange(range) {
   if (range === '7d') return daygleLocalDayStartIso(7);
   if (range === '30d') return daygleLocalDayStartIso(30);
   return ''; // 'all' - no since filter
-}
-
-// ─── Shared rule expand-row template (zones.js + sounds.js) ──────────────
-// Both zone object rules and sound rules have an expandable row that
-// contains an email-recipients field plus four time-picker fields
-// (active_start / active_end / notify_start / notify_end). The data-
-// attribute prefix differs between the two pages ('zone-rule' vs 'rule')
-// but the HTML structure is byte-identical. Consolidating here keeps
-// the two page scripts in sync so future tweaks to the time-picker
-// layout land in one place.
-//
-// renderRuleExpandFields is the shared field set (email recipients + four
-// time pickers). The zones page Motion card embeds the same
-// fields directly in a div so Motion's advanced settings match the object
-// rules without living in a table row.
-// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts (sounds/zones rule editors)
-function renderRuleExpandFields(prefix, key, rule) {
-  return `
-    <label class="sound-rule-field sound-rule-email-field">
-      <span>Email recipients</span>
-      <input type="email" data-${prefix}-email-recipients="${escapeHtml(key)}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
-    </label>
-    <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-      <span>Active from</span>
-      ${renderTimeSelect(rule.active_start, `data-${prefix}-active-start`, key)}
-    </label>
-    <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-      <span>Active to</span>
-      ${renderTimeSelect(rule.active_end, `data-${prefix}-active-end`, key)}
-    </label>
-    <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-      <span>Email/Push from</span>
-      ${renderTimeSelect(rule.notify_start, `data-${prefix}-notify-start`, key)}
-    </label>
-    <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-      <span>Email/Push to</span>
-      ${renderTimeSelect(rule.notify_end, `data-${prefix}-notify-end`, key)}
-    </label>`;
 }
 
 // Seconds-of-day → wall clock (e.g. 37800 → "10:30" or "10:30 am"). Honours
