@@ -589,6 +589,35 @@ textarea {
 }
 .ai-verification-cameras legend { padding: 0 6px; font-weight: 500; }
 .ai-tags-add { width: 100%; margin-top: 6px; }
+
+/* Zones page: tint the shared chip class so object chips inside tripwire /
+   loiter / unusual-time / activity-spike / AI-tag cards read as accents of
+   that card rather than the neutral chip look (the base .chip rules apply
+   because the JS markup also carries the class name). */
+.zone-object-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 10px;
+  border: 1px solid rgba(71, 214, 255, .3);
+  border-radius: 999px;
+  background: rgba(71, 214, 255, .1);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+/* Links inside the per-rule hints ("Set email / push alerts") currently
+   inherit the browser's default link styling, which is nearly invisible on
+   the dark panel. Give them the same accent + underline treatment the rest
+   of the dashboard uses for inline links. */
+.zone-assigned-link {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.zone-assigned-link:hover { color: var(--text); }
 /* The AI page wraps its cards in this form, which is itself a .page-stack
    grid item of the shell. Make it a grid too so the cards inside get the
    same row gap as the cards on every other page (gap: inherit resolves to
@@ -1470,7 +1499,10 @@ input[type="file"] { padding: 10px; }
   display: inline-block;
   border: 1px solid var(--border);
 }
-.zone-overlay { position: absolute; pointer-events: auto; z-index: 2; touch-action: none; }
+/* Zone overlay: JS positions this over the visible (letterboxed) image area
+   with explicit left/top/width/height, so the default inset must not fight
+   it before the first sync runs. */
+.zone-overlay { position: absolute; inset: 0; pointer-events: auto; z-index: 2; touch-action: none; }
 .monitor-zone-polygon { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .monitor-zone-polygon polygon,
 .monitor-zone-polygon polyline {
@@ -6018,11 +6050,12 @@ button.secondary:disabled, a.secondary:disabled {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 24px;
   margin-bottom: 0;
   padding: 4px 2px 2px;
 }
-.zones-hero-copy { max-width: 720px; }
+.zones-hero-copy { flex: 1 1 320px; max-width: 720px; }
 .zones-hero h1 { letter-spacing: -.045em; }
 .zones-hero .muted { max-width: 680px; margin: 12px 0 0; font-size: 15px; line-height: 1.55; }
 .zones-hero-action { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
@@ -6033,7 +6066,11 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-editor-footer button svg,
 .sound-editor-footer button svg { flex: 0 0 auto; }
 
-.zones-workflow {
+/* In-page workflow stepper. zones.html does not ship one today, but a
+   .zones-shell whose only child is a bare .zones-workflow (i.e. an editorial
+   header-only variant) would show an empty gradient strip - so only lay it
+   out when it actually has steps. */
+.zones-workflow:has(.zones-workflow-step) {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -6055,8 +6092,17 @@ button.secondary:disabled, a.secondary:disabled {
 .zones-workflow-line { flex: 1; min-width: 18px; height: 1px; background: linear-gradient(90deg, rgba(71,214,255,.35), var(--border)); }
 
 .zones-stats { gap: 12px; }
+/* Two-up stat row: even columns so a long camera name cannot squeeze the
+   Active-zones card (auto-fit could otherwise size the pair unevenly). */
+.zones-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 480px) {
+  .zones-stats { grid-template-columns: 1fr; }
+}
 .zones-stats .stat-card { padding: 17px 18px 18px; border-radius: 18px; box-shadow: 0 12px 32px rgba(0,0,0,.16); }
 .zones-stats .stat-card-value { margin-top: 8px; font-size: 28px; }
+/* The camera-name stat card uses the text-value variant; match its top margin
+   to the numeric one so both cards' baselines line up. */
+.zones-stats .stat-card-value-text { margin-top: 8px; }
 .zones-stats .stat-card-icon { width: 30px; height: 30px; border-radius: 10px; }
 .zones-stats .stat-card-camera .stat-card-icon { color: var(--accent); background: rgba(71,214,255,.08); }
 
@@ -6102,9 +6148,11 @@ button.secondary:disabled, a.secondary:disabled {
 .zones-editor-camera select { min-height: 46px; border-radius: 13px; }
 .zones-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 9px; }
 .zones-list-heading > div { min-width: 0; }
+.zones-list-heading strong { display: block; }
 .zones-list-heading span:not(.zones-list-count) { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
 .zones-list-count { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 10px; font-weight: 850; text-transform: uppercase; letter-spacing: .06em; }
 .zones-list { gap: 9px; }
+.zones-list .empty { margin: 0; padding: 14px; border: 1px dashed var(--border); border-radius: 14px; background: rgba(255,255,255,.02); font-size: 12.5px; line-height: 1.5; }
 .zones-list .item { padding: 13px; border-radius: 15px; background: rgba(255,255,255,.025); }
 .zones-list .item:hover { transform: translateY(-1px); }
 .zones-list .zone-row.selected { border-color: rgba(73,230,163,.72); background: linear-gradient(90deg, rgba(73,230,163,.11), rgba(73,230,163,.035)); box-shadow: inset 3px 0 0 var(--success); }
@@ -6123,6 +6171,9 @@ button.secondary:disabled, a.secondary:disabled {
 }
 /* The text keeps a readable width; the buttons wrap below it in a narrow column. */
 .zone-card-actions > div:first-child { flex: 1 1 200px; min-width: 0; }
+/* Inline SVG + text inside these secondary buttons need a consistent
+   baseline, matching the treatment given to footer buttons above. */
+.zone-card-action-buttons button svg { flex: 0 0 auto; }
 .zone-card-actions strong,
 .zone-card-actions span { display: block; }
 .zone-card-actions strong { color: var(--text); font-size: 12px; }
@@ -6149,13 +6200,19 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-row-main label > span { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
 .zone-row-main .zone-visibility-field > span { color: var(--muted); background: transparent; }
 .zone-row-main label select { min-height: 42px; border-radius: 11px; }
+/* Remove + Save cluster: pinned to the Visibility cell (column 2, row 3).
+   When the per-area Save appears (unsaved changes), the pair may outgrow the
+   auto column, so let it wrap instead of stretching the row. */
 .zone-row-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
   grid-column: 2;
   grid-row: 3;
   align-self: end;
+  max-width: 100%;
 }
 .zone-action-btn {
   height: 42px;
@@ -6261,6 +6318,7 @@ button.secondary:disabled, a.secondary:disabled {
 .zones-rules-tip strong { color: var(--text); }
 .zones-tip-icon { display: grid; place-items: center; flex: 0 0 auto; width: 18px; height: 18px; border: 1px solid rgba(71,214,255,.45); border-radius: 999px; color: var(--accent); font-size: 11px; font-weight: 900; }
 .zone-object-rules { margin-bottom: 20px; padding: 14px; border: 1px solid var(--border); border-radius: 17px; background: rgba(255,255,255,.018); }
+.zone-object-rules:last-child { margin-bottom: 0; }
 .zone-rules-header {
   display: flex;
   align-items: center;
@@ -6320,14 +6378,11 @@ button.secondary:disabled, a.secondary:disabled {
   .zone-rule-add .rule-add-select { width: 100%; }
 }
 /* Motion is its own card with a single toggle -- it is not an object class,
-   so it lives above the object table instead of in it. */
-.zone-motion-card {
-  margin-top: 14px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: rgba(255,255,255,.018);
-}
+   so it lives above the object table instead of in it. Spacing is owned by
+   .zone-tripwire-card (margin-top: 12px) so Motion, Face, Line Crossing,
+   Loitering, Unusual Time, Activity Spike and AI Tag cards all sit on the
+   same vertical rhythm instead of the Motion card hugging the table. */
+.zone-motion-card { margin-top: 12px; }
 .zone-motion-card.is-enabled { border-color: rgba(73,230,163,.3); }
 .zone-motion-head {
   display: flex;
@@ -6471,6 +6526,8 @@ button.secondary:disabled, a.secondary:disabled {
 :root.light .zones-stats .stat-card,
 :root.light .zones-frame-card { box-shadow: 0 12px 32px rgba(0,0,0,.08); }
 :root.light .zones-list .item { background: rgba(255,255,255,.72); }
+:root.light .zones-list .empty { background: rgba(255,255,255,.6); }
+:root.light .zone-object-chip { border-color: rgba(2,132,199,.3); background: rgba(2,132,199,.08); color: #0369a1; }
 :root.light .zone-object-rules { background: rgba(255,255,255,.7); }
 :root.light .cameras-table-wrap { background: rgba(0,0,0,.018); }
 :root.light .zones-rules-tip { background: rgba(2,132,199,.045); border-color: rgba(2,132,199,.16); }
@@ -6784,6 +6841,11 @@ button.secondary:disabled, a.secondary:disabled {
    the mark stay together at the right edge instead of being pushed apart by
    .hero's space-between. */
 .hero:has(> .onnx-hero-mark) > :first-child { flex: 1 1 auto; min-width: 0; }
+/* The Zones hero carries the same emblem plus the floating Save button.
+   Keeping the action aligned to the mark's vertical centre (not the flex
+   baseline) stops the button from riding above/below the emblem when the
+   description wraps onto multiple lines. */
+.zones-hero .zones-hero-action { align-self: center; }
 .onnx-hero-ring {
   position: absolute;
   border-radius: 50%;
