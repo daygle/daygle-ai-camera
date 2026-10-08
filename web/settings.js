@@ -216,6 +216,8 @@ const FORM_DEFAULTS = {
     adaptive_detection_enabled: 'true',
     object_detection_region_boost: 'false',
     object_detection_tiling: 'off',
+    object_detection_low_light: 'off',
+    object_detection_second_look: 'false',
     detection_history_minutes: 10,
     ingest_frame_fps: 4,
     snapshot_quality: 2,
@@ -304,6 +306,7 @@ const FIELD_TYPES = {
   boolean: new Set([
     'enabled', 'continuous', 'auto_purge_enabled', 'background_detection_enabled',
     'always_run_object_detection', 'object_detection_region_boost', 'motion_denoise',
+    'object_detection_second_look',
     'adaptive_detection_enabled',
     'use_tls', 'use_ssl', 'autostart', 'tunnel_loopback_only',
   ]),

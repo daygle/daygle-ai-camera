@@ -13,6 +13,8 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 - Monitoring zones, motion and object rules, per-label confidence and cooldowns
 - Per-object detection behavior: choose, per class, whether detections count for moving subjects, still subjects, or both (a parked car can be ignored while a passing one still alerts)
 - Umbrella `animal` / `pet` group labels so one rule can match any related class (e.g. a cat misread as a dog at night)
+- Per-rule object size and shape limits (min/max share of the frame, min/max width-to-height), so an oversized or wrongly shaped box never alerts
+- Opt-in low-light / IR contrast enhancement of the detector's input, and an opt-in "second look" that re-checks near-miss detections on a zoomed, mirrored crop
 - Optional temporal confirmation gate that requires an object to persist across several detection cycles before it alerts, suppressing single-frame false positives
 - Continuous per-camera recording plus event clips with pre/post-event buffering
 - Email alerts and ntfy-compatible push notifications, including camera offline and recovery alerts

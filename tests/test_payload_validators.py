@@ -1269,6 +1269,7 @@ def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
         'background_detection_enabled', 'always_run_object_detection',
         'adaptive_detection_enabled',
         'object_detection_region_boost', 'object_detection_tiling',
+        'object_detection_low_light', 'object_detection_second_look',
         'detection_history_minutes',
         'motion_algorithm', 'motion_denoise', 'motion_shadow_suppression',
         'motion_pixel_threshold', 'motion_gate_fraction',

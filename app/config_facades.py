@@ -136,6 +136,13 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     # including stationary ones the motion-region boost never sees -- at the cost
     # of one inference per tile. Best on cameras covering a large/deep area.
     'object_detection_tiling': 'off',
+    # Low-light / IR enhancement of the detector's input (app.low_light):
+    # 'off' (default), 'auto' (only while the frame is dark) or 'on'.
+    'object_detection_low_light': 'off',
+    # Second look (app.second_look): re-check near-miss detections on a zoomed
+    # crop and a mirrored crop before dropping them. Off by default: it adds up
+    # to four inferences on a cycle with borderline detections.
+    'object_detection_second_look': False,
     'detection_history_minutes': 10,
     # Background-subtraction engine: 'mog2' (default, Gaussian-mixture with
     # shadow rejection) or 'diff' (legacy single-frame adaptive diff / automatic

@@ -186,8 +186,10 @@ from app.camera_policy import camera_policy
 _zone_pixel_motion_errors: set[str] = set()
 from app.utils import normalize_email_recipients
 from app.zone_schema import (
+    BOX_LIMIT_KEYS,
     canonical_label,
     detection_label_in_allowed,
+    detection_within_box_limits,
     label_matches,
     normalize_label_list,
     zone_motion_confirm_cycles,
@@ -830,6 +832,10 @@ def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict
                 continue
             if confidence > float(rule.get('max_confidence', 1.0)):
                 continue
+            # Optional object size / shape limits (e.g. a "person" covering
+            # most of the frame, or one wider than it is tall).
+            if not detection_within_box_limits(detection, rule):
+                continue
             matches.append((zone, rule))
     return matches
 
@@ -917,6 +923,7 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                     # detection in the first place.
                     'min_confidence': rule.get('min_confidence', 0.45 if label in ('motion', 'face') else 0.5),
                     'max_confidence': rule.get('max_confidence', 1.0),
+                    **{key: rule.get(key) for key in BOX_LIMIT_KEYS},
                     'cooldown_seconds': rule.get('cooldown_seconds', 60),
                     'ai_verify': bool(rule.get('ai_verify', False)),
                     'ai_verify_skip_above': rule.get('ai_verify_skip_above', 1.0),
@@ -1057,7 +1064,7 @@ def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[di
             max_conf = float(rule.get('max_confidence', 1.0))
         except (TypeError, ValueError):
             max_conf = 1.0
-        if min_conf <= confidence <= max_conf:
+        if min_conf <= confidence <= max_conf and detection_within_box_limits(detection, rule):
             return True
     return False
 
@@ -1216,3 +1223,24 @@ def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame:
                 normalized_detection['confidence'] = 0.0
         normalized.append(normalized_detection)
     return normalized
+
+
+def stamp_frame_aspect(detections: list[dict[str, Any]], frame: dict[str, Any]) -> None:
+    """Record the frame's width / height on each detection as ``_frame_aspect``.
+
+    Boxes are normalized to the frame, so their width / height ratio is only a
+    real pixel aspect on a square frame. Object rules with a shape limit (see
+    ``detection_within_box_limits``) read this to compare true proportions. The
+    leading underscore keeps it out of JSON payloads (``json_safe_detections``).
+    """
+    try:
+        width = float(frame.get('width') or 0)
+        height = float(frame.get('height') or 0)
+    except (AttributeError, TypeError, ValueError):
+        return
+    if not (math.isfinite(width) and math.isfinite(height)) or width <= 0 or height <= 0:
+        return
+    aspect = round(width / height, 6)
+    for detection in detections:
+        if isinstance(detection, dict):
+            detection['_frame_aspect'] = aspect

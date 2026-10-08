@@ -7774,3 +7774,12 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
   .stats-grid .stat-card .stat-card-value,
   body.has-sidebar .stats-grid .card strong { font-size: 22px; margin-top: 2px; }
 }
+
+/* Object card "Size & Shape" panel: a full-width row under the card's fields. */
+.zone-detect-card .zone-object-limits {
+  flex: 1 1 100%;
+  padding-top: 10px;
+  border-top: 1px solid var(--zone-card-border, var(--border));
+}
+.zone-detect-card .zone-object-limits[hidden] { display: none; }
+.zone-object-limits-hint { grid-column: 1 / -1; margin: 0; font-size: 12px; }

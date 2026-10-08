@@ -323,7 +323,7 @@ driveway" zone rule.
 
 All of these live under **Settings → Detection & Live → Live Performance**. The motion engine settings are grouped under the **Advanced Motion Engine** disclosure on that card, with plain names: **Ignore Small Light Changes** (pixel threshold), **Clean Up Speckle Noise** (denoise), **Ignore Shadows** (shadow suppression), **Background Model** (MOG2 / Simple Difference), **Background Adapt Speed** (background alpha), **Wake-Up Threshold** (gate fraction), **Motion Score Scale** (scale fraction), **Periodic Scan Interval**, and **Analysis Width / Height** (motion frame size). How much movement counts as motion is not set here; it is each area's trigger on the Zones page. The card's **Reset Defaults** button refills the form with the built-in defaults; nothing is applied until you press **Save**.
 
-These remain the global defaults. Each camera can override the detection-performance settings from **Cameras → Edit Camera → Advanced**, where the **Day Profile** and **Night Profile** sections are edited independently: each keeps its own values, so a daytime tuning change never overwrites the night tuning (and vice versa), and changing **Active Profile** only picks which one runs - it never reloads or discards what is typed in either section. The camera stores separate Day and Night values for background detection, detection interval, ingest frame rate, confirmation frames/window/IoU, always-run object detection, region boost, tiling, periodic scans, motion-frame dimensions, and all motion tuning fields. A value left on **Global Default** inherits the global Live Performance setting and stays that way across saves.
+These remain the global defaults. Each camera can override the detection-performance settings from **Cameras → Edit Camera → Advanced**, where the **Day Profile** and **Night Profile** sections are edited independently: each keeps its own values, so a daytime tuning change never overwrites the night tuning (and vice versa), and changing **Active Profile** only picks which one runs - it never reloads or discards what is typed in either section. The camera stores separate Day and Night values for background detection, detection interval, ingest frame rate, confirmation frames/window/IoU, always-run object detection, region boost, tiling, low-light enhancement, second look, periodic scans, motion-frame dimensions, and all motion tuning fields. A value left on **Global Default** inherits the global Live Performance setting and stays that way across saves.
 
 The **Profile Presets** row holds separate **Day** and **Night** versions of **Cat / Small Animal**, **Balanced**, **Maximum Recall**, **Low CPU**, **Night / IR**, and **Fast Motion**. Each preset contains settings for only one mode. The **Day Preset** selector lists only Day presets, and **Night Preset** lists only Night presets. **Save Day Preset** and **Save Night Preset** create a new mode-specific custom preset, while **Update** and **Delete** affect only the selected mode. Legacy cameras that used one shared preset assignment are left unassigned during migration so the operator explicitly chooses Day, Night, both, or neither. Nothing reaches the camera until you save.
 
@@ -392,6 +392,51 @@ python scripts/evaluate_detection.py --input clip.mp4 --model models/yolo11n.onn
 ```
 
 Default: `Off`
+
+### Low-Light Enhancement
+
+YOLO models learn mostly from daylight photos, so a dark night frame or a flat
+grey IR frame hides a subject that a person can still pick out. With this on,
+the copy of the frame handed to the object detector gets a local contrast boost
+(CLAHE) first: colour frames on their lightness channel, IR frames on their grey
+channel. Snapshots, recordings, the motion model and face recognition all keep
+the original picture, and boxes map back unchanged.
+
+- **Off** - the detector always sees the raw frame (default).
+- **Auto (Dark Frames Only)** - enhance only while the frame's average
+  brightness is below 50/255, the same "night" line the motion engine uses for
+  Ignore Shadows = Auto. Daytime frames pass through untouched.
+- **Always** - enhance every frame, for a camera that is always dim.
+
+The cost is a few milliseconds per cycle on a 1080p frame. CLAHE can also lift
+sensor noise into texture, so compare a night clip with it on and off before
+leaving it on (see `docs/detection-benchmarking.md`). Setting it in a camera's
+**Night Profile** only is a good way to try it.
+
+Default: `Off`
+
+### Second Look
+
+A small, dim or partly hidden subject often scores just under its rule's
+threshold on the full-frame pass. Lowering the threshold to catch it lets every
+other weak guess through too. Second Look re-checks only those near-misses:
+
+1. The full-frame pass runs at 60% of the camera's lowest rule threshold (a 0.5
+   rule becomes a 0.3 floor), so near-misses are kept for a moment.
+2. For each near-miss with a label and position some rule on this camera
+   watches, the full-resolution frame is cropped around the box with context,
+   and the detector runs on the crop and on a mirrored copy of it.
+3. The detection is kept only when the two re-checks, on average, clear the
+   threshold for the same label at the same spot. It is stored with the
+   re-checked confidence and box and marked `second_look`.
+
+Every other sub-threshold detection is dropped, so nothing below the threshold
+reaches the overlay, events or alerts. At most two near-misses are re-checked per
+cycle (strongest first), so the extra cost is at most four inferences, and only
+on cycles that have a near-miss. It composes with Low-Light Enhancement (the
+re-check uses the enhanced frame) and with Region Boost / Tiling.
+
+Default: `Disabled`
 
 ### Always Run Object Detection
 

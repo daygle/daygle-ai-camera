@@ -74,6 +74,8 @@ CAMERA_MOTION_PROFILE_FIELDS = (
     'adaptive_detection_enabled',
     'object_detection_region_boost',
     'object_detection_tiling',
+    'object_detection_low_light',
+    'object_detection_second_look',
     'periodic_scan_interval_seconds',
     'motion_frame_width',
     'motion_frame_height',
@@ -126,12 +128,15 @@ def _normalize_profile_value(key: str, value: Any) -> int | float | str | bool |
     if key in {
         'background_detection_enabled', 'always_run_object_detection',
         'adaptive_detection_enabled', 'object_detection_region_boost',
-        'motion_denoise',
+        'object_detection_second_look', 'motion_denoise',
     }:
         return normalize_bool_setting(value, True)
     if key == 'object_detection_tiling':
         text = str(value).strip().lower()
         return text if text in {'off', '2x2', '3x3', '4x4'} else None
+    if key == 'object_detection_low_light':
+        text = str(value).strip().lower()
+        return text if text in {'off', 'auto', 'on'} else None
     if key == 'motion_algorithm':
         text = str(value).strip().lower()
         return text if text in {'mog2', 'diff'} else None
