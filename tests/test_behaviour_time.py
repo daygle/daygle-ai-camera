@@ -153,7 +153,7 @@ class TimeSchemaTests(unittest.TestCase):
     def test_defaults(self) -> None:
         rule = normalize_zone_time({'time_of_day': {}})
         self.assertTrue(rule['enabled'])
-        self.assertEqual(rule['name'], 'Unusual time')
+        self.assertEqual(rule['name'], 'Unusual Time')
         self.assertEqual(rule['labels'], [])
         self.assertEqual(rule['threshold'], 0.15)
         self.assertEqual(rule['cooldown_seconds'], 1800)
@@ -168,7 +168,7 @@ class TimeSchemaTests(unittest.TestCase):
         self.assertEqual(rule['threshold'], 1.0)        # capped at 1
         self.assertEqual(rule['cooldown_seconds'], 0)   # floored at 0
         self.assertEqual(rule['labels'], ['person'])
-        self.assertEqual(rule['name'], 'Unusual time')  # blank -> default
+        self.assertEqual(rule['name'], 'Unusual Time')  # blank -> default
         self.assertEqual(rule['notify_start'], '09:30')
 
     def test_bad_types_fall_back(self) -> None:

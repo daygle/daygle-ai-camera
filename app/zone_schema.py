@@ -718,7 +718,7 @@ def normalize_zone_time(zone: dict[str, Any]) -> dict[str, Any] | None:
         cooldown = 1800
     return {
         'enabled': bool(raw.get('enabled', True)),
-        'name': str(raw.get('name') or 'Unusual time').strip() or 'Unusual time',
+        'name': str(raw.get('name') or 'Unusual Time').strip() or 'Unusual Time',
         'labels': normalize_label_list(raw.get('labels')),
         'threshold': round(threshold, 4),
         'cooldown_seconds': cooldown,
@@ -775,7 +775,7 @@ def normalize_zone_activity(zone: dict[str, Any]) -> dict[str, Any] | None:
         cooldown = 900
     return {
         'enabled': bool(raw.get('enabled', True)),
-        'name': str(raw.get('name') or 'Activity spike').strip() or 'Activity spike',
+        'name': str(raw.get('name') or 'Activity Spike').strip() or 'Activity Spike',
         'labels': normalize_label_list(raw.get('labels')),
         'min_count': min_count,
         'sensitivity': round(sensitivity, 3),

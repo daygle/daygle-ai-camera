@@ -243,8 +243,8 @@ function ruleLabel(rule) {
   if (alertType === 'people') return rule.name || 'Unknown Person';
   if (alertType === 'tripwire') return titleCase(rule.name || 'Tripwire');
   if (alertType === 'loiter') return titleCase(rule.name || 'Loitering');
-  if (alertType === 'time') return titleCase(rule.name || 'Unusual time');
-  if (alertType === 'activity') return titleCase(rule.name || 'Activity spike');
+  if (alertType === 'time') return titleCase(rule.name || 'Unusual Time');
+  if (alertType === 'activity') return titleCase(rule.name || 'Activity Spike');
   if (alertType === 'ai_tags') return `${rule.name || 'AI tag alert'}${(rule.tags || []).length ? ` (${rule.tags.join(', ')})` : ''}`;
   return String(rule.label || '').replace(/\b\w/g, (char) => char.toUpperCase());
 }
@@ -304,10 +304,9 @@ function renderPolicies() {
           ? 'No line crossing is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Line crossing and draw a line, then set its alerts here.'
           : alertType === 'loiter'
             ? 'No loitering rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Loitering, then set its alerts here.'
-            : alertType === 'time'
-              ? 'No unusual time-of-day rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Unusual time, then set its alerts here.'
+            : alertType === 'time'                ? 'No unusual time-of-day rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Unusual Time, then set its alerts here.'
               : alertType === 'activity'
-                ? 'No activity-spike rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Activity spike, then set its alerts here.'
+                ? 'No activity-spike rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Activity Spike, then set its alerts here.'
                 : alertType === 'ai_tags'
                   ? 'No AI tag alert is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on AI tag alert and add the things to watch for, then set its alerts here.'
                   : 'No recognized-person alert policies yet. Add one below to get started.';

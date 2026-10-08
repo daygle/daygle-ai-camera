@@ -133,7 +133,7 @@ class ActivitySchemaTests(unittest.TestCase):
     def test_defaults(self) -> None:
         rule = normalize_zone_activity({'activity_spike': {}})
         self.assertTrue(rule['enabled'])
-        self.assertEqual(rule['name'], 'Activity spike')
+        self.assertEqual(rule['name'], 'Activity Spike')
         self.assertEqual(rule['min_count'], 5)
         self.assertEqual(rule['sensitivity'], 3.0)
         self.assertEqual(rule['cooldown_seconds'], 900)
@@ -149,7 +149,7 @@ class ActivitySchemaTests(unittest.TestCase):
         self.assertEqual(rule['sensitivity'], 10.0)
         self.assertEqual(rule['cooldown_seconds'], 0)
         self.assertEqual(rule['labels'], ['car'])
-        self.assertEqual(rule['name'], 'Activity spike')
+        self.assertEqual(rule['name'], 'Activity Spike')
         self.assertEqual(rule['notify_start'], '08:05')
 
     def test_bad_types_fall_back(self) -> None:

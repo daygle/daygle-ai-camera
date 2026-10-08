@@ -1890,7 +1890,7 @@ function normalizeTime(raw) {
     : [];
   return {
     enabled: raw.enabled !== false,
-    name: String(raw.name || 'Unusual time').trim() || 'Unusual time',
+    name: String(raw.name || 'Unusual Time').trim() || 'Unusual Time',
     labels,
     threshold,
     cooldown_seconds: cooldown,
@@ -1922,7 +1922,7 @@ function normalizeActivity(raw) {
     : [];
   return {
     enabled: raw.enabled !== false,
-    name: String(raw.name || 'Activity spike').trim() || 'Activity spike',
+    name: String(raw.name || 'Activity Spike').trim() || 'Activity Spike',
     labels,
     min_count: minCount,
     sensitivity,

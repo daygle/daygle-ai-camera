@@ -607,17 +607,6 @@ textarea {
   font-weight: 700;
   line-height: 1.4;
 }
-/* Links inside the per-rule hints ("Set email / push alerts") currently
-   inherit the browser's default link styling, which is nearly invisible on
-   the dark panel. Give them the same accent + underline treatment the rest
-   of the dashboard uses for inline links. */
-.zone-assigned-link {
-  color: var(--accent);
-  font-weight: 700;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.zone-assigned-link:hover { color: var(--text); }
 /* The AI page wraps its cards in this form, which is itself a .page-stack
    grid item of the shell. Make it a grid too so the cards inside get the
    same row gap as the cards on every other page (gap: inherit resolves to
@@ -1631,29 +1620,96 @@ input[type="file"] { padding: 10px; }
   border-color: #07111d;
   box-shadow: 0 0 0 1px rgba(255,255,255,.4);
 }
-/* Line-crossing card in the detection-rules panel. */
+/* Detection cards in the rules panel (object classes, Motion, Face, Line
+   Crossing, Loitering, Unusual Time, Activity Spike, AI Tag). Every card
+   carries one colour variant that drives its border, tint and icon, so the
+   cards read as distinct at a glance. With no variant the card stays amber,
+   matching the Line Crossing card and the line drawn on the footage. */
 .zone-tripwire-card {
   margin-top: 12px;
   padding: 12px 14px;
-  border: 1px solid rgba(251,191,36,.28);
+  border: 1px solid var(--zone-card-border, rgba(251,191,36,.28));
+  border-left-width: 3px;
   border-radius: 12px;
-  background: rgba(251,191,36,.05);
+  background: var(--zone-card-bg, rgba(251,191,36,.05));
 }
-.zone-tripwire-card.is-enabled { border-color: rgba(251,191,36,.5); }
-/* Loitering card: same layout as the line-crossing card, distinct violet accent. */
-.zone-loiter-card { border-color: rgba(167,139,250,.3); background: rgba(167,139,250,.05); }
-.zone-loiter-card.is-enabled { border-color: rgba(167,139,250,.55); }
-/* Unusual time-of-day card: distinct sky accent. */
-.zone-time-card { border-color: rgba(56,189,248,.3); background: rgba(56,189,248,.05); }
-.zone-time-card.is-enabled { border-color: rgba(56,189,248,.55); }
-/* Activity-spike card: distinct rose accent. */
-.zone-activity-card { border-color: rgba(251,113,133,.3); background: rgba(251,113,133,.05); }
-.zone-activity-card.is-enabled { border-color: rgba(251,113,133,.55); }
+.zone-tripwire-card.is-enabled { border-color: var(--zone-card-border-strong, rgba(251,191,36,.5)); }
+.zone-tripwire-card .zone-rule-icon {
+  color: var(--zone-card-accent, var(--accent));
+  border-color: var(--zone-card-border, rgba(71,214,255,.3));
+  background: var(--zone-card-bg, rgba(71,214,255,.08));
+}
+/* Colour variants: one per accent, set on the card element. */
+.zone-card--emerald { --zone-card-accent:#34d399; --zone-card-border:rgba(52,211,153,.3); --zone-card-border-strong:rgba(52,211,153,.55); --zone-card-bg:rgba(52,211,153,.05); }
+.zone-card--sky { --zone-card-accent:#38bdf8; --zone-card-border:rgba(56,189,248,.3); --zone-card-border-strong:rgba(56,189,248,.55); --zone-card-bg:rgba(56,189,248,.05); }
+.zone-card--blue { --zone-card-accent:#60a5fa; --zone-card-border:rgba(96,165,250,.3); --zone-card-border-strong:rgba(96,165,250,.55); --zone-card-bg:rgba(96,165,250,.05); }
+.zone-card--teal { --zone-card-accent:#2dd4bf; --zone-card-border:rgba(45,212,191,.3); --zone-card-border-strong:rgba(45,212,191,.55); --zone-card-bg:rgba(45,212,191,.05); }
+.zone-card--violet { --zone-card-accent:#a78bfa; --zone-card-border:rgba(167,139,250,.3); --zone-card-border-strong:rgba(167,139,250,.55); --zone-card-bg:rgba(167,139,250,.05); }
+.zone-card--rose { --zone-card-accent:#fb7185; --zone-card-border:rgba(251,113,133,.3); --zone-card-border-strong:rgba(251,113,133,.55); --zone-card-bg:rgba(251,113,133,.05); }
+.zone-card--amber { --zone-card-accent:#fbbf24; --zone-card-border:rgba(251,191,36,.3); --zone-card-border-strong:rgba(251,191,36,.55); --zone-card-bg:rgba(251,191,36,.05); }
+.zone-card--orange { --zone-card-accent:#fb923c; --zone-card-border:rgba(251,146,60,.3); --zone-card-border-strong:rgba(251,146,60,.55); --zone-card-bg:rgba(251,146,60,.05); }
+.zone-card--pink { --zone-card-accent:#f472b6; --zone-card-border:rgba(244,114,182,.3); --zone-card-border-strong:rgba(244,114,182,.55); --zone-card-bg:rgba(244,114,182,.05); }
+.zone-card--lime { --zone-card-accent:#a3e635; --zone-card-border:rgba(163,230,53,.3); --zone-card-border-strong:rgba(163,230,53,.55); --zone-card-bg:rgba(163,230,53,.05); }
+.zone-card--indigo { --zone-card-accent:#818cf8; --zone-card-border:rgba(129,140,248,.3); --zone-card-border-strong:rgba(129,140,248,.55); --zone-card-bg:rgba(129,140,248,.05); }
+.zone-card--red { --zone-card-accent:#f87171; --zone-card-border:rgba(248,113,113,.3); --zone-card-border-strong:rgba(248,113,113,.55); --zone-card-bg:rgba(248,113,113,.05); }
+.zone-card--yellow { --zone-card-accent:#facc15; --zone-card-border:rgba(250,204,21,.3); --zone-card-border-strong:rgba(250,204,21,.55); --zone-card-bg:rgba(250,204,21,.05); }
+.zone-card--fuchsia { --zone-card-accent:#e879f9; --zone-card-border:rgba(232,121,249,.3); --zone-card-border-strong:rgba(232,121,249,.55); --zone-card-bg:rgba(232,121,249,.05); }
+.zone-card--cyan { --zone-card-accent:#22d3ee; --zone-card-border:rgba(34,211,238,.3); --zone-card-border-strong:rgba(34,211,238,.55); --zone-card-bg:rgba(34,211,238,.05); }
+.zone-card--green { --zone-card-accent:#4ade80; --zone-card-border:rgba(74,222,128,.3); --zone-card-border-strong:rgba(74,222,128,.55); --zone-card-bg:rgba(74,222,128,.05); }
+/* Object-class cards: a compact, scannable row - the object name on the left,
+   then the Detect / Record toggles, minimum confidence, and Remove on the
+   right. Fields wrap below the name on narrow screens. */
+.zone-detect-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-top: 10px;
+  padding: 11px 14px;
+  border: 1px solid var(--zone-card-border, rgba(251,191,36,.28));
+  border-left: 3px solid var(--zone-card-accent, #fbbf24);
+  border-radius: 12px;
+  background: var(--zone-card-bg, rgba(251,191,36,.05));
+}
+.zone-detect-card.is-enabled {
+  border-color: var(--zone-card-border-strong, rgba(251,191,36,.5));
+  border-left-color: var(--zone-card-accent, #fbbf24);
+}
+.zone-detect-card-name { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.zone-detect-card-name strong { font-size: 13.5px; }
+.zone-detect-card .zone-rule-icon {
+  margin-right: 0;
+  color: var(--zone-card-accent, var(--accent));
+  border-color: var(--zone-card-border, rgba(71,214,255,.3));
+  background: var(--zone-card-bg, rgba(71,214,255,.08));
+}
+.zone-detect-card-fields { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 14px; }
+.zone-detect-field { display: grid; gap: 4px; }
+.zone-detect-field-label { color: var(--muted); font-size: 11.5px; font-weight: 750; line-height: 1.1; }
+.zone-detect-field--num .zone-rule-conf { width: 78px; }
+.zone-detect-card-fields .zone-rule-remove { align-self: center; }
+.zone-object-empty { margin-top: 12px; }
+/* The card body is a grid, so a lone action button (e.g. Motion's "Custom
+   trigger…") would otherwise stretch the full width; keep it content-sized. */
+.zone-tripwire-body > .zone-rule-advanced-toggle { justify-self: start; }
 .zone-tripwire-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .zone-tripwire-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .zone-tripwire-title strong { font-size: 13px; }
 .zone-tripwire-sub { font-size: 11px; }
-.zone-tripwire-body { margin-top: 12px; display: grid; gap: 12px; }
+.zone-tripwire-body { margin-top: 12px; display: grid; gap: 14px; }
+/* Fields inside a detection card sit in a two-up grid with the label above
+   each control, so cards stay compact and aligned instead of stacking one
+   full-width row per field. Collapses to a single column on phones. */
+.zone-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
+  align-items: start;
+}
+/* Keep controls at their natural width inside a field (a full-width On/Off
+   pill looks wrong); selects still fill their cell via width: 100%. */
+.zone-tripwire-body .sound-rule-field { align-items: flex-start; }
 .tripwire-direction { display: inline-flex; flex-wrap: wrap; }
 .tripwire-dir-option { min-width: 72px; }
 .tripwire-labels { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 26px; }
@@ -1668,9 +1724,18 @@ input[type="file"] { padding: 10px; }
   padding: 0 2px;
 }
 .tripwire-any { color: var(--muted); font-size: 12px; }
-.tripwire-toggles { display: flex; flex-wrap: wrap; gap: 16px; }
-.tripwire-toggle-field { display: inline-flex; align-items: center; gap: 8px; }
-.tripwire-toggle-field > span { font-size: 12px; font-weight: 700; color: var(--muted); }
+/* Detection-card field labels read as Title Case (rather than the app's
+   uppercase micro-labels) so the cards scan like a form. */
+.zone-tripwire-body .sound-rule-field > span {
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+}
+/* The Counts field's "Any Object" placeholder is a value, not a label, but the
+   inherited uppercase micro-label style would shout it; keep it Title Case. */
+.zone-tripwire-body .tripwire-any { text-transform: none; }
 .tripwire-hint { font-size: 11px; margin: 0; }
 .tripwire-hint-off { margin-top: 10px; }
 .zones-layout {
@@ -4708,7 +4773,6 @@ button.activity-item-action.activity-item-action-delete:hover {
 }
 
 /* ─── Zones page ────────────────────────────────────────────────────────── */
-.zones-stats { margin-top: 4px; }
 .zones-frame-card { margin-top: 0; }
 .zones-frame-wrap { min-height: 360px; }
 .zones-layout .zone-editor-card { margin-top: 28px; }
@@ -6091,30 +6155,38 @@ button.secondary:disabled, a.secondary:disabled {
 .zones-workflow-step small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .zones-workflow-line { flex: 1; min-width: 18px; height: 1px; background: linear-gradient(90deg, rgba(71,214,255,.35), var(--border)); }
 
-.zones-stats { gap: 12px; }
-/* Two-up stat row: even columns so a long camera name cannot squeeze the
-   Active-zones card (auto-fit could otherwise size the pair unevenly). */
-.zones-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-@media (max-width: 480px) {
-  .zones-stats { grid-template-columns: 1fr; }
-}
-.zones-stats .stat-card { padding: 17px 18px 18px; border-radius: 18px; box-shadow: 0 12px 32px rgba(0,0,0,.16); }
-.zones-stats .stat-card-value { margin-top: 8px; font-size: 28px; }
-/* The camera-name stat card uses the text-value variant; match its top margin
-   to the numeric one so both cards' baselines line up. */
-.zones-stats .stat-card-value-text { margin-top: 8px; }
-.zones-stats .stat-card-icon { width: 30px; height: 30px; border-radius: 10px; }
-.zones-stats .stat-card-camera .stat-card-icon { color: var(--accent); background: rgba(71,214,255,.08); }
-
+/* Every zone card spans the full page and stacks vertically, matching the
+   Objects page: camera picker, live footage, Zone Editor, Detection Settings. */
 .zones-layout {
-  grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-items: stretch;
 }
-.zones-layout .zone-rules-card { grid-column: 1 / -1; }
 .zones-frame-card,
 .zone-settings-card,
 .zone-rules-card { min-width: 0; }
+/* Camera picker card at the top of the page: the heading sits on the left and
+   the picker on the right, so the control stays beside its label instead of
+   floating under a wide header (which also detached its chevron). */
+.zone-camera-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px 24px;
+}
+.zone-camera-card .zones-section-header {
+  flex: 1 1 360px;
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.zone-camera-card .zones-editor-camera { flex: 0 0 auto; width: min(100%, 340px); margin-bottom: 0; }
+.zone-camera-card .zones-camera-select-wrap { width: 100%; }
+.zone-camera-card .zones-editor-camera select { width: 100%; max-width: none; }
+@media (max-width: 680px) {
+  .zone-camera-card .zones-editor-camera { flex: 1 1 100%; width: 100%; }
+}
 .zones-frame-card { border-color: rgba(71,214,255,.22); box-shadow: 0 22px 55px rgba(0,0,0,.28); }
 .zones-frame-card .live-frame-header { padding: 17px 20px 15px; background: rgba(255,255,255,.025); }
 .zones-panel-kicker {
@@ -6143,7 +6215,7 @@ button.secondary:disabled, a.secondary:disabled {
 .zones-section-header .settings-section-icon { width: 38px; height: 38px; border-radius: 11px; color: var(--accent); font-size: 22px; }
 .zones-section-header h2 { font-size: 19px; letter-spacing: -.02em; }
 .zones-editor-camera { gap: 7px; margin-bottom: 18px; }
-.zones-editor-camera > span,
+.zones-editor-camera > span { color: var(--text); font-size: 11.5px; font-weight: 800; }
 .zones-list-heading strong { color: var(--text); font-size: 11px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
 .zones-editor-camera select { min-height: 46px; border-radius: 13px; }
 .zones-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 9px; }
@@ -6367,10 +6439,8 @@ button.secondary:disabled, a.secondary:disabled {
 }
 .zone-rule-add-label {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: .06em;
-  text-transform: uppercase;
+  font-size: 11.5px;
+  font-weight: 750;
 }
 .zone-rule-add .rule-add-select { width: 230px; max-width: 100%; min-height: 38px; border-radius: 10px; }
 @media (max-width: 560px) {
@@ -6523,7 +6593,7 @@ button.secondary:disabled, a.secondary:disabled {
 .zones-save-indicator { width: 7px; height: 7px; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 3px rgba(73,230,163,.13); }
 
 :root.light .zones-workflow { background: linear-gradient(90deg, rgba(2,132,199,.06), rgba(5,150,105,.045)); box-shadow: 0 8px 26px rgba(0,0,0,.06); }
-:root.light .zones-stats .stat-card,
+:root.light .zone-camera-card,
 :root.light .zones-frame-card { box-shadow: 0 12px 32px rgba(0,0,0,.08); }
 :root.light .zones-list .item { background: rgba(255,255,255,.72); }
 :root.light .zones-list .empty { background: rgba(255,255,255,.6); }
@@ -6560,6 +6630,8 @@ button.secondary:disabled, a.secondary:disabled {
   .zone-object-rules-header { align-items: stretch; flex-direction: column; }
   .zone-object-rules-header::before { order: 0; }
   .zone-object-rules-header select { max-width: none; width: 100%; }
+  .zone-rule-grid,
+  .zone-rule-advanced { grid-template-columns: 1fr; }
   .zone-motion-body { grid-template-columns: 1fr; align-items: stretch; }
   .zone-motion-secondary { flex-wrap: wrap; }
   .zone-motion-advanced { justify-self: start; }
@@ -6570,9 +6642,6 @@ button.secondary:disabled, a.secondary:disabled {
 }
 @media (max-width: 600px) {
   .zones-shell { gap: 14px; }
-  .zones-stats { gap: 9px; }
-  .zones-stats .stat-card { padding: 14px; }
-  .zones-stats .stat-card-value { font-size: 24px; }
   .zone-settings-card, .zone-rules-card { padding: 16px; }
   .zones-frame-wrap, .zones-frame-wrap .live-frame { min-height: 290px; }
   .zones-frame-wrap .live-frame { height: min(58vh, 470px); }
@@ -7107,11 +7176,23 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-rule-advanced-toggle {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-self: start;
+  gap: 6px;
+  width: auto;
+  height: auto;
+  min-height: 0;
   white-space: nowrap;
   padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,.03);
+  color: var(--muted);
   font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
 }
+.zone-rule-advanced-toggle:hover { color: var(--text); border-color: var(--accent); }
+.zone-rule-advanced-toggle svg { flex: 0 0 auto; }
 .cameras-table-wrap .zone-rule-table .cell-actions button.zone-rule-advanced-toggle:not(.zone-rule-advanced-icon-btn) {
   width: auto;
   height: auto;
@@ -7122,7 +7203,7 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-rule-advanced-icon-btn { width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 0; }
 .zone-rule-advanced-icon-btn svg { display: block; flex: 0 0 auto; }
 .zone-rule-advanced-row > td { background: rgba(255, 255, 255, .02); }
-.zone-rule-advanced { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; }
+.zone-rule-advanced { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; align-items: start; }
 .zone-rule-table input:disabled { opacity: .5; }
 .zone-rule-toggle input:disabled + span { opacity: .5; }
 :root.light .zone-rule-advanced-row > td { background: rgba(0, 0, 0, .02); }

@@ -35,7 +35,7 @@ const rehome = (value) => (value == null ? value : JSON.parse(JSON.stringify(val
 test('defaults are filled in for a bare rule', () => {
   const rule = normalizeTime({});
   assert.equal(rule.enabled, true);
-  assert.equal(rule.name, 'Unusual time');
+  assert.equal(rule.name, 'Unusual Time');
   assert.deepEqual(rehome(rule.labels), []);
   assert.equal(rule.threshold, 0.15);
   assert.equal(rule.cooldown_seconds, 1800);

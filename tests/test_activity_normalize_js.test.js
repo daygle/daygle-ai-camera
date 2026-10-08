@@ -33,7 +33,7 @@ const rehome = (value) => (value == null ? value : JSON.parse(JSON.stringify(val
 test('defaults are filled in for a bare rule', () => {
   const rule = normalizeActivity({});
   assert.equal(rule.enabled, true);
-  assert.equal(rule.name, 'Activity spike');
+  assert.equal(rule.name, 'Activity Spike');
   assert.deepEqual(rehome(rule.labels), []);
   assert.equal(rule.min_count, 5);
   assert.equal(rule.sensitivity, 3);

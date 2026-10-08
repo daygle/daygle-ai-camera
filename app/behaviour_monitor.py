@@ -639,7 +639,7 @@ def _emit_time(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], r
     email_recipients = normalize_email_recipients(rule.get('email_recipients') or [])
     notify_enabled = email_enabled or push_enabled
     camera_name = str((settings or {}).get('name') or '').strip() or None
-    rule_display = str(rule.get('name') or 'Unusual time').strip() or 'Unusual time'
+    rule_display = str(rule.get('name') or 'Unusual Time').strip() or 'Unusual Time'
 
     metadata = {
         'source': 'time_of_day',
@@ -848,7 +848,7 @@ def _emit_activity(camera_id: str, settings: dict[str, Any], fire: dict[str, Any
     email_recipients = normalize_email_recipients(rule.get('email_recipients') or [])
     notify_enabled = email_enabled or push_enabled
     camera_name = str((settings or {}).get('name') or '').strip() or None
-    rule_display = str(rule.get('name') or 'Activity spike').strip() or 'Activity spike'
+    rule_display = str(rule.get('name') or 'Activity Spike').strip() or 'Activity Spike'
     plural = 's' if label and not label.endswith('s') else ''
 
     metadata = {

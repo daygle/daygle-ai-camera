@@ -39,7 +39,7 @@ function effectiveZoneMotionTuning() {
 // "Trigger when X% of this zone moves" presets. Mirrors the backend bounds in
 // app/zone_schema.py (MOTION_TRIGGER_MIN / MOTION_TRIGGER_MAX).
 const MOTION_TRIGGER_PRESETS = [
-  { value: 0.005, label: 'Very sensitive' },
+  { value: 0.005, label: 'Very Sensitive' },
   { value: 0.01, label: 'Sensitive' },
   { value: 0.02, label: 'Normal' },
   { value: 0.04, label: 'Relaxed' },
@@ -347,9 +347,9 @@ function ensureTripwire(zone) {
 // tags (app/ai_tag_alerts.py). Tags + match mode live on the Zones card;
 // email/push/quiet-hours on the Alerts page, like the behaviour rules.
 const AI_TAG_MATCH_OPTIONS = [
-  ['both', 'Tags or description'],
-  ['tags', 'Tags only'],
-  ['description', 'Description only'],
+  ['both', 'Tags or Description'],
+  ['tags', 'Tags Only'],
+  ['description', 'Description Only'],
 ];
 
 function aiTagsOf(zone) {
@@ -393,18 +393,13 @@ function aiTagsBody(rule, zoneIndex) {
   const match = rule.match || 'both';
   return `
     <div class="zone-tripwire-body">
-      <label class="sound-rule-field tripwire-name-field">
-        <span>Name</span>
-        <input type="text" data-ai-tags-name="${zoneIndex}" value="${escapeHtml(rule.name || 'AI Tag Alert')}" maxlength="60" placeholder="AI Tag Alert" />
-      </label>
-      <div class="sound-rule-field tripwire-labels-field">
-        <span>Watch for</span>
-        <div class="tripwire-labels" data-ai-tags-list="${zoneIndex}">${aiTagChips(rule, zoneIndex)}</div>
-        <input type="text" class="ai-tags-add" data-ai-tags-add="${zoneIndex}" maxlength="30" placeholder="Add a thing, e.g. ladder, then Enter" aria-label="Add something for the AI to watch for" />
-      </div>
-      <div class="tripwire-toggles">
+      <div class="zone-rule-grid">
         <label class="sound-rule-field">
-          <span>Match in</span>
+          <span>Name</span>
+          <input type="text" data-ai-tags-name="${zoneIndex}" value="${escapeHtml(rule.name || 'AI Tag Alert')}" maxlength="60" placeholder="AI Tag Alert" />
+        </label>
+        <label class="sound-rule-field">
+          <span>Match In</span>
           <select data-ai-tags-match="${zoneIndex}" title="Where the AI must name it: its tag list, its description sentence, or either.">
             ${AI_TAG_MATCH_OPTIONS.map(([value, label]) => `<option value="${value}"${value === match ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')}
           </select>
@@ -414,7 +409,12 @@ function aiTagsBody(rule, zoneIndex) {
           <input type="number" data-ai-tags-cooldown="${zoneIndex}" min="0" max="86400" step="30" value="${escapeHtml(rule.cooldown_seconds ?? 300)}" title="Minimum time between AI Tag Alerts for this area." />
         </label>
       </div>
-      <p class="muted tripwire-hint">Alerts when the local AI model's description of an event in this area names one of these. Unconfirmed: only the AI saw it, and alerts arrive a few seconds after the event. Every event on this camera is described while this is on. <a class="zone-assigned-link" href="/alerts">Set email / push alerts</a></p>
+      <div class="sound-rule-field tripwire-labels-field">
+        <span>Watch For</span>
+        <div class="tripwire-labels" data-ai-tags-list="${zoneIndex}">${aiTagChips(rule, zoneIndex)}</div>
+        <input type="text" class="ai-tags-add" data-ai-tags-add="${zoneIndex}" maxlength="30" placeholder="Add a thing, e.g. ladder, then Enter" aria-label="Add something for the AI to watch for" />
+      </div>
+      <p class="muted tripwire-hint">Alerts when the local AI model's description of an event in this area names one of these. Unconfirmed: only the AI saw it, and alerts arrive a few seconds after the event. Every event on this camera is described while this is on.</p>
     </div>`;
 }
 
@@ -422,7 +422,7 @@ function renderAiTagsCard(zone, zoneIndex) {
   const rule = aiTagsOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
   return `
-    <div class="zone-tripwire-card zone-ai-tags-card${enabled ? ' is-enabled' : ''}" data-zone-ai-tags-for="${zoneIndex}">
+    <div class="zone-tripwire-card zone-card--teal${enabled ? ' is-enabled' : ''}" data-zone-ai-tags-for="${zoneIndex}">
       <div class="zone-tripwire-head">
         <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">🤖</span><strong>AI Tag Alert</strong><span class="muted zone-tripwire-sub">Alert when the AI model sees something, e.g. a ladder</span></div>
         ${ruleToggleCell(`data-ai-tags-enabled="${zoneIndex}"`, enabled, 'Enable AI Tag Alerts for this area', false)}
@@ -474,7 +474,7 @@ function ensureTime(zone) {
   }
   zone.time_of_day = {
     enabled: true,
-    name: 'Unusual time',
+    name: 'Unusual Time',
     labels: [],
     threshold: 0.15,
     cooldown_seconds: 1800,
@@ -501,7 +501,7 @@ function ensureActivity(zone) {
   }
   zone.activity_spike = {
     enabled: true,
-    name: 'Activity spike',
+    name: 'Activity Spike',
     labels: [],
     min_count: 5,
     sensitivity: 3,
@@ -817,9 +817,15 @@ function ruleToggleCell(attr, on, title, disabled) {
   return `<label class="toggle-control zone-rule-toggle" title="${escapeHtml(title)}"><input type="checkbox" ${attr}${on ? ' checked' : ''}${disabled ? ' disabled' : ''} /><span>${on ? 'On' : 'Off'}</span></label>`;
 }
 
-// Object-class rows for a zone's detection table. Motion and face get their own
-// cards below the table (renderMotionCard/renderFaceCard); this returns only
-// object-class <tr>s.
+// Per-object-class card colours, assigned by position within a zone so
+// neighbouring cards stay visually distinct. Motion, Face and Line Crossing
+// already own emerald/blue/amber, which this list deliberately avoids.
+const OBJECT_CARD_COLOURS = ['orange', 'pink', 'lime', 'indigo', 'red', 'yellow', 'fuchsia', 'cyan', 'green'];
+
+// Object-class cards for a zone's detection panel, rendered in the same card
+// shape as Motion/Face/Line Crossing (renderMotionCard etc.) and given their
+// own accent colour. Motion and face are excluded here - they get their own
+// dedicated cards below.
 function renderObjectRules(zone, zoneIndex) {
   zone.object_rules = normalizeObjectRules(zone);
   const rules = zone.object_rules
@@ -828,19 +834,37 @@ function renderObjectRules(zone, zoneIndex) {
       const label = String(rule.label || '').trim().toLowerCase();
       return label !== 'motion' && label !== 'face';
     });
-  return rules.map(({ rule, ruleIndex }) => {
+  if (!rules.length) {
+    return '<p class="muted empty-message zone-object-empty">No object classes in this area yet. Add one from the picker above - or use Motion, Face or Line Crossing below.</p>';
+  }
+  return rules.map(({ rule, ruleIndex }, order) => {
     const key = `${zoneIndex}:${ruleIndex}`;
     const label = escapeHtml(titleCase(rule.label));
     const lower = label.toLowerCase();
     const enabled = rule.enabled !== false;
+    const colour = OBJECT_CARD_COLOURS[order % OBJECT_CARD_COLOURS.length];
     return `
-      <tr class="zone-rule-row${enabled ? ' is-enabled' : ''}">
-        <td class="cell-label"><span class="zone-rule-icon" aria-hidden="true">🔍</span>${label}</td>
-        <td>${ruleToggleCell(`data-zone-rule-enabled="${key}"`, enabled, `Enable or disable ${lower} detection in this area`, false)}</td>
-        <td><input class="zone-rule-conf" type="number" data-zone-rule-confidence-value="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" title="Minimum confidence (0.01-1). Overrides the global ONNX slider for this object in this zone." /></td>
-        <td>${ruleToggleCell(`data-zone-rule-record="${key}"`, rule.record_on_detect !== false, `Record a clip when ${lower} is detected in this area`, false)}</td>
-        <td class="cell-actions"><button class="delete-btn secondary zone-action-btn zone-rule-remove" type="button" data-delete-zone-rule="${key}" title="Remove ${label} from this area" aria-label="Remove ${label} from this area">${ICONS.remove}</button></td>
-      </tr>`;
+      <div class="zone-detect-card zone-card--${colour}${enabled ? ' is-enabled' : ''}" data-zone-object-for="${key}">
+        <div class="zone-detect-card-name">
+          <span class="zone-rule-icon" aria-hidden="true">🔍</span>
+          <strong>${label}</strong>
+        </div>
+        <div class="zone-detect-card-fields">
+          <div class="zone-detect-field">
+            <span class="zone-detect-field-label">Detect</span>
+            ${ruleToggleCell(`data-zone-rule-enabled="${key}"`, enabled, `Enable or disable ${lower} detection in this area`, false)}
+          </div>
+          <div class="zone-detect-field">
+            <span class="zone-detect-field-label">Record</span>
+            ${ruleToggleCell(`data-zone-rule-record="${key}"`, rule.record_on_detect !== false, `Record a clip when ${lower} is detected in this area`, false)}
+          </div>
+          <label class="zone-detect-field zone-detect-field--num">
+            <span class="zone-detect-field-label">Min Confidence</span>
+            <input class="zone-rule-conf" type="number" data-zone-rule-confidence-value="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" title="Minimum confidence (0.01-1). Overrides the global ONNX slider for this object in this zone." />
+          </label>
+          <button class="delete-btn secondary zone-action-btn zone-rule-remove" type="button" data-delete-zone-rule="${key}" title="Remove ${label} from this area" aria-label="Remove ${label} from this area">${ICONS.remove}</button>
+        </div>
+      </div>`;
   }).join('');
 }
 
@@ -858,36 +882,34 @@ function renderMotionCard(zone, zoneIndex) {
   const presetOptions = MOTION_TRIGGER_PRESETS.map((item) => (
     `<option value="${item.value}"${preset?.value === item.value ? ' selected' : ''}>${escapeHtml(item.label)} · ${formatMotionShare(item.value)}</option>`
   )).join('');
-  const customLabel = preset ? 'Custom...' : `Custom · ${formatMotionShare(trigger)}`;
+  const customLabel = preset ? 'Custom…' : `Custom · ${formatMotionShare(trigger)}`;
   const cycles = motionConfirmCycles(rule);
   const cycleOptions = [1, 2, 3].map((count) => (
-    `<option value="${count}"${cycles === count ? ' selected' : ''}>${count} ${count === 1 ? 'check' : 'checks'}</option>`
-  )).join('') + (cycles > 3 ? `<option value="${cycles}" selected>${cycles} checks</option>` : '');
+    `<option value="${count}"${cycles === count ? ' selected' : ''}>${count} ${count === 1 ? 'Check' : 'Checks'}</option>`
+  )).join('') + (cycles > 3 ? `<option value="${cycles}" selected>${cycles} Checks</option>` : '');
   const body = enabled ? `
     <div class="zone-tripwire-body">
-      <label class="sound-rule-field">
-        <span>Trigger at</span>
-        <select class="zone-motion-trigger" data-zone-motion-trigger="${zoneIndex}" title="Trigger when this much of the area moves. Smaller = more sensitive." aria-label="Motion trigger for this area">${presetOptions}<option value="custom"${preset ? '' : ' selected'}>${escapeHtml(customLabel)}</option></select>
-      </label>
-      <div class="tripwire-toggles">
+      <div class="zone-rule-grid">
+        <label class="sound-rule-field">
+          <span>Trigger At</span>
+          <select class="zone-motion-trigger" data-zone-motion-trigger="${zoneIndex}" title="Trigger when this much of the area moves. Smaller = more sensitive." aria-label="Motion trigger for this area">${presetOptions}<option value="custom"${preset ? '' : ' selected'}>${escapeHtml(customLabel)}</option></select>
+        </label>
         ${tripwireToggleField('Record', `data-zone-motion-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when motion is detected in this area')}
       </div>
-      <button class="secondary zone-action-btn zone-rule-advanced-toggle" type="button" data-zone-motion-advanced-toggle="${zoneIndex}" title="Custom trigger and how long motion must last" aria-label="Custom trigger and how long motion must last" aria-expanded="false">${ICONS.cog}<span>Custom trigger…</span></button>
-      <div data-zone-motion-advanced-for="${zoneIndex}" hidden>
-        <div class="zone-rule-advanced">
-          <label class="sound-rule-field" title="The share of this area's pixels that must change for motion to count. Use the zone meter's ten-minute peak on the Live page as a guide: set the trigger just above it.">
-            <span>Trigger at (% of area)</span>
-            <input type="number" data-zone-motion-trigger-custom="${zoneIndex}" value="${escapeHtml(Number((trigger * 100).toFixed(3)))}" min="${MOTION_TRIGGER_MIN * 100}" max="${MOTION_TRIGGER_MAX * 100}" step="0.1" />
-          </label>
-          <label class="sound-rule-field" title="How many motion checks in a row must see movement above the trigger before it counts. More checks ignore brief flickers (headlights, a bug on the lens) but react a moment later.">
-            <span>Must last</span>
-            <select data-zone-motion-cycles="${zoneIndex}">${cycleOptions}</select>
-          </label>
-        </div>
+      <button class="zone-rule-advanced-toggle" type="button" data-zone-motion-advanced-toggle="${zoneIndex}" title="Custom trigger and how long motion must last" aria-label="Custom trigger and how long motion must last" aria-expanded="false">${ICONS.cog}<span>Custom Trigger</span></button>
+      <div class="zone-rule-advanced" data-zone-motion-advanced-for="${zoneIndex}" hidden>
+        <label class="sound-rule-field" title="The share of this area's pixels that must change for motion to count. Use the zone meter's ten-minute peak on the Live page as a guide: set the trigger just above it.">
+          <span>Trigger At (% of Area)</span>
+          <input type="number" data-zone-motion-trigger-custom="${zoneIndex}" value="${escapeHtml(Number((trigger * 100).toFixed(3)))}" min="${MOTION_TRIGGER_MIN * 100}" max="${MOTION_TRIGGER_MAX * 100}" step="0.1" />
+        </label>
+        <label class="sound-rule-field" title="How many motion checks in a row must see movement above the trigger before it counts. More checks ignore brief flickers (headlights, a bug on the lens) but react a moment later.">
+          <span>Must Last</span>
+          <select data-zone-motion-cycles="${zoneIndex}">${cycleOptions}</select>
+        </label>
       </div>
     </div>` : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to trigger when this area of the footage moves.</p>';
   return `
-    <div class="zone-tripwire-card${enabled ? ' is-enabled' : ''}" data-zone-motion-for="${zoneIndex}">
+    <div class="zone-tripwire-card zone-card--emerald${enabled ? ' is-enabled' : ''}" data-zone-motion-for="${zoneIndex}">
       <div class="zone-tripwire-head">
         <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">⟳</span><strong>Motion</strong><span class="muted zone-tripwire-sub">Trigger when this area moves</span></div>
         ${ruleToggleCell(`data-zone-motion-toggle="${zoneIndex}"`, enabled, 'Enable or disable motion detection in this area', false)}
@@ -906,16 +928,16 @@ function renderFaceCard(zone, zoneIndex) {
   const conf = rule?.min_confidence ?? 0.45;
   const body = enabled ? `
     <div class="zone-tripwire-body">
-      <label class="sound-rule-field">
-        <span>Face confidence</span>
-        <input type="number" data-zone-face-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(conf)}" title="Only faces with at least this confidence are processed in this area (0-1). Faces detected outside Face-enabled areas are ignored entirely." />
-      </label>
-      <div class="tripwire-toggles">
+      <div class="zone-rule-grid">
+        <label class="sound-rule-field">
+          <span>Face Confidence</span>
+          <input type="number" data-zone-face-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(conf)}" title="Only faces with at least this confidence are processed in this area (0-1). Faces detected outside Face-enabled areas are ignored entirely." />
+        </label>
         ${tripwireToggleField('Record', `data-zone-face-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when a face is detected in this area')}
       </div>
     </div>` : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to detect and recognize faces in this area.</p>';
   return `
-    <div class="zone-tripwire-card" data-zone-face-for="${zoneIndex}">
+    <div class="zone-tripwire-card zone-card--blue${enabled ? ' is-enabled' : ''}" data-zone-face-for="${zoneIndex}">
       <div class="zone-tripwire-head">
         <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">👤</span><strong>Face</strong><span class="muted zone-tripwire-sub">Detect and recognize faces in this area</span></div>
         ${ruleToggleCell(`data-zone-face-toggle="${zoneIndex}"`, enabled, 'Enable or disable face detection in this area', false)}
@@ -928,7 +950,7 @@ function renderFaceCard(zone, zoneIndex) {
 // from the LEFT of the drawn line to its RIGHT (the arrow side).
 function tripwireDirectionOptions(current) {
   const options = [
-    ['forward', 'Arrow way', 'Count only crossings that travel the way the arrow points (left → right of the line).'],
+    ['forward', 'Arrow Way', 'Count only crossings that travel the way the arrow points (left → right of the line).'],
     ['backward', 'Against', 'Count only crossings that travel against the arrow (right → left of the line).'],
     ['both', 'Both', 'Count a crossing in either direction.'],
   ];
@@ -940,7 +962,7 @@ function tripwireDirectionOptions(current) {
 // Removable chips for the object labels a tripwire counts ([] = any object).
 function tripwireLabelChips(wire, zoneIndex) {
   const labels = wire && Array.isArray(wire.labels) ? wire.labels : [];
-  if (!labels.length) return '<span class="tripwire-any">Any object</span>';
+  if (!labels.length) return '<span class="tripwire-any">Any Object</span>';
   return labels.map((label, labelIndex) => (
     `<span class="zone-object-chip tripwire-chip">${escapeHtml(titleCase(label))}<button type="button" class="tripwire-chip-remove" data-tripwire-label-remove="${zoneIndex}:${labelIndex}" title="Stop counting ${escapeHtml(titleCase(label))}" aria-label="Stop counting ${escapeHtml(titleCase(label))}">×</button></span>`
   )).join('');
@@ -956,11 +978,13 @@ function tripwireLabelAddOptions(selected) {
   const coco = labels.map((label) => `<option value="${escapeHtml(label)}">${escapeHtml(titleCase(label))}</option>`).join('');
   const groups = OBJECT_GROUP_LABELS.filter((group) => !chosen.has(group.value))
     .map((group) => `<option value="${escapeHtml(group.value)}">${escapeHtml(group.label)}</option>`).join('');
-  return `<option value="">+ Limit to object…</option>${groups ? `<optgroup label="Groups">${groups}</optgroup>` : ''}${coco}`;
+  return `<option value="">+ Limit to Object…</option>${groups ? `<optgroup label="Groups">${groups}</optgroup>` : ''}${coco}`;
 }
 
+// Toggle field used inside the detection-card grids: the label sits above the
+// On/Off pill so every field in a row aligns on the same baseline.
 function tripwireToggleField(label, attr, on, title) {
-  return `<div class="tripwire-toggle-field"><span>${escapeHtml(label)}</span>${ruleToggleCell(attr, on, title, false)}</div>`;
+  return `<div class="sound-rule-field"><span>${escapeHtml(label)}</span>${ruleToggleCell(attr, on, title, false)}</div>`;
 }
 
 // The editable body of an enabled tripwire card. Detection only (line,
@@ -969,11 +993,14 @@ function tripwireToggleField(label, attr, on, title) {
 function tripwireBody(wire, zoneIndex) {
   return `
     <div class="zone-tripwire-body">
-      <label class="sound-rule-field tripwire-name-field">
-        <span>Name</span>
-        <input type="text" data-tripwire-name="${zoneIndex}" value="${escapeHtml(wire.name || 'Tripwire')}" maxlength="60" placeholder="Tripwire" />
-      </label>
-      <div class="sound-rule-field tripwire-direction-field">
+      <div class="zone-rule-grid">
+        <label class="sound-rule-field">
+          <span>Name</span>
+          <input type="text" data-tripwire-name="${zoneIndex}" value="${escapeHtml(wire.name || 'Tripwire')}" maxlength="60" placeholder="Tripwire" />
+        </label>
+        ${tripwireToggleField('Record', `data-tripwire-record="${zoneIndex}"`, wire.record_on_detect !== false, 'Record a clip when the line is crossed')}
+      </div>
+      <div class="sound-rule-field">
         <span>Direction</span>
         <div class="zone-shape-toggle tripwire-direction" role="group" aria-label="Counting direction" data-tripwire-direction-for="${zoneIndex}">${tripwireDirectionOptions(wire.direction || 'both')}</div>
       </div>
@@ -982,10 +1009,7 @@ function tripwireBody(wire, zoneIndex) {
         <div class="tripwire-labels" data-tripwire-labels="${zoneIndex}">${tripwireLabelChips(wire, zoneIndex)}</div>
         <select class="rule-add-select tripwire-label-add" data-tripwire-label-add="${zoneIndex}" aria-label="Limit which objects this line counts">${tripwireLabelAddOptions(wire.labels)}</select>
       </div>
-      <div class="tripwire-toggles">
-        ${tripwireToggleField('Record', `data-tripwire-record="${zoneIndex}"`, wire.record_on_detect !== false, 'Record a clip when the line is crossed')}
-      </div>
-      <p class="muted tripwire-hint">Drag the two dots on the footage to place the line. The arrow shows the “forward” direction. <a class="zone-assigned-link" href="/alerts">Set email / push alerts</a></p>
+      <p class="muted tripwire-hint">Drag the two dots on the footage to place the line. The arrow shows the “forward” direction.</p>
     </div>`;
 }
 
@@ -995,7 +1019,7 @@ function renderTripwireCard(zone, zoneIndex) {
   const wire = tripwireOf(zone);
   const enabled = Boolean(wire && wire.enabled !== false);
   return `
-    <div class="zone-tripwire-card${enabled ? ' is-enabled' : ''}" data-zone-tripwire-for="${zoneIndex}">
+    <div class="zone-tripwire-card zone-card--amber${enabled ? ' is-enabled' : ''}" data-zone-tripwire-for="${zoneIndex}">
       <div class="zone-tripwire-head">
         <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">⤢</span><strong>Line Crossing</strong><span class="muted zone-tripwire-sub">Alert when an object crosses a line you draw</span></div>
         ${ruleToggleCell(`data-tripwire-enabled="${zoneIndex}"`, enabled, 'Enable a directional line-crossing counter for this area', false)}
@@ -1007,7 +1031,7 @@ function renderTripwireCard(zone, zoneIndex) {
 // Removable chips for the object labels a loiter rule counts ([] = any object).
 function loiterLabelChips(rule, zoneIndex) {
   const labels = rule && Array.isArray(rule.labels) ? rule.labels : [];
-  if (!labels.length) return '<span class="tripwire-any">Any object</span>';
+  if (!labels.length) return '<span class="tripwire-any">Any Object</span>';
   return labels.map((label, labelIndex) => (
     `<span class="zone-object-chip tripwire-chip">${escapeHtml(titleCase(label))}<button type="button" class="tripwire-chip-remove" data-loiter-label-remove="${zoneIndex}:${labelIndex}" title="Stop counting ${escapeHtml(titleCase(label))}" aria-label="Stop counting ${escapeHtml(titleCase(label))}">×</button></span>`
   )).join('');
@@ -1019,29 +1043,27 @@ function loiterLabelChips(rule, zoneIndex) {
 function loiterBody(rule, zoneIndex) {
   return `
     <div class="zone-tripwire-body">
-      <label class="sound-rule-field tripwire-name-field">
-        <span>Name</span>
-        <input type="text" data-loiter-name="${zoneIndex}" value="${escapeHtml(rule.name || 'Loitering')}" maxlength="60" placeholder="Loitering" />
-      </label>
-      <div class="tripwire-toggles">
+      <div class="zone-rule-grid">
         <label class="sound-rule-field">
-          <span>Min dwell (s)</span>
+          <span>Name</span>
+          <input type="text" data-loiter-name="${zoneIndex}" value="${escapeHtml(rule.name || 'Loitering')}" maxlength="60" placeholder="Loitering" />
+        </label>
+        <label class="sound-rule-field">
+          <span>Min Dwell (s)</span>
           <input type="number" data-loiter-min-dwell="${zoneIndex}" min="1" step="1" value="${escapeHtml(rule.min_dwell_seconds ?? 30)}" title="An object must stay at least this many seconds before it can count as loitering." />
         </label>
         <label class="sound-rule-field">
           <span>Sensitivity</span>
           <input type="number" data-loiter-sensitivity="${zoneIndex}" min="0" max="10" step="0.5" value="${escapeHtml(rule.sensitivity ?? 3)}" title="How far above the zone's normal dwell before it counts (× the normal spread). Lower = more sensitive; 0 = fire at the minimum dwell." />
         </label>
+        ${tripwireToggleField('Record', `data-loiter-record="${zoneIndex}"`, rule.record_on_detect !== false, 'Record a clip when loitering is detected')}
       </div>
       <div class="sound-rule-field tripwire-labels-field">
         <span>Counts</span>
         <div class="tripwire-labels" data-loiter-labels="${zoneIndex}">${loiterLabelChips(rule, zoneIndex)}</div>
         <select class="rule-add-select tripwire-label-add" data-loiter-label-add="${zoneIndex}" aria-label="Limit which objects this rule counts">${tripwireLabelAddOptions(rule.labels)}</select>
       </div>
-      <div class="tripwire-toggles">
-        ${tripwireToggleField('Record', `data-loiter-record="${zoneIndex}"`, rule.record_on_detect !== false, 'Record a clip when loitering is detected')}
-      </div>
-      <p class="muted tripwire-hint">Learns this area's normal dwell over time, then alerts on an unusually long stay. <a class="zone-assigned-link" href="/alerts">Set email / push alerts</a></p>
+      <p class="muted tripwire-hint">Learns this area's normal dwell over time, then alerts on an unusually long stay.</p>
     </div>`;
 }
 
@@ -1051,7 +1073,7 @@ function renderLoiterCard(zone, zoneIndex) {
   const rule = loiterOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
   return `
-    <div class="zone-tripwire-card zone-loiter-card${enabled ? ' is-enabled' : ''}" data-zone-loiter-for="${zoneIndex}">
+    <div class="zone-tripwire-card zone-card--violet${enabled ? ' is-enabled' : ''}" data-zone-loiter-for="${zoneIndex}">
       <div class="zone-tripwire-head">
         <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">⏲</span><strong>Loitering</strong><span class="muted zone-tripwire-sub">Alert when an object lingers far longer than normal</span></div>
         ${ruleToggleCell(`data-loiter-enabled="${zoneIndex}"`, enabled, 'Enable statistical loitering detection for this area', false)}
@@ -1063,7 +1085,7 @@ function renderLoiterCard(zone, zoneIndex) {
 // Removable chips for the object labels an unusual-time rule counts.
 function timeLabelChips(rule, zoneIndex) {
   const labels = rule && Array.isArray(rule.labels) ? rule.labels : [];
-  if (!labels.length) return '<span class="tripwire-any">Any object</span>';
+  if (!labels.length) return '<span class="tripwire-any">Any Object</span>';
   return labels.map((label, labelIndex) => (
     `<span class="zone-object-chip tripwire-chip">${escapeHtml(titleCase(label))}<button type="button" class="tripwire-chip-remove" data-time-label-remove="${zoneIndex}:${labelIndex}" title="Stop counting ${escapeHtml(titleCase(label))}" aria-label="Stop counting ${escapeHtml(titleCase(label))}">×</button></span>`
   )).join('');
@@ -1076,23 +1098,23 @@ function timeBody(rule, zoneIndex) {
   const percent = Math.round(Math.max(0, Math.min(1, Number(rule.threshold ?? 0.15))) * 100);
   return `
     <div class="zone-tripwire-body">
-      <label class="sound-rule-field tripwire-name-field">
-        <span>Name</span>
-        <input type="text" data-time-name="${zoneIndex}" value="${escapeHtml(rule.name || 'Unusual time')}" maxlength="60" placeholder="Unusual time" />
-      </label>
-      <label class="sound-rule-field">
-        <span>Flag under (%)</span>
-        <input type="number" data-time-threshold="${zoneIndex}" min="0" max="100" step="1" value="${escapeHtml(percent)}" title="Consider an hour unusual when this area normally has activity on at most this percent of days. Lower = only the rarest hours fire." />
-      </label>
+      <div class="zone-rule-grid">
+        <label class="sound-rule-field">
+          <span>Name</span>
+          <input type="text" data-time-name="${zoneIndex}" value="${escapeHtml(rule.name || 'Unusual Time')}" maxlength="60" placeholder="Unusual Time" />
+        </label>
+        <label class="sound-rule-field">
+          <span>Flag Under (%)</span>
+          <input type="number" data-time-threshold="${zoneIndex}" min="0" max="100" step="1" value="${escapeHtml(percent)}" title="Consider an hour unusual when this area normally has activity on at most this percent of days. Lower = only the rarest hours fire." />
+        </label>
+        ${tripwireToggleField('Record', `data-time-record="${zoneIndex}"`, rule.record_on_detect !== false, 'Record a clip when activity happens at an unusual time')}
+      </div>
       <div class="sound-rule-field tripwire-labels-field">
         <span>Counts</span>
         <div class="tripwire-labels" data-time-labels="${zoneIndex}">${timeLabelChips(rule, zoneIndex)}</div>
         <select class="rule-add-select tripwire-label-add" data-time-label-add="${zoneIndex}" aria-label="Limit which objects this rule counts">${tripwireLabelAddOptions(rule.labels)}</select>
       </div>
-      <div class="tripwire-toggles">
-        ${tripwireToggleField('Record', `data-time-record="${zoneIndex}"`, rule.record_on_detect !== false, 'Record a clip when activity happens at an unusual time')}
-      </div>
-      <p class="muted tripwire-hint">Learns which hours this area is normally active (needs about a week), then alerts on activity at a normally-quiet hour. <a class="zone-assigned-link" href="/alerts">Set email / push alerts</a></p>
+      <p class="muted tripwire-hint">Learns which hours this area is normally active (needs about a week), then alerts on activity at a normally-quiet hour.</p>
     </div>`;
 }
 
@@ -1102,7 +1124,7 @@ function renderTimeCard(zone, zoneIndex) {
   const rule = timeOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
   return `
-    <div class="zone-tripwire-card zone-time-card${enabled ? ' is-enabled' : ''}" data-zone-time-for="${zoneIndex}">
+    <div class="zone-tripwire-card zone-card--sky${enabled ? ' is-enabled' : ''}" data-zone-time-for="${zoneIndex}">
       <div class="zone-tripwire-head">
         <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">🕒</span><strong>Unusual Time</strong><span class="muted zone-tripwire-sub">Alert on activity at a normally-quiet hour</span></div>
         ${ruleToggleCell(`data-time-enabled="${zoneIndex}"`, enabled, 'Enable unusual time-of-day detection for this area', false)}
@@ -1114,7 +1136,7 @@ function renderTimeCard(zone, zoneIndex) {
 // Removable chips for the object labels an activity-spike rule counts.
 function activityLabelChips(rule, zoneIndex) {
   const labels = rule && Array.isArray(rule.labels) ? rule.labels : [];
-  if (!labels.length) return '<span class="tripwire-any">Any object</span>';
+  if (!labels.length) return '<span class="tripwire-any">Any Object</span>';
   return labels.map((label, labelIndex) => (
     `<span class="zone-object-chip tripwire-chip">${escapeHtml(titleCase(label))}<button type="button" class="tripwire-chip-remove" data-activity-label-remove="${zoneIndex}:${labelIndex}" title="Stop counting ${escapeHtml(titleCase(label))}" aria-label="Stop counting ${escapeHtml(titleCase(label))}">×</button></span>`
   )).join('');
@@ -1125,29 +1147,27 @@ function activityLabelChips(rule, zoneIndex) {
 function activityBody(rule, zoneIndex) {
   return `
     <div class="zone-tripwire-body">
-      <label class="sound-rule-field tripwire-name-field">
-        <span>Name</span>
-        <input type="text" data-activity-name="${zoneIndex}" value="${escapeHtml(rule.name || 'Activity spike')}" maxlength="60" placeholder="Activity spike" />
-      </label>
-      <div class="tripwire-toggles">
+      <div class="zone-rule-grid">
         <label class="sound-rule-field">
-          <span>Min count</span>
+          <span>Name</span>
+          <input type="text" data-activity-name="${zoneIndex}" value="${escapeHtml(rule.name || 'Activity Spike')}" maxlength="60" placeholder="Activity Spike" />
+        </label>
+        <label class="sound-rule-field">
+          <span>Min Count</span>
           <input type="number" data-activity-min-count="${zoneIndex}" min="1" step="1" value="${escapeHtml(rule.min_count ?? 5)}" title="At least this many distinct objects in an hour before a burst can fire (a floor under the learned normal)." />
         </label>
         <label class="sound-rule-field">
           <span>Sensitivity</span>
           <input type="number" data-activity-sensitivity="${zoneIndex}" min="0" max="10" step="0.5" value="${escapeHtml(rule.sensitivity ?? 3)}" title="How far above the hour's normal count before it counts as a spike (x the normal spread). Lower = more sensitive." />
         </label>
+        ${tripwireToggleField('Record', `data-activity-record="${zoneIndex}"`, rule.record_on_detect !== false, 'Record a clip when an activity spike is detected')}
       </div>
       <div class="sound-rule-field tripwire-labels-field">
         <span>Counts</span>
         <div class="tripwire-labels" data-activity-labels="${zoneIndex}">${activityLabelChips(rule, zoneIndex)}</div>
         <select class="rule-add-select tripwire-label-add" data-activity-label-add="${zoneIndex}" aria-label="Limit which objects this rule counts">${tripwireLabelAddOptions(rule.labels)}</select>
       </div>
-      <div class="tripwire-toggles">
-        ${tripwireToggleField('Record', `data-activity-record="${zoneIndex}"`, rule.record_on_detect !== false, 'Record a clip when an activity spike is detected')}
-      </div>
-      <p class="muted tripwire-hint">Learns how busy this area normally is each hour (needs about a week), then alerts on an unusual burst. <a class="zone-assigned-link" href="/alerts">Set email / push alerts</a></p>
+      <p class="muted tripwire-hint">Learns how busy this area normally is each hour (needs about a week), then alerts on an unusual burst.</p>
     </div>`;
 }
 
@@ -1156,7 +1176,7 @@ function renderActivityCard(zone, zoneIndex) {
   const rule = activityOf(zone);
   const enabled = Boolean(rule && rule.enabled !== false);
   return `
-    <div class="zone-tripwire-card zone-activity-card${enabled ? ' is-enabled' : ''}" data-zone-activity-for="${zoneIndex}">
+    <div class="zone-tripwire-card zone-card--rose${enabled ? ' is-enabled' : ''}" data-zone-activity-for="${zoneIndex}">
       <div class="zone-tripwire-head">
         <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">📈</span><strong>Activity Spike</strong><span class="muted zone-tripwire-sub">Alert on an unusual burst of activity for the hour</span></div>
         ${ruleToggleCell(`data-activity-enabled="${zoneIndex}"`, enabled, 'Enable activity-spike detection for this area', false)}
@@ -1238,9 +1258,9 @@ function renderObjectDetectionRules() {
     zone.object_rules = normalizeObjectRules(zone);
     const zoneName = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
     const addOptions = objectRuleOptions('');
-    // One table per area for object classes; Motion and Face follow below as
-    // their own cards (always present so they can be toggled on), then the
-    // behavioural cards.
+    // One card list per area: object classes first (each with its own colour),
+    // then Motion, Face, Line Crossing and the behavioural cards - all sharing
+    // the same card shape.
     return `
       <div class="zone-object-rules" data-zone-rules-for="${zoneIndex}">
         <div class="zone-rules-header">
@@ -1250,14 +1270,7 @@ function renderObjectDetectionRules() {
             <select data-add-zone-rule="${zoneIndex}" class="rule-add-select" aria-label="Add an object to ${zoneName}">${addOptions}</select>
           </label>
         </div>
-        <div class="cameras-table-wrap">
-          <table class="rule-table zone-rule-table">
-            <thead><tr><th scope="col">Detection</th><th scope="col">Detect</th><th scope="col">Threshold</th><th scope="col">Record</th><th scope="col" class="cell-actions" aria-label="Actions"></th></tr></thead>
-            <tbody>
-              ${renderObjectRules(zone, zoneIndex)}
-            </tbody>
-          </table>
-        </div>
+        ${renderObjectRules(zone, zoneIndex)}
         ${renderMotionCard(zone, zoneIndex)}
         ${renderFaceCard(zone, zoneIndex)}
         ${renderTripwireCard(zone, zoneIndex)}
@@ -1727,7 +1740,7 @@ function bindTimeControls() {
       selectedZoneIndex = Number(cb.dataset.timeEnabled);
       if (cb.checked) {
         ensureTime(zone);
-        liveEls.status.textContent = 'Unusual time enabled - it will learn this area\'s normal hours (about a week), then Save Zones.';
+        liveEls.status.textContent = 'Unusual Time enabled - it will learn this area\'s normal hours (about a week), then Save Zones.';
       } else if (timeOf(zone)) {
         zone.time_of_day.enabled = false;
       }
@@ -1805,7 +1818,7 @@ function bindActivityControls() {
       selectedZoneIndex = Number(cb.dataset.activityEnabled);
       if (cb.checked) {
         ensureActivity(zone);
-        liveEls.status.textContent = 'Activity spike enabled - it will learn how busy this area normally is (about a week), then Save Zones.';
+        liveEls.status.textContent = 'Activity Spike enabled - it will learn how busy this area normally is (about a week), then Save Zones.';
       } else if (activityOf(zone)) {
         zone.activity_spike.enabled = false;
       }
