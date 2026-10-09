@@ -320,9 +320,12 @@ missing alert does not necessarily mean ONNX missed the object. The audit of
   image-space movement is unknowable, so object movement is reported as
   `unknown` and non-`any` labels cannot alert until it settles. Movement is
   detected from an app-issued PTZ command and, for PTZ/auto-track cameras, a
-  persistent frame-wide pixel change. The per-camera **PTZ Motion Detection**
-  switch (`detection.ptz_motion_detection`, in the camera editor's Detection
-  section) controls the automatic detection: `auto` (default) follows the
+  persistent frame-wide pixel change (35% or more of the picture on two analysed
+  frames in a row; once active, every further high-change frame extends it, and
+  the hold stretches to 1.5x the gap between frames so a slow detection cadence
+  does not let a long pan flicker in and out). The per-camera **PTZ Motion
+  Detection** switch (`detection.ptz_motion_detection`, on the camera editor's
+  PTZ tab) controls the automatic detection: `auto` (default) follows the
   camera's PTZ-enabled flag, `on` forces it (a fixed camera on a movable
   mount), and `off` disables it so a fixed camera's object alerts are never
   suppressed by a headlight sweep, IR switch, or a large close subject.

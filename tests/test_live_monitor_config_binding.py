@@ -438,3 +438,36 @@ def test_motion_frame_size_clamped_to_validated_bounds(monkeypatch):
     assert captured['frame_size'] == (640, 480)
     assert _state._MOTION_FRAME_W == 320
     assert _state._MOTION_FRAME_H == 240
+
+
+def test_camera_profile_background_detection_overrides_the_global_value(monkeypatch):
+    """Per-camera Background Detection used to be an off-switch only: a camera
+    set to Enabled was still skipped while the global value was Disabled."""
+    monkeypatch.setattr(live_monitor, '_camera_has_live_alert_stream', lambda cfg: True)
+    monkeypatch.setattr(live_monitor, 'build_stream_url', lambda cfg: '')
+    monkeypatch.setattr(_state, 'camera_event_recording_config', lambda cfg: {}, raising=False)
+    monkeypatch.setattr(live_monitor, 'read_ingest_frame',
+                        lambda cid: (f'img-{cid}', {'timestamp': time.time(), 'width': 10, 'height': 10}))
+    monkeypatch.setattr(live_monitor, 'clear_live_camera_backoff', lambda *a, **k: None)
+    monkeypatch.setattr(live_monitor, 'process_live_stream_alerts', lambda *a, **k: None)
+
+    def _camera(cid, value):
+        profile = {} if value is None else {'background_detection_enabled': value}
+        return {'id': cid, 'name': cid, 'detection_profiles': {'active': 'day', 'day': profile, 'night': {}}}
+
+    monkeypatch.setattr(_state, 'cameras_config', [
+        _camera('cam-on', True), _camera('cam-default', None), _camera('cam-off', False),
+    ])
+    monkeypatch.setattr(_state, 'active_live_detection_cameras', set())
+    monkeypatch.setattr(_state, 'live_detection_last_checked', {})
+    monkeypatch.setattr(_state, 'live_detection_retry_after', {})
+
+    scheduler = _install_capturing_scheduler(monkeypatch)
+    live_monitor.run_live_alert_monitor_once({'background_detection_enabled': False, 'detection_interval_seconds': 0})
+    assert [job[0] for job in scheduler.jobs] == ['cam-on'], scheduler.jobs
+
+    scheduler.jobs.clear()
+    _state.live_detection_last_checked = {}
+    _state.active_live_detection_cameras = set()  # the captured jobs never ran
+    live_monitor.run_live_alert_monitor_once({'background_detection_enabled': True, 'detection_interval_seconds': 0})
+    assert sorted(job[0] for job in scheduler.jobs) == ['cam-default', 'cam-on'], scheduler.jobs

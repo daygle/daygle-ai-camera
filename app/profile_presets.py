@@ -9,6 +9,13 @@ from app.recording_settings import normalize_camera_detection_profiles
 _PRESET_ID_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
 _MAX_PRESETS = 100
 _MAX_NAME_LENGTH = 80
+# Motion-engine values that moved to the global Advanced Motion Engine. A camera
+# profile still honours one an older version stored (the camera form lists it
+# with a "Use the global values" button), so a preset must never carry them:
+# applying it would quietly bring the per-camera override back.
+LEGACY_MOTION_OVERRIDE_KEYS: frozenset[str] = frozenset({
+    'motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha', 'motion_algorithm',
+})
 
 # Shipped presets provide reusable defaults for either Day or Night. The
 # source groups below are expanded into separate, mode-specific records below
@@ -41,10 +48,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_frame_width': 320,
             'motion_frame_height': 240,
             'motion_pixel_threshold': 25,
-            'motion_gate_fraction': 0.003,
-            'motion_scale_fraction': 0.025,
-            'motion_background_alpha': 0.04,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'auto',
             'object_detection_second_look': True,
@@ -71,10 +74,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_frame_width': 320,
             'motion_frame_height': 240,
             'motion_pixel_threshold': 45,
-            'motion_gate_fraction': 0.002,
-            'motion_scale_fraction': 0.02,
-            'motion_background_alpha': 0.02,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
             'object_detection_second_look': True,
@@ -98,10 +97,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'object_detection_tiling': 'off',
             'periodic_scan_interval_seconds': 0,
             'motion_pixel_threshold': 30,
-            'motion_gate_fraction': 0.005,
-            'motion_scale_fraction': 0.03,
-            'motion_background_alpha': 0.05,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'auto',
         },
@@ -117,10 +112,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'object_detection_tiling': 'off',
             'periodic_scan_interval_seconds': 15,
             'motion_pixel_threshold': 45,
-            'motion_gate_fraction': 0.004,
-            'motion_scale_fraction': 0.03,
-            'motion_background_alpha': 0.03,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
         },
@@ -141,10 +132,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'object_detection_tiling': '2x2',
             'periodic_scan_interval_seconds': 10,
             'motion_pixel_threshold': 20,
-            'motion_gate_fraction': 0.002,
-            'motion_scale_fraction': 0.02,
-            'motion_background_alpha': 0.04,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'auto',
             'object_detection_second_look': True,
@@ -162,10 +149,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'object_detection_tiling': '3x3',
             'periodic_scan_interval_seconds': 5,
             'motion_pixel_threshold': 35,
-            'motion_gate_fraction': 0.0015,
-            'motion_scale_fraction': 0.02,
-            'motion_background_alpha': 0.02,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
             'object_detection_second_look': True,
@@ -189,10 +172,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'object_detection_tiling': 'off',
             'periodic_scan_interval_seconds': 0,
             'motion_pixel_threshold': 40,
-            'motion_gate_fraction': 0.008,
-            'motion_scale_fraction': 0.04,
-            'motion_background_alpha': 0.05,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'auto',
             'object_detection_second_look': False,
@@ -210,10 +189,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'object_detection_tiling': 'off',
             'periodic_scan_interval_seconds': 0,
             'motion_pixel_threshold': 60,
-            'motion_gate_fraction': 0.01,
-            'motion_scale_fraction': 0.05,
-            'motion_background_alpha': 0.03,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
             'object_detection_second_look': False,
@@ -236,10 +211,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'object_detection_tiling': 'off',
             'periodic_scan_interval_seconds': 0,
             'motion_pixel_threshold': 30,
-            'motion_gate_fraction': 0.005,
-            'motion_scale_fraction': 0.03,
-            'motion_background_alpha': 0.05,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'auto',
         },
@@ -255,10 +226,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'object_detection_tiling': '2x2',
             'periodic_scan_interval_seconds': 10,
             'motion_pixel_threshold': 60,
-            'motion_gate_fraction': 0.004,
-            'motion_scale_fraction': 0.03,
-            'motion_background_alpha': 0.01,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
             'object_detection_second_look': True,
@@ -281,10 +248,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'object_detection_tiling': 'off',
             'periodic_scan_interval_seconds': 0,
             'motion_pixel_threshold': 25,
-            'motion_gate_fraction': 0.004,
-            'motion_scale_fraction': 0.025,
-            'motion_background_alpha': 0.05,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'auto',
             'adaptive_detection_enabled': False,
@@ -301,10 +264,6 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'object_detection_tiling': '2x2',
             'periodic_scan_interval_seconds': 0,
             'motion_pixel_threshold': 50,
-            'motion_gate_fraction': 0.003,
-            'motion_scale_fraction': 0.025,
-            'motion_background_alpha': 0.02,
-            'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
             'adaptive_detection_enabled': False,
@@ -380,6 +339,7 @@ def normalize_preset(raw: Any, *, preset_id: str | None = None, builtin: bool = 
         raise ValueError('Preset id must contain lowercase letters, numbers, hyphens, or underscores.')
     settings = raw.get('settings') if isinstance(raw.get('settings'), dict) else raw.get(mode)
     normalized = normalize_camera_detection_profiles({'day': settings if isinstance(settings, dict) else {}})['day']
+    normalized = {key: value for key, value in normalized.items() if key not in LEGACY_MOTION_OVERRIDE_KEYS}
     return {
         'id': resolved_id,
         'name': name,

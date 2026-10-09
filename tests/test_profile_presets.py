@@ -164,3 +164,17 @@ def test_normalize_preset_rejects_bad_names_ids_and_modes():
         normalize_preset({'id': 'Not Valid!', 'name': 'Preset', 'mode': 'day', 'settings': {}})
     with pytest.raises(ValueError, match='Preset mode'):
         normalize_preset({'id': 'valid-id', 'name': 'Preset', 'mode': 'evening', 'settings': {}})
+
+
+def test_presets_never_carry_legacy_per_camera_motion_overrides():
+    """These moved to the global Advanced Motion Engine; a preset that carried
+    them brought the hidden per-camera override back when applied."""
+    from app.profile_presets import LEGACY_MOTION_OVERRIDE_KEYS
+    for preset in list_presets(None):
+        assert not LEGACY_MOTION_OVERRIDE_KEYS & set(preset['settings']), preset['id']
+    saved = normalize_preset({
+        'id': 'porch-day', 'name': 'Porch', 'mode': 'day',
+        'settings': {'motion_pixel_threshold': 40, 'motion_gate_fraction': 0.002, 'motion_algorithm': 'diff'},
+    })['settings']
+    assert saved['motion_pixel_threshold'] == 40
+    assert not LEGACY_MOTION_OVERRIDE_KEYS & set(saved)
