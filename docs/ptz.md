@@ -80,11 +80,20 @@ How it behaves:
   restores the exact home zoom.
 - **Manual control wins.** Using the PTZ pad pauses auto-tracking for 30
   seconds and drops the current target.
-- **Safety.** Every pulse is short. ONVIF cameras stop themselves at the end of
-  each pulse, and Pelco-D gets an explicit Stop, so a server restart mid-track
-  cannot leave the camera spinning. Camera commands run off the detection
-  thread, and a camera whose last command is still in flight is skipped, so a
-  slow or offline camera cannot stall detection.
+- **Safety.** Every pulse is short and ends with an explicit Stop (retried
+  once if it fails). ONVIF moves also carry a timeout as a backup, but many
+  cameras ignore it and keep moving until told to stop, so the tracker never
+  relies on it. Camera commands run off the detection thread, and a camera
+  whose last command is still in flight is skipped, so a slow or offline
+  camera cannot stall detection.
+
+### Tuning
+
+Start with **Tracking Speed** 3-4 and **Zoom While Tracking** off, then raise
+the speed only if the camera falls behind. On a wide-angle camera a full-speed
+pulse moves the picture a long way, so high speeds overshoot. If the camera
+hunts back and forth, lower the speed or raise **Dead Zone**. The pad's own
+**Speed** setting does not affect tracking.
 
 The Live page shows a line under the PTZ pad: watching for, following, paused
 for manual control, or returning home.
