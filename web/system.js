@@ -64,13 +64,13 @@ function renderSystemResources(res) {
 // ─── Video decoding card ────────────────────────────────────────────────────
 // Which decoder each camera's ingest uses (app.video_decode): the NVIDIA
 // GPU's NVDEC, or the CPU. Set under Settings > Detection & Live.
-const DECODE_SETTING_LABELS = { auto: 'Auto', gpu: 'GPU', cpu: 'CPU' };
+const DECODE_SETTING_LABELS = { auto: 'Automatic', gpu: 'GPU', cpu: 'CPU' };
 
 function renderVideoDecode(status) {
   if (!els.decodeSummary || !status) return;
   const cameras = Array.isArray(status.cameras) ? status.cameras : [];
   const onGpu = cameras.filter((camera) => camera.decode === 'gpu').length;
-  const setting = DECODE_SETTING_LABELS[status.setting] || 'Auto';
+  const setting = DECODE_SETTING_LABELS[status.setting] || 'Automatic';
   let summary = `Setting: ${setting}. `;
   if (!status.ffmpeg_cuda) {
     summary += 'This ffmpeg cannot decode on an NVIDIA GPU (no "cuda" in ffmpeg -hwaccels), so video is decoded on the CPU.';

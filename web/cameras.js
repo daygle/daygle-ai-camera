@@ -190,10 +190,10 @@ function profileSectionHtml(camera, mode) {
     ] }) +
     selectField('object_detection_low_light', {
       label: 'Low-Light Enhancement',
-      tip: 'Boost contrast on the copy of the frame the object detector sees. Auto only enhances dark frames. Snapshots and recordings are unchanged.',
+      tip: 'Boost contrast on the copy of the frame the object detector sees. Automatic only enhances dark frames. Snapshots and recordings are unchanged.',
       options: [
         { value: 'off', attr: 'off', label: 'Off' },
-        { value: 'auto', attr: 'auto', label: 'Auto (Dark Frames)' },
+        { value: 'auto', attr: 'auto', label: 'Automatic (Dark Frames)' },
         { value: 'on', attr: 'on', label: 'Always' },
       ],
     }) +
@@ -409,7 +409,7 @@ function buildEditFormHtml(camera, index) {
             '<label><span>Latitude</span><input name="latitude" type="number" min="-90" max="90" step="0.000001" placeholder="e.g. -33.8688" value="' + htmlAttr(camera.latitude != null ? camera.latitude : '') + '" /></label>' +
             '<label><span>Longitude</span><input name="longitude" type="number" min="-180" max="180" step="0.000001" placeholder="e.g. 151.2093" value="' + htmlAttr(camera.longitude != null ? camera.longitude : '') + '" /></label>' +
             '<label><span>PTZ Motion Detection</span><select name="ptz_motion_detection">' +
-              '<option value="auto"' + ((camera.detection?.ptz_motion_detection || 'auto') === 'auto' ? ' selected' : '') + '>Auto (Follow PTZ)</option>' +
+              '<option value="auto"' + ((camera.detection?.ptz_motion_detection || 'auto') === 'auto' ? ' selected' : '') + '>Automatic (Follow PTZ)</option>' +
               '<option value="on"' + (camera.detection?.ptz_motion_detection === 'on' ? ' selected' : '') + '>On</option>' +
               '<option value="off"' + (camera.detection?.ptz_motion_detection === 'off' ? ' selected' : '') + '>Off</option>' +
             '</select></label>' +
@@ -444,8 +444,8 @@ function buildEditFormHtml(camera, index) {
         '<div class="cam-edit-section">' +
           '<h4 class="cam-edit-section-title">Stream</h4>' +
           '<div class="form-grid">' +
-            '<label><span>FPS <span class="info-tip" data-tip="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." title="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." tabindex="0" aria-label="Help: Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong."></span></span><input name="fps" type="number" min="1" max="120" placeholder="Auto" value="' + htmlAttr(camera.fps != null ? camera.fps : '') + '" /></label>' +
-            '<label><span>Frame Buffer Drains <span class="info-tip" data-tip="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." title="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." tabindex="0" aria-label="Help: Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)."></span></span><input name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" value="' + htmlAttr(camera.stale_frame_grabs != null ? camera.stale_frame_grabs : '') + '" /></label>' +
+            '<label><span>FPS <span class="info-tip" data-tip="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." title="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." tabindex="0" aria-label="Help: Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong."></span></span><input name="fps" type="number" min="1" max="120" placeholder="Automatic" value="' + htmlAttr(camera.fps != null ? camera.fps : '') + '" /></label>' +
+            '<label><span>Frame Buffer Drains <span class="info-tip" data-tip="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for automatic (FPS/4)." title="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for automatic (FPS/4)." tabindex="0" aria-label="Help: Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for automatic (FPS/4)."></span></span><input name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Automatic" value="' + htmlAttr(camera.stale_frame_grabs != null ? camera.stale_frame_grabs : '') + '" /></label>' +
           '</div>' +
           '<p class="form-help muted">Frame-buffer drains is a hint passed to the stream decoder. Leave FPS empty to auto-detect it from the stream; override it only if the detected value is wrong.</p>' +
         '</div>' +
@@ -859,7 +859,7 @@ function formatCameraResolution(camera, runtimeResolution) {
     var live = runtimeResolution.width + ' × ' + runtimeResolution.height;
     return live + (configured && live !== configured ? ' live' : '');
   }
-  return configured ? configured + ' configured' : 'Auto';
+  return configured ? configured + ' configured' : 'Automatic';
 }
 
 function renderCameraRow(camera, index) {
