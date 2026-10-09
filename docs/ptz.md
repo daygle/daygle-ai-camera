@@ -76,6 +76,15 @@ How it behaves:
   across the picture is not outrun. After each pulse the camera stops and
   waits 0.5 s, because the video arrives a little after the motor moves, and
   steering on old frames makes a camera overshoot and hunt back and forth.
+- **Catching up.** If a pulse did not gain on the object (it is still as far
+  off centre, on the same side - someone walking steadily away), the next
+  pulse on that axis is up to 2.5x faster and longer. The boost resets as soon
+  as the object is centred or the camera overshoots, so someone who stops is
+  not swung past.
+- **Following off the edge.** An object half out of the picture often stops
+  being detected. If it was last seen near the edge, the camera keeps turning
+  that way for up to two pulses instead of freezing, then picks it up again
+  wherever it reappears.
 - **Zoom.** With zoom on, the camera zooms in only once the object is centred,
   and zooms out straight away if the object nears the edge or is too big. When
   the object is lost, the tracker undoes its own zoom-in; return-home then

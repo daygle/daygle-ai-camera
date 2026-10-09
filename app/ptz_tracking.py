@@ -19,6 +19,14 @@ detections. On a camera with auto-tracking on, it:
    pulse waits ``SETTLE_SECONDS`` after the last one ends, because the video
    lags the motor: steering on frames that predate the last pulse is what
    makes trackers overshoot and hunt back and forth.
+   A target that keeps walking away is chased harder: when a pulse did not
+   gain on it (it is still as far off centre, on the same side), the next
+   pulse on that axis is faster and longer (``BOOST_STEP`` up to
+   ``MAX_BOOST``). The boost resets once the target is centred or the camera
+   overshoots, so a person who stops is not swung past.
+   A target that vanishes at the frame edge (half out of the picture, so the
+   detector misses it) is followed off the edge with up to
+   ``MAX_EDGE_PUSHES`` pulses in that direction instead of freezing.
 4. **Lets go** when the target has not been seen for ``lost_seconds``, and
    after ``return_home_seconds`` with nothing to follow sends the camera back to
    its home position (or a chosen preset).
@@ -60,6 +68,19 @@ PULSE_SECONDS = 0.4
 MIN_PULSE_SECONDS = 0.3
 MAX_PULSE_SECONDS = 1.5
 SETTLE_SECONDS = 0.5
+
+# Catch-up boost for a target that keeps moving away (see module docstring).
+# A pulse "gained" when the error shrank below BOOST_PROGRESS of what it was
+# at the previous pulse; otherwise that axis's boost grows by BOOST_STEP.
+BOOST_STEP = 1.5
+MAX_BOOST = 2.5
+BOOST_PROGRESS = 0.8
+MAX_BOOSTED_PULSE_SECONDS = 2.5
+
+# Follow a target off the frame edge: when it was last seen at least this far
+# from centre and then disappeared, keep turning that way for a few pulses.
+EDGE_ERROR = 0.35
+MAX_EDGE_PUSHES = 2
 MANUAL_PAUSE_SECONDS = 30.0
 HOME_MOVE_SECONDS = 4.0
 
@@ -176,7 +197,7 @@ class _CameraState:
     __slots__ = (
         'target_label', 'target_track_id', 'last_center', 'last_seen',
         'next_command_at', 'paused_until', 'moved_since_home', 'busy', 'state',
-        'zoom_in_seconds',
+        'zoom_in_seconds', 'boost', 'last_error', 'edge_pushes',
     )
 
     def __init__(self) -> None:
@@ -192,11 +213,20 @@ class _CameraState:
         self.state = 'idle'
         # Net seconds of zoom-in this tracker has applied, undone on loss.
         self.zoom_in_seconds = 0.0
+        self.reset_steering()
+
+    def reset_steering(self) -> None:
+        # Per axis (pan, tilt): the catch-up multiplier, and the signed error
+        # at the last pulse on that axis (None = no pulse since centring).
+        self.boost = [1.0, 1.0]
+        self.last_error: list[float | None] = [None, None]
+        self.edge_pushes = 0
 
     def drop_target(self) -> None:
         self.target_label = None
         self.target_track_id = None
         self.last_center = None
+        self.reset_steering()
 
 
 # Re-entrant: a dispatched job clears its busy flag under this lock, and a
@@ -275,7 +305,24 @@ def _pick_new_target(
     return max(eligible, key=_area) if eligible else None
 
 
-def _follow(state: _CameraState, visible: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _update_boost(state: _CameraState, axis: int, error: float, dead_zone: float) -> float:
+    """Catch-up multiplier for one axis at a pulse (see BOOST_STEP)."""
+    if abs(error) <= dead_zone:
+        state.boost[axis] = 1.0
+        state.last_error[axis] = None
+        return 1.0
+    previous = state.last_error[axis]
+    if previous is not None:
+        if (previous > 0) != (error > 0):
+            # Overshot: the target is now on the other side. Start gentle.
+            state.boost[axis] = 1.0
+        elif abs(error) >= abs(previous) * BOOST_PROGRESS:
+            # The last pulse did not gain on it: it is moving away.
+            state.boost[axis] = min(MAX_BOOST, state.boost[axis] * BOOST_STEP)
+    return state.boost[axis]
+
+
+def _follow(state: _CameraState, visible: list[dict[str, Any]], *, max_jump: float = MAX_FOLLOW_JUMP) -> dict[str, Any] | None:
     from app.zone_schema import canonical_label
 
     same_label = [
@@ -297,7 +344,7 @@ def _follow(state: _CameraState, visible: list[dict[str, Any]]) -> dict[str, Any
         return ((cx - lx) ** 2 + (cy - ly) ** 2) ** 0.5
 
     nearest = min(same_label, key=_distance)
-    return nearest if _distance(nearest) <= MAX_FOLLOW_JUMP else None
+    return nearest if _distance(nearest) <= max_jump else None
 
 
 def update_auto_tracking(
@@ -337,7 +384,11 @@ def update_auto_tracking(
             state.state = 'paused'
             return _status(state, now)
 
-        target = _follow(state, visible) if state.target_label else None
+        # After pushing the camera off the edge after a lost target, the
+        # target reappears somewhere else in the frame: accept the nearest
+        # same-label box anywhere.
+        max_jump = 1.5 if state.edge_pushes else MAX_FOLLOW_JUMP
+        target = _follow(state, visible, max_jump=max_jump) if state.target_label else None
         if target is None and state.target_label and now - state.last_seen > settings['lost_seconds']:
             logger.info('PTZ auto-track on %s lost the %s', camera_id, state.target_label)
             state.drop_target()
@@ -353,10 +404,12 @@ def update_auto_tracking(
             state.last_center = _center(target)
             state.last_seen = now
             state.state = 'tracking'
+            state.edge_pushes = 0
             cx, cy = state.last_center  # type: ignore[misc]
             pan = axis_velocity(cx - 0.5, settings['dead_zone'], settings['speed'])
             # Image y grows downwards; ONVIF/Pelco-D tilt is positive upwards.
             tilt = -axis_velocity(cy - 0.5, settings['dead_zone'], settings['speed'])
+            boost = 1.0
             zoom = 0.0
             if settings['zoom']:
                 try:
@@ -371,12 +424,30 @@ def update_auto_tracking(
                     # An edge zoom-out only undoes our own zoom-in; it never
                     # widens past where tracking started.
                     zoom = 0.0
+            ready = now >= state.next_command_at and not state.busy
+            if ready and (pan or tilt):
+                # Boost is judged only when a pulse can actually go out, so a
+                # cycle that is still settling does not count as "no gain".
+                pan_boost = _update_boost(state, 0, cx - 0.5, settings['dead_zone'])
+                tilt_boost = _update_boost(state, 1, cy - 0.5, settings['dead_zone'])
+                pan = max(-1.0, min(1.0, pan * pan_boost))
+                tilt = max(-1.0, min(1.0, tilt * tilt_boost))
+                boost = max(pan_boost if pan else 1.0, tilt_boost if tilt else 1.0)
+            elif ready:
+                state.reset_steering()
             if pan or tilt:
-                duration = pulse_seconds(max(abs(cx - 0.5), abs(cy - 0.5)), settings['dead_zone'])
+                duration = min(
+                    MAX_BOOSTED_PULSE_SECONDS,
+                    pulse_seconds(max(abs(cx - 0.5), abs(cy - 0.5)), settings['dead_zone']) * boost,
+                )
             else:
                 duration = PULSE_SECONDS
-            if (pan or tilt or zoom) and now >= state.next_command_at:
+            if (pan or tilt or zoom) and ready:
                 if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, pan, tilt, zoom, duration), 'move'):
+                    if pan:
+                        state.last_error[0] = cx - 0.5
+                    if tilt:
+                        state.last_error[1] = cy - 0.5
                     state.next_command_at = now + duration + SETTLE_SECONDS
                     state.moved_since_home = True
                     if zoom:
@@ -384,9 +455,24 @@ def update_auto_tracking(
             return _status(state, now)
 
         if state.target_label is not None:
-            # Briefly out of view (a missed detection, behind a bush): hold
-            # still and keep the target until ``lost_seconds`` runs out.
             state.state = 'tracking'
+            lx, ly = state.last_center or (0.5, 0.5)
+            if (
+                max(abs(lx - 0.5), abs(ly - 0.5)) >= EDGE_ERROR
+                and state.edge_pushes < MAX_EDGE_PUSHES
+                and now >= state.next_command_at
+            ):
+                # Last seen at the edge: it has most likely walked out of the
+                # picture (half out, so the detector misses it). Keep turning
+                # after it instead of freezing until it is lost.
+                pan = axis_velocity(lx - 0.5, EDGE_ERROR - 0.01, settings['speed'])
+                tilt = -axis_velocity(ly - 0.5, EDGE_ERROR - 0.01, settings['speed'])
+                if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, pan, tilt, 0.0, MAX_PULSE_SECONDS), 'edge follow'):
+                    state.edge_pushes += 1
+                    state.moved_since_home = True
+                    state.next_command_at = now + MAX_PULSE_SECONDS + SETTLE_SECONDS
+            # Otherwise briefly out of view (a missed detection, behind a
+            # bush): hold still and keep the target until ``lost_seconds``.
             return _status(state, now)
 
         state.state = 'idle'
