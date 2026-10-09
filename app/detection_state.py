@@ -288,13 +288,31 @@ def update_camera_motion(
             # The frame that activates suppression belongs to the camera-motion
             # window; do not carry its qualifying streak into the next window.
             current['high_fraction_streak'] = 0
-        if not active and current.get('reason') == 'global_motion':
+        # A window that was active on the previous analysed frame and is not
+        # now has just ended: the camera points somewhere new.
+        ended = bool(current.get('last_active')) and not active
+        current['last_active'] = active
+        reason = current.get('reason')
+        if not active and reason == 'global_motion':
             current['reason'] = None
-        return {
-            'active': active,
-            'reason': current.get('reason') if active else None,
-            'motion_fraction': round(max(0.0, min(1.0, fraction)), 6),
-        }
+        if not ended:
+            return {
+                'active': active,
+                'reason': current.get('reason') if active else None,
+                'motion_fraction': round(max(0.0, min(1.0, fraction)), 6),
+            }
+    # The window just ended. The motion background still describes the old
+    # view and would take ~1/background_alpha frames to fade: re-learn it from
+    # the next frame (the reconnect path), and treat this boundary frame, which
+    # was diffed against the old view, as still moving. Cleared outside the
+    # camera-motion lock so the two locks are never nested.
+    clear_frame_motion_state(str(camera_id))
+    return {
+        'active': True,
+        'reason': reason or 'camera_moved',
+        'motion_fraction': round(max(0.0, min(1.0, fraction)), 6),
+        'ended': True,
+    }
 
 
 def _box_iou(box_a: Any, box_b: Any) -> float:

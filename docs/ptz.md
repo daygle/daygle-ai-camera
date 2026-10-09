@@ -85,10 +85,17 @@ How it behaves:
   being detected. If it was last seen near the edge, the camera keeps turning
   that way for up to two pulses instead of freezing, then picks it up again
   wherever it reappears.
-- **Zoom.** With zoom on, the camera zooms in only once the object is centred,
-  and zooms out straight away if the object nears the edge or is too big. When
-  the object is lost, the tracker undoes its own zoom-in; return-home then
-  restores the exact home zoom.
+- **Zoom.** With zoom on, the camera zooms in only once the object has been
+  centred, with no pan or tilt, for 2 seconds, so it never zooms in on someone
+  just walking through the middle. It zooms out straight away if the object
+  nears the edge or is too big. Each zoom step changes the lens by the same
+  amount even when it rides along with a long pan move. While zoomed in, the
+  same turn moves the picture further, so pan/tilt moves are halved and the
+  catch-up boost is off. When the object is lost, the tracker undoes its own
+  zoom-in, and return-home then restores the exact home zoom. Using the PTZ pad
+  makes the tracker forget its own zoom, so it never "undoes" yours.
+  Pelco-D zoom has no speed control, so on Pelco-D the tracker only zooms in
+  its own short steps, never during a pan.
 - **Manual control wins.** Using the PTZ pad pauses auto-tracking for 30
   seconds and drops the current target.
 - **Safety.** Every pulse is short and ends with an explicit Stop (retried
