@@ -285,11 +285,13 @@ function startEditGroup(name) {
   groupNameInput.focus();
 }
 
-async function persistGroups(next) {
+async function persistGroups(next, renames = {}) {
   try {
+    // renames ({old: new}) lets the server point zone rules that name a
+    // renamed group at its new name.
     const result = await api('/api/settings/label_groups', {
       method: 'PUT',
-      body: JSON.stringify({ groups: next }),
+      body: JSON.stringify({ groups: next, renames }),
     });
     groups = (result && result.groups) || {};
     renderGroups();
@@ -324,7 +326,9 @@ async function saveGroup() {
     return;
   }
   const next = { ...groups };
+  const renames = {};
   if (editingGroupName && editingGroupName !== name) {
+    renames[editingGroupName] = name;
     delete next[editingGroupName];
     if (Object.prototype.hasOwnProperty.call(groupModes, editingGroupName)) {
       groupModes[name] = groupModes[editingGroupName];
@@ -332,7 +336,7 @@ async function saveGroup() {
     }
   }
   next[name] = members;
-  await persistGroups(next);
+  await persistGroups(next, renames);
   resetGroupForm();
 }
 

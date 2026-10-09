@@ -1330,6 +1330,56 @@ def test_label_groups_settings_update(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_label_group_rename_updates_zone_rules(tmp_path, monkeypatch):
+    """Renaming a group carries zone rules that name it over to the new name."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        zone = {
+            "id": "yard", "name": "Yard",
+            "points": [{"x": 0.1, "y": 0.1}, {"x": 0.9, "y": 0.1}, {"x": 0.9, "y": 0.9}],
+            "object_rules": [{"label": "pet", "min_confidence": 0.4}, {"label": "person", "min_confidence": 0.5}],
+        }
+        status, _headers, _camera = client.request(
+            "/api/cameras/camera-1",
+            method="PUT",
+            json_body={"backend": "rtsp", "device": "rtsp", "stream_url": "rtsp://127.0.0.1:554/s",
+                       "detection": {"zones": [zone]}},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        status, _headers, _objects = client.request(
+            "/api/settings/objects",
+            method="PUT",
+            json_body={"default_mode": "moving", "group_modes": {"pet": "any"}},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+
+        status, _headers, updated = client.request(
+            "/api/settings/label_groups",
+            method="PUT",
+            json_body={"groups": {"animal": ["cat", "dog", "horse"], "pets": ["cat", "dog"]},
+                       "renames": {"pet": "pets", "animal": "ghost"}},  # stale hint ignored
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert sorted(updated["groups"]) == ["animal", "pets"]
+
+        status, _headers, cameras = client.request("/api/cameras")
+        assert status == 200
+        rules = cameras["cameras"][0]["detection"]["zones"][0]["object_rules"]
+        assert [rule["label"] for rule in rules] == ["pets", "person"]
+        status, _headers, objects = client.request("/api/settings/objects")
+        assert objects["group_modes"] == {"pets": "any"}
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_viewer_responses_redact_camera_and_alert_credentials(tmp_path, monkeypatch):
     """Viewer-role accounts must never receive camera ONVIF/stream or alert
     channel credentials: ``GET /api/config`` redacts the camera records and

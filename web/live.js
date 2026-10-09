@@ -78,6 +78,8 @@ let detectionStatusRefreshMs = DEFAULT_DETECTION_STATUS_REFRESH_MS;
 let cameras = [];
 // eslint-disable-next-line no-unused-vars -- ESLint: exported for zones.js (zones page script)
 let availableLabels = [];
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for zones.js (zones page script)
+let labelGroupNames = [];
 let selectedCamera = null;
 // Whether the selected camera has motion zones (and so per-zone meters).
 let selectedCameraHasMotionZones = false;
@@ -1346,6 +1348,14 @@ async function init() {
       availableLabels = aiSettings.available_labels || [];
     } catch {
       availableLabels = [];
+    }
+    try {
+      // Object groups are user-managed on the Objects page, so read the
+      // current set (names only) instead of a hard-coded list.
+      const groupSettings = await api('/api/settings/label_groups');
+      labelGroupNames = Object.keys((groupSettings && groupSettings.groups) || {}).sort();
+    } catch {
+      labelGroupNames = [];
     }
   }
   // configuredLabels is built per selected camera inside setSelectedCamera

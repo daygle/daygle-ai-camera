@@ -33,7 +33,7 @@ DEFAULT_LABEL_GROUPS: dict[str, frozenset[str]] = {
         'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',
         'elephant', 'bear', 'zebra', 'giraffe',
     }),
-    'pet': frozenset({'cat', 'dog', 'bird'}),
+    'pet': frozenset({'cat', 'dog'}),
 }
 
 # Bounds that keep a hand-edited / hostile group map from growing without limit.
@@ -148,3 +148,82 @@ def refresh_label_groups() -> None:
     global _cache
     with _cache_lock:
         _cache = effective_label_groups()
+
+
+# Zone sub-rules that carry their own ``labels`` allow-list.
+_ZONE_LABEL_RULES: tuple[str, ...] = ('tripwire', 'loiter', 'time_of_day', 'activity_spike')
+
+
+def _rename_labels(labels: Any, renames: dict[str, str]) -> tuple[Any, bool]:
+    """Swap renamed group names in a label list, keeping order and dropping duplicates."""
+    if not isinstance(labels, list):
+        return labels, False
+    out: list[Any] = []
+    changed = False
+    for label in labels:
+        new = renames.get(_canonical_token(label))
+        if new is not None:
+            changed = True
+            label = new
+        if label not in out:
+            out.append(label)
+    return out, changed
+
+
+def rename_group_references(cameras: list[dict[str, Any]], renames: dict[str, str]) -> tuple[list[dict[str, Any]], bool]:
+    """Point every camera's object labels, zone rules and zone sub-rules that name
+    a renamed group at its new name.
+
+    Returns ``(cameras, changed)``; the input list is not modified. Without this a
+    renamed group would leave zone rules naming a group that no longer exists, so
+    they would quietly stop matching anything.
+    """
+    renames = {_canonical_token(old): _canonical_token(new) for old, new in (renames or {}).items()}
+    renames = {old: new for old, new in renames.items() if old and new and old != new}
+    if not renames:
+        return cameras, False
+    changed = False
+    result: list[dict[str, Any]] = []
+    for camera in cameras:
+        detection = camera.get('detection') if isinstance(camera, dict) else None
+        if not isinstance(detection, dict):
+            result.append(camera)
+            continue
+        detection = dict(detection)
+        camera_changed = False
+        if 'object_labels' in detection:
+            detection['object_labels'], camera_changed = _rename_labels(detection['object_labels'], renames)
+        zones = []
+        for zone in detection.get('zones') or []:
+            if not isinstance(zone, dict):
+                zones.append(zone)
+                continue
+            zone = dict(zone)
+            rules = []
+            for rule in zone.get('object_rules') or []:
+                new = renames.get(_canonical_token(rule.get('label'))) if isinstance(rule, dict) else None
+                if new is not None:
+                    rule = {**rule, 'label': new}
+                    camera_changed = True
+                rules.append(rule)
+            if 'object_rules' in zone:
+                zone['object_rules'] = rules
+            if 'object_labels' in zone:
+                zone['object_labels'], hit = _rename_labels(zone['object_labels'], renames)
+                camera_changed = camera_changed or hit
+            for key in _ZONE_LABEL_RULES:
+                sub = zone.get(key)
+                if isinstance(sub, dict) and 'labels' in sub:
+                    labels, hit = _rename_labels(sub['labels'], renames)
+                    if hit:
+                        zone[key] = {**sub, 'labels': labels}
+                        camera_changed = True
+            zones.append(zone)
+        if 'zones' in detection:
+            detection['zones'] = zones
+        if camera_changed:
+            changed = True
+            result.append({**camera, 'detection': detection})
+        else:
+            result.append(camera)
+    return result, changed
