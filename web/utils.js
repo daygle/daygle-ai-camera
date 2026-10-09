@@ -2293,9 +2293,9 @@ function getDaygleDatePrefs() {
 // to count as changed). The picker is a nameless <select> paired with the
 // real numeric input, so forms keep submitting the number; Custom reveals it.
 const PIXEL_THRESHOLD_PRESETS = [
-  { value: 15, label: 'Low (catch faint movement)' },
-  { value: 30, label: 'Medium (recommended)' },
-  { value: 50, label: 'High (noisy or IR night cameras)' },
+  { value: 15, label: 'Low (Catch Faint Movement)' },
+  { value: 30, label: 'Medium (Recommended)' },
+  { value: 50, label: 'High (Noisy Or IR Night Cameras)' },
 ];
 
 // eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts

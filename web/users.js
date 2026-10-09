@@ -22,7 +22,7 @@ function setMessage(text, isError = false) {
 
 function roleLabel(value) {
   const normalized = String(value || '').trim().toLowerCase();
-  return normalized === 'admin' ? 'Admin' : 'Viewer';
+  return normalized === 'admin' ? 'Administrator' : 'Viewer';
 }
 
 function formatLastLogin(value) {
@@ -51,7 +51,7 @@ function buildEditForm(user) {
             <label><span>First Name</span><input name="first_name" value="${escapeHtml(user.first_name)}" /></label>
             <label><span>Last Name</span><input name="last_name" value="${escapeHtml(user.last_name)}" /></label>
             <label><span>Email</span><input name="email" type="email" value="${escapeHtml(user.email)}" /></label>
-            <label><span>Role</span><select name="role"><option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>Viewer</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option></select></label>
+            <label><span>Role</span><select name="role"><option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>Viewer</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrator</option></select></label>
             <label><span>Account Status</span><select name="is_active"><option value="true" ${user.is_active ? 'selected' : ''}>Active</option><option value="false" ${!user.is_active ? 'selected' : ''}>Disabled</option></select></label>
             <label class="user-password-field"><span>New Password <small>(optional)</small></span><input name="password" type="password" placeholder="Leave blank to keep current" autocomplete="new-password" /></label>
             <div class="user-edit-footer">
