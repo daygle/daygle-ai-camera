@@ -691,11 +691,13 @@ def ptz_connection(camera: dict) -> PtzConnection | None:
 
 
 def ptz_move(conn: PtzConnection, pan: float, tilt: float, duration: float, zoom: float = 0.0) -> None:
-    """Pan/tilt/zoom at a velocity (-1..1 per axis) for ``duration`` seconds.
+    """Pan/tilt/zoom at a velocity (-1..1 per axis) for ``duration`` seconds, then stop.
 
-    ONVIF cameras stop themselves when the ContinuousMove timeout expires.
-    Pelco-D has no timeout, so this blocks for ``duration`` and then sends an
-    explicit stop - call it from a worker thread, never the detection loop.
+    Always ends with an explicit Stop. ONVIF's ContinuousMove ``<Timeout>`` is
+    still sent, but only as a backup: many cameras ignore it and keep moving
+    until told to stop, which turned a 0.4 s tracking pulse into a full-speed
+    sweep to the end of the pan range. This blocks for ``duration``, so call it
+    from a worker thread, never the detection loop.
     """
     duration = max(0.05, min(5.0, float(duration)))
     with conn.lock:
@@ -706,9 +708,13 @@ def ptz_move(conn: PtzConnection, pan: float, tilt: float, duration: float, zoom
                 conn.host, conn.http_port, pan, tilt, zoom,
                 conn.username, conn.password, timeout_seconds=duration,
             )
-            return
     time.sleep(duration)
-    ptz_stop(conn)
+    try:
+        ptz_stop(conn)
+    except OSError as exc:
+        # A dropped Stop is what leaves a camera spinning, so try once more.
+        logger.warning('PTZ stop after a move failed on %s, retrying: %s', conn.host, exc)
+        ptz_stop(conn)
 
 
 def ptz_stop(conn: PtzConnection) -> None:

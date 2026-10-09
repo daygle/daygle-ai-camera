@@ -181,3 +181,31 @@ def test_pelcod_move_stops_after_duration(monkeypatch):
     assert len(sent) == 2 and sent[1][3] == 0x00  # move, then stop
     assert ptz.ptz_goto_home(conn, '') is False  # Pelco-D needs a preset number
     assert ptz.ptz_goto_home(conn, '3') is True and sent[-1][3] == 0x07 and sent[-1][5] == 3
+
+
+def test_onvif_move_always_ends_with_an_explicit_stop(monkeypatch):
+    """Many cameras ignore the ContinuousMove timeout, so a pulse must not rely on it."""
+    camera = _FakeCamera()
+    monkeypatch.setattr(ptz, '_soap', camera)
+    monkeypatch.setattr(ptz.time, 'sleep', lambda _s: None)
+    conn = ptz.ptz_connection({'host': 'cam', 'ptz': {'enabled': True, 'protocol': 'onvif'}})
+    ptz.ptz_move(conn, -0.5, 0.0, 0.4, zoom=0.5)
+    bodies = [body for _url, body in camera.calls]
+    assert bodies[-2].startswith('<tptz:ContinuousMove>')
+    assert bodies[-1].startswith('<tptz:Stop>')
+
+
+def test_failed_stop_after_a_move_is_retried(monkeypatch):
+    stops = []
+    monkeypatch.setattr(ptz, 'send_ptz_velocity_onvif', lambda *a, **k: None)
+    monkeypatch.setattr(ptz.time, 'sleep', lambda _s: None)
+
+    def flaky_stop(*_args):
+        stops.append(1)
+        if len(stops) == 1:
+            raise OSError('ONVIF transport error (url=x): reset')
+
+    monkeypatch.setattr(ptz, 'stop_ptz_onvif', flaky_stop)
+    conn = ptz.ptz_connection({'host': 'cam', 'ptz': {'enabled': True}})
+    ptz.ptz_move(conn, 0.5, 0.0, 0.4)
+    assert len(stops) == 2
