@@ -70,10 +70,12 @@ How it behaves:
   label nearest to where it was last seen). Zones are ignored while following,
   because they stop lining up with the scene once the camera has moved.
 - **Steering.** When the object is outside the dead zone, the camera moves
-  towards it in a 0.4 s pulse. The speed grows with how far off centre the
-  object is. The next pulse waits another 0.6 s, because the video arrives a
-  little after the motor moves, and steering on old frames makes a camera
-  overshoot and hunt back and forth.
+  towards it in a pulse. Both the speed and the length of the pulse grow with
+  how far off centre the object is: a 0.3 s nudge just outside the dead zone,
+  up to 1.5 s when the object is at the edge of the frame, so someone walking
+  across the picture is not outrun. After each pulse the camera stops and
+  waits 0.5 s, because the video arrives a little after the motor moves, and
+  steering on old frames makes a camera overshoot and hunt back and forth.
 - **Zoom.** With zoom on, the camera zooms in only once the object is centred,
   and zooms out straight away if the object nears the edge or is too big. When
   the object is lost, the tracker undoes its own zoom-in; return-home then
@@ -89,11 +91,16 @@ How it behaves:
 
 ### Tuning
 
-Start with **Tracking Speed** 3-4 and **Zoom While Tracking** off, then raise
-the speed only if the camera falls behind. On a wide-angle camera a full-speed
-pulse moves the picture a long way, so high speeds overshoot. If the camera
-hunts back and forth, lower the speed or raise **Dead Zone**. The pad's own
-**Speed** setting does not affect tracking.
+Start with **Tracking Speed** 4-6 and **Zoom While Tracking** off.
+
+- **Falls behind** (the object reaches the edge before the camera catches up):
+  raise Tracking Speed.
+- **Overshoots or hunts back and forth:** lower Tracking Speed, or raise
+  **Dead Zone** so small drifts are ignored.
+- **Twitchy while the object stands still:** raise Dead Zone (20-25%).
+
+The pad's own **Speed** and **Step Duration** settings do not affect
+tracking.
 
 The Live page shows a line under the PTZ pad: watching for, following, paused
 for manual control, or returning home.

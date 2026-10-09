@@ -81,7 +81,7 @@ def test_only_configured_labels_are_followed():
     assert status == {'state': 'idle'} and mover.calls == []
     status = _step(_camera(), 11.0, candidates=[_det('cat', 0.9, 0.5, track_id=7)], mover=mover)
     assert status['state'] == 'tracking' and status['label'] == 'cat' and status['track_id'] == 7
-    action, pan, tilt, zoom = mover.calls[-1]
+    action, pan, tilt, zoom, _duration = mover.calls[-1]
     assert action == 'move' and pan > 0 and tilt == 0 and zoom == 0
 
 
@@ -89,7 +89,7 @@ def test_group_label_matches_member():
     mover = _Mover()
     status = _step(_camera(labels=['animal']), 10.0, candidates=[_det('cat', 0.1, 0.9)], mover=mover)
     assert status['state'] == 'tracking'
-    _action, pan, tilt, _zoom = mover.calls[-1]
+    _action, pan, tilt, _zoom, _duration = mover.calls[-1]
     assert pan < 0 and tilt < 0  # left and down
 
 
@@ -105,10 +105,25 @@ def test_dead_zone_and_pulse_spacing():
     _step(camera, 10.0, candidates=[_det('cat', 0.52, 0.48)], mover=mover)
     assert mover.calls == []  # already centred
     _step(camera, 11.0, candidates=[_det('cat', 0.9, 0.5)], mover=mover)
-    _step(camera, 11.5, candidates=[_det('cat', 0.9, 0.5)], mover=mover)  # too soon after the pulse
-    assert len(mover.calls) == 1
-    _step(camera, 12.1, candidates=[_det('cat', 0.9, 0.5)], mover=mover)
+    duration = mover.calls[-1][-1]
+    _step(camera, 11.0 + duration + pt.SETTLE_SECONDS - 0.05, candidates=[_det('cat', 0.9, 0.5)], mover=mover)
+    assert len(mover.calls) == 1  # pulse still running or settling
+    _step(camera, 11.0 + duration + pt.SETTLE_SECONDS + 0.01, candidates=[_det('cat', 0.9, 0.5)], mover=mover)
     assert len(mover.calls) == 2
+
+
+def test_pulse_length_grows_with_distance_from_centre():
+    """Small corrections are short nudges; a target near the edge gets a long pulse."""
+    assert pt.pulse_seconds(0.16, 0.15) == pytest.approx(pt.MIN_PULSE_SECONDS, abs=0.05)
+    assert pt.pulse_seconds(0.5, 0.15) == pytest.approx(pt.MAX_PULSE_SECONDS)
+    assert pt.pulse_seconds(0.3, 0.15) < pt.pulse_seconds(0.45, 0.15)
+    mover = _Mover()
+    _step(_camera(), 10.0, candidates=[_det('cat', 0.7, 0.5, track_id=1)], mover=mover)
+    near = mover.calls[-1][-1]
+    pt.reset_auto_tracking()
+    _step(_camera(), 10.0, candidates=[_det('cat', 0.97, 0.5, track_id=2)], mover=mover)
+    far = mover.calls[-1][-1]
+    assert near < far <= pt.MAX_PULSE_SECONDS
 
 
 def test_follows_outside_zones_and_by_nearest_position():
@@ -165,8 +180,9 @@ def test_zoom_in_when_centred_and_small_then_undo_on_loss():
     mover = _Mover()
     camera = _camera(zoom=True, target_size=0.4, return_home_seconds=0, lost_seconds=1)
     _step(camera, 10.0, candidates=[_det('cat', 0.5, 0.5, size=0.1)], mover=mover)
-    _action, pan, tilt, zoom = mover.calls[-1]
+    _action, pan, tilt, zoom, duration = mover.calls[-1]
     assert pan == 0 and tilt == 0 and zoom == pt.ZOOM_VELOCITY
+    assert duration == pt.PULSE_SECONDS  # zoom-only pulses stay short
     _step(camera, 11.1, candidates=[_det('cat', 0.5, 0.5, size=0.12)], mover=mover)
     zoom_ins = sum(1 for call in mover.calls if call[3] > 0)
     assert zoom_ins == 2
