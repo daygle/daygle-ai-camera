@@ -46,7 +46,8 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.04,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'on',
+            'motion_shadow_suppression': 'auto',
+            'object_detection_second_look': True,
         },
         'night': {
             'background_detection_enabled': True,
@@ -76,6 +77,9 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
+            'object_detection_second_look': True,
+            'object_detection_low_light': 'auto',
+            'adaptive_detection_enabled': False,
         },
     },
     {
@@ -99,7 +103,7 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.05,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'on',
+            'motion_shadow_suppression': 'auto',
         },
         'night': {
             'background_detection_enabled': True,
@@ -142,7 +146,9 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.04,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'on',
+            'motion_shadow_suppression': 'auto',
+            'object_detection_second_look': True,
+            'adaptive_detection_enabled': False,
         },
         'night': {
             'background_detection_enabled': True,
@@ -162,6 +168,9 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
+            'object_detection_second_look': True,
+            'object_detection_low_light': 'auto',
+            'adaptive_detection_enabled': False,
         },
     },
     {
@@ -185,7 +194,9 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.05,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'on',
+            'motion_shadow_suppression': 'auto',
+            'object_detection_second_look': False,
+            'object_detection_low_light': 'off',
         },
         'night': {
             'background_detection_enabled': True,
@@ -205,6 +216,8 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
+            'object_detection_second_look': False,
+            'object_detection_low_light': 'off',
         },
     },
     {
@@ -228,7 +241,7 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.05,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'on',
+            'motion_shadow_suppression': 'auto',
         },
         'night': {
             'background_detection_enabled': True,
@@ -248,6 +261,8 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
+            'object_detection_second_look': True,
+            'object_detection_low_light': 'auto',
         },
     },
     {
@@ -271,7 +286,8 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_background_alpha': 0.05,
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
-            'motion_shadow_suppression': 'on',
+            'motion_shadow_suppression': 'auto',
+            'adaptive_detection_enabled': False,
         },
         'night': {
             'background_detection_enabled': True,
@@ -291,6 +307,7 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_algorithm': 'mog2',
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
+            'adaptive_detection_enabled': False,
         },
     },
 )
