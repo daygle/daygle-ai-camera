@@ -206,3 +206,74 @@ def test_axis_velocity_scales_with_error_and_speed():
     assert pt.axis_velocity(0.5, 0.15, 8) == pytest.approx(1.0)
     assert pt.axis_velocity(-0.2, 0.15, 8) == pytest.approx(-0.4)
     assert pt.axis_velocity(0.2, 0.15, 4) == pytest.approx(0.2)
+
+
+def _next_ready(mover, now):
+    """The time the next pulse may go out after the last recorded one at ``now``."""
+    return now + mover.calls[-1][-1] + pt.SETTLE_SECONDS + 0.01
+
+
+def test_target_walking_away_gets_a_stronger_pulse():
+    mover = _Mover()
+    camera = _camera(speed=4)
+    now = 10.0
+    _step(camera, now, candidates=[_det('cat', 0.75, 0.5)], mover=mover)
+    first_pan, first_duration = mover.calls[-1][1], mover.calls[-1][-1]
+    # Still as far off on the same side: the pulse did not gain on it.
+    now = _next_ready(mover, now)
+    _step(camera, now, candidates=[_det('cat', 0.76, 0.5)], mover=mover)
+    second_pan, second_duration = mover.calls[-1][1], mover.calls[-1][-1]
+    assert second_pan > first_pan and second_duration > first_duration
+    # It keeps escaping: the boost keeps growing, up to the cap.
+    for _ in range(5):
+        now = _next_ready(mover, now)
+        _step(camera, now, candidates=[_det('cat', 0.77, 0.5)], mover=mover)
+    assert mover.calls[-1][-1] <= pt.MAX_BOOSTED_PULSE_SECONDS
+    assert pt._states['cam'].boost[0] == pt.MAX_BOOST
+
+
+def test_boost_resets_when_centred_or_overshot():
+    mover = _Mover()
+    camera = _camera(speed=4)
+    now = 10.0
+    _step(camera, now, candidates=[_det('cat', 0.75, 0.5)], mover=mover)
+    now = _next_ready(mover, now)
+    _step(camera, now, candidates=[_det('cat', 0.76, 0.5)], mover=mover)
+    assert pt._states['cam'].boost[0] > 1.0
+    # Overshot: now on the other side - back to a gentle pulse.
+    now = _next_ready(mover, now)
+    _step(camera, now, candidates=[_det('cat', 0.25, 0.5)], mover=mover)
+    assert pt._states['cam'].boost[0] == 1.0
+    assert mover.calls[-1][1] < 0
+    # Gaining on it does not boost.
+    now = _next_ready(mover, now)
+    _step(camera, now, candidates=[_det('cat', 0.32, 0.5)], mover=mover)
+    assert pt._states['cam'].boost[0] == 1.0
+
+
+def test_lost_at_the_edge_keeps_turning_that_way():
+    mover = _Mover()
+    camera = _camera(lost_seconds=10)
+    _step(camera, 10.0, candidates=[_det('cat', 0.95, 0.5)], mover=mover)
+    now = _next_ready(mover, 10.0)
+    # Half out of the picture: no detection this cycle.
+    assert _step(camera, now, mover=mover)['state'] == 'tracking'
+    action, pan, tilt, zoom, duration = mover.calls[-1]
+    assert action == 'move' and pan > 0 and tilt == 0 and duration == pt.MAX_PULSE_SECONDS
+    now = _next_ready(mover, now)
+    _step(camera, now, mover=mover)
+    now = _next_ready(mover, now)
+    _step(camera, now, mover=mover)
+    assert len(mover.calls) == 1 + pt.MAX_EDGE_PUSHES  # bounded
+    # It reappears anywhere in the frame after the camera turned: followed again.
+    status = _step(camera, now + 0.1, candidates=[], visible=[_det('cat', 0.3, 0.5, track_id=42)], mover=mover)
+    assert status['state'] == 'tracking' and status['track_id'] == 42
+
+
+def test_lost_mid_frame_holds_still():
+    mover = _Mover()
+    camera = _camera()
+    _step(camera, 10.0, candidates=[_det('cat', 0.7, 0.5)], mover=mover)
+    calls = len(mover.calls)
+    _step(camera, _next_ready(mover, 10.0), mover=mover)
+    assert len(mover.calls) == calls  # behind a bush, not walked off: no push
