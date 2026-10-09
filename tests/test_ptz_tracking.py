@@ -359,3 +359,34 @@ def test_pelcod_never_zooms_during_a_pan_pulse():
     _step(camera, now, candidates=[_det('cat', 0.95, 0.5, size=0.1)], mover=mover)
     _action, pan, _tilt, zoom, _duration = mover.calls[-1]
     assert pan > 0 and zoom == 0
+
+
+def test_tilt_is_scaled_to_the_frame_shape():
+    """A 16:9 frame moves ~16/9 times further vertically per turn, so tilt is
+    steered proportionally gentler than pan for the same offset."""
+    assert pt.tilt_scale(16 / 9) == pytest.approx(9 / 16)
+    assert pt.tilt_scale(4 / 3) == pytest.approx(0.75)
+    assert pt.tilt_scale(None) == pytest.approx(9 / 16)
+    assert pt.tilt_scale(0.5) == 1.0  # portrait: never stronger than pan
+    mover = _Mover()
+    det = _det('cat', 0.8, 0.2)
+    det['_frame_aspect'] = 16 / 9
+    _step(_camera(speed=4), 10.0, candidates=[det], mover=mover)
+    _action, pan, tilt, _zoom, _duration = mover.calls[-1]
+    assert tilt > 0  # target above centre: tilt up
+    assert abs(tilt) == pytest.approx(abs(pan) * 9 / 16)
+
+
+def test_tilt_is_never_boosted():
+    """A distant person at the top edge: repeated tilt pulses that do not gain
+    must not grow (that is what tilted the camera into the sky)."""
+    mover = _Mover()
+    camera = _camera(speed=8, labels=['person'])
+    now = 10.0
+    _step(camera, now, candidates=[_det('person', 0.5, 0.1)], mover=mover)
+    first_tilt, first_duration = mover.calls[-1][2], mover.calls[-1][-1]
+    for _ in range(4):
+        now = _next_ready(mover, now)
+        _step(camera, now, candidates=[_det('person', 0.5, 0.1)], mover=mover)
+    assert mover.calls[-1][2] == pytest.approx(first_tilt)
+    assert mover.calls[-1][-1] == pytest.approx(first_duration)
