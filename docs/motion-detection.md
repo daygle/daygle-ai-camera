@@ -59,7 +59,12 @@ example boxing only its roof. A box that jumps inside the settled one and then
 holds steady there is treated as that redraw, not as the car leaving.
 Only a box that stays away from the anchor for several cycles in a row (and not
 while something else covers it) releases the anchor, so a car that pulls out
-still reads *moving* within a few detection cycles. It annotates each detection with `track_id`,
+still reads *moving* within a few detection cycles. A distant parked car at
+night can drop out of detection for a few seconds at a time. If it comes back on
+exactly its settled box within 10 minutes, it gets its old track back, still
+anchored, instead of starting as a new object. A new object is judged only by
+its changed pixels, so a moth or rain streak crossing it at that moment would
+otherwise read it as *moving*. It annotates each detection with `track_id`,
 `track_age` (cycles seen), and `track_new` (first sighting). The moving/still
 classifier reads a track's age and movement: on a second sighting a box that grew
 or shrank reads *moving*, while a box that only shifted is judged by the motion

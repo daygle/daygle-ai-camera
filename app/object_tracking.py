@@ -145,6 +145,19 @@ ANCHOR_OCCLUSION_OVERLAP = 0.2
 # really pulls out keeps moving from one sighting to the next, so it leaves the
 # first departing box behind and is released as before, one sighting later.
 ANCHOR_REDRAW_TOLERANCE = TRACK_STILL_DISPLACEMENT
+# Re-acquiring a parked car. A distant car at night hovers around the
+# detector's confidence threshold, so it can go unseen for more than ``max_age``
+# cycles and its track is dropped. It then came back as a brand-new track, and a
+# new track has no history, so the motion mask alone decided moving/still: a
+# moth or rain streak crossing it that cycle read the parked car as moving
+# (recording 21122: a parked car tagged moving on track 1584 as a moth flew
+# past). An anchored track that ages out is kept for ``REVIVE_SECONDS``; a new
+# detection of the same label within ``ANCHOR_TOLERANCE`` of its anchor takes
+# the old track back - id, history and anchor - so it stays still. A car really
+# moving through that spot does not line up with the old box that closely, and
+# one that does is released by the usual anchor rules once it keeps going.
+REVIVE_SECONDS = 600.0
+REVIVE_MAX_TRACKS = 32
 
 
 def _center_of(box: dict[str, Any]) -> tuple[float, float] | None:
@@ -451,6 +464,44 @@ def _anchored_displacement(
     return windowed
 
 
+def _retire(state: dict[str, Any], track: dict[str, Any], now: float) -> None:
+    """Keep an anchored (parked) track that aged out, so it can be revived."""
+    if track.get("anchor") is None:
+        return
+    retired = [
+        entry for entry in state.get("retired") or []
+        if now - float(entry.get("retired_ts") or 0.0) <= REVIVE_SECONDS
+    ]
+    retired.append({**track, "retired_ts": now})
+    state["retired"] = retired[-REVIVE_MAX_TRACKS:]
+
+
+def _revive(state: dict[str, Any], label: str, box: tuple[float, float, float, float] | None, now: float) -> dict[str, Any] | None:
+    """Take back a retired parked track whose anchor this box sits on."""
+    if box is None:
+        return None
+    best: tuple[float, int] | None = None
+    retired = state.get("retired") or []
+    for index, entry in enumerate(retired):
+        if entry.get("label") != label or now - float(entry.get("retired_ts") or 0.0) > REVIVE_SECONDS:
+            continue
+        anchor = entry.get("anchor")
+        if anchor is None:
+            continue
+        deviation = _box_deviation(box, tuple(anchor))
+        if deviation <= ANCHOR_TOLERANCE and (best is None or deviation < best[0]):
+            best = (deviation, index)
+    if best is None:
+        return None
+    track = retired.pop(best[1])
+    track.pop("retired_ts", None)
+    track["misses"] = 0
+    track["anchor_breaks"] = 0
+    track.pop("departure", None)
+    track.pop("velocity", None)
+    return track
+
+
 def _label_key(detection: dict[str, Any]) -> str:
     return str(detection.get("label") or "").strip().lower()
 
@@ -487,11 +538,14 @@ def update_object_tracks(
             state = _state._object_tracks.get(camera_id)
             if state:
                 survivors = []
+                now = time.time()
                 for track in state["tracks"]:
                     if track["label"] not in hold_labels:
                         track["misses"] += 1
                     if track["misses"] <= max_age:
                         survivors.append(track)
+                    else:
+                        _retire(state, track, now)
                 state["tracks"] = survivors
         return detections
 
@@ -555,6 +609,18 @@ def update_object_tracks(
             assignments[detection_index] = track
             assigned_detection_indices.add(detection_index)
             matched_track_ids.add(track["id"])
+
+        # A detection nothing matched may be a parked car that was lost for a
+        # while: give it its old track back (see REVIVE_SECONDS).
+        for detection_index, detection in enumerate(detections):
+            box = detection.get("box")
+            if detection_index in assigned_detection_indices or not isinstance(box, dict):
+                continue
+            revived = _revive(state, _label_key(detection), _box_tuple(box), now)
+            if revived is not None:
+                tracks.append(revived)
+                assignments[detection_index] = revived
+                assigned_detection_indices.add(detection_index)
 
         # Apply the precomputed assignments in input order so the returned list
         # remains in detector order; only ownership of a track is order-free.
@@ -654,6 +720,8 @@ def update_object_tracks(
                 track["misses"] += 1
             if track["misses"] <= max_age:
                 survivors.append(track)
+            else:
+                _retire(state, track, now)
         state["tracks"] = survivors
 
     return detections
