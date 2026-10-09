@@ -886,6 +886,7 @@ async function refreshDetectionStatus() {
     }
     ingestServerTrackDetections(payload);
     renderInferenceTiming(payload);
+    renderPtzTracking(payload?.ptz_tracking);
     renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus, soundEnabled));
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect
@@ -1127,18 +1128,63 @@ document.querySelectorAll('[data-view-mode]').forEach((btn) => {
 
 const ptzOverlay = document.getElementById('ptzOverlay');
 
+// Cameras whose ONVIF service/profile caches have been warmed this page load.
+const ptzWarmedCameras = new Set();
+
 function updatePtzVisibility() {
   if (!ptzOverlay) return;
   const enabled = selectedCamera?.ptz?.enabled === true && !isAllCameraMode();
   if (liveEls.livePtzToggleGroup) liveEls.livePtzToggleGroup.hidden = !enabled;
   const toggled = liveEls.livePtzToggle ? liveEls.livePtzToggle.checked : true;
   ptzOverlay.hidden = !enabled || !toggled;
+  // Listing presets makes the server discover the camera's ONVIF services and
+  // PTZ profile now, so the first button press does not pay for those extra
+  // round-trips. Fire-and-forget; viewers (no PTZ access) simply get a 403.
+  if (enabled && !ptzWarmedCameras.has(selectedCamera.id)) {
+    ptzWarmedCameras.add(selectedCamera.id);
+    api(`/api/cameras/${encodeURIComponent(selectedCamera.id)}/ptz/presets`).catch(() => {});
+  }
 }
 
-async function sendPtz(command) {
-  if (!selectedCamera) return;
+// Auto-tracking line under the PTZ pad, from the live detection status.
+function renderPtzTracking(tracking) {
+  const el = document.getElementById('ptzTrackingStatus');
+  if (!el) return;
+  const autoTrack = selectedCamera?.ptz?.auto_track;
+  if (!tracking || !autoTrack?.enabled) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
+  }
+  const wanted = (autoTrack.labels || []).map((label) => titleCase(label)).join(', ');
+  let text;
+  if (tracking.state === 'tracking') {
+    text = `Auto-tracking: following ${titleCase(tracking.label || 'object')}`;
+  } else if (tracking.state === 'paused') {
+    text = `Auto-tracking paused for manual control (resumes in ${Math.ceil(Number(tracking.resumes_in) || 0)} s)`;
+  } else if (tracking.state === 'returning') {
+    text = 'Auto-tracking: returning to home position';
+  } else {
+    text = `Auto-tracking: watching for ${wanted || 'objects'}`;
+  }
+  el.textContent = text;
+  el.dataset.state = tracking.state || 'idle';
+  el.hidden = false;
+}
+
+// PTZ commands go out one at a time. A held button re-sends its move every
+// ~70% of the step duration; on a slow camera those requests used to pile up
+// and arrive late (or after the release's stop), so the camera lagged behind
+// the button and then drifted. Now only one request is in flight: a repeat
+// move while one is pending is dropped (the pending one already keeps the
+// camera moving), and any other command waits its turn and replaces whatever
+// was queued, so the latest intent - usually Stop - always goes out last.
+let ptzInFlight = null;
+let ptzQueued = null;
+
+async function postPtz(cameraId, command) {
   try {
-    await api(`/api/cameras/${encodeURIComponent(selectedCamera.id)}/ptz`, {
+    await api(`/api/cameras/${encodeURIComponent(cameraId)}/ptz`, {
       method: 'POST',
       body: JSON.stringify({ command }),
     });
@@ -1150,12 +1196,30 @@ async function sendPtz(command) {
   }
 }
 
+function sendPtz(command, { repeat = false } = {}) {
+  if (!selectedCamera) return;
+  const cameraId = selectedCamera.id;
+  if (ptzInFlight) {
+    if (!repeat) ptzQueued = { cameraId, command };
+    return;
+  }
+  ptzInFlight = postPtz(cameraId, command).finally(() => {
+    ptzInFlight = null;
+    const next = ptzQueued;
+    ptzQueued = null;
+    if (next && next.cameraId === selectedCamera?.id) sendPtz(next.command);
+  });
+}
+
 // Visual-feedback helpers for the PTZ overlay: pressed/active CSS state on
 // the pressed button plus the "Moving" status pill in the top-right corner.
 function setPtzMoving(btn, isMoving) {
   if (btn) btn.setAttribute('data-moving', isMoving ? 'true' : 'false');
   const status = document.getElementById('ptzStatus');
   if (status) {
+    // The global [hidden] rule is !important, so the pill must drop the
+    // attribute to show at all (it was never visible before).
+    status.hidden = !isMoving;
     status.setAttribute('data-visible', isMoving ? 'true' : 'false');
     status.textContent = isMoving
       ? `${clampStepDuration(selectedCamera?.ptz?.step_duration).toFixed(1)} s step`
@@ -1177,11 +1241,25 @@ function clampStepDuration(raw) {
 let ptzHoldTimer = null;
 let ptzActiveBtn = null;
 
+// While the camera moves, poll the picture faster so the operator sees where
+// it is pointing sooner (the normal snapshot refresh is ~500 ms).
+const PTZ_FAST_FRAME_MS = 150;
+let ptzFastFrameTimer = null;
+
+function setPtzFastFrames(on) {
+  if (ptzFastFrameTimer !== null) {
+    clearInterval(ptzFastFrameTimer);
+    ptzFastFrameTimer = null;
+  }
+  if (on) ptzFastFrameTimer = setInterval(refreshFrame, PTZ_FAST_FRAME_MS);
+}
+
 function endPtzHold({ sendStop = true } = {}) {
   if (ptzHoldTimer !== null) {
     clearInterval(ptzHoldTimer);
     ptzHoldTimer = null;
   }
+  setPtzFastFrames(false);
   const heldBtn = ptzActiveBtn;
   ptzActiveBtn = null;
   setPtzMoving(heldBtn, false);
@@ -1232,8 +1310,9 @@ if (ptzOverlay) {
       const stepDuration = clampStepDuration(selectedCamera?.ptz?.step_duration);
       const refreshMs = Math.max(50, Math.round(stepDuration * 700));
       ptzHoldTimer = setInterval(() => {
-        if (ptzActiveBtn === btn) sendPtz(startCmd);
+        if (ptzActiveBtn === btn) sendPtz(startCmd, { repeat: true });
       }, refreshMs);
+      setPtzFastFrames(true);
     };
 
     btn.addEventListener('mousedown', startHold);

@@ -300,6 +300,8 @@ def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
 
 
 def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
+    from app.ptz_tracking import normalize_auto_track_settings
+
     raw = settings if isinstance(settings, dict) else {}
     protocol = str(raw.get('protocol') or 'onvif').strip().lower()
     if protocol not in {'onvif', 'tcp_pelcod'}:
@@ -338,6 +340,7 @@ def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
         'address': _int(raw.get('address'), 1, 1, 255),
         'speed': _int(raw.get('speed'), 5, 1, 8),
         'step_duration': step_duration,
+        'auto_track': normalize_auto_track_settings(raw.get('auto_track')),
     }
 
 

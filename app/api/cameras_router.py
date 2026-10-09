@@ -7,7 +7,6 @@ import json
 import logging
 import shutil
 import subprocess
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
@@ -34,7 +33,8 @@ from app.deps import (
     get_recording_service,
 )
 from app.payload_validators import validate_camera_settings, validate_camera_stream_source, validate_cameras_settings
-from app.ptz import send_ptz_command, VALID_COMMANDS as PTZ_VALID_COMMANDS
+from app.ptz import ptz_connection, ptz_presets, send_ptz_command, VALID_COMMANDS as PTZ_VALID_COMMANDS
+from app.ptz_tracking import note_manual_ptz
 from app.detection_state import clear_camera_motion, mark_camera_motion
 from app.profile_automation import (
     profile_status,
@@ -330,6 +330,32 @@ async def test_camera_connection(request: Request, recording_service=Depends(get
         return {'online': False, 'message': 'Connection timed out (8 s). Check host, port, and credentials.'}
 
 
+def _ptz_connection_or_400(cam: dict):
+    if not (cam.get('ptz') or {}).get('enabled'):
+        raise HTTPException(status_code=400, detail='PTZ is not enabled for this camera.')
+    conn = ptz_connection(cam)
+    if conn is None:
+        raise HTTPException(status_code=400, detail='Cannot determine camera host for PTZ.')
+    return conn
+
+
+@router.get('/api/cameras/{camera_id}/ptz/presets')
+async def camera_ptz_presets(camera_id: str, request: Request):
+    """The camera's saved PTZ presets (ONVIF; Pelco-D cannot list them).
+
+    The Live page also calls this when it shows a PTZ camera, which warms the
+    ONVIF service / profile caches so the first button press is not slowed by
+    the discovery round-trips.
+    """
+    require_admin(request)
+    conn = _ptz_connection_or_400(get_camera_config(camera_id))
+    try:
+        presets = await run_in_threadpool(ptz_presets, conn)
+    except OSError as exc:
+        raise HTTPException(status_code=502, detail=f'Could not read PTZ presets: {exc}') from exc
+    return {'protocol': conn.protocol, 'presets': presets}
+
+
 @router.post('/api/cameras/{camera_id}/ptz')
 async def camera_ptz(camera_id: str, request: Request):
     require_admin(request)
@@ -339,39 +365,20 @@ async def camera_ptz(camera_id: str, request: Request):
         raise HTTPException(status_code=400, detail=f'Invalid PTZ command. Valid: {sorted(PTZ_VALID_COMMANDS)}')
 
     cam = get_camera_config(camera_id)
-    ptz = cam.get('ptz') or {}
-    if not ptz.get('enabled'):
-        raise HTTPException(status_code=400, detail='PTZ is not enabled for this camera.')
+    conn = _ptz_connection_or_400(cam)
 
-    host = cam.get('host') or ''
-    if not host and cam.get('stream_url'):
-        host = urlsplit(cam['stream_url']).hostname or ''
-    if not host:
-        raise HTTPException(status_code=400, detail='Cannot determine camera host for PTZ.')
-
-    protocol = str(ptz.get('protocol') or 'http_cgi')
-    http_port = int(ptz.get('http_port') or 80)
-    tcp_port = int(ptz.get('port') or 6060)
-    address = int(ptz.get('address') or 1)
-    speed = int(ptz.get('speed') or 5)
-    # Per-camera step duration: every ContinuousMove SOAP body carries an
-    # ``<Timeout>`` value of ``step_duration`` seconds, so the camera
-    # self-stops after that interval even if the explicit /api/.../ptz
-    # ``stop`` call is dropped. Defaults to 0.4s when missing or invalid;
-    # the normalizer is the canonical clamp site (0.1-5.0s).
-    try:
-        step_duration = float(ptz.get('step_duration') or 0.4)
-    except (TypeError, ValueError):
-        step_duration = 0.4
-    username = str(cam.get('username') or '')
-    password = str(cam.get('password') or '')
-
+    # A person driving the camera always wins over auto-tracking: pause it
+    # before the command goes out so a tracking pulse cannot fight the press.
+    note_manual_ptz(camera_id)
     try:
         await run_in_threadpool(
-            send_ptz_command, host, command, speed, protocol,
-            http_port=http_port, tcp_port=tcp_port, address=address,
-            username=username, password=password,
-            timeout_seconds=step_duration,
+            send_ptz_command, conn.host, command, conn.speed, conn.protocol,
+            http_port=conn.http_port, tcp_port=conn.tcp_port, address=conn.address,
+            username=conn.username, password=conn.password,
+            # Per-camera step duration: every ContinuousMove carries an ONVIF
+            # ``<Timeout>`` of ``step_duration`` seconds, so the camera
+            # self-stops even if the explicit ``stop`` call is dropped.
+            timeout_seconds=conn.step_duration,
         )
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f'PTZ connection failed: {exc}') from exc
@@ -381,5 +388,5 @@ async def camera_ptz(camera_id: str, request: Request):
     if command == 'stop':
         clear_camera_motion(camera_id)
     else:
-        mark_camera_motion(camera_id, step_duration)
+        mark_camera_motion(camera_id, conn.step_duration)
     return {'ok': True, 'command': command}

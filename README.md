@@ -5,6 +5,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 ## Features
 
 - Multi-camera RTSP/ONVIF support with browser management and optional PTZ control
+- PTZ auto-tracking: a PTZ camera can follow a chosen kind of object (a cat, a person), with optional zoom and return-to-home
 - Object detection via ONNX YOLO models - YOLOv8, YOLO11, and NMS-free YOLO26 families in Nano through Extra Large sizes
 - In-app model library that downloads and exports models at a chosen input resolution
 - CPU and CUDA (NVIDIA GPU) inference with FP32, FP16, and INT8 precision options
@@ -34,6 +35,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 - `docs/detection-architecture-audit.md` - Item 10 detection architecture re-audit and follow-up plan
 - `docs/detection-benchmarking.md` - labeled detection benchmarks, post-pipeline tuning validation, and quality gates
 - `docs/sound-detection.md` - sound detection, audio rules, and runtime setup
+- `docs/ptz.md` - PTZ control, responsiveness, and auto-tracking
 - `docs/ai-verification.md` - local vision model: alert verification, plain-English event descriptions and footage search
 - `docs/operations.md` - health, logs, backups, and service operation
 

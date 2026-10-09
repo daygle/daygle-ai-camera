@@ -322,7 +322,7 @@ def test_normalize_camera_profiles_with_legacy_still_migrates_legacy_rows(rs):
 def test_normalize_camera_ptz_settings_defaults_when_input_not_dict(rs):
     """Non-dict input collapses to the canonical PTZ defaults:
     enabled=False, protocol=onvif, http_port=80, port=6060, address=1, speed=5,
-    step_duration=0.4."""
+    step_duration=0.4, and auto-tracking off with its defaults."""
     assert rs.normalize_camera_ptz_settings(None) == {
         'enabled': False,
         'protocol': 'onvif',
@@ -331,6 +331,17 @@ def test_normalize_camera_ptz_settings_defaults_when_input_not_dict(rs):
         'address': 1,
         'speed': 5,
         'step_duration': 0.4,
+        'auto_track': {
+            'enabled': False,
+            'labels': ['person'],
+            'dead_zone': 0.15,
+            'speed': 4,
+            'lost_seconds': 3.0,
+            'return_home_seconds': 30.0,
+            'home_preset': '',
+            'zoom': False,
+            'target_size': 0.3,
+        },
     }
 
 

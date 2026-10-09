@@ -248,6 +248,52 @@ function profileSectionHtml(camera, mode) {
     '</div>';
 }
 
+// Auto-tracking section of the PTZ tab. Values mirror
+// app/ptz_tracking.py::normalize_auto_track_settings (DEFAULTS and bounds).
+function ptzAutoTrackSectionHtml(camera, index) {
+  var at = (camera.ptz && camera.ptz.auto_track) || {};
+  var tip = function(text) {
+    return ' <span class="info-tip" data-tip="' + escapeHtml(text) + '" title="' + escapeHtml(text) + '" tabindex="0" aria-label="Help: ' + escapeHtml(text) + '"></span>';
+  };
+  var onOff = function(name, on) {
+    return '<select name="' + name + '">' +
+      '<option value="false"' + (on ? '' : ' selected') + '>Disabled</option>' +
+      '<option value="true"' + (on ? ' selected' : '') + '>Enabled</option>' +
+    '</select>';
+  };
+  var num = function(value, fallback) { return value == null || value === '' ? fallback : value; };
+  var labels = Array.isArray(at.labels) ? at.labels.join(', ') : 'person';
+  return '<div class="cam-edit-section">' +
+    '<h4 class="cam-edit-section-title">Auto-Tracking</h4>' +
+    '<div class="form-grid">' +
+      '<label class="full-width"><span>Auto-Tracking' + tip('Steer the camera to keep a detected object in the middle of the picture. Using the PTZ pad pauses it for 30 seconds.') + '</span>' + onOff('ptz_auto_track_enabled', at.enabled === true) + '</label>' +
+      '<label class="full-width"><span>Follow These Objects' + tip('Comma-separated object names, e.g. cat or cat, dog. Groups like animal or pet follow any member. Tracking starts only for an object that passes this camera\'s zones and confirmation.') + '</span><input name="ptz_auto_track_labels" type="text" placeholder="person" value="' + escapeHtml(labels) + '" /></label>' +
+      '<label><span>Tracking Speed' + tip('How fast the camera turns towards the object (1-8, default 4). Lower is smoother; raise it for fast subjects.') + '</span><input name="ptz_auto_track_speed" type="number" min="1" max="8" step="1" placeholder="4" value="' + escapeHtml(String(num(at.speed, 4))) + '" /></label>' +
+      '<label><span>Dead Zone (%)' + tip('How far from the centre the object may drift before the camera moves, as a share of the frame (5-40, default 15). Larger = calmer camera.') + '</span><input name="ptz_auto_track_dead_zone" type="number" min="5" max="40" step="1" placeholder="15" value="' + escapeHtml(Math.round(num(at.dead_zone, 0.15) * 100)) + '" /></label>' +
+      '<label><span>Lost After (s)' + tip('How long the object can be out of sight before tracking lets go (1-30 s, default 3).') + '</span><input name="ptz_auto_track_lost_seconds" type="number" min="1" max="30" step="0.5" placeholder="3" value="' + escapeHtml(num(at.lost_seconds, 3)) + '" /></label>' +
+      '<label><span>Return Home After (s)' + tip('With nothing to follow for this long, go back to the home position (0 = stay where it stopped; default 30).') + '</span><input name="ptz_auto_track_return_home_seconds" type="number" min="0" max="3600" step="1" placeholder="30" value="' + escapeHtml(num(at.return_home_seconds, 30)) + '" /></label>' +
+      '<label class="full-width"><span>Home Position' + tip('Blank = the camera\'s own home position (ONVIF). Or pick a saved preset. Pelco-D cameras need a preset number here.') + '</span><input name="ptz_auto_track_home_preset" type="text" list="ptzPresets-' + index + '" placeholder="Camera home position" value="' + escapeHtml(at.home_preset || '') + '" /><datalist id="ptzPresets-' + index + '"></datalist></label>' +
+      '<label><span>Zoom While Tracking' + tip('Zoom in on a small object once it is centred, and back out when it nears the edge or is lost.') + '</span>' + onOff('ptz_auto_track_zoom', at.zoom === true) + '</label>' +
+      '<label><span>Target Size (%)' + tip('With zoom on: how much of the frame height the object should fill (5-80, default 30).') + '</span><input name="ptz_auto_track_target_size" type="number" min="5" max="80" step="1" placeholder="30" value="' + escapeHtml(Math.round(num(at.target_size, 0.3) * 100)) + '" /></label>' +
+    '</div>' +
+    '<p class="form-help muted">While the camera is moving, moving/still cannot be told apart, so an object only alerts if it is set to Moving &amp; Still on the Objects page. Tracking starts on a moving object; to also start on one sitting still, set its mode to Moving &amp; Still.</p>' +
+  '</div>';
+}
+
+// Fill the Home Position suggestions with the camera's saved presets (ONVIF).
+// Best-effort: a camera that is offline or does not list presets just keeps
+// the free-text field.
+function loadPtzPresetSuggestions(camera, index) {
+  if (!camera || !camera.id || !(camera.ptz && camera.ptz.enabled)) return;
+  var list = document.getElementById('ptzPresets-' + index);
+  if (!list) return;
+  api('/api/cameras/' + encodeURIComponent(camera.id) + '/ptz/presets').then(function(payload) {
+    list.innerHTML = (payload.presets || []).map(function(preset) {
+      return '<option value="' + escapeHtml(preset.token) + '">' + escapeHtml(preset.name) + '</option>';
+    }).join('');
+  }).catch(function() { /* presets are optional */ });
+}
+
 function buildEditFormHtml(camera, index) {
   const backend = camera.backend || 'onvif';
   const isRtsp = backend === 'rtsp';
@@ -373,7 +419,7 @@ function buildEditFormHtml(camera, index) {
                 '<option value="onvif"' + ((camera.ptz?.protocol || 'onvif') === 'onvif' ? ' selected' : '') + '>ONVIF (Recommended)</option>' +
                 '<option value="tcp_pelcod"' + (camera.ptz?.protocol === 'tcp_pelcod' ? ' selected' : '') + '>TCP PelcoD (Legacy Cameras)</option>' +
               '</select></label>' +
-            '<label><span>HTTP Port <span class="info-tip" data-tip="Camera web port used by HTTP CGI (default 80)." title="Camera web port used by HTTP CGI (default 80)." tabindex="0" aria-label="Help: Camera web port used by HTTP CGI (default 80)."></span></span><input name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" value="' + htmlAttr(camera.ptz?.http_port || 80) + '" /></label>' +
+            '<label><span>HTTP Port <span class="info-tip" data-tip="Camera web (ONVIF) port, usually 80 (ONVIF only)." title="Camera web (ONVIF) port, usually 80 (ONVIF only)." tabindex="0" aria-label="Help: Camera web (ONVIF) port, usually 80 (ONVIF only)."></span></span><input name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" value="' + htmlAttr(camera.ptz?.http_port || 80) + '" /></label>' +
             '<label><span>Command Port <span class="info-tip" data-tip="Port for TCP PelcoD only (default 6060)." title="Port for TCP PelcoD only (default 6060)." tabindex="0" aria-label="Help: Port for TCP PelcoD only (default 6060)."></span></span><input name="ptz_port" type="number" min="1" max="65535" placeholder="6060" value="' + htmlAttr(camera.ptz?.port || 6060) + '" /></label>' +
           '</div>' +
         '</div>' +
@@ -384,8 +430,9 @@ function buildEditFormHtml(camera, index) {
             '<label><span>Speed <span class="info-tip" data-tip="Movement speed (1-8, default 5)." title="Movement speed (1-8, default 5)." tabindex="0" aria-label="Help: Movement speed (1-8, default 5)."></span></span><input name="ptz_speed" type="number" min="1" max="8" placeholder="5" value="' + htmlAttr(camera.ptz?.speed || 5) + '" /></label>' +
             '<label class="full-width"><span>Step Duration (s) <span class="info-tip" data-tip="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." title="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." tabindex="0" aria-label="Help: How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)."></span></span><input name="ptz_step_duration" type="number" min="0.1" max="5" step="0.1" placeholder="0.4" value="' + htmlAttr(camera.ptz?.step_duration != null ? Number(camera.ptz.step_duration).toFixed(2) : '') + '" /></label>' +
           '</div>' +
-          '<p class="form-help muted">Enable PTZ and save to show the control pad on the Live page. The camera&#39;s username and password from the Connection tab are used for HTTP CGI authentication.</p>' +
+          '<p class="form-help muted">Enable PTZ and save to show the control pad on the Live page. The camera&#39;s username and password from the Connection tab are used for ONVIF authentication.</p>' +
         '</div>' +
+        ptzAutoTrackSectionHtml(camera, index) +
       '</div>' +
 
       // Advanced tab
@@ -496,6 +543,7 @@ function wireEditFormHandlers(index) {
 
   var collapseButton = panel.querySelector('.cam-edit-collapse-btn');
   if (collapseButton) collapseButton.addEventListener('click', closeAllEditForms);
+  loadPtzPresetSuggestions(cameras[index], index);
 
   bindPixelThresholdPresets(form);
   form.querySelectorAll('[data-clear-legacy-motion]').forEach(function(button) {
@@ -827,6 +875,17 @@ function collectFormData(form) {
       address: getInt('ptz_address', 1),
       speed: getInt('ptz_speed', 5),
       step_duration: (function() { var raw = parseFloat(getVal('ptz_step_duration')); return isFinite(raw) ? raw : 0.4; })(),
+      auto_track: {
+        enabled: getVal('ptz_auto_track_enabled') === 'true',
+        labels: getName('ptz_auto_track_labels') || 'person',
+        speed: getInt('ptz_auto_track_speed', 4),
+        dead_zone: (function() { var v = parseFloat(getVal('ptz_auto_track_dead_zone')); return isFinite(v) ? v / 100 : 0.15; })(),
+        lost_seconds: (function() { var v = parseFloat(getVal('ptz_auto_track_lost_seconds')); return isFinite(v) ? v : 3; })(),
+        return_home_seconds: (function() { var v = parseFloat(getVal('ptz_auto_track_return_home_seconds')); return isFinite(v) ? v : 30; })(),
+        home_preset: getName('ptz_auto_track_home_preset'),
+        zoom: getVal('ptz_auto_track_zoom') === 'true',
+        target_size: (function() { var v = parseFloat(getVal('ptz_auto_track_target_size')); return isFinite(v) ? v / 100 : 0.3; })(),
+      },
     },
     detection: { ptz_motion_detection: getName('ptz_motion_detection') || 'auto' },
     detection_profiles: profiles,

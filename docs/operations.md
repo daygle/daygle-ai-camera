@@ -31,7 +31,7 @@ seconds, so `docker ps` reports `healthy` / `unhealthy` based on it.
 
 Use **Cameras** (`/cameras`) to review each configured camera and the camera health summary. The health endpoint tracks online and offline state so administrators can quickly identify streams that need attention.
 
-Use the camera connection test before saving a new stream URL or ONVIF configuration. The test reports the detected video codec and checks whether the installed FFmpeg advertises the matching decoder. If a camera supports PTZ, enable PTZ in the camera editor and verify the protocol, port, address, and speed before sending movement commands.
+Use the camera connection test before saving a new stream URL or ONVIF configuration. The test reports the detected video codec and checks whether the installed FFmpeg advertises the matching decoder. If a camera supports PTZ, enable PTZ in the camera editor and verify the protocol, port, address, and speed before sending movement commands. See `docs/ptz.md` for auto-tracking.
 
 ### H.264, H.265, and H.265+ streams
 
