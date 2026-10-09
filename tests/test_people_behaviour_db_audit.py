@@ -145,8 +145,9 @@ def test_ptz_escapes_the_camera_profile_token(monkeypatch):
 
     ptz.send_ptz_command_onvif('10.0.0.5', 80, 'stop', 4, 'admin', 'pw')
 
-    assert '<tptz:ProfileToken>a&lt;b&gt;&amp;' in sent[0]
-    assert 'a<b>' not in sent[0]
+    # sent[0] is the ONVIF service discovery request; the PTZ Stop is last.
+    assert '<tptz:ProfileToken>a&lt;b&gt;&amp;' in sent[-1]
+    assert 'a<b>' not in sent[-1]
 
 
 def test_audit_resource_filter_treats_wildcards_literally(tmp_path):

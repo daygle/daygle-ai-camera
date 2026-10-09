@@ -104,6 +104,7 @@ from app.second_look import (
     second_look_floor,
 )
 from app.low_light import low_light_detection_frame, normalize_low_light_mode
+from app.ptz_tracking import update_auto_tracking
 from app.camera_models import camera_detector
 from app.detector import DetectorUnavailableError
 from app.event_debounce import (
@@ -1414,6 +1415,20 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _telemetry_rejected[REJECT_CONFIRMATION] = max(
         0, _confirm_input - len(object_detections),
     )
+    # PTZ auto-tracking (opt-in per camera): start following only an object
+    # that passed the zone + confirmation gates above, but keep following it
+    # through every tracked detection, since zones stop lining up with the
+    # scene once the camera pans. Best-effort: camera commands run on their
+    # own worker threads and a failure here never breaks the cycle.
+    try:
+        _ptz_tracking_status = update_auto_tracking(
+            camera_id, settings,
+            candidates=object_detections,
+            visible=_annotated_detections,
+        )
+        update_live_detection_status(camera_id, ptz_tracking=_ptz_tracking_status)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('PTZ auto-tracking failed on %s: %s', camera_id, exc)
     # (Track ids were stamped earlier, before the confirmation gate, so the
     # motion-mode filter could read ``track_displacement``; the ids still
     # thread through to the history + recording rows from there.)
