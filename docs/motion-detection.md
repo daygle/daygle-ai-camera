@@ -59,7 +59,12 @@ example boxing only its roof. A box that jumps inside the settled one and then
 holds steady there is treated as that redraw, not as the car leaving.
 Only a box that stays away from the anchor for several cycles in a row (and not
 while something else covers it) releases the anchor, so a car that pulls out
-still reads *moving* within a few detection cycles. It annotates each detection with `track_id`,
+still reads *moving* within a few detection cycles. A distant parked car at
+night can drop out of detection for a few seconds at a time. If it comes back on
+exactly its settled box within 10 minutes, it gets its old track back, still
+anchored, instead of starting as a new object. A new object is judged only by
+its changed pixels, so a moth or rain streak crossing it at that moment would
+otherwise read it as *moving*. It annotates each detection with `track_id`,
 `track_age` (cycles seen), and `track_new` (first sighting). The moving/still
 classifier reads a track's age and movement: on a second sighting a box that grew
 or shrank reads *moving*, while a box that only shifted is judged by the motion
@@ -83,7 +88,7 @@ You configure it on the **Zones** page: each area has a **Motion** row with a si
 
 **Custom** (or the cog button) lets you type any percentage. Under the cog you also set **Must last: 1 / 2 / 3 checks**: how many motion checks in a row must see the area above its trigger before it counts. Two is the default. One reacts on the first check. Three ignores brief flickers such as headlights or a bug on the lens, at the cost of reacting a moment later. When the trigger has been passed for long enough, the alert fires without needing YOLO to identify anything, after a short hold that lets an object in the same zone take priority (see below). Recording, cooldown, email/push and time windows are set on the Alerts page.
 
-**The live meter.** Under the Motion row, and for each motion area in the Live page's *AI Detection Status* card, a meter shows how much of the area is moving right now, in the same units as the trigger. For example, *Driveway: 0.4% moving · triggers at 2%*. The trigger tick sits in the middle of the bar, so a bar past the tick will fire. Each area reads **Quiet** (nothing moving), **Moving** (movement below the trigger, or above it but still waiting for its next check) or **Triggered** (passed the trigger for long enough to record or alert). The meter also shows *Highest in the last 10 minutes*. To pick a trigger, watch that peak while the scene is quiet and set the trigger just above it.
+**The live meter.** Under the Motion row, and for each motion area in the Live page's *AI Detection Status* card, a meter shows how much of the area is moving right now, in the same units as the trigger. For example, *Driveway: 0.4% Moving · Triggers at 2%*. The trigger tick sits in the middle of the bar, so a bar past the tick will fire. Each area reads **Quiet** (nothing moving), **Moving** (movement below the trigger, or above it but still waiting for its next check) or **Triggered** (passed the trigger for long enough to record or alert). The meter also shows *Highest in the Last 10 Minutes*. To pick a trigger, watch that peak while the scene is quiet and set the trigger just above it.
 
 **Areas saved before the trigger existed** keep firing exactly where they did. Their old *Sensitivity* × scale and gate (including any per-zone gate/scale override) are folded into the equivalent trigger. The editor shows that value (usually as *Custom*) and stores it the next time the area is saved.
 
@@ -629,7 +634,7 @@ Defaults: `320` × `240`
 Symptom: YOLO runs constantly, live detection status shows "motion detected" on every quiet frame.
 
 1. Set **Ignore Small Light Changes** to **High** (in the camera's Night profile if only nights are noisy)
-2. If an area still fires, watch its *Highest in the last 10 minutes* on a quiet night and raise that area's trigger just above it, or set **Must last** to 3 checks
+2. If an area still fires, watch its *Highest in the Last 10 Minutes* on a quiet night and raise that area's trigger just above it, or set **Must last** to 3 checks
 3. Save and watch the live meter - the area should read **Quiet** during quiet periods
 
 ---
@@ -657,7 +662,7 @@ Enable **Periodic Scan Interval** - set to `30` or `60` seconds. YOLO will conti
 
 Symptom: A waving tree or flag in the corner of frame keeps triggering motion alerts even with nothing happening.
 
-1. Watch the area's *Highest in the last 10 minutes* while only the tree moves, then raise the area's trigger above it (for example **Relaxed**)
+1. Watch the area's *Highest in the Last 10 Minutes* while only the tree moves, then raise the area's trigger above it (for example **Relaxed**)
 2. Alternatively, adjust the area's outline on the Zones page to exclude that corner of the frame
 
 ---

@@ -793,3 +793,87 @@ def test_parked_car_driving_toward_the_camera_still_reads_moving():
     states = _states('trk-anchor-approach', [[_VAN]] * 14 + growing)
     assert os_.MODE_MOVING in states[14:14 + ot.ANCHOR_RELEASE_CYCLES + 3], states[14:]
     assert states[-1] == os_.MODE_MOVING
+
+
+# ---------------------------------------------------------------------------
+# A parked car lost for a while and re-detected keeps its parked track.
+# ---------------------------------------------------------------------------
+
+# Recording 21122 (night): a distant parked car hovering near the confidence
+# threshold. When it came back after being unseen for longer than max_age it
+# opened a new track, and a moth streak across it read it as moving.
+_FAR_CAR = (0.573, 0.154, 0.091, 0.086)
+
+
+def _settle(cam, box=_FAR_CAR, cycles=14):
+    _reset(cam)
+    for _ in range(cycles):
+        out = ot.update_object_tracks(cam, [_det('car', *box)])
+    assert 'anchor' in st._object_tracks[cam]['tracks'][0]
+    return out[0]['track_id']
+
+
+def _lose(cam, cycles=7):
+    for _ in range(cycles):
+        ot.update_object_tracks(cam, [])
+    assert st._object_tracks[cam]['tracks'] == []
+
+
+def test_reacquired_parked_car_keeps_its_track_and_reads_still_through_a_streak():
+    cam = 'trk-revive'
+    track_id = _settle(cam)
+    _lose(cam)
+    out = ot.update_object_tracks(cam, [_det('car', *_FAR_CAR)])[0]
+    assert out['track_id'] == track_id and out['track_new'] is False
+    assert out['track_age'] > ot.TRACK_DISPLACEMENT_MIN_AGE
+    # A streak across the box would have read moving for a brand-new track.
+    streak = np.ones((240, 320), dtype=bool)
+    assert os_.detection_motion_state(out, streak, out.get('track_displacement')) == os_.MODE_STILL
+
+
+def test_reacquired_car_lost_while_other_objects_were_seen_is_revived_too():
+    cam = 'trk-revive-busy'
+    track_id = _settle(cam)
+    for _ in range(7):
+        ot.update_object_tracks(cam, [_det('person', 0.1, 0.6)])
+    out = ot.update_object_tracks(cam, [_det('car', *_FAR_CAR), _det('person', 0.1, 0.6)])
+    assert out[0]['track_id'] == track_id
+
+
+def test_a_car_elsewhere_is_not_given_the_parked_cars_track():
+    cam = 'trk-revive-elsewhere'
+    track_id = _settle(cam)
+    _lose(cam)
+    out = ot.update_object_tracks(cam, [_det('car', _FAR_CAR[0] + 0.05, *_FAR_CAR[1:])])[0]
+    assert out['track_id'] != track_id and out['track_new'] is True
+
+
+def test_revival_expires_and_needs_an_anchored_track(monkeypatch):
+    cam = 'trk-revive-expired'
+    track_id = _settle(cam)
+    _lose(cam)
+    later = ot.time.time() + ot.REVIVE_SECONDS + 1
+    monkeypatch.setattr(ot.time, 'time', lambda: later)
+    out = ot.update_object_tracks(cam, [_det('car', *_FAR_CAR)])[0]
+    assert out['track_id'] != track_id
+
+    # A young (never anchored) track that ages out is not kept.
+    monkeypatch.undo()
+    cam = 'trk-revive-young'
+    _reset(cam)
+    first = ot.update_object_tracks(cam, [_det('car', *_FAR_CAR)])[0]
+    _lose(cam)
+    again = ot.update_object_tracks(cam, [_det('car', *_FAR_CAR)])[0]
+    assert again['track_id'] != first['track_id']
+
+
+def test_revived_car_that_drives_off_still_reads_moving():
+    cam = 'trk-revive-leaves'
+    _settle(cam)
+    _lose(cam)
+    states = []
+    for step in range(0, 10):
+        out = ot.update_object_tracks(cam, [_det('car', _FAR_CAR[0] - step * 0.015, *_FAR_CAR[1:])])[0]
+        states.append(os_.detection_motion_state(out, None, out.get('track_displacement')))
+    assert states[0] == os_.MODE_STILL
+    assert states[-1] == os_.MODE_MOVING

@@ -6527,6 +6527,29 @@ button.secondary:disabled, a.secondary:disabled {
 .multi-select-option input[type="checkbox"] { margin: 0; accent-color: var(--accent); }
 .multi-select-option-label { flex: 1; }
 .multi-select-empty { padding: 10px; text-align: center; color: var(--muted); font-size: 13px; }
+.multi-select-heading { padding: 6px 10px 2px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+/* Camera > PTZ "Follow These Objects": laid out like the grid's <label> fields
+   (it is a div so chip clicks don't toggle the list). */
+.ptz-track-field { display: grid; gap: 8px; min-width: 0; color: var(--muted); }
+.ptz-track-field > span:first-child { font-weight: 500; }
+/* Match the form's other inputs, and undo the grid's label styling inside
+   the list (.form-grid label stacks a checkbox above its text). */
+.ptz-track-field .multi-select-chips:empty { display: none; }
+.ptz-track-field .multi-select-toggle {
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-weight: 400;
+  background: rgba(255,255,255,.05);
+}
+.ptz-track-field .multi-select-dropdown { border-radius: 14px; overflow: hidden; }
+.form-grid .ptz-track-field label.multi-select-option {
+  display: flex;
+  gap: 8px;
+  font-weight: 400;
+  color: var(--text);
+}
+.ptz-track-field .multi-select-search input { width: 100%; }
+.ptz-track-field .multi-select-option input[type="checkbox"] { width: auto; display: inline-block; padding: 0; flex: none; }
 
 @media (max-width: 600px) {
   .group-form-fields { grid-template-columns: 1fr; }
@@ -7784,12 +7807,11 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
 .zone-detect-card .zone-object-limits[hidden] { display: none; }
 .zone-object-limits-hint { grid-column: 1 / -1; margin: 0; font-size: 12px; }
 
-/* Auto-tracking line under the PTZ pad (see renderPtzTracking in live.js). */
+/* Auto-tracking line in the Vision lane (see renderPtzTracking in live.js). */
 .ptz-tracking-status {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: var(--muted);
   font-size: 12.5px;
   font-weight: 650;
-  text-align: center;
 }
 .ptz-tracking-status[data-state="tracking"] { color: var(--accent); }
