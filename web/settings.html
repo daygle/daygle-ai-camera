@@ -12,7 +12,7 @@
   <main class="shell page-stack">
     <header class="hero">
       <div>
-        <p class="eyebrow">Admin</p>
+        <p class="eyebrow">Administrator</p>
         <h1>Settings</h1>
         <p class="muted">Manage camera, recording, storage, notifications, and login settings.</p>
       </div>
@@ -106,10 +106,10 @@
               <option value="4x4">4 × 4 (16 tiles)</option>
             </select></label>
           <label>
-            <span>Low-Light Enhancement <span class="info-tip" data-tip="Boost local contrast (CLAHE) on the copy of the frame the object detector sees, so a dim subject at night or at the edge of the IR light stands out. Snapshots and recordings are not changed. Auto only enhances dark frames. Can also lift sensor noise - check the result on your own night footage. Default: Off" title="Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off" tabindex="0" aria-label="Help: Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off"></span></span>
+            <span>Low-Light Enhancement <span class="info-tip" data-tip="Boost local contrast (CLAHE) on the copy of the frame the object detector sees, so a dim subject at night or at the edge of the IR light stands out. Snapshots and recordings are not changed. Automatic only enhances dark frames. Can also lift sensor noise - check the result on your own night footage. Default: Off" title="Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off" tabindex="0" aria-label="Help: Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off"></span></span>
             <select name="object_detection_low_light">
               <option value="off">Off</option>
-              <option value="auto">Auto (Dark Frames Only)</option>
+              <option value="auto">Automatic (Dark Frames Only)</option>
               <option value="on">Always</option>
             </select></label>
           <label>
@@ -128,9 +128,9 @@
             <span>Snapshot Quality <span class="info-tip" data-tip="JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = better quality and larger files; higher = more compressed. Takes effect on next camera reconnect. Default: 2" title="JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = better quality and larger files; higher = more compressed. Takes effect on next camera reconnect. Default: 2" tabindex="0" aria-label="Help: JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = be..."></span></span>
             <input name="snapshot_quality" type="number" min="2" max="31" step="1" placeholder="2" /></label>
           <label>
-            <span>Video Decoding <span class="info-tip" data-tip="Where camera video is decoded for motion, object and face detection. Auto uses an NVIDIA GPU's video decoder (NVDEC) when one is present and ffmpeg supports it, which takes the heaviest work off the CPU; a camera whose GPU decoding fails falls back to the CPU on its own. Recording and sound are unaffected. Cameras reconnect once when this changes. Default: Auto" title="Where camera video is decoded for motion, object and face detection. Auto uses an NVIDIA GPU's video decoder (NVDEC) when one is present and ffmpeg supports it, which takes the heaviest work off the CPU; a camera whose GPU decoding fails falls back to the CPU on its own. Recording and sound are unaffected. Cameras reconnect once when this changes. Default: Auto" tabindex="0" aria-label="Help: Where camera video is decoded for motion, object and face detection. Auto uses a..."></span></span>
+            <span>Video Decoding <span class="info-tip" data-tip="Where camera video is decoded for motion, object and face detection. Automatic uses an NVIDIA GPU's video decoder (NVDEC) when one is present and ffmpeg supports it, which takes the heaviest work off the CPU; a camera whose GPU decoding fails falls back to the CPU on its own. Recording and sound are unaffected. Cameras reconnect once when this changes. Default: Automatic" title="Where camera video is decoded for motion, object and face detection. Automatic uses an NVIDIA GPU's video decoder (NVDEC) when one is present and ffmpeg supports it, which takes the heaviest work off the CPU; a camera whose GPU decoding fails falls back to the CPU on its own. Recording and sound are unaffected. Cameras reconnect once when this changes. Default: Automatic" tabindex="0" aria-label="Help: Where camera video is decoded for motion, object and face detection. Automatic uses a..."></span></span>
             <select name="video_decode">
-              <option value="auto">Auto (GPU if available)</option>
+              <option value="auto">Automatic (GPU if available)</option>
               <option value="gpu">GPU (NVIDIA)</option>
               <option value="cpu">CPU</option>
             </select></label>

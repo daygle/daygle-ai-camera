@@ -20,7 +20,7 @@ test('Live is the home entry, followed by Events and Recordings', () => {
 });
 
 test('configuration lives in admin-only Setup, Intelligence and Admin groups', () => {
-  for (const group of ['Setup', 'Intelligence', 'Admin']) {
+  for (const group of ['Setup', 'Intelligence', 'Administrator']) {
     assert.match(nav, new RegExp(`label: '${group}',\\s*admin: true,`));
   }
 });

@@ -25,9 +25,9 @@ test('cat profile shortcut is removed while reusable presets remain', () => {
 });
 
 test('PTZ Motion Detection switch is editable and collected into detection', () => {
-  // Tri-state select with Auto/On/Off...
+  // Tri-state select with Automatic/On/Off...
   assert.match(source, /name="ptz_motion_detection"/);
-  assert.match(source, /Auto \(Follow PTZ\)/);
+  assert.match(source, /Automatic \(Follow PTZ\)/);
   // ...bound to the camera-level detection block (not a profile field)...
   assert.match(source, /camera\.detection\?\.ptz_motion_detection/);
   // ...and written into data.detection so the save merge preserves zones.

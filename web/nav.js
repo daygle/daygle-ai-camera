@@ -298,7 +298,7 @@ window.daygleAuthReady = (async () => {
     },
     {
       id: 'navAdmin',
-      label: 'Admin',
+      label: 'Administrator',
       admin: true,
       links: [
         { href: '/settings', matches: ['/settings'], label: 'Settings', icon: 'settings' },
