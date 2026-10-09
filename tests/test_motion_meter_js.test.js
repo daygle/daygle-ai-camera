@@ -65,8 +65,8 @@ test('a zone meter puts the trigger mid-bar and states the reading in the trigge
     zone_name: 'Driveway', fraction: 0.004, trigger: 0.02, state: 'moving', peak_fraction: 0.012, peak_window_seconds: 600,
   });
   assert.match(html, /Driveway/);
-  assert.match(html, /0\.4% moving · triggers at 2%/);
-  assert.match(html, /Highest in the last 10 minutes: 1\.2%/);
+  assert.match(html, /0\.4% Moving · Triggers at 2%/);
+  assert.match(html, /Highest in the Last 10 Minutes: 1\.2%/);
   assert.match(html, />Moving</);
   // 0.4% of a 4% full scale (twice the trigger) is a 10% bar.
   assert.match(html, /class="motion-bar" style="width: 10\.0%"/);
@@ -78,7 +78,7 @@ test('a zone above its trigger but still confirming says which check it is on', 
   const html = motionZoneMeterHtml({
     zone_name: 'Path', fraction: 0.03, trigger: 0.02, state: 'moving', above_trigger: true, checks_seen: 1, checks_needed: 2,
   });
-  assert.match(html, /check 1 of 2/);
+  assert.match(html, /Check 1 of 2/);
   assert.match(html, /width: 75\.0%/);
   const fired = motionZoneMeterHtml({ zone_name: 'Path', fraction: 0.05, trigger: 0.02, state: 'triggered' });
   assert.match(fired, />Triggered</);

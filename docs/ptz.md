@@ -122,8 +122,9 @@ Start with **Tracking Speed** 4-6 and **Zoom While Tracking** off.
 The pad's own **Speed** and **Step Duration** settings do not affect
 tracking.
 
-The Live page shows a line under the PTZ pad: watching for, following, paused
-for manual control, or returning home.
+The Live page shows the tracking state in the **Vision** lane of the *AI
+Detection Status* card: Watching for, Following, Paused for Manual Control,
+or Returning to Home Position.
 
 ### Alerts while tracking
 

@@ -7807,12 +7807,11 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
 .zone-detect-card .zone-object-limits[hidden] { display: none; }
 .zone-object-limits-hint { grid-column: 1 / -1; margin: 0; font-size: 12px; }
 
-/* Auto-tracking line under the PTZ pad (see renderPtzTracking in live.js). */
+/* Auto-tracking line in the Vision lane (see renderPtzTracking in live.js). */
 .ptz-tracking-status {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: var(--muted);
   font-size: 12.5px;
   font-weight: 650;
-  text-align: center;
 }
 .ptz-tracking-status[data-state="tracking"] { color: var(--accent); }

@@ -774,9 +774,9 @@ function renderDetectionStatus(summary) {
   }
   if (liveEls.motionCaption) {
     const parts = [];
-    if (motionFraction != null) parts.push(`Whole frame: ${formatMotionShare(motionFraction)} changed`);
+    if (motionFraction != null) parts.push(`Whole Frame: ${formatMotionShare(motionFraction)} Changed`);
     if (!isAllCameraMode() && motionZones.length === 0 && !selectedCameraHasMotionZones) {
-      parts.push('no motion zones configured');
+      parts.push('No Motion Zones Configured');
     }
     liveEls.motionCaption.textContent = parts.join(' · ');
   }
@@ -956,14 +956,14 @@ function motionZoneMeterHtml(level, { showName = true } = {}) {
   const fraction = hasFraction ? Math.max(0, Number(level.fraction)) : 0;
   const fullScale = trigger > 0 ? trigger * 2 : 0.01;
   const barPct = Math.min(100, (fraction / fullScale) * 100);
-  const reading = hasFraction ? `${formatMotionShare(fraction)} moving` : 'Not measured';
-  const parts = [reading, `triggers at ${formatMotionShare(trigger)}`];
+  const reading = hasFraction ? `${formatMotionShare(fraction)} Moving` : 'Not Measured';
+  const parts = [reading, `Triggers at ${formatMotionShare(trigger)}`];
   const needed = Number(level?.checks_needed) || 0;
   const seen = Number(level?.checks_seen) || 0;
-  if (state === 'moving' && level?.above_trigger && needed > 1) parts.push(`check ${Math.max(1, seen)} of ${needed}`);
+  if (state === 'moving' && level?.above_trigger && needed > 1) parts.push(`Check ${Math.max(1, seen)} of ${needed}`);
   const peakMinutes = Math.round((Number(level?.peak_window_seconds) || 600) / 60);
   const peak = level?.peak_fraction != null
-    ? `<p class="motion-zone-peak">Highest in the last ${peakMinutes} minutes: ${formatMotionShare(level.peak_fraction)}</p>`
+    ? `<p class="motion-zone-peak">Highest in the Last ${peakMinutes} Minutes: ${formatMotionShare(level.peak_fraction)}</p>`
     : '';
   return `<div class="motion-zone-meter is-${state}">
     <div class="motion-zone-head">
@@ -1148,7 +1148,7 @@ function updatePtzVisibility() {
   }
 }
 
-// Auto-tracking line under the PTZ pad, from the live detection status.
+// Auto-tracking line in the Vision lane, from the live detection status.
 function renderPtzTracking(tracking) {
   const el = document.getElementById('ptzTrackingStatus');
   if (!el) return;
@@ -1161,13 +1161,13 @@ function renderPtzTracking(tracking) {
   const wanted = (autoTrack.labels || []).map((label) => titleCase(label)).join(', ');
   let text;
   if (tracking.state === 'tracking') {
-    text = `Auto-tracking: following ${titleCase(tracking.label || 'object')}`;
+    text = `Auto-Tracking: Following ${titleCase(tracking.label || 'object')}`;
   } else if (tracking.state === 'paused') {
-    text = `Auto-tracking paused for manual control (resumes in ${Math.ceil(Number(tracking.resumes_in) || 0)} s)`;
+    text = `Auto-Tracking Paused for Manual Control (Resumes in ${Math.ceil(Number(tracking.resumes_in) || 0)} s)`;
   } else if (tracking.state === 'returning') {
-    text = 'Auto-tracking: returning to home position';
+    text = 'Auto-Tracking: Returning to Home Position';
   } else {
-    text = `Auto-tracking: watching for ${wanted || 'objects'}`;
+    text = `Auto-Tracking: Watching for ${wanted || 'Objects'}`;
   }
   el.textContent = text;
   el.dataset.state = tracking.state || 'idle';
