@@ -321,6 +321,10 @@ missing alert does not necessarily mean ONNX missed the object. The audit of
   camera's PTZ-enabled flag, `on` forces it (a fixed camera on a movable
   mount), and `off` disables it so a fixed camera's object alerts are never
   suppressed by a headlight sweep, IR switch, or a large close subject.
+  When the camera stops moving, the motion detector re-learns the scene from
+  the next frame (as after a reconnect). Without this, the background would
+  still show the old view for several seconds and motion zones would fire on
+  the changed picture.
 - **Temporal confirmation:** object confirmation defaults to 2 detections in a
   2-frame window (or the configured window), so an isolated valid detection is
   held until it persists. Optional spatial IoU confirmation is stricter.

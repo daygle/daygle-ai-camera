@@ -95,6 +95,12 @@ ZOOM_IN_RATIO = 0.7
 ZOOM_OUT_RATIO = 1.4
 ZOOM_EDGE_ERROR = 0.35
 ZOOM_VELOCITY = 0.5
+# Zoom in only once the target has been centred, with no pan/tilt pulse, for
+# this long - never on someone just passing through the middle mid-walk.
+ZOOM_SETTLED_SECONDS = 2.0
+# While zoomed in by the tracker, the same pan moves the picture further, so
+# pan/tilt pulses are scaled down by this and the catch-up boost is off.
+ZOOMED_PULSE_SCALE = 0.5
 # Velocity = error * GAIN (clamped), scaled by the tracking speed; never below
 # MIN_VELOCITY so small corrections still overcome motor dead-band.
 GAIN = 2.0
@@ -172,6 +178,20 @@ def zoom_velocity(error_x: float, error_y: float, box_height: float, target_size
     return 0.0
 
 
+def scaled_zoom(zoom: float, duration: float) -> float:
+    """Zoom velocity for a pulse of ``duration`` that changes the lens by one
+    standard step (PULSE_SECONDS at ZOOM_VELOCITY), whatever the pulse length."""
+    if not zoom or duration <= 0:
+        return 0.0
+    magnitude = min(abs(zoom), ZOOM_VELOCITY * PULSE_SECONDS / duration)
+    return magnitude if zoom > 0 else -magnitude
+
+
+def zoom_amount(zoom: float, duration: float) -> float:
+    """Signed zoom applied by a pulse, in seconds at ZOOM_VELOCITY."""
+    return zoom * duration / ZOOM_VELOCITY if zoom else 0.0
+
+
 def _center(detection: dict[str, Any]) -> tuple[float, float] | None:
     box = detection.get('box')
     if not isinstance(box, dict):
@@ -197,7 +217,7 @@ class _CameraState:
     __slots__ = (
         'target_label', 'target_track_id', 'last_center', 'last_seen',
         'next_command_at', 'paused_until', 'moved_since_home', 'busy', 'state',
-        'zoom_in_seconds', 'boost', 'last_error', 'edge_pushes',
+        'zoom_in_seconds', 'boost', 'last_error', 'edge_pushes', 'last_steer_at',
     )
 
     def __init__(self) -> None:
@@ -211,8 +231,11 @@ class _CameraState:
         self.moved_since_home = False
         self.busy = False
         self.state = 'idle'
-        # Net seconds of zoom-in this tracker has applied, undone on loss.
+        # Net zoom this tracker has applied, in seconds at ZOOM_VELOCITY,
+        # undone on loss.
         self.zoom_in_seconds = 0.0
+        # When the last pan/tilt pulse went out (zoom-in waits for calm).
+        self.last_steer_at = 0.0
         self.reset_steering()
 
     def reset_steering(self) -> None:
@@ -268,6 +291,9 @@ def note_manual_ptz(camera_id: str, *, now: float | None = None) -> None:
         state.drop_target()
         state.moved_since_home = True
         state.last_seen = now
+        # The operator may have zoomed: the tracker's own zoom accounting no
+        # longer describes the lens, so it must not "undo" their zoom later.
+        state.zoom_in_seconds = 0.0
 
 
 def _dispatch(camera_id: str, state: _CameraState, job: Callable[[], None], what: str) -> bool:
@@ -418,14 +444,19 @@ def update_auto_tracking(
                     box_height = 0.0
                 zoom = zoom_velocity(
                     cx - 0.5, cy - 0.5, box_height, settings['target_size'],
-                    centred=not (pan or tilt),
+                    centred=not (pan or tilt) and now - state.last_steer_at >= ZOOM_SETTLED_SECONDS,
                 )
                 if zoom < 0 and state.zoom_in_seconds <= 0 and box_height <= settings['target_size'] * ZOOM_OUT_RATIO:
                     # An edge zoom-out only undoes our own zoom-in; it never
                     # widens past where tracking started.
                     zoom = 0.0
             ready = now >= state.next_command_at and not state.busy
-            if ready and (pan or tilt):
+            zoomed_in = state.zoom_in_seconds > 0
+            if ready and (pan or tilt) and zoomed_in:
+                # Zoomed in, a pulse moves the picture further: no catch-up
+                # boost (and shorter pulses below), or it overshoots.
+                state.reset_steering()
+            elif ready and (pan or tilt):
                 # Boost is judged only when a pulse can actually go out, so a
                 # cycle that is still settling does not count as "no gain".
                 pan_boost = _update_boost(state, 0, cx - 0.5, settings['dead_zone'])
@@ -440,18 +471,29 @@ def update_auto_tracking(
                     MAX_BOOSTED_PULSE_SECONDS,
                     pulse_seconds(max(abs(cx - 0.5), abs(cy - 0.5)), settings['dead_zone']) * boost,
                 )
+                if zoomed_in:
+                    duration = max(MIN_PULSE_SECONDS, duration * ZOOMED_PULSE_SCALE)
             else:
                 duration = PULSE_SECONDS
+            # One command carries pan, tilt and zoom for the same duration, so
+            # a zoom riding on a long pan pulse is slowed to change the lens by
+            # one standard zoom step (PULSE_SECONDS at ZOOM_VELOCITY).
+            zoom = scaled_zoom(zoom, duration)
+            if zoom and (pan or tilt) and conn.protocol == 'tcp_pelcod':
+                # Pelco-D zoom has no speed byte, so it cannot be slowed to fit
+                # a long pan pulse: zoom only in its own short pulses there.
+                zoom = 0.0
             if (pan or tilt or zoom) and ready:
                 if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, pan, tilt, zoom, duration), 'move'):
                     if pan:
                         state.last_error[0] = cx - 0.5
                     if tilt:
                         state.last_error[1] = cy - 0.5
+                    if pan or tilt:
+                        state.last_steer_at = now
                     state.next_command_at = now + duration + SETTLE_SECONDS
                     state.moved_since_home = True
-                    if zoom:
-                        state.zoom_in_seconds += duration if zoom > 0 else -duration
+                    state.zoom_in_seconds += zoom_amount(zoom, duration)
             return _status(state, now)
 
         if state.target_label is not None:
@@ -467,10 +509,21 @@ def update_auto_tracking(
                 # after it instead of freezing until it is lost.
                 pan = axis_velocity(lx - 0.5, EDGE_ERROR - 0.01, settings['speed'])
                 tilt = -axis_velocity(ly - 0.5, EDGE_ERROR - 0.01, settings['speed'])
-                if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, pan, tilt, 0.0, MAX_PULSE_SECONDS), 'edge follow'):
+                duration = MAX_PULSE_SECONDS
+                zoom = 0.0
+                if state.zoom_in_seconds > 0:
+                    # Zoomed in: a shorter push, and widen out at the same time
+                    # (not on Pelco-D, whose zoom cannot be slowed) so the
+                    # target is easier to find again.
+                    duration = MAX_PULSE_SECONDS * ZOOMED_PULSE_SCALE
+                    if conn.protocol != 'tcp_pelcod':
+                        zoom = scaled_zoom(-ZOOM_VELOCITY, duration)
+                if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, pan, tilt, zoom, duration), 'edge follow'):
                     state.edge_pushes += 1
                     state.moved_since_home = True
-                    state.next_command_at = now + MAX_PULSE_SECONDS + SETTLE_SECONDS
+                    state.last_steer_at = now
+                    state.zoom_in_seconds = max(0.0, state.zoom_in_seconds + zoom_amount(zoom, duration))
+                    state.next_command_at = now + duration + SETTLE_SECONDS
             # Otherwise briefly out of view (a missed detection, behind a
             # bush): hold still and keep the target until ``lost_seconds``.
             return _status(state, now)

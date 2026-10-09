@@ -277,3 +277,85 @@ def test_lost_mid_frame_holds_still():
     calls = len(mover.calls)
     _step(camera, _next_ready(mover, 10.0), mover=mover)
     assert len(mover.calls) == calls  # behind a bush, not walked off: no push
+
+
+def _zoomed_in(camera, mover, now=10.0):
+    """Drive the tracker into a zoomed-in state with a centred, small target."""
+    _step(camera, now, candidates=[_det('cat', 0.5, 0.5, size=0.1)], mover=mover)
+    assert mover.calls[-1][3] > 0 and pt._states['cam'].zoom_in_seconds > 0
+    return _next_ready(mover, now)
+
+
+def test_zoom_riding_on_a_long_pan_pulse_changes_the_lens_by_one_step():
+    mover = _Mover()
+    camera = _camera(zoom=True, target_size=0.3)
+    now = _zoomed_in(camera, mover)
+    # Target jumps to the edge: pan towards it and zoom out at the same time.
+    _step(camera, now, candidates=[_det('cat', 0.95, 0.5, size=0.1)], mover=mover)
+    _action, pan, _tilt, zoom, duration = mover.calls[-1]
+    assert pan > 0 and zoom < 0
+    assert abs(zoom) * duration == pytest.approx(pt.ZOOM_VELOCITY * pt.PULSE_SECONDS)
+
+
+def test_zoom_in_waits_until_the_target_has_settled():
+    mover = _Mover()
+    camera = _camera(zoom=True, target_size=0.4)
+    _step(camera, 10.0, candidates=[_det('cat', 0.8, 0.5, size=0.1)], mover=mover)
+    assert mover.calls[-1][1] > 0 and mover.calls[-1][3] == 0  # steer, no zoom
+    # Centred right after steering (still walking through the middle): no zoom.
+    now = _next_ready(mover, 10.0)
+    calls = len(mover.calls)
+    _step(camera, now, candidates=[_det('cat', 0.5, 0.5, size=0.1)], mover=mover)
+    assert len(mover.calls) == calls
+    # Still centred after ZOOM_SETTLED_SECONDS: now it zooms in.
+    _step(camera, 10.0 + pt.ZOOM_SETTLED_SECONDS + 0.1, candidates=[_det('cat', 0.5, 0.5, size=0.1)], mover=mover)
+    assert mover.calls[-1][3] > 0
+
+
+def test_zoomed_in_pulses_are_shorter_and_never_boosted():
+    mover = _Mover()
+    wide = _Mover()
+    _step(_camera(), 10.0, candidates=[_det('cat', 0.8, 0.5)], mover=wide)
+    pt.reset_auto_tracking()
+    camera = _camera(zoom=True, target_size=0.3)
+    now = _zoomed_in(camera, mover)
+    _step(camera, now, candidates=[_det('cat', 0.8, 0.5, size=0.2)], mover=mover)
+    assert mover.calls[-1][-1] < wide.calls[-1][-1]
+    for _ in range(3):  # escaping, but zoomed in: no boost
+        now = _next_ready(mover, now)
+        _step(camera, now, candidates=[_det('cat', 0.8, 0.5, size=0.2)], mover=mover)
+    assert pt._states['cam'].boost == [1.0, 1.0]
+
+
+def test_manual_control_forgets_the_trackers_zoom():
+    mover = _Mover()
+    camera = _camera(zoom=True, target_size=0.4)
+    _zoomed_in(camera, mover)
+    pt.note_manual_ptz('cam', now=11.0)
+    assert pt._states['cam'].zoom_in_seconds == 0
+    # After the pause, nothing tries to "undo" a zoom the operator may have changed.
+    calls = len(mover.calls)
+    _step(camera, 50.0, mover=mover)
+    assert len(mover.calls) == calls or mover.calls[-1][0] == 'home'
+
+
+def test_edge_push_while_zoomed_in_is_shorter_and_widens_out():
+    mover = _Mover()
+    camera = _camera(zoom=True, target_size=0.4, lost_seconds=10)
+    now = _zoomed_in(camera, mover)
+    now = _zoomed_in(camera, mover, now)  # two steps in, so one is left after the chase
+    _step(camera, now, candidates=[_det('cat', 0.95, 0.5, size=0.1)], mover=mover)
+    now = _next_ready(mover, now)
+    _step(camera, now, mover=mover)  # vanished at the edge
+    _action, pan, _tilt, zoom, duration = mover.calls[-1]
+    assert pan > 0 and zoom < 0 and duration < pt.MAX_PULSE_SECONDS
+
+
+def test_pelcod_never_zooms_during_a_pan_pulse():
+    mover = _Mover()
+    camera = _camera(zoom=True, target_size=0.3)
+    camera['ptz']['protocol'] = 'tcp_pelcod'
+    now = _zoomed_in(camera, mover)
+    _step(camera, now, candidates=[_det('cat', 0.95, 0.5, size=0.1)], mover=mover)
+    _action, pan, _tilt, zoom, _duration = mover.calls[-1]
+    assert pan > 0 and zoom == 0

@@ -78,7 +78,11 @@ def test_camera_motion_activation_resets_high_fraction_streak():
     # one frame after the hold must not immediately reactivate suppression.
     with st._camera_motion_lock:
         st._camera_motion_state[cam]['auto_until'] = 0.0
-    assert ds.update_camera_motion(cam, 0.5)['active'] is False
+    # The frame the hold expires on is the window's end-of-move boundary: it
+    # reports ``ended`` (and stays suppressed, see below) but the streak it
+    # contributes is a fresh one, not a reactivation.
+    boundary = ds.update_camera_motion(cam, 0.5)
+    assert boundary.get('ended') is True
     assert st._camera_motion_state[cam]['high_fraction_streak'] == 1
     assert ds.update_camera_motion(cam, 0.5)['active'] is True
     assert st._camera_motion_state[cam]['high_fraction_streak'] == 0
@@ -502,3 +506,47 @@ def test_diff_engine_background_freezes_during_motion():
     assert conf == first_conf, (
         f"Diff-engine confidence decayed {first_conf}->{conf} -- freeze broken"
     )
+
+
+def test_end_of_camera_move_relearns_the_motion_background():
+    """After a pan the motion background still shows the old view and would take
+    ~1/background_alpha frames to fade, firing false motion in the meantime.
+    The frame a camera-motion window ends on clears the model (it re-seeds from
+    the next frame) and is itself reported as still moving."""
+    cam = 'ptz-relearn'
+    st._camera_motion_state.pop(cam, None)
+    old_view = np.full((240, 320, 3), 40, dtype=np.uint8)
+    old_view[60:180, 80:240] = 200
+    new_view = np.roll(old_view, 60, axis=1)  # the camera panned
+    ds.clear_frame_motion_state(cam)
+    ds.detect_frame_motion(cam, old_view)  # seed
+    ds.detect_frame_motion(cam, old_view)
+
+    ds.mark_camera_motion(cam, 0.1)
+    assert ds.update_camera_motion(cam, 0.0)['active'] is True
+    with st._camera_motion_lock:
+        st._camera_motion_state[cam]['command_until'] = 0.0  # the move is over
+    boundary = ds.update_camera_motion(cam, 0.0)
+    assert boundary['active'] is True and boundary['ended'] is True
+    assert cam not in st._frame_motion_mog2  # model dropped
+
+    # The first frame of the new view re-seeds; the next is diffed against it.
+    assert ds.detect_frame_motion(cam, new_view)[0] is False
+    has_motion, _conf, _mask, fraction = ds.detect_frame_motion(cam, new_view)
+    assert has_motion is False and fraction < 0.01
+    after = ds.update_camera_motion(cam, fraction)
+    assert after['active'] is False and 'ended' not in after
+
+
+def test_stale_background_without_relearn_would_report_motion():
+    """Control for the test above: diffing the panned view against the old
+    background does read as motion, which is what the re-learn prevents."""
+    cam = 'ptz-stale'
+    old_view = np.full((240, 320, 3), 40, dtype=np.uint8)
+    old_view[60:180, 80:240] = 200
+    new_view = np.roll(old_view, 60, axis=1)
+    ds.clear_frame_motion_state(cam)
+    ds.detect_frame_motion(cam, old_view)
+    ds.detect_frame_motion(cam, old_view)
+    has_motion, _conf, _mask, fraction = ds.detect_frame_motion(cam, new_view)
+    assert has_motion is True and fraction > 0.05
