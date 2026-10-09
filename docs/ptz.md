@@ -51,7 +51,7 @@ middle of the picture.
 
 | Setting | What it does | Default |
 | --- | --- | --- |
-| Follow These Objects | Comma-separated labels, e.g. `cat`. Groups such as `animal` or `pet` follow any member, so a cat misread as a dog at night is still followed. | `person` |
+| Follow These Objects | Pick one or more objects from the list. Your object groups (from the Objects page) are listed first, then the classes the loaded model can detect; the filter box narrows the list. A group such as Animal or Pet follows any member, so a cat misread as a dog at night is still followed. Nothing picked means `person`. | `person` |
 | Tracking Speed | How fast the camera turns towards the object (1-8). | 4 |
 | Dead Zone (%) | How far from the centre the object may drift before the camera moves. | 15 |
 | Lost After (s) | How long the object may be out of sight before tracking lets go. | 3 |

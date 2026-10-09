@@ -267,7 +267,19 @@ function ptzAutoTrackSectionHtml(camera, index) {
     '<h4 class="cam-edit-section-title">Auto-Tracking</h4>' +
     '<div class="form-grid">' +
       '<label class="full-width"><span>Auto-Tracking' + tip('Steer the camera to keep a detected object in the middle of the picture. Using the PTZ pad pauses it for 30 seconds.') + '</span>' + onOff('ptz_auto_track_enabled', at.enabled === true) + '</label>' +
-      '<label class="full-width"><span>Follow These Objects' + tip('Comma-separated object names, e.g. cat or cat, dog. Groups like animal or pet follow any member. Tracking starts only for an object that passes this camera\'s zones and confirmation.') + '</span><input name="ptz_auto_track_labels" type="text" placeholder="person" value="' + escapeHtml(labels) + '" /></label>' +
+      // A div, not a <label>: clicking a chip inside a label would also
+      // activate the label's first button and toggle the list.
+      '<div class="full-width ptz-track-field"><span>Follow These Objects' + tip('Pick the objects to follow. A group such as Pet follows any of its members. Tracking starts only for an object that passes this camera\'s zones and confirmation.') + '</span>' +
+        '<input name="ptz_auto_track_labels" type="hidden" value="' + escapeHtml(labels) + '" />' +
+        '<div class="multi-select" data-ptz-track-picker>' +
+          '<div class="multi-select-chips" data-ptz-track-chips></div>' +
+          '<button type="button" class="multi-select-toggle" data-ptz-track-toggle aria-haspopup="listbox" aria-expanded="false"><span>Select objects…</span><span class="multi-select-caret">▼</span></button>' +
+          '<div class="multi-select-dropdown" data-ptz-track-dropdown role="listbox" aria-multiselectable="true" hidden>' +
+            '<div class="multi-select-search"><input type="text" data-ptz-track-filter placeholder="Filter…" autocomplete="off" aria-label="Filter objects" /></div>' +
+            '<div class="multi-select-options" data-ptz-track-options></div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
       '<label><span>Tracking Speed' + tip('How fast the camera turns towards the object (1-8, default 4). Lower is smoother; raise it for fast subjects.') + '</span><input name="ptz_auto_track_speed" type="number" min="1" max="8" step="1" placeholder="4" value="' + escapeHtml(String(num(at.speed, 4))) + '" /></label>' +
       '<label><span>Dead Zone (%)' + tip('How far from the centre the object may drift before the camera moves, as a share of the frame (5-40, default 15). Larger = calmer camera.') + '</span><input name="ptz_auto_track_dead_zone" type="number" min="5" max="40" step="1" placeholder="15" value="' + escapeHtml(Math.round(num(at.dead_zone, 0.15) * 100)) + '" /></label>' +
       '<label><span>Lost After (s)' + tip('How long the object can be out of sight before tracking lets go (1-30 s, default 3).') + '</span><input name="ptz_auto_track_lost_seconds" type="number" min="1" max="30" step="0.5" placeholder="3" value="' + escapeHtml(num(at.lost_seconds, 3)) + '" /></label>' +
@@ -278,6 +290,149 @@ function ptzAutoTrackSectionHtml(camera, index) {
     '</div>' +
     '<p class="form-help muted">While the camera is moving, moving/still cannot be told apart, so an object only alerts if it is set to Moving &amp; Still on the Objects page. Tracking starts on a moving object; to also start on one sitting still, set its mode to Moving &amp; Still.</p>' +
   '</div>';
+}
+
+// Choices for the Follow These Objects picker: the user's object groups
+// (Objects page) and the classes the loaded model can detect. Fetched once per
+// page load and shared by every camera's form.
+var ptzTrackChoicesPromise = null;
+function loadPtzTrackChoices() {
+  if (!ptzTrackChoicesPromise) {
+    ptzTrackChoicesPromise = api('/api/settings/label_groups').then(function(payload) {
+      return {
+        groups: Object.keys((payload && payload.groups) || {}).sort(),
+        labels: ((payload && payload.available_labels) || []).filter(function(label) {
+          return label && label !== 'motion' && label !== 'face';
+        }),
+      };
+    }).catch(function() {
+      ptzTrackChoicesPromise = null;  // retry on the next form open
+      return { groups: [], labels: [] };
+    });
+  }
+  return ptzTrackChoicesPromise;
+}
+
+function parsePtzTrackLabels(value) {
+  var seen = {};
+  return String(value || '').split(',').map(function(label) { return label.trim().toLowerCase(); })
+    .filter(function(label) {
+      if (!label || seen[label]) return false;
+      seen[label] = true;
+      return true;
+    });
+}
+
+// Chip multi-select for Follow These Objects. The hidden input keeps the
+// comma-separated value the save code (and the backend) already expect, so a
+// saved "cat, dog" opens as two chips.
+function bindPtzTrackPicker(form) {
+  var field = form.querySelector('.ptz-track-field');
+  if (!field) return;
+  var input = field.querySelector('[name="ptz_auto_track_labels"]');
+  var picker = field.querySelector('[data-ptz-track-picker]');
+  var chips = field.querySelector('[data-ptz-track-chips]');
+  var toggle = field.querySelector('[data-ptz-track-toggle]');
+  var dropdown = field.querySelector('[data-ptz-track-dropdown]');
+  var filter = field.querySelector('[data-ptz-track-filter]');
+  var options = field.querySelector('[data-ptz-track-options]');
+  var choices = { groups: [], labels: [] };
+  var selected = parsePtzTrackLabels(input.value);
+
+  function commit() {
+    input.value = selected.join(', ');
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function renderChips() {
+    chips.innerHTML = selected.map(function(label) {
+      var name = escapeHtml(titleCase(label));
+      return '<span class="multi-select-chip">' + name + '<span class="multi-select-chip-remove" role="button" tabindex="0" data-remove="' + escapeHtml(label) + '" title="Stop following ' + name + '" aria-label="Stop following ' + name + '">&times;</span></span>';
+    }).join('');
+    // Nothing picked saves as the default (person), so say so.
+    toggle.querySelector('span').textContent = selected.length ? selected.length + ' selected' : 'Select objects… (Person if none)';
+  }
+
+  function optionHtml(label) {
+    var checked = selected.indexOf(label) !== -1 ? ' checked' : '';
+    return '<label class="multi-select-option"><input type="checkbox" value="' + escapeHtml(label) + '"' + checked + '><span class="multi-select-option-label">' + escapeHtml(titleCase(label)) + '</span></label>';
+  }
+
+  function renderOptions() {
+    var query = (filter.value || '').trim().toLowerCase();
+    var match = function(label) { return !query || label.indexOf(query) !== -1 || titleCase(label).toLowerCase().indexOf(query) !== -1; };
+    var groups = choices.groups.filter(match);
+    var groupSet = {};
+    choices.groups.forEach(function(name) { groupSet[name] = true; });
+    // A saved label the model no longer lists stays visible so it can be removed.
+    var labels = choices.labels.concat(selected.filter(function(label) {
+      return !groupSet[label] && choices.labels.indexOf(label) === -1;
+    })).filter(function(label) { return !groupSet[label] && match(label); });
+    if (!groups.length && !labels.length) {
+      options.innerHTML = '<div class="multi-select-empty">' + (query ? 'No matching objects.' : 'No objects are available yet. Load an ONNX model first.') + '</div>';
+      return;
+    }
+    options.innerHTML =
+      (groups.length ? '<div class="multi-select-heading">Groups</div>' + groups.map(optionHtml).join('') : '') +
+      (labels.length ? (groups.length ? '<div class="multi-select-heading">Objects</div>' : '') + labels.map(optionHtml).join('') : '');
+  }
+
+  function setOpen(open) {
+    dropdown.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    if (open) {
+      filter.value = '';
+      renderOptions();
+      filter.focus();
+    }
+  }
+
+  function remove(label) {
+    selected = selected.filter(function(item) { return item !== label; });
+    commit();
+    renderChips();
+    if (!dropdown.hidden) renderOptions();
+  }
+
+  toggle.addEventListener('click', function(event) {
+    event.preventDefault();
+    setOpen(dropdown.hidden);
+  });
+  filter.addEventListener('input', renderOptions);
+  filter.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') { setOpen(false); toggle.focus(); }
+  });
+  options.addEventListener('change', function(event) {
+    var box = event.target;
+    if (!box || box.type !== 'checkbox') return;
+    if (box.checked) {
+      if (selected.indexOf(box.value) === -1) selected.push(box.value);
+    } else {
+      selected = selected.filter(function(item) { return item !== box.value; });
+    }
+    commit();
+    renderChips();
+  });
+  chips.addEventListener('click', function(event) {
+    var button = event.target.closest('[data-remove]');
+    if (button) remove(button.dataset.remove);
+  });
+  chips.addEventListener('keydown', function(event) {
+    var button = event.target.closest('[data-remove]');
+    if (button && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      remove(button.dataset.remove);
+    }
+  });
+  document.addEventListener('click', function(event) {
+    if (!dropdown.hidden && !picker.contains(event.target)) setOpen(false);
+  });
+
+  renderChips();
+  loadPtzTrackChoices().then(function(loaded) {
+    choices = loaded;
+    if (!dropdown.hidden) renderOptions();
+  });
 }
 
 // Fill the Home Position suggestions with the camera's saved presets (ONVIF).
@@ -544,6 +699,7 @@ function wireEditFormHandlers(index) {
   var collapseButton = panel.querySelector('.cam-edit-collapse-btn');
   if (collapseButton) collapseButton.addEventListener('click', closeAllEditForms);
   loadPtzPresetSuggestions(cameras[index], index);
+  bindPtzTrackPicker(form);
 
   bindPixelThresholdPresets(form);
   form.querySelectorAll('[data-clear-legacy-motion]').forEach(function(button) {
