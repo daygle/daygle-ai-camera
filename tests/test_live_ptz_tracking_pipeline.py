@@ -67,9 +67,10 @@ def test_cycle_hands_detections_to_the_tracker_and_publishes_status(tmp_path, mo
 
     # The cat is right of centre: once its track is old enough, the camera pans right.
     assert moves, 'the tracker should have steered the camera'
-    action, camera_id, host, pan, tilt, zoom = moves[0]
+    action, camera_id, host, pan, tilt, zoom, duration = moves[0]
     assert (action, camera_id, host) == ('move', 'camera-ptz', '192.0.2.40')
     assert pan > 0 and tilt == 0 and zoom == 0
+    assert pt.MIN_PULSE_SECONDS <= duration <= pt.MAX_PULSE_SECONDS
 
     status = main._state.live_detection_status['camera-ptz']['ptz_tracking']
     assert status['state'] == 'tracking' and status['label'] == 'cat'

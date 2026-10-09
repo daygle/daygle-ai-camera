@@ -10,12 +10,15 @@ detections. On a camera with auto-tracking on, it:
 2. **Follows** it: the same track id, or failing that the same label nearest
    to where the target was last seen. Following deliberately ignores zones -
    the moment the camera pans, zone outlines no longer line up with the scene.
-3. **Steers** with short velocity pulses. When the target's centre is outside
-   the dead zone (a box around the middle of the frame), the camera pans/tilts
-   towards it for ``PULSE_SECONDS`` at a speed proportional to how far off
-   centre it is. The next pulse waits ``SETTLE_SECONDS`` more, because the
-   video lags the motor: steering on frames that predate the last pulse is
-   what makes trackers overshoot and hunt back and forth.
+3. **Steers** with velocity pulses. When the target's centre is outside the
+   dead zone (a box around the middle of the frame), the camera pans/tilts
+   towards it at a speed proportional to how far off centre it is. The pulse
+   is longer the further off centre the target is (``pulse_seconds``): short
+   nudges for small corrections, up to ``MAX_PULSE_SECONDS`` for a target near
+   the edge, so a person walking across the frame is not outrun. The next
+   pulse waits ``SETTLE_SECONDS`` after the last one ends, because the video
+   lags the motor: steering on frames that predate the last pulse is what
+   makes trackers overshoot and hunt back and forth.
 4. **Lets go** when the target has not been seen for ``lost_seconds``, and
    after ``return_home_seconds`` with nothing to follow sends the camera back to
    its home position (or a chosen preset).
@@ -48,9 +51,15 @@ from app.utils import normalize_bool_setting
 
 logger = logging.getLogger('daygle.ai')
 
-# Control loop timing (seconds).
+# Control loop timing (seconds). Pan/tilt pulses run from MIN_PULSE_SECONDS
+# (just outside the dead zone) to MAX_PULSE_SECONDS (target at the frame
+# edge); zoom-only pulses use PULSE_SECONDS. A test at 0.4 s fixed pulses
+# could not keep a walking person in view; the camera stops after every pulse
+# (app.ptz.ptz_move), so a longer pulse is bounded, not a runaway.
 PULSE_SECONDS = 0.4
-SETTLE_SECONDS = 0.6
+MIN_PULSE_SECONDS = 0.3
+MAX_PULSE_SECONDS = 1.5
+SETTLE_SECONDS = 0.5
 MANUAL_PAUSE_SECONDS = 30.0
 HOME_MOVE_SECONDS = 4.0
 
@@ -124,6 +133,13 @@ def axis_velocity(error: float, dead_zone: float, speed: int) -> float:
     return magnitude if error > 0 else -magnitude
 
 
+def pulse_seconds(error: float, dead_zone: float) -> float:
+    """Pan/tilt pulse length for the target's largest offset from centre."""
+    span = max(1e-6, 0.5 - dead_zone)
+    fraction = max(0.0, min(1.0, (abs(error) - dead_zone) / span))
+    return round(MIN_PULSE_SECONDS + fraction * (MAX_PULSE_SECONDS - MIN_PULSE_SECONDS), 3)
+
+
 def zoom_velocity(error_x: float, error_y: float, box_height: float, target_size: float, centred: bool) -> float:
     """Zoom velocity (+in / -out) for the target's offset and size."""
     if max(abs(error_x), abs(error_y)) > ZOOM_EDGE_ERROR:
@@ -159,7 +175,7 @@ def _area(detection: dict[str, Any]) -> float:
 class _CameraState:
     __slots__ = (
         'target_label', 'target_track_id', 'last_center', 'last_seen',
-        'last_command', 'paused_until', 'moved_since_home', 'busy', 'state',
+        'next_command_at', 'paused_until', 'moved_since_home', 'busy', 'state',
         'zoom_in_seconds',
     )
 
@@ -168,7 +184,8 @@ class _CameraState:
         self.target_track_id: Any = None
         self.last_center: tuple[float, float] | None = None
         self.last_seen = 0.0
-        self.last_command = 0.0
+        # Earliest time the next command may go out (pulse end + settle).
+        self.next_command_at = 0.0
         self.paused_until = 0.0
         self.moved_since_home = False
         self.busy = False
@@ -354,12 +371,16 @@ def update_auto_tracking(
                     # An edge zoom-out only undoes our own zoom-in; it never
                     # widens past where tracking started.
                     zoom = 0.0
-            if (pan or tilt or zoom) and now - state.last_command >= PULSE_SECONDS + SETTLE_SECONDS:
-                if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, pan, tilt, zoom), 'move'):
-                    state.last_command = now
+            if pan or tilt:
+                duration = pulse_seconds(max(abs(cx - 0.5), abs(cy - 0.5)), settings['dead_zone'])
+            else:
+                duration = PULSE_SECONDS
+            if (pan or tilt or zoom) and now >= state.next_command_at:
+                if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, pan, tilt, zoom, duration), 'move'):
+                    state.next_command_at = now + duration + SETTLE_SECONDS
                     state.moved_since_home = True
                     if zoom:
-                        state.zoom_in_seconds += PULSE_SECONDS if zoom > 0 else -PULSE_SECONDS
+                        state.zoom_in_seconds += duration if zoom > 0 else -duration
             return _status(state, now)
 
         if state.target_label is not None:
@@ -371,26 +392,26 @@ def update_auto_tracking(
         state.state = 'idle'
         if (
             state.zoom_in_seconds > 0
-            and now - state.last_command >= PULSE_SECONDS + SETTLE_SECONDS
+            and now >= state.next_command_at
         ):
             # Lost the target while zoomed in: widen back out, one pulse a
             # cycle, so the next subject can be found without waiting for the
             # return-home delay.
-            if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, 0.0, 0.0, -ZOOM_VELOCITY), 'zoom out'):
+            if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, 0.0, 0.0, -ZOOM_VELOCITY, PULSE_SECONDS), 'zoom out'):
                 state.zoom_in_seconds = max(0.0, state.zoom_in_seconds - PULSE_SECONDS)
-                state.last_command = now
+                state.next_command_at = now + PULSE_SECONDS + SETTLE_SECONDS
             return _status(state, now)
         if (
             state.moved_since_home
             and settings['return_home_seconds'] > 0
             and now - state.last_seen >= settings['return_home_seconds']
-            and now - state.last_command >= PULSE_SECONDS + SETTLE_SECONDS
+            and now >= state.next_command_at
         ):
             preset = settings['home_preset']
             if _dispatch(camera_id, state, lambda: mover('home', camera_id, conn, preset), 'return home'):
                 state.moved_since_home = False
                 state.zoom_in_seconds = 0.0
-                state.last_command = now
+                state.next_command_at = now + HOME_MOVE_SECONDS
                 state.state = 'returning'
         return _status(state, now)
 
@@ -400,9 +421,9 @@ def _default_mover(action: str, camera_id: str, conn: Any, *args: Any) -> None:
     from app.ptz import ptz_goto_home, ptz_move
 
     if action == 'move':
-        pan, tilt, zoom = args
-        mark_camera_motion(camera_id, PULSE_SECONDS, reason='auto_track')
-        ptz_move(conn, pan, tilt, PULSE_SECONDS, zoom=zoom)
+        pan, tilt, zoom, duration = args
+        mark_camera_motion(camera_id, duration, reason='auto_track')
+        ptz_move(conn, pan, tilt, duration, zoom=zoom)
     elif action == 'home':
         (preset,) = args
         mark_camera_motion(camera_id, HOME_MOVE_SECONDS, reason='auto_track_home')
