@@ -34,11 +34,56 @@ def test_builtin_presets_are_separate_day_and_night_records():
     assert night['settings']['object_detection_tiling'] == '2x2'
     assert day['settings']['detection_confirm_frames'] == 2
     assert night['settings']['detection_confirm_frames'] == 2
-    assert all(preset['settings']['adaptive_detection_enabled'] is True for preset in presets)
+    # Day presets let the shadow check decide per frame; IR night has no colour.
     assert all(
-        preset['settings']['motion_shadow_suppression'] == ('off' if preset['mode'] == 'night' else 'on')
+        preset['settings']['motion_shadow_suppression'] == ('off' if preset['mode'] == 'night' else 'auto')
         for preset in presets
     )
+
+
+# Presets that chase short or fast events skip adaptive cadence: stretching the
+# detection interval on a quiet scene would miss the first frames of a visit.
+_NO_ADAPTIVE = {
+    'cat-small-animal-night', 'maximum-recall-day', 'maximum-recall-night',
+    'fast-motion-day', 'fast-motion-night',
+}
+
+
+def test_adaptive_cadence_is_off_only_for_short_event_presets():
+    for preset in list_presets(None):
+        expected = preset['id'] not in _NO_ADAPTIVE
+        assert preset['settings']['adaptive_detection_enabled'] is expected, preset['id']
+
+
+@pytest.mark.parametrize(('preset_id', 'second_look', 'low_light'), [
+    ('cat-small-animal-day', True, None),
+    ('cat-small-animal-night', True, 'auto'),
+    ('maximum-recall-day', True, None),
+    ('maximum-recall-night', True, 'auto'),
+    ('night-ir-night', True, 'auto'),
+    ('low-cpu-day', False, 'off'),
+    ('low-cpu-night', False, 'off'),
+    # Unset -> the camera follows the global default.
+    ('balanced-day', None, None),
+    ('balanced-night', None, None),
+    ('fast-motion-day', None, None),
+    ('fast-motion-night', None, None),
+])
+def test_second_look_and_low_light_per_preset(preset_id, second_look, low_light):
+    settings = get_preset(None, preset_id)['settings']
+    assert settings.get('object_detection_second_look') is second_look
+    assert settings.get('object_detection_low_light') == low_light
+
+
+def test_builtin_settings_survive_normalization():
+    for preset in list_presets(None):
+        normalized = normalize_preset({
+            'id': 'copy-' + preset['id'], 'name': 'Copy', 'mode': preset['mode'], 'settings': preset['settings'],
+        })['settings']
+        for key in ('object_detection_second_look', 'object_detection_low_light',
+                    'adaptive_detection_enabled', 'motion_shadow_suppression'):
+            if key in preset['settings']:
+                assert normalized[key] == preset['settings'][key], (preset['id'], key)
 
 
 def test_recall_profiles_do_not_add_confirmation_latency():

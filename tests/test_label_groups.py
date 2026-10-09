@@ -48,13 +48,12 @@ def _hermetic_groups(monkeypatch):
 def test_defaults_expose_animal_and_pet():
     assert 'cat' in lg.DEFAULT_LABEL_GROUPS['animal']
     assert 'dog' in lg.DEFAULT_LABEL_GROUPS['animal']
-    assert 'bird' in lg.DEFAULT_LABEL_GROUPS['pet']
-    assert lg.DEFAULT_LABEL_GROUPS['pet'] == frozenset({'cat', 'dog', 'bird'})
+    assert lg.DEFAULT_LABEL_GROUPS['pet'] == frozenset({'cat', 'dog'})
 
 
 def test_effective_returns_defaults_without_database():
     assert 'animal' in lg.cached_label_groups()
-    assert lg.cached_label_groups()['pet'] == frozenset({'cat', 'dog', 'bird'})
+    assert lg.cached_label_groups()['pet'] == frozenset({'cat', 'dog'})
 
 
 def test_normalize_label_groups_canonicalizes():
@@ -105,3 +104,36 @@ def test_matching_uses_custom_groups(monkeypatch):
     assert detection_label_in_allowed('person', {'vehicle'}) is False
     # The removed default group no longer matches.
     assert detection_label_in_allowed('cat', {'animal'}) is False
+
+
+def _camera(**zone_extra):
+    zone = {
+        'id': 'zone-1',
+        'object_rules': [{'label': 'pet', 'enabled': True}, {'label': 'person', 'enabled': True}],
+        'object_labels': ['pet', 'person'],
+        **zone_extra,
+    }
+    return {'id': 'cam-1', 'detection': {'object_labels': ['pet', 'car'], 'zones': [zone]}}
+
+
+def test_rename_follows_the_group_into_zone_rules():
+    camera = _camera(tripwire={'labels': ['pet'], 'name': 'Gate'}, loiter={'labels': ['person']})
+    cameras, changed = lg.rename_group_references([camera], {'Pet': 'pets'})
+    assert changed
+    detection = cameras[0]['detection']
+    zone = detection['zones'][0]
+    assert detection['object_labels'] == ['pets', 'car']
+    assert [rule['label'] for rule in zone['object_rules']] == ['pets', 'person']
+    assert zone['object_labels'] == ['pets', 'person']
+    assert zone['tripwire'] == {'labels': ['pets'], 'name': 'Gate'}
+    assert zone['loiter'] == {'labels': ['person']}
+    # The input is left untouched.
+    assert camera['detection']['zones'][0]['object_rules'][0]['label'] == 'pet'
+
+
+def test_rename_without_references_changes_nothing():
+    camera = _camera()
+    cameras, changed = lg.rename_group_references([camera], {'animal': 'critter'})
+    assert not changed and cameras[0] is camera
+    assert lg.rename_group_references([camera], {}) == ([camera], False)
+    assert lg.rename_group_references([camera], {'pet': 'pet'}) == ([camera], False)

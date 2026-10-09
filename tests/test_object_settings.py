@@ -180,7 +180,7 @@ def test_motion_mode_for_label_group_mode_applies():
 
 def test_motion_mode_for_label_most_specific_group_wins():
     settings = {'default_mode': 'moving', 'labels': {}, 'group_modes': {'animal': 'still', 'pet': 'moving'}}
-    # cat is in both animal (10 members) and pet (3 members): the smaller pet
+    # cat is in both animal (10 members) and pet (2 members): the smaller pet
     # umbrella is more specific and wins.
     assert os.motion_mode_for_label('cat', settings) == 'moving'
     # horse is only in animal.

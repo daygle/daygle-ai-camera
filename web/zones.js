@@ -820,16 +820,18 @@ function updateSelectionStyles() {
   });
 }
 
-// Umbrella group labels: a single rule that matches ANY member class. Mirrors
-// app/zone_schema.py::_LABEL_GROUPS on the backend. Useful when a subject is
-// easily mislabeled between related classes (e.g. an IR-lit cat read as a dog).
-const OBJECT_GROUP_LABELS = [
-  { value: 'animal', label: 'Animal (Cat, Dog, Bird…)' },
-  { value: 'pet', label: 'Pet (Cat / Dog / Bird)' },
-];
+// Umbrella group labels: a single rule that matches ANY member class. The
+// groups are managed on the Objects page (app/label_groups.py) and loaded by
+// live.js into labelGroupNames, so renamed or new groups show up here as-is.
+// Useful when a subject is easily mislabeled between related classes (e.g. an
+// IR-lit cat read as a dog).
+function objectGroupLabels() {
+  return (labelGroupNames || []).map((name) => ({ value: name, label: titleCase(name) }));
+}
 
 function objectRuleOptions(selectedLabel) {
-  const groupValues = new Set(OBJECT_GROUP_LABELS.map((group) => group.value));
+  const groupLabels = objectGroupLabels();
+  const groupValues = new Set(groupLabels.map((group) => group.value));
   // Group names are rendered as dedicated options below, so keep them out of the
   // per-class list even when one is the currently selected value.
   const labels = [...new Set([...availableLabels, selectedLabel].filter((l) => Boolean(l) && l !== 'motion' && l !== 'face' && !groupValues.has(l)))];
@@ -837,7 +839,7 @@ function objectRuleOptions(selectedLabel) {
   // raw lowercase because rule.label is the canonical lookup key used by
   // defaultObjectRule, normalizeObjectRules, and backend filters.
   const coco = labels.map((label) => `<option value="${escapeHtml(label)}" ${label === selectedLabel ? 'selected' : ''}>${escapeHtml(titleCase(label))}</option>`).join('');
-  const groups = OBJECT_GROUP_LABELS.map((group) => `<option value="${escapeHtml(group.value)}" ${group.value === selectedLabel ? 'selected' : ''}>${escapeHtml(group.label)}</option>`).join('');
+  const groups = groupLabels.map((group) => `<option value="${escapeHtml(group.value)}" ${group.value === selectedLabel ? 'selected' : ''}>${escapeHtml(group.label)}</option>`).join('');
   // Motion is not an object class: it gets its own dedicated per-zone card
   // (renderMotionCard) with a single toggle, so it stays out of this list.
   return `<option value="">Add Object...</option><optgroup label="Groups">${groups}</optgroup>${coco}`;
@@ -1025,12 +1027,13 @@ function tripwireLabelChips(wire, zoneIndex) {
 // "+ Limit to object" picker: available classes/groups not already chosen.
 function tripwireLabelAddOptions(selected) {
   const chosen = new Set((selected || []).map((label) => String(label).toLowerCase()));
-  const groupValues = new Set(OBJECT_GROUP_LABELS.map((group) => group.value));
+  const groupLabels = objectGroupLabels();
+  const groupValues = new Set(groupLabels.map((group) => group.value));
   const labels = [...new Set(availableLabels.filter((label) => (
     label && label !== 'motion' && label !== 'face' && !groupValues.has(label) && !chosen.has(label)
   )))];
   const coco = labels.map((label) => `<option value="${escapeHtml(label)}">${escapeHtml(titleCase(label))}</option>`).join('');
-  const groups = OBJECT_GROUP_LABELS.filter((group) => !chosen.has(group.value))
+  const groups = groupLabels.filter((group) => !chosen.has(group.value))
     .map((group) => `<option value="${escapeHtml(group.value)}">${escapeHtml(group.label)}</option>`).join('');
   return `<option value="">+ Limit to Object…</option>${groups ? `<optgroup label="Groups">${groups}</optgroup>` : ''}${coco}`;
 }

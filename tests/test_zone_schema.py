@@ -633,7 +633,8 @@ def test_label_matches_group_expands_only_on_configured_side(zs):
     # 'animal'/'pet' groups match member detections...
     assert zs.label_matches('cat', 'animal') is True
     assert zs.label_matches('dog', 'animal') is True
-    assert zs.label_matches('bird', 'pet') is True
+    assert zs.label_matches('dog', 'pet') is True
+    assert zs.label_matches('bird', 'pet') is False  # Pet is cat + dog only
     # ...but a person is not an animal.
     assert zs.label_matches('person', 'animal') is False
     # Group expansion is one-directional: a detection that happens to be named

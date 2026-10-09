@@ -327,6 +327,8 @@ These remain the global defaults. Each camera can override the detection-perform
 
 The **Profile Presets** row holds separate **Day** and **Night** versions of **Cat / Small Animal**, **Balanced**, **Maximum Recall**, **Low CPU**, **Night / IR**, and **Fast Motion**. Each preset contains settings for only one mode. The **Day Preset** selector lists only Day presets, and **Night Preset** lists only Night presets. **Save Day Preset** and **Save Night Preset** create a new mode-specific custom preset, while **Update** and **Delete** affect only the selected mode. Legacy cameras that used one shared preset assignment are left unassigned during migration so the operator explicitly chooses Day, Night, both, or neither. Nothing reaches the camera until you save.
 
+The built-in Day presets set **Ignore Shadows** to *Auto*, and the Night presets set it to *Off* because IR frames carry no colour. **Cat / Small Animal**, **Maximum Recall** and **Night / IR** turn **Second Look** on. Their Night versions also set **Low-Light Enhancement** to *Auto*. **Low CPU** turns both off. **Balanced** and **Fast Motion** leave both on the global default. **Adaptive Cadence** is off for **Fast Motion**, **Maximum Recall** and **Cat / Small Animal (Night)**, because short visits must not wait out a stretched interval. Changing a built-in preset does not change cameras already using it. Re-apply the preset to pick up the new values.
+
 Profile selection can be manual, schedule-based (Day Starts / Night Starts in the camera's timezone), driven by the camera's ONVIF IR state, or solar - sunrise/sunset recalculated daily from the camera's coordinates and timezone.
 
 ### Motion Engine

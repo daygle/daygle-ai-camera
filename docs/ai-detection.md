@@ -96,12 +96,15 @@ identify, loaded from `models/coco.names`.
 ### Umbrella group labels
 
 Besides the individual model classes, object rules and zone allow-lists accept
-two **group** labels that match any of several related classes with a single
-rule:
+**group** labels that match any of several related classes with a single
+rule. A fresh install starts with two:
 
 - **animal** - matches `bird`, `cat`, `dog`, `horse`, `sheep`, `cow`,
   `elephant`, `bear`, `zebra`, and `giraffe`.
-- **pet** - matches `cat`, `dog`, and `bird`.
+- **pet** - matches `cat` and `dog`.
+
+Groups are managed on the Objects page, where you can add, edit, rename or
+remove them.
 
 Groups are useful when a subject is easily confused between neighbouring
 classes - for example, an IR-lit cat at night is frequently misclassified as a
@@ -109,7 +112,9 @@ classes - for example, an IR-lit cat at night is frequently misclassified as a
 would miss it. Groups only expand on the configured side: a rule for a concrete
 class such as `cat` continues to match `cat` only, so adding a group never
 changes the behavior of your existing per-class rules. Pick a group from the
-**Add Object…** dropdown on the Zones page, under the **Groups** heading.
+**Add Object…** dropdown on the Zones page, under the **Groups** heading. The
+dropdown lists your current groups by name. Renaming a group also renames it in
+every zone rule, line-crossing rule and Objects-page mode override that uses it.
 
 ---
 

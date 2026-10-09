@@ -12,12 +12,14 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 
+import app.state as _state
 from app.ai_settings import detector_status
 from app.auth import utc_now
 from app.auth_gates import require_admin
-from app.config_facades import effective_ai_config
-from app.deps import get_database
+from app.config_facades import effective_ai_config, effective_cameras_config
+from app.deps import get_apply_cameras_settings, get_database
 from app.label_groups import (
     _MAX_GROUPS,
     _MAX_MEMBERS_PER_GROUP,
@@ -25,6 +27,7 @@ from app.label_groups import (
     cached_label_groups,
     normalize_label_groups,
     refresh_label_groups,
+    rename_group_references,
 )
 from app.request_helpers import read_json_object, write_audit_log
 
@@ -54,7 +57,11 @@ def get_label_groups(request: Request):
 
 
 @router.put('/api/settings/label_groups')
-async def update_label_groups(request: Request, db=Depends(get_database)):
+async def update_label_groups(
+    request: Request,
+    db=Depends(get_database),
+    apply_cameras_settings=Depends(get_apply_cameras_settings),
+):
     require_admin(request)
     payload = await read_json_object(request)
     if not isinstance(payload, dict):
@@ -114,10 +121,20 @@ async def update_label_groups(request: Request, db=Depends(get_database)):
                 detail=f"Group '{name}' has no valid member labels.",
             )
 
+    renames = _validated_renames(payload.get('renames'), normalized)
+
     db.set_setting('label_groups', normalized, utc_now())
     refresh_label_groups()
+    if renames:
+        # Zone rules store the group name as text, so a rename must follow it
+        # into every camera or those rules would stop matching anything.
+        # Applying camera settings restarts workers (blocking), so run it in
+        # the threadpool like the cameras router does.
+        await run_in_threadpool(_rename_in_cameras, renames, db, apply_cameras_settings)
+        _rename_group_modes(renames, db)
     write_audit_log(request, db, 'update', 'settings.label_groups', details={
         'groups': sorted(normalized),
+        **({'renames': renames} if renames else {}),
     })
     return {
         'groups': {name: sorted(members) for name, members in normalized.items()},
@@ -165,3 +182,43 @@ def _validate_members(group_name: str, raw_members: Any) -> list[str]:
             detail=f"Group '{group_name}' has no valid member labels.",
         )
     return sorted(members)
+
+
+def _validated_renames(raw: Any, groups: dict[str, list[str]]) -> dict[str, str]:
+    """``{old_name: new_name}`` pairs whose new name is a saved group and whose
+    old name no longer is. Anything else is ignored rather than rejected: the
+    group map itself has already been validated, and a stale rename hint must
+    not block the save."""
+    if not isinstance(raw, dict):
+        return {}
+    renames: dict[str, str] = {}
+    for raw_old, raw_new in raw.items():
+        old = str(raw_old or '').strip().lower()
+        new = str(raw_new or '').strip().lower()
+        if old and new and old != new and new in groups and old not in groups:
+            renames[old] = new
+    return renames
+
+
+def _rename_in_cameras(renames: dict[str, str], db, apply_cameras_settings) -> None:
+    with _state._cameras_config_write_lock:
+        cameras, changed = rename_group_references(list(effective_cameras_config()), renames)
+        if changed:
+            db.set_setting('cameras', cameras, utc_now())
+            apply_cameras_settings(cameras)
+
+
+def _rename_group_modes(renames: dict[str, str], db) -> None:
+    """Carry a renamed group's Objects-page detection mode over to its new name."""
+    objects = db.get_setting('objects')
+    if not isinstance(objects, dict) or not isinstance(objects.get('group_modes'), dict):
+        return
+    modes = dict(objects['group_modes'])
+    moved = False
+    for old, new in renames.items():
+        if old in modes:
+            mode = modes.pop(old)
+            modes.setdefault(new, mode)
+            moved = True
+    if moved:
+        db.set_setting('objects', {**objects, 'group_modes': modes}, utc_now())

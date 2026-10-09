@@ -183,6 +183,7 @@ const WEB_SHARED_GLOBALS = {
   selectedZoneIndex: 'writable',
   setSelectedCamera: 'readonly',
   availableLabels: 'writable',
+  labelGroupNames: 'writable',
 
   // web/cameras.js - camera list state referenced by later page scripts.
   cameras: 'writable',
