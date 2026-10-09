@@ -1675,7 +1675,7 @@ function setTimeSelectValue(wrap, hhmm) {
 
 function titleCase(value) {
   return String(value || '')
-    .split(/[-_\s]+/)
+    .split(/[\s_]+/)
     .filter(Boolean)
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
     .join(' ');

@@ -79,7 +79,7 @@ test('a single detection is reported as such, never as an invented 1.0s span', (
   const hairline = bar.find((el) => el.className.includes('clip-seg-event-single'));
   assert.ok(hairline, 'single detection hairline is drawn');
   assert.equal(hairline.style.left, '20%');
-  assert.equal(hairline.title, 'Single detection at 12s');
+  assert.equal(hairline.title, 'Single Detection at 12s');
 });
 
 test('a real span is reported with its measured duration', () => {

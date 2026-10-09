@@ -156,7 +156,7 @@ function renderClipTimeline() {
       const hairline = document.createElement('div');
       hairline.className = 'clip-seg clip-seg-event clip-seg-event-single';
       hairline.style.left = pct(first);
-      hairline.title = `Single detection at ${fmtClipSeconds(first)}`;
+      hairline.title = `Single Detection at ${fmtClipSeconds(first)}`;
       els.clipTimelineBar.appendChild(hairline);
       continue;
     }

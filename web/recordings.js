@@ -811,7 +811,7 @@ async function playRecording(id) {
   } catch (error) {
     // <video>.play() media error (never an api() throw) - redirect guard skipped by design.
     if (['AbortError', 'NotAllowedError'].includes(error?.name)) {
-      els.clipPlayerStatus.textContent = `Recording #${id} loaded.`;
+      window.showToast?.(`Recording #${id} loaded.`);
       return;
     }
     els.clipPlayerStatus.textContent = `Unable to play recording #${id}: ${error?.message || 'media playback failed'}.`;
