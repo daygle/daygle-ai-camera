@@ -19,9 +19,9 @@ detections. On a camera with auto-tracking on, it:
    pulse waits ``SETTLE_SECONDS`` after the last one ends, because the video
    lags the motor: steering on frames that predate the last pulse is what
    makes trackers overshoot and hunt back and forth.
-   A target that keeps walking away is chased harder: when a pulse did not
-   gain on it (it is still as far off centre, on the same side), the next
-   pulse on that axis is faster and longer (``BOOST_STEP`` up to
+   A target that keeps walking away is chased harder: when a pan pulse did
+   not gain on it (it is still as far off centre, on the same side), the next
+   pulse is faster and longer (``BOOST_STEP`` up to
    ``MAX_BOOST``). The boost resets once the target is centred or the camera
    overshoots, so a person who stops is not swung past.
    A target that vanishes at the frame edge (half out of the picture, so the
@@ -69,7 +69,37 @@ MIN_PULSE_SECONDS = 0.3
 MAX_PULSE_SECONDS = 1.5
 SETTLE_SECONDS = 0.5
 
+# Tilt is scaled to the picture's shape: a 16:9 frame is far shorter than it
+# is wide, so the same motor turn moves the picture about 16/9 times as far
+# (as a share of the frame) vertically as horizontally. Steering both axes
+# alike made tilt overshoot - a distant person at the top edge got the camera
+# tilted past them into the sky. Uses the frame aspect the live pipeline
+# stamps on each detection (``_frame_aspect``), 16:9 when it is missing.
+DEFAULT_FRAME_ASPECT = 16 / 9
+
+
+def tilt_scale(frame_aspect: Any) -> float:
+    """Tilt velocity relative to pan for a frame of ``frame_aspect`` (w / h)."""
+    try:
+        aspect = float(frame_aspect or DEFAULT_FRAME_ASPECT)
+    except (TypeError, ValueError):
+        aspect = DEFAULT_FRAME_ASPECT
+    if aspect <= 0:
+        aspect = DEFAULT_FRAME_ASPECT
+    return max(0.3, min(1.0, 1.0 / aspect))
+
+
+def _scale_tilt(tilt: float, scale: float, speed: int) -> float:
+    """Scale a tilt velocity, keeping it above the motor dead-band floor."""
+    if not tilt:
+        return 0.0
+    magnitude = max(MIN_VELOCITY * max(1, min(8, speed)) / 8.0, abs(tilt) * scale)
+    return magnitude if tilt > 0 else -magnitude
+
+
 # Catch-up boost for a target that keeps moving away (see module docstring).
+# Pan only: someone walking across the frame is the case it exists for, and a
+# boosted tilt pulse was what carried the camera past a target into the sky.
 # A pulse "gained" when the error shrank below BOOST_PROGRESS of what it was
 # at the previous pulse; otherwise that axis's boost grows by BOOST_STEP.
 BOOST_STEP = 1.5
@@ -218,6 +248,7 @@ class _CameraState:
         'target_label', 'target_track_id', 'last_center', 'last_seen',
         'next_command_at', 'paused_until', 'moved_since_home', 'busy', 'state',
         'zoom_in_seconds', 'boost', 'last_error', 'edge_pushes', 'last_steer_at',
+        'frame_aspect',
     )
 
     def __init__(self) -> None:
@@ -236,6 +267,8 @@ class _CameraState:
         self.zoom_in_seconds = 0.0
         # When the last pan/tilt pulse went out (zoom-in waits for calm).
         self.last_steer_at = 0.0
+        # Frame width / height from the last sighting (tilt scaling).
+        self.frame_aspect: float | None = None
         self.reset_steering()
 
     def reset_steering(self) -> None:
@@ -435,6 +468,8 @@ def update_auto_tracking(
             pan = axis_velocity(cx - 0.5, settings['dead_zone'], settings['speed'])
             # Image y grows downwards; ONVIF/Pelco-D tilt is positive upwards.
             tilt = -axis_velocity(cy - 0.5, settings['dead_zone'], settings['speed'])
+            state.frame_aspect = target.get('_frame_aspect') or state.frame_aspect
+            tilt = _scale_tilt(tilt, tilt_scale(state.frame_aspect), settings['speed'])
             boost = 1.0
             zoom = 0.0
             if settings['zoom']:
@@ -460,10 +495,8 @@ def update_auto_tracking(
                 # Boost is judged only when a pulse can actually go out, so a
                 # cycle that is still settling does not count as "no gain".
                 pan_boost = _update_boost(state, 0, cx - 0.5, settings['dead_zone'])
-                tilt_boost = _update_boost(state, 1, cy - 0.5, settings['dead_zone'])
                 pan = max(-1.0, min(1.0, pan * pan_boost))
-                tilt = max(-1.0, min(1.0, tilt * tilt_boost))
-                boost = max(pan_boost if pan else 1.0, tilt_boost if tilt else 1.0)
+                boost = pan_boost if pan else 1.0
             elif ready:
                 state.reset_steering()
             if pan or tilt:
@@ -509,6 +542,7 @@ def update_auto_tracking(
                 # after it instead of freezing until it is lost.
                 pan = axis_velocity(lx - 0.5, EDGE_ERROR - 0.01, settings['speed'])
                 tilt = -axis_velocity(ly - 0.5, EDGE_ERROR - 0.01, settings['speed'])
+                tilt = _scale_tilt(tilt, tilt_scale(state.frame_aspect), settings['speed'])
                 duration = MAX_PULSE_SECONDS
                 zoom = 0.0
                 if state.zoom_in_seconds > 0:

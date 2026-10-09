@@ -76,9 +76,13 @@ How it behaves:
   across the picture is not outrun. After each pulse the camera stops and
   waits 0.5 s, because the video arrives a little after the motor moves, and
   steering on old frames makes a camera overshoot and hunt back and forth.
-- **Catching up.** If a pulse did not gain on the object (it is still as far
-  off centre, on the same side - someone walking steadily away), the next
-  pulse on that axis is up to 2.5x faster and longer. The boost resets as soon
+- **Tilt matches the picture's shape.** The picture is wider than it is tall,
+  so the same camera turn shifts the view further up/down than left/right.
+  Tilt moves are scaled down to match (about 0.56x on a 16:9 camera), so a
+  distant person near the top edge doesn't get the camera tilted past them.
+- **Catching up.** If a sideways pulse did not gain on the object (it is still
+  as far off centre, on the same side - someone walking steadily across), the
+  next pulse is up to 2.5x faster and longer. Tilt is never boosted. The boost resets as soon
   as the object is centred or the camera overshoots, so someone who stops is
   not swung past.
 - **Following off the edge.** An object half out of the picture often stops
