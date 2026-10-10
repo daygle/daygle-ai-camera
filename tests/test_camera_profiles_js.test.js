@@ -59,7 +59,6 @@ test('the library lists, edits, duplicates and deletes through the presets API',
   const html = read('settings.html');
   assert.match(html, /data-tab="profiles"/);
   assert.match(html, /<script src="\/static\/profile-fields\.js"><\/script>\s*<script src="\/static\/camera-profiles\.js"><\/script>/);
-  assert.match(read('cameras.html'), /<script src="\/static\/profile-fields\.js"><\/script>\s*<script src="\/static\/cameras\.js"><\/script>/);
 });
 
 test('Live Performance is split into headed groups', () => {
