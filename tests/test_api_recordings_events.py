@@ -1236,3 +1236,56 @@ def test_alerts_events_stats_accept_local_day_start_since_bound(tmp_path):
     # The OLD frontend sent the UTC date string; that bound misses the
     # midnight row entirely (its UTC date is still Jul 31) -- the bug.
     assert database.alerts(limit=10, since='2026-08-01') == []
+
+
+def test_event_payload_describes_the_linked_clips_media_ready_state(monkeypatch, tmp_path):
+    """The Events page disables its Play action while a clip is still being
+    written and enables it once the file lands - the same rule the recordings
+    page follows. It reads that from ``media_ready`` on the clip the event links
+    to, so the event payload must describe the linked recording (not only its
+    id) with the flag the recordings list uses; otherwise a fresh event's row
+    links straight to a clip that cannot play yet.
+    """
+    from app.database import EventDatabase
+    import app.media_utils as media_utils
+
+    recordings_dir = tmp_path / 'recordings'
+    recordings_dir.mkdir()
+    monkeypatch.setattr(media_utils, '_storage_roots', lambda _keys: (recordings_dir,))
+
+    database = EventDatabase(str(tmp_path / 'events-media-ready.sqlite3'))
+    now = '2026-06-08T00:00:00+00:00'
+    event_id = database.add_event(
+        created_at=now,
+        source='camera',
+        snapshot_path=None,
+        detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}],
+        metadata={'camera_id': 'driveway', 'camera_name': 'Driveway'},
+    )
+    # The capture pipeline commits the recording row first and the media file
+    # last, so "still being prepared" is exactly this state.
+    clip = recordings_dir / 'clip.mp4'
+    recording_id = database.add_recording(
+        event_id=event_id,
+        camera_id='driveway',
+        started_at=now,
+        ended_at='2026-06-08T00:00:30+00:00',
+        duration_seconds=30,
+        file_path=str(clip),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=now,
+        trigger_type='motion',
+    )
+    database.set_event_recording(event_id, recording_id)
+
+    event = database.get_event(event_id)
+    assert event['recording_id'] == recording_id
+    linked = [recording for recording in event['recordings'] if recording['id'] == recording_id]
+    assert len(linked) == 1, 'the linked clip travels with the event payload'
+    assert linked[0]['media_ready'] is False, 'a row without its file is still being prepared'
+
+    clip.write_bytes(b'video')
+    ready = database.get_event(event_id)['recordings']
+    assert [recording['id'] for recording in ready] == [recording_id]
+    assert ready[0]['media_ready'] is True

@@ -47,6 +47,12 @@ let eventsMoreLoading = false;
 // table. A streamed page can only be appended to a <tbody> whose previous
 // render completed; anything else repaints the whole loaded set instead.
 let eventsRowsReady = false;
+// A clip still being written has no playable media yet. As on the recordings
+// page, the Play action stays disabled ("Preparing...") until the file lands
+// and the feed quietly re-checks on a timer while any loaded event's clip is
+// still preparing, so the action enables itself without a manual reload.
+const EVENTS_PREPARING_REFRESH_MS = 3000;
+let eventsRefreshTimer = null;
 
 // Click-to-sort column headers re-order the currently loaded list
 // client-side. `null` means the server order (newest first) applies;
@@ -202,6 +208,22 @@ function aiVerificationBadge(event) {
   return `<span class="detection ${filtered ? 'detection-ai-filtered' : 'detection-ai-verified'}" title="${escapeHtml(title)}">🤖 ${filtered ? 'Filtered' : 'Verified'}</span>`;
 }
 
+// The clip this event links to, as /api/events describes it: the row links to
+// event.recording_id, and event.recordings carries that clip's media_ready flag
+// - the same flag the recordings page disables its Play button on. A payload
+// without the list reads as ready, so a playable clip is never disabled.
+function eventRecording(event) {
+  if (event.recording_id == null || !Array.isArray(event.recordings)) return null;
+  return event.recordings.find(
+    (recording) => recording && String(recording.id) === String(event.recording_id),
+  ) || null;
+}
+
+function eventRecordingPreparing(event) {
+  const recording = eventRecording(event);
+  return Boolean(recording && recording.media_ready === false);
+}
+
 function renderEventRow(event) {
   const created = event.created_at || '';
   const camera = eventCameraLabel(event);
@@ -233,7 +255,12 @@ function renderEventRow(event) {
     actions.push(`<a class="secondary activity-item-action activity-item-action-snapshot" href="/api/events/${encodeURIComponent(event.id)}/snapshot" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><span class="activity-action-label">Snapshot</span></a>`);
   }
   if (event.recording_id != null) {
-    actions.push(`<a class="secondary activity-item-action activity-item-action-play" href="/recordings/${encodeURIComponent(event.recording_id)}" aria-label="Open recording for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Play</span></a>`);
+    // A clip still being written cannot play yet, so the row shows the same
+    // disabled "Preparing..." action the recordings page uses instead of a link
+    // that would land on a recording which is not ready.
+    actions.push(eventRecordingPreparing(event)
+      ? '<button class="secondary activity-item-action" disabled aria-label="Preparing recording"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="activity-action-label">Preparing...</span></button>'
+      : `<a class="secondary activity-item-action activity-item-action-play" href="/recordings/${encodeURIComponent(event.recording_id)}" aria-label="Open recording for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Play</span></a>`);
   }
   const recordingAction = actions.length ? actions.join('') : '<span class="muted">-</span>';
   return `
@@ -305,6 +332,17 @@ function wireLoadMore() {
   setLoadMoreSentinel('events', (eventsPager && !eventsPager.done) ? sentinel : null, loadMoreEvents);
 }
 
+// While a loaded event's clip is still being prepared, quietly re-fetch the
+// first page every 3s (as the recordings page does) so the disabled Play action
+// becomes a link on its own. The quiet load repaints the rows without the
+// "Loading events…" placeholder or a failure toast.
+function scheduleEventRefresh() {
+  clearTimeout(eventsRefreshTimer);
+  eventsRefreshTimer = allEvents.some(eventRecordingPreparing)
+    ? setTimeout(() => loadEvents({ quiet: true }), EVENTS_PREPARING_REFRESH_MS)
+    : null;
+}
+
 // Append one streamed page's visible rows to the painted table. Falls back to
 // a full repaint when appending is unsafe: a custom column sort must re-order
 // the whole loaded set, the empty state has no <tbody>, and a half-painted
@@ -324,6 +362,7 @@ function appendEventRows(rows) {
     },
   });
   wireLoadMore();
+  scheduleEventRefresh();
 }
 
 async function loadMoreEvents() {
@@ -363,6 +402,7 @@ function renderList() {
       </div>${renderListFooter()}`;
     eventsRowsReady = false;
     wireLoadMore();
+    scheduleEventRefresh();
     return;
   }
   const ordered = eventsSortState
@@ -394,6 +434,7 @@ function renderList() {
   });
   bindSortHeaders();
   wireLoadMore();
+  scheduleEventRefresh();
 }
 
 // ─── Plain-English (AI) search ──────────────────────────────────────────────
@@ -459,9 +500,11 @@ function eventsQueryString(query) {
   return params.toString();
 }
 
-async function loadEvents() {
+async function loadEvents({ quiet = false } = {}) {
   filters?.setNote('');
-  if (els.eventFeed) els.eventFeed.innerHTML = '<p class="muted">Loading events…</p>';
+  // A quiet re-check (see scheduleEventRefresh) leaves the painted rows in
+  // place while the refresh is in flight.
+  if (els.eventFeed && !quiet) els.eventFeed.innerHTML = '<p class="muted">Loading events…</p>';
   eventsLoadSession += 1;
   const session = eventsLoadSession;
   const query = eventsQueryString(filters ? filters.query() : libraryDefaultQuery());
@@ -475,6 +518,13 @@ async function loadEvents() {
     allEvents = page.items;
   } catch (_err) {
     if (session !== eventsLoadSession) return;
+    if (quiet) {
+      // A background re-check must not blank or toast over the list the user is
+      // reading - it just stops re-arming.
+      clearTimeout(eventsRefreshTimer);
+      eventsRefreshTimer = null;
+      return;
+    }
     allEvents = [];
     // The failed stream must not leave the old sentinel wired to a dead pager.
     setLoadMoreSentinel('events', null, loadMoreEvents);
