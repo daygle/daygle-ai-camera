@@ -51,7 +51,9 @@ async function loadFaceMode() {
   try {
     const objectSettings = await api('/api/settings/objects');
     const override = objectSettings?.labels?.face;
-    frForm.face_mode.value = override || 'inherit';
+    // An explicit Moving & Still is the default behaviour, so it shows as the
+    // single Moving & Still (Default) choice.
+    frForm.face_mode.value = override && override !== 'any' ? override : 'inherit';
   } catch (_err) {
     // Non-fatal: leave the select on its default rather than blocking the page.
     frForm.face_mode.value = 'inherit';

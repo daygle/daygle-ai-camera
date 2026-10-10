@@ -168,7 +168,7 @@ function profileSectionHtml(camera, mode) {
     { value: false, attr: 'false', label: 'Disabled' },
   ];
   const performanceControls =
-    selectField('background_detection_enabled', { label: 'Background Detection', options: boolOptions }) +
+    selectField('background_detection_enabled', { label: 'Background Detection', tip: 'Keep detecting (alerts, recordings, snapshots) while no Live page is open. Global Default follows the Settings page; Enabled or Disabled overrides it for this camera.', options: boolOptions }) +
     numberField('detection_interval_seconds', { label: 'Detection Interval (s)', min: '0.1', max: '10', step: '0.05', placeholder: 'Global Default (0.5)' }) +
     numberField('face_detection_interval_seconds', { label: 'Face Detection Interval (s)', min: '0.1', max: '10', step: '0.05', placeholder: 'Global Default (1)' }) +
     numberField('ingest_frame_fps', { label: 'Detection Frame Rate (fps)', min: '1', max: '30', step: '1', placeholder: 'Global Default (4)' }) +
@@ -449,6 +449,36 @@ function loadPtzPresetSuggestions(camera, index) {
   }).catch(function() { /* presets are optional */ });
 }
 
+// Global live settings (Settings page), for profile fields left on Global Default.
+var globalLiveSettings = {};
+
+// Dim Day/Night profile fields that another setting in the same profile (or
+// its global default) currently makes do nothing.
+function bindProfileFieldDependencies(form) {
+  function field(mode, key) {
+    return form.querySelector('[name="' + mode + '_' + profileFieldName(key) + '"]');
+  }
+  function effective(mode, key) {
+    var el = field(mode, key);
+    return el && el.value !== '' ? el.value : globalLiveSettings[key];
+  }
+  function sync() {
+    ['day', 'night'].forEach(function(mode) {
+      var alwaysRun = String(effective(mode, 'always_run_object_detection')) !== 'false';
+      setFieldInactive(field(mode, 'periodic_scan_interval_seconds'), alwaysRun,
+        'Not used while Always Run Object Detection is Enabled for this profile.');
+      var frames = parseInt(effective(mode, 'detection_confirm_frames'), 10) || 1;
+      ['detection_confirm_window', 'detection_confirm_iou'].forEach(function(key) {
+        setFieldInactive(field(mode, key), frames <= 1, 'Only used when Confirm Frames is above 1.');
+      });
+    });
+  }
+  form.addEventListener('input', sync);
+  form.addEventListener('change', sync);
+  form.__syncProfileDependencies = sync;
+  sync();
+}
+
 function buildEditFormHtml(camera, index) {
   const backend = camera.backend || 'onvif';
   const isRtsp = backend === 'rtsp';
@@ -584,6 +614,11 @@ function buildEditFormHtml(camera, index) {
             '<label><span>PTZ Address <span class="info-tip" data-tip="PelcoD device address (default 1, TCP PelcoD only)." title="PelcoD device address (default 1, TCP PelcoD only)." tabindex="0" aria-label="Help: PelcoD device address (default 1, TCP PelcoD only)."></span></span><input name="ptz_address" type="number" min="1" max="255" placeholder="1" value="' + htmlAttr(camera.ptz?.address || 1) + '" /></label>' +
             '<label><span>Speed <span class="info-tip" data-tip="Movement speed (1-8, default 5)." title="Movement speed (1-8, default 5)." tabindex="0" aria-label="Help: Movement speed (1-8, default 5)."></span></span><input name="ptz_speed" type="number" min="1" max="8" placeholder="5" value="' + htmlAttr(camera.ptz?.speed || 5) + '" /></label>' +
             '<label class="full-width"><span>Step Duration (s) <span class="info-tip" data-tip="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." title="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." tabindex="0" aria-label="Help: How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)."></span></span><input name="ptz_step_duration" type="number" min="0.1" max="5" step="0.1" placeholder="0.4" value="' + htmlAttr(camera.ptz?.step_duration != null ? Number(camera.ptz.step_duration).toFixed(2) : '') + '" /></label>' +
+            '<label class="full-width"><span>PTZ Motion Detection <span class="info-tip" data-tip="Spot camera movement this app did not make (the camera&#39;s own patrol, return to home, or another app) from the whole picture changing. While it moves, objects cannot be judged moving or still, so only objects set to Moving &amp; Still alert, and the motion background is re-learned once it stops. Moves made from this app are always handled. Automatic = on when PTZ is enabled here. Use On for a PTZ moved by another app, Off if large close subjects filling the view pause alerts." title="Spot camera movement this app did not make (the camera&#39;s own patrol, return to home, or another app) from the whole picture changing. While it moves, objects cannot be judged moving or still, so only objects set to Moving &amp; Still alert, and the motion background is re-learned once it stops. Moves made from this app are always handled. Automatic = on when PTZ is enabled here. Use On for a PTZ moved by another app, Off if large close subjects filling the view pause alerts." tabindex="0" aria-label="Help: Spot camera movement this app did not make (the camera&#39;s own patrol, return to home, or another app) from the whole picture changing. While it moves, objects cannot be judged moving or still, so only objects set to Moving &amp; Still alert, and the motion background is re-learned once it stops. Moves made from this app are always handled. Automatic = on when PTZ is enabled here. Use On for a PTZ moved by another app, Off if large close subjects filling the view pause alerts."></span></span><select name="ptz_motion_detection">' +
+              '<option value="auto"' + ((camera.detection?.ptz_motion_detection || 'auto') === 'auto' ? ' selected' : '') + '>Automatic (Follow PTZ)</option>' +
+              '<option value="on"' + (camera.detection?.ptz_motion_detection === 'on' ? ' selected' : '') + '>On</option>' +
+              '<option value="off"' + (camera.detection?.ptz_motion_detection === 'off' ? ' selected' : '') + '>Off</option>' +
+            '</select></label>' +
           '</div>' +
           '<p class="form-help muted">Enable PTZ and save to show the control pad on the Live page. The camera&#39;s username and password from the Connection tab are used for ONVIF authentication.</p>' +
         '</div>' +
@@ -610,11 +645,6 @@ function buildEditFormHtml(camera, index) {
             '<label><span>Camera Timezone</span><input name="timezone" placeholder="e.g. Australia/Sydney" value="' + escapeHtml(camera.timezone || 'UTC') + '" /></label>' +
             '<label><span>Latitude</span><input name="latitude" type="number" min="-90" max="90" step="0.000001" placeholder="e.g. -33.8688" value="' + htmlAttr(camera.latitude != null ? camera.latitude : '') + '" /></label>' +
             '<label><span>Longitude</span><input name="longitude" type="number" min="-180" max="180" step="0.000001" placeholder="e.g. 151.2093" value="' + htmlAttr(camera.longitude != null ? camera.longitude : '') + '" /></label>' +
-            '<label><span>PTZ Motion Detection</span><select name="ptz_motion_detection">' +
-              '<option value="auto"' + ((camera.detection?.ptz_motion_detection || 'auto') === 'auto' ? ' selected' : '') + '>Automatic (Follow PTZ)</option>' +
-              '<option value="on"' + (camera.detection?.ptz_motion_detection === 'on' ? ' selected' : '') + '>On</option>' +
-              '<option value="off"' + (camera.detection?.ptz_motion_detection === 'off' ? ' selected' : '') + '>Off</option>' +
-            '</select></label>' +
           '</div>' +
           '<div class="button-row">' +
             '<button type="button" class="secondary profile-suggest-btn">Suggest Sunrise/Sunset</button>' +
@@ -702,6 +732,7 @@ function wireEditFormHandlers(index) {
   bindPtzTrackPicker(form);
 
   bindPixelThresholdPresets(form);
+  bindProfileFieldDependencies(form);
   form.querySelectorAll('[data-clear-legacy-motion]').forEach(function(button) {
     button.addEventListener('click', function() {
       var mode = button.dataset.clearLegacyMotion;
@@ -800,6 +831,7 @@ function wireEditFormHandlers(index) {
       field.value = hasValue ? String(values[key]) : '';
     });
     syncPixelThresholdPresets(form);
+    if (form.__syncProfileDependencies) form.__syncProfileDependencies();
     form.__selectedPresetByMode = form.__selectedPresetByMode || {};
     form.__selectedPresetByMode[mode] = preset.id || null;
     var select = mode === 'day' ? dayPresetSelect : nightPresetSelect;
@@ -1413,6 +1445,7 @@ async function loadCameras() {
   var settings = await api('/api/settings/system');
   cameras = settings.cameras || (settings.camera ? [settings.camera] : []);
   cameraProfilePresets = settings.profile_presets || [];
+  globalLiveSettings = settings.live || {};
   // Clear stale entries so removed cameras don't linger.
   Object.keys(cameraResolutions).forEach(function(key) { delete cameraResolutions[key]; });
   Object.keys(cameraFps).forEach(function(key) { delete cameraFps[key]; });

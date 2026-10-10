@@ -550,3 +550,38 @@ def test_stale_background_without_relearn_would_report_motion():
     ds.detect_frame_motion(cam, old_view)
     has_motion, _conf, _mask, fraction = ds.detect_frame_motion(cam, new_view)
     assert has_motion is True and fraction > 0.05
+
+
+def test_camera_motion_stays_active_through_a_pan_on_a_slow_cadence(monkeypatch):
+    """Frames 1 s apart: a fixed 0.75 s hold expired before every next frame,
+    so a continuous pan was only suppressed on alternate frames."""
+    cam = 'ptz-slow-cadence'
+    st._camera_motion_state.pop(cam, None)
+    clock = [1000.0]
+    monkeypatch.setattr(ds.time, 'monotonic', lambda: clock[0])
+    states = []
+    for _ in range(8):
+        states.append(ds.update_camera_motion(cam, 0.6))
+        clock[0] += 1.0
+    assert states[0]['active'] is False  # persistence still required to start
+    assert all(state['active'] and not state.get('ended') for state in states[1:]), states
+    # Once the pan stops the window closes within a couple of frames, re-learning
+    # the background once.
+    after = []
+    for _ in range(4):
+        after.append(ds.update_camera_motion(cam, 0.0))
+        clock[0] += 1.0
+    assert sum(1 for state in after if state.get('ended')) == 1
+    assert after[-1]['active'] is False
+
+
+def test_camera_motion_hold_is_capped_after_a_long_gap(monkeypatch):
+    cam = 'ptz-hold-cap'
+    st._camera_motion_state.pop(cam, None)
+    clock = [2000.0]
+    monkeypatch.setattr(ds.time, 'monotonic', lambda: clock[0])
+    ds.update_camera_motion(cam, 0.6)
+    clock[0] += 60.0
+    assert ds.update_camera_motion(cam, 0.6)['active'] is True
+    clock[0] += ds._CAMERA_MOTION_MAX_HOLD_SECONDS + 0.1
+    assert ds.update_camera_motion(cam, 0.0).get('ended') is True

@@ -428,7 +428,6 @@ def _run_foreground_live_detection(image: Any, frame: dict[str, Any], camera_cfg
 def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> int:
     if live_settings is None:
         live_settings = effective_live_config()
-    background_detection_enabled = normalize_bool_setting(live_settings.get('background_detection_enabled'), True)
     processed = 0
     for selected_config in list(_state.cameras_config):
         camera_live_settings = effective_camera_live_settings(selected_config, live_settings)
@@ -446,7 +445,10 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config)
             if cam_rec_config.get('continuous'):
                 _state.recording_service.start_continuous_chunk_recording(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config, on_chunk_complete=_make_continuous_chunk_callback(camera_id))
-        if not background_detection_enabled or not normalize_bool_setting(camera_live_settings.get('background_detection_enabled'), True):
+        # The camera's Day/Night profile value when set, else the global one
+        # (effective_camera_live_settings merges them), so a camera can be
+        # switched on while the global default is off as well as the reverse.
+        if not normalize_bool_setting(camera_live_settings.get('background_detection_enabled'), True):
             continue
         with _state._live_backoff_lock:
             retry_after = _state.live_detection_retry_after.get(camera_id, 0)
@@ -614,13 +616,15 @@ def queue_live_stream_alerts(
     """
     camera_id = str(settings.get('id') or 'camera')
     live_cfg = effective_live_config()
-    background_enabled = normalize_bool_setting(live_cfg.get('background_detection_enabled'), True)
+    camera_live_cfg = effective_camera_live_settings(settings, live_cfg)
+    # Per camera, like the background loop: a camera whose profile turns
+    # background detection off still gets the Live page's foreground cycles.
+    background_enabled = normalize_bool_setting(camera_live_cfg.get('background_detection_enabled'), True)
     if background_enabled and not allow_when_background_enabled:
         return
     stream_url = build_stream_url(settings)
     if stream_url:
         _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=_state.camera_event_recording_config(settings))
-    camera_live_cfg = effective_camera_live_settings(settings, live_cfg)
     detection_interval_seconds = float(camera_live_cfg.get('detection_interval_seconds', 0.5))
     now = time.time()
     with _state.live_detection_worker_lock:

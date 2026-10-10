@@ -211,6 +211,13 @@ def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
 _CAMERA_MOTION_FRACTION = 0.35
 _CAMERA_MOTION_REQUIRED_FRAMES = 2
 _CAMERA_MOTION_HOLD_SECONDS = 0.75
+# The hold must also reach the NEXT analysed frame, or a pan seen on a slow
+# cadence flickers: with frames 1 s apart a 0.75 s hold had always expired by
+# the next frame, so a continuous pan was suppressed on every other frame only
+# (and the background was re-learned mid-pan each time). The hold is therefore
+# stretched to 1.5x the last gap between frames, up to this cap.
+_CAMERA_MOTION_HOLD_GAP_FACTOR = 1.5
+_CAMERA_MOTION_MAX_HOLD_SECONDS = 5.0
 _CAMERA_MOTION_SETTLE_SECONDS = 1.5
 
 def mark_camera_motion(camera_id: str, duration_seconds: float, *, reason: str = 'ptz_command') -> None:
@@ -270,14 +277,23 @@ def update_camera_motion(
     now = time.monotonic()
     with _state._camera_motion_lock:
         current = _state._camera_motion_state.setdefault(str(camera_id), {})
-        was_active = now < float(current.get('command_until', 0.0)) or now < float(current.get('auto_until', 0.0))
+        auto_was_active = now < float(current.get('auto_until', 0.0))
+        was_active = now < float(current.get('command_until', 0.0)) or auto_was_active
+        last_frame = current.get('last_frame_ts')
+        current['last_frame_ts'] = now
+        gap = now - float(last_frame) if last_frame is not None else 0.0
+        hold = max(
+            _CAMERA_MOTION_HOLD_SECONDS,
+            min(_CAMERA_MOTION_MAX_HOLD_SECONDS, gap * _CAMERA_MOTION_HOLD_GAP_FACTOR),
+        )
         if allow_auto_detection and fraction >= _CAMERA_MOTION_FRACTION:
             current['high_fraction_streak'] = int(current.get('high_fraction_streak', 0)) + 1
-            # Always require persistence: a single high-change frame is not
-            # distinguishable from a real subject, so only a run of
+            # Always require persistence to START: a single high-change frame
+            # is not distinguishable from a real subject, so only a run of
             # ``_CAMERA_MOTION_REQUIRED_FRAMES`` consecutive frames activates.
-            if current['high_fraction_streak'] >= _CAMERA_MOTION_REQUIRED_FRAMES:
-                current['auto_until'] = now + _CAMERA_MOTION_HOLD_SECONDS
+            # An active window is extended by every further high frame.
+            if current['high_fraction_streak'] >= _CAMERA_MOTION_REQUIRED_FRAMES or auto_was_active:
+                current['auto_until'] = now + hold
                 current['reason'] = 'global_motion'
         else:
             current['high_fraction_streak'] = 0

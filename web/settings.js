@@ -165,6 +165,28 @@ const forms = {
 };
 if (forms.live) bindPixelThresholdPresets(forms.live);
 
+// Settings that only matter while another one is set a certain way.
+function syncLiveFieldDependencies() {
+  const form = forms.live;
+  if (!form) return;
+  const alwaysRun = form.elements.always_run_object_detection?.value !== 'false';
+  setFieldInactive(form.elements.periodic_scan_interval_seconds, alwaysRun,
+    'Not used while Always Run Object Detection is Enabled: every check already runs object detection.');
+  const confirmFrames = Number.parseInt(form.elements.detection_confirm_frames?.value || '1', 10) || 1;
+  for (const name of ['detection_confirm_window', 'detection_confirm_iou']) {
+    setFieldInactive(form.elements[name], confirmFrames <= 1, 'Only used when Confirm Frames is above 1.');
+  }
+  // The legacy Simple Difference model stays selectable only while it is the
+  // saved value, so an older setup keeps working but nobody new picks it.
+  const algorithm = form.elements.motion_algorithm;
+  const legacy = algorithm?.querySelector('option[value="diff"]');
+  if (legacy) legacy.hidden = algorithm.value !== 'diff';
+}
+if (forms.live) {
+  forms.live.addEventListener('input', syncLiveFieldDependencies);
+  forms.live.addEventListener('change', syncLiveFieldDependencies);
+}
+
 // api() is provided by web/utils.js (loaded before this script). It reads
 // window.daygleAuth.csrfToken for state-changing verbs, redirects to /login
 // on 401, and sets Content-Type: application/json on JSON bodies. The local
@@ -398,6 +420,7 @@ async function loadSettings() {
   if (versionEl && settings.version) versionEl.textContent = settings.version;
   fillForm(forms.live, settings.live, FORM_DEFAULTS.live);
   syncPixelThresholdPresets(forms.live);
+  syncLiveFieldDependencies();
   fillForm(forms.recording, settings.recording, FORM_DEFAULTS.recording);
   fillForm(forms.retention, settings.recording, FORM_DEFAULTS.recording);
   fillForm(forms.storage, settings.storage, FORM_DEFAULTS.storage);
@@ -603,6 +626,7 @@ document.getElementById('resetLiveDefaultsBtn')?.addEventListener('click', guard
   if (!window.confirm('Reset the Live Performance form to the defaults? Nothing changes until you save.')) return;
   fillForm(forms.live, {}, FORM_DEFAULTS.live);
   syncPixelThresholdPresets(forms.live);
+  syncLiveFieldDependencies();
   setMessage('Live Performance fields reset to defaults. Save to apply.');
 }));
 bindDefaultsReset('resetRecordingDefaultsBtn', 'recording', 'Recording Clips');

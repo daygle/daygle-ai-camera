@@ -129,6 +129,7 @@ const WEB_SHARED_GLOBALS = {
   timeAgo: 'readonly',
   timeSelectValue: 'readonly',
   titleCase: 'readonly',
+  setFieldInactive: 'readonly',
   RECORDINGS_OVERLAY_TOGGLE_KEY: 'readonly',
   TIMELINE_OVERLAY_TOGGLE_KEY: 'readonly',
   // web/utils.js - behavioural tripwire geometry/normalisation (Zones canvas).

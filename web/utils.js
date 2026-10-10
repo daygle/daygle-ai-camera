@@ -1673,6 +1673,27 @@ function setTimeSelectValue(wrap, hhmm) {
   }
 }
 
+// Dim a setting that another setting currently makes do nothing, and say why
+// under it. The field stays enabled so its value is still saved and comes back
+// into play when the other setting changes.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function setFieldInactive(field, inactive, reason) {
+  const label = field && field.closest ? field.closest('label') : null;
+  if (!label) return;
+  label.classList.toggle('field-inactive', Boolean(inactive));
+  let note = label.querySelector('.field-inactive-note');
+  if (inactive) {
+    if (!note) {
+      note = document.createElement('small');
+      note.className = 'field-inactive-note';
+      label.appendChild(note);
+    }
+    note.textContent = reason;
+  } else if (note) {
+    note.remove();
+  }
+}
+
 function titleCase(value) {
   return String(value || '')
     .split(/[\s_]+/)

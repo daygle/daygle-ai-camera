@@ -7815,3 +7815,8 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
   font-weight: 650;
 }
 .ptz-tracking-status[data-state="tracking"] { color: var(--accent); }
+
+/* A setting another setting currently makes do nothing (setFieldInactive in
+   utils.js): dimmed, still editable, with the reason underneath. */
+label.field-inactive > :not(.field-inactive-note) { opacity: .55; }
+.field-inactive-note { color: var(--muted); font-size: 12px; font-weight: 500; line-height: 1.35; }
