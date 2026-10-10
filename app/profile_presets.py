@@ -409,3 +409,175 @@ def custom_presets(raw: Any) -> list[dict[str, Any]]:
         if isinstance(item, dict) and not item.get('builtin'):
             result.extend(_expand_custom_item(item))
     return result
+
+
+# ---------------------------------------------------------------------------
+# Linked camera profiles
+# ---------------------------------------------------------------------------
+#
+# A camera's Day and Night profiles point at a preset by id
+# (``detection_profiles.day_preset_id`` / ``night_preset_id``). The preset's
+# settings are copied into the camera's ``day`` / ``night`` dict whenever the
+# camera is saved, the preset is edited, or the app starts, so the detection
+# pipeline keeps reading the camera's own values unchanged while an edit made
+# on the Settings page reaches every camera that uses the profile.
+#
+# ``global-default-<mode>`` is the reserved profile with no settings: every
+# value follows the global Live Performance settings. A camera with no id at all
+# keeps its own values ("Custom"), which only an older install or a direct API
+# write produces; the start-up migration turns those into named profiles.
+
+GLOBAL_DEFAULT_PROFILE_NAME = 'Global Default'
+
+
+def global_default_profile_id(mode: str) -> str:
+    return f'global-default-{mode}'
+
+
+def _profile_values(values: Any) -> dict[str, Any]:
+    """A mode dict's preset-able part, normalized the way presets are."""
+    normalized = normalize_camera_detection_profiles({'day': values if isinstance(values, dict) else {}})['day']
+    return {key: value for key, value in normalized.items() if key not in LEGACY_MOTION_OVERRIDE_KEYS}
+
+
+def _legacy_values(values: Any) -> dict[str, Any]:
+    if not isinstance(values, dict):
+        return {}
+    return {key: value for key, value in values.items() if key in LEGACY_MOTION_OVERRIDE_KEYS and value is not None}
+
+
+def profile_settings(raw_presets: Any, preset_id: Any, mode: str) -> dict[str, Any] | None:
+    """Settings of the profile ``preset_id`` for ``mode``, or None if unknown."""
+    resolved = str(preset_id or '').strip().lower()
+    if not resolved:
+        return None
+    if resolved == global_default_profile_id(mode):
+        return {}
+    preset = get_preset(raw_presets, resolved)
+    if preset is None or preset.get('mode') != mode:
+        return None
+    return _profile_values(preset.get('settings'))
+
+
+def link_camera_profiles(cameras: list[dict[str, Any]], raw_presets: Any) -> tuple[list[dict[str, Any]], bool]:
+    """Copy each camera's linked Day/Night profile into its mode dicts.
+
+    A per-camera legacy motion override (see ``LEGACY_MOTION_OVERRIDE_KEYS``)
+    is kept: it belongs to the camera, not the profile, and the camera form
+    offers to clear it. Unlinked modes and unknown ids keep their values.
+    Returns ``(cameras, changed)``; the input list is not modified.
+    """
+    changed = False
+    result = []
+    for camera in cameras:
+        profiles = camera.get('detection_profiles') if isinstance(camera, dict) else None
+        if not isinstance(profiles, dict):
+            result.append(camera)
+            continue
+        updated = dict(profiles)
+        for mode in ('day', 'night'):
+            if not profiles.get(f'{mode}_preset_id') and not _profile_values(profiles.get(mode)):
+                # Nothing set and nothing linked (a new camera): that is Global Default.
+                updated[f'{mode}_preset_id'] = global_default_profile_id(mode)
+            settings = profile_settings(raw_presets, updated.get(f'{mode}_preset_id'), mode)
+            if settings is None:
+                continue
+            current = profiles.get(mode) if isinstance(profiles.get(mode), dict) else {}
+            linked = {**settings, **_legacy_values(current)}
+            if linked != current:
+                updated[mode] = linked
+        if updated != profiles:
+            changed = True
+            camera = {**camera, 'detection_profiles': updated}
+            active = updated.get('active') if updated.get('active') in ('day', 'night') else 'day'
+            # Keep the flat projection of the active profile in step, as
+            # ``apply_active_camera_detection_profile`` would on the next read.
+            from app.recording_settings import CAMERA_MOTION_PROFILE_FIELDS
+            camera = {key: value for key, value in camera.items() if key not in CAMERA_MOTION_PROFILE_FIELDS}
+            camera.update(updated[active])
+        result.append(camera)
+    return result, changed
+
+
+def cameras_using_profile(cameras: list[dict[str, Any]], preset_id: str) -> list[str]:
+    """Names of the cameras whose Day or Night profile is ``preset_id``."""
+    names = []
+    for camera in cameras:
+        profiles = camera.get('detection_profiles') if isinstance(camera, dict) else None
+        if not isinstance(profiles, dict):
+            continue
+        if preset_id in (profiles.get('day_preset_id'), profiles.get('night_preset_id')):
+            names.append(str(camera.get('name') or camera.get('id') or 'Camera'))
+    return names
+
+
+def migrate_camera_profile_links(
+    cameras: list[dict[str, Any]], raw_presets: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """Link every camera mode to a profile without changing what it runs.
+
+    - Its stored preset id is kept when that profile still holds the same
+      values (it was applied and not edited since).
+    - A mode with no values links to Global Default.
+    - Otherwise it links to the first profile of that mode with exactly the
+      same values, or to a new custom profile named after the camera.
+
+    Returns ``(cameras, custom_presets, changed)``.
+    """
+    customs = custom_presets(raw_presets)
+    changed = False
+    result = []
+    for camera in cameras:
+        profiles = camera.get('detection_profiles') if isinstance(camera, dict) else None
+        if not isinstance(profiles, dict):
+            result.append(camera)
+            continue
+        updated = dict(profiles)
+        for mode in ('day', 'night'):
+            values = _profile_values(profiles.get(mode))
+            stored_id = profiles.get(f'{mode}_preset_id')
+            if stored_id and profile_settings(customs, stored_id, mode) == values:
+                continue
+            if not values:
+                profile_id = global_default_profile_id(mode)
+            else:
+                match = next(
+                    (preset for preset in list_presets(customs)
+                     if preset['mode'] == mode and _profile_values(preset['settings']) == values),
+                    None,
+                )
+                if match is None:
+                    camera_name = str(camera.get('name') or camera.get('id') or 'Camera').strip() or 'Camera'
+                    match = create_preset(
+                        {'name': f'{camera_name} ({mode.capitalize()})'[:_MAX_NAME_LENGTH], 'mode': mode, 'settings': values},
+                        list_presets(customs),
+                    )
+                    customs.append(match)
+                profile_id = match['id']
+            if stored_id != profile_id:
+                updated[f'{mode}_preset_id'] = profile_id
+        if updated != profiles:
+            changed = True
+            camera = {**camera, 'detection_profiles': updated}
+        result.append(camera)
+    return result, customs, changed
+
+
+def migrate_stored_camera_profiles(db: Any) -> bool:
+    """Start-up step: link stored cameras to profiles, then refresh their values."""
+    from app.camera_config import normalize_camera_settings
+    from app.utils import utc_now
+
+    stored = db.get_setting('cameras')
+    if not isinstance(stored, list) or not stored:
+        return False
+    cameras = [normalize_camera_settings(camera, index) for index, camera in enumerate(stored, start=1)]
+    raw_presets = db.get_setting('camera_profile_presets')
+    cameras, customs, migrated = migrate_camera_profile_links(cameras, raw_presets)
+    if migrated:
+        db.set_setting('camera_profile_presets', customs, utc_now())
+        raw_presets = customs
+    cameras, relinked = link_camera_profiles(cameras, raw_presets)
+    if migrated or relinked:
+        db.set_setting('cameras', cameras, utc_now())
+    return migrated or relinked

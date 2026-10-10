@@ -508,6 +508,11 @@ function initDaygleTabs() {
 
   const initial = (window.location.hash || '').replace('#', '');
   activate(panels.has(initial) ? initial : tabs[0].dataset.tab, { updateHash: false });
+  // An in-page link to another tab (e.g. href="#profiles") changes only the hash.
+  window.addEventListener('hashchange', () => {
+    const name = (window.location.hash || '').replace('#', '');
+    if (panels.has(name)) activate(name, { updateHash: false });
+  });
 }
 
 // ─── Toast notification (shared by every page that fires user feedback) ────

@@ -7820,3 +7820,36 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
    utils.js): dimmed, still editable, with the reason underneath. */
 label.field-inactive > :not(.field-inactive-note) { opacity: .55; }
 .field-inactive-note { color: var(--muted); font-size: 12px; font-weight: 500; line-height: 1.35; }
+
+/* Settings > Live Performance: headed groups of related fields. */
+.settings-group + .settings-group { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+.settings-group-title { margin: 0; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.settings-group-hint { margin: 4px 0 10px; color: var(--muted); font-size: 13px; }
+
+/* Settings > Camera Profiles (camera-profiles.js). */
+.profile-library-actions { margin: 4px 0 14px; }
+.profile-library { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+.profile-list { display: grid; gap: 8px; margin-top: 8px; }
+.profile-row {
+  display: flex; gap: 12px; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+}
+.profile-row-main { display: grid; gap: 2px; min-width: 0; }
+.profile-row-name { font-weight: 700; color: var(--text); }
+.profile-row-summary, .profile-row-usage { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.profile-row-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; flex-shrink: 0; }
+.profile-row-actions button { padding: 6px 10px; font-size: 13px; }
+.profile-badge {
+  display: inline-block; margin-left: 4px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border);
+  font-size: 11px; font-weight: 700; color: var(--muted); vertical-align: middle;
+}
+.profile-editor { margin: 0 0 18px; padding: 14px; border: 1px solid var(--accent); border-radius: 14px; }
+.profile-editor-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.profile-editor-head h3 { margin: 0; }
+.profile-editor .settings-group { margin-top: 14px; }
+@media (max-width: 640px) {
+  .profile-row { flex-direction: column; align-items: stretch; }
+  .profile-row-actions { justify-content: flex-start; }
+}
+.profile-select-summary { color: var(--muted); font-size: 12px; font-weight: 500; line-height: 1.35; }
+.profile-link-grid { align-items: start; }

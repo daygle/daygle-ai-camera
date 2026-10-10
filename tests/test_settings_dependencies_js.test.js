@@ -21,11 +21,11 @@ test('settings page dims Periodic Scan and the confirm fields when they cannot a
   assert.match(source, /legacy\.hidden = algorithm\.value !== 'diff'/);
 });
 
-test('camera profiles dim the same fields from their own or the global value', () => {
-  const source = read('cameras.js');
-  assert.match(source, /function bindProfileFieldDependencies\(form\)/);
-  assert.match(source, /globalLiveSettings = settings\.live \|\| \{\}/);
-  assert.match(source, /form\.__syncProfileDependencies\(\)/);  // after a preset is applied
+test('the profile editor dims the same fields from its own or the global value', () => {
+  const source = read('camera-profiles.js');
+  assert.match(source, /function syncProfileEditorDependencies\(form\)/);
+  assert.match(source, /: globalLiveDefaults\[key\]/);
+  assert.match(source, /setFieldInactive\(form\.elements\.profile_periodic_scan_interval_seconds, alwaysRun/);
 });
 
 test('inactive fields stay enabled so their values are still saved', () => {

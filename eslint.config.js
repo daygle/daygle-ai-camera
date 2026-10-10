@@ -186,6 +186,12 @@ const WEB_SHARED_GLOBALS = {
   availableLabels: 'writable',
   labelGroupNames: 'writable',
 
+  // web/profile-fields.js - camera Day/Night profile field definitions and
+  // summary, shared by Settings > Camera Profiles and the Cameras page.
+  PROFILE_FIELD_GROUPS: 'readonly',
+  parseProfileField: 'readonly',
+  profileSummary: 'readonly',
+
   // web/cameras.js - camera list state referenced by later page scripts.
   cameras: 'writable',
 

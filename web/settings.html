@@ -27,6 +27,7 @@
 
     <div class="settings-tabs" role="tablist" aria-label="Settings sections">
       <button class="settings-tab" type="button" role="tab" id="tab-detection" aria-controls="panel-detection" data-tab="detection" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">⚡</span><span class="settings-tab-label">Detection &amp; Live</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-profiles" aria-controls="panel-profiles" data-tab="profiles" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🌗</span><span class="settings-tab-label">Camera Profiles</span></button>
       <button class="settings-tab" type="button" role="tab" id="tab-recording" aria-controls="panel-recording" data-tab="recording" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🎬</span><span class="settings-tab-label">Recording &amp; Storage</span></button>
       <button class="settings-tab" type="button" role="tab" id="tab-notifications" aria-controls="panel-notifications" data-tab="notifications" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🔔</span><span class="settings-tab-label">Notifications</span></button>
       <button class="settings-tab" type="button" role="tab" id="tab-network" aria-controls="panel-network" data-tab="network" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🌐</span><span class="settings-tab-label">Network &amp; Access</span></button>
@@ -40,100 +41,128 @@
         <div class="settings-section-icon" aria-hidden="true">⚡</div>
         <div>
           <h2>Live Performance</h2>
-          <p class="settings-section-subtitle">Tune refresh rates and detection frequency to balance responsiveness with resource usage.</p>
+          <p class="settings-section-subtitle">The defaults every camera starts from. A camera&#x27;s Day and Night profiles (Camera Profiles tab) can change any of the detection values for that camera.</p>
           <p class="field-help" style="margin: 2px 0 0;">The live object overlay may appear slightly behind the video feed. This is normal on CPU hardware - AI inference takes time, and there is no further optimisation possible beyond the extrapolation already applied.</p>
         </div>
       </div>
       <form id="liveSettingsForm">
-        <div class="form-grid">
-          <label>
-            <span>Snapshot Refresh (ms) <span class="info-tip" data-tip="How often the live camera image updates. Lower = more responsive, higher = less bandwidth. Default: 500ms" title="How often the live camera image updates. Lower = more responsive, higher = less bandwidth. Default: 500ms" tabindex="0" aria-label="Help: How often the live camera image updates. Lower = more responsive, higher = less ..."></span></span>
-            <input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="500" /></label>
-          <label>
-            <span>Detection Status Refresh (ms) <span class="info-tip" data-tip="How often the detection status and live overlay update with new detections. Lower = more responsive overlay, higher = less CPU. Default: 2000ms" title="How often the detection status and live overlay update with new detections. Lower = more responsive overlay, higher = less CPU. Default: 2000ms" tabindex="0" aria-label="Help: How often the detection status and live overlay update with new detections. Lowe..."></span></span>
-            <input name="detection_status_refresh_ms" type="number" min="100" max="15000" step="100" placeholder="2000" /></label>
-          <label>
-            <span>Detection Interval (s) <span class="info-tip" data-tip="How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s" title="How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s" tabindex="0" aria-label="Help: How often AI checks each camera for motion and objects. Lower = faster alerts, h..."></span></span>
-            <input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.5" /></label>
-          <label>
-            <span>Face Detection Interval (s) <span class="info-tip" data-tip="How often the secondary face model scans each frame, independent of object detection. Raise it to cut GPU use on cameras where face alerts do not need sub-second latency; the pass is skipped entirely for cameras with no face rules. Default: 1s" title="How often the secondary face model scans each frame, independent of object detection. Raise it to cut GPU use on cameras where face alerts do not need sub-second latency; the pass is skipped entirely for cameras with no face rules. Default: 1s" tabindex="0" aria-label="Help: How often the secondary face model scans each frame."></span></span>
-            <input name="face_detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="1" /></label>
-          <label>
-            <span>Event Merge Window (s) <span class="info-tip" data-tip="Merges repeat detections of an object into one event. Only used for objects with no zone rule (for example a camera without zones): an object with a zone rule uses that rule&#x27;s own Cooldown on the Zones page instead. Default: 10s" title="Merges repeat detections of an object into one event. Only used for objects with no zone rule (for example a camera without zones): an object with a zone rule uses that rule&#x27;s own Cooldown on the Zones page instead. Default: 10s" tabindex="0" aria-label="Help: Merges repeat detections into one event. Only used for objects with no zone rule. Default: 10s"></span></span>
-            <input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /></label>
-          <label>
-            <span>Object Priority Window (s) <span class="info-tip" data-tip="Objects take priority over motion. Motion with no object is held this long in case an object appears in the same zone (headlights before a car), and motion this close to an object in its zone counts as that object. 0 = motion alerts immediately. Default: 3s" title="Objects take priority over motion. Motion with no object is held this long in case an object appears in the same zone (headlights before a car), and motion this close to an object in its zone counts as that object. 0 = motion alerts immediately. Default: 3s" tabindex="0" aria-label="Help: Objects take priority over motion. Motion with no object is held this long for an object to appear. Default: 3s"></span></span>
-            <input name="motion_object_grace_seconds" type="number" min="0" max="10" step="0.5" placeholder="3" /></label>
-          <label>
-            <span>Confirm Frames <span class="info-tip" data-tip="Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off (react on the first frame). 2-3 suppresses single-frame false positives when needed. Default: 1" title="Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off (react on the first frame). 2-3 suppresses single-frame false positives when needed. Default: 1" tabindex="0" aria-label="Help: Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off. Default: 1"></span></span>
-            <input name="detection_confirm_frames" type="number" min="1" max="10" step="1" placeholder="1" /></label>
-          <label>
-            <span>Confirm Window <span class="info-tip" data-tip="How many recent detection cycles the Confirm Frames count looks back over (the M in 'N of the last M'). Only applies when Confirm Frames is above 1. Default: 1" title="How many recent detection cycles the Confirm Frames count looks back over (the M in 'N of the last M'). Only applies when Confirm Frames is above 1. Default: 1" tabindex="0" aria-label="Help: How many recent detection cycles the Confirm Frames count looks back over. Default: 1"></span></span>
-            <input name="detection_confirm_window" type="number" min="1" max="30" step="1" placeholder="1" /></label>
-          <label>
-            <span>Confirm Location (IoU) <span class="info-tip" data-tip="Also require a confirmed object to stay in roughly the same place across the confirmation window, not just repeat its label. 0 = off (label-only). Raise (try 0.2) to suppress noise whose false detections jump around the frame each cycle - rain/snow streaks, IR sensor noise, wind-blown foliage - while a real subject that barely moves between cycles still passes. Only applies when Confirm Frames is above 1. Default: 0" title="Also require a confirmed object to stay in roughly the same place across the confirmation window, not just repeat its label. 0 = off. Raise (try 0.2) to suppress rain, IR noise, and foliage false positives. Only applies when Confirm Frames is above 1. Default: 0" tabindex="0" aria-label="Help: Also require a confirmed object to stay in roughly the same place across cycles. 0 = off. Raise to suppress rain/IR/foliage false positives. Default: 0"></span></span>
-            <input name="detection_confirm_iou" type="number" min="0" max="0.9" step="0.05" placeholder="0" /></label>
-          <label>
-            <span>Background Detection <span class="info-tip" data-tip="Keep running detection (alerts, recordings, and snapshots) even when no Live Cameras page is open. Default: Enabled" title="Keep running detection (alerts, recordings, and snapshots) even when no Live Cameras page is open. Default: Enabled" tabindex="0" aria-label="Help: Keep running detection (alerts, recordings, and snapshots) even when no Live Cameras page is open. Default: Enabled"></span></span>
-            <select name="background_detection_enabled">
-              <option value="true">Enabled</option>
-              <option value="false">Disabled</option>
-            </select></label>
-          <label>
-            <span>Always Run Object Detection <span class="info-tip" data-tip="Run YOLO object detection on every cycle regardless of motion. Maximum recall - a still, slow, or low-contrast subject is never hidden from the detector. Disable to restore the CPU-saving motion gate (object detection only when motion fires) on low-power hardware. Pair with Confirm Frames = 2 when false-positive resistance is more important than minimum alert latency. Motion detection still runs independently. Default: Enabled" title="Run YOLO object detection on every cycle regardless of motion. Maximum recall. Disable to restore the CPU-saving motion gate. Pair with Confirm Frames = 2 when needed. Default: Enabled" tabindex="0" aria-label="Help: Run object detection every cycle regardless of motion. Maximum recall. Disable for the CPU-saving motion gate. Default: Enabled"></span></span>
-            <select name="always_run_object_detection">
-              <option value="true">Enabled</option>
-              <option value="false">Disabled</option>
-            </select></label>
-          <label>
-            <span>Adaptive Detection Cadence <span class="info-tip" data-tip="Stretch the detection interval on a quiet scene and when the inference queue is backed up, so a busy camera is not starved by an idle one. A scene that has been still for a while is sampled progressively less often (up to 4x the configured interval) and recovers to the full rate the moment motion returns. The stretch is also capped so a frame is never more than 10s stale, and a camera can be pinned back to its exact interval. Disable to run every cycle at exactly the Detection Interval below. Default: Enabled" title="Stretch the detection interval on quiet scenes and under inference load. Recovers to the full rate on motion. Default: Enabled" tabindex="0" aria-label="Help: Stretch the detection interval on quiet scenes and under inference load. Recovers to the full rate on motion. Default: Enabled"></span></span>
-            <select name="adaptive_detection_enabled">
-              <option value="true">Enabled</option>
-              <option value="false">Disabled</option>
-            </select></label>
-          <label>
-            <span>Motion-Region Boost <span class="info-tip" data-tip="After the full-frame scan, re-run object detection zoomed into the moving regions so small or distant subjects (a person far from the camera) are detected at higher resolution. Higher CPU/GPU (extra inference per motion region). Best enabled after validating on your footage. Default: Disabled" title="Re-run object detection zoomed into moving regions to catch small/distant subjects. Higher CPU. Default: Disabled" tabindex="0" aria-label="Help: Re-run detection zoomed into moving regions for small/distant subjects. Higher CPU. Default: Disabled"></span></span>
-            <select name="object_detection_region_boost">
-              <option value="false">Disabled</option>
-              <option value="true">Enabled</option>
-            </select></label>
-          <label>
-            <span>Tiled Inference <span class="info-tip" data-tip="Also run object detection on a grid of overlapping tiles covering the whole frame every cycle, so small subjects anywhere - including stationary ones - are detected at higher resolution. Costs one inference per tile (e.g. 3x3 = 9x). Best on cameras covering a large or deep area (driveways, yards, lots). Off for tight/doorway views. Default: Off" title="Run object detection on a grid of overlapping tiles to catch small/stationary subjects anywhere. Costs one inference per tile. Default: Off" tabindex="0" aria-label="Help: Tiled inference runs detection on a grid of tiles to catch small subjects anywhere. Higher CPU. Default: Off"></span></span>
-            <select name="object_detection_tiling">
-              <option value="off">Off</option>
-              <option value="2x2">2 × 2 (4 tiles)</option>
-              <option value="3x3">3 × 3 (9 tiles)</option>
-              <option value="4x4">4 × 4 (16 tiles)</option>
-            </select></label>
-          <label>
-            <span>Low-Light Enhancement <span class="info-tip" data-tip="Boost local contrast (CLAHE) on the copy of the frame the object detector sees, so a dim subject at night or at the edge of the IR light stands out. Snapshots and recordings are not changed. Automatic only enhances dark frames. Can also lift sensor noise - check the result on your own night footage. Default: Off" title="Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off" tabindex="0" aria-label="Help: Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off"></span></span>
-            <select name="object_detection_low_light">
-              <option value="off">Off</option>
-              <option value="auto">Automatic (Dark Frames Only)</option>
-              <option value="on">Always</option>
-            </select></label>
-          <label>
-            <span>Second Look <span class="info-tip" data-tip="When a watched object scores just under its threshold, zoom in on it at full resolution and check it again (plus a mirrored copy) before giving up. Catches small or dim subjects without lowering thresholds for everything. Adds up to 4 extra inferences on a cycle with a near-miss. Default: Disabled" title="Re-check near-miss detections on a zoomed crop before dropping them. Up to 4 extra inferences per cycle. Default: Disabled" tabindex="0" aria-label="Help: Re-check near-miss detections on a zoomed crop before dropping them. Default: Disabled"></span></span>
-            <select name="object_detection_second_look">
-              <option value="false">Disabled</option>
-              <option value="true">Enabled</option>
-            </select></label>
-          <label>
-            <span>Detection History (min) <span class="info-tip" data-tip="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" title="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" tabindex="0" aria-label="Help: How many minutes of detection data to keep per camera for recording playback ove..."></span></span>
-            <input name="detection_history_minutes" type="number" min="1" max="120" step="1" placeholder="10" /></label>
-          <label>
-            <span>Detection Frame Rate (fps) <span class="info-tip" data-tip="Frames per second decoded from the camera stream for AI detection. Lower = less CPU; higher = catches faster movements. Takes effect on next camera reconnect. Default: 4" title="Frames per second decoded from the camera stream for AI detection. Lower = less CPU; higher = catches faster movements. Takes effect on next camera reconnect. Default: 4" tabindex="0" aria-label="Help: Frames per second decoded from the camera stream for AI detection. Lower = less ..."></span></span>
-            <input name="ingest_frame_fps" type="number" min="1" max="30" step="1" placeholder="4" /></label>
-          <label>
-            <span>Snapshot Quality <span class="info-tip" data-tip="JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = better quality and larger files; higher = more compressed. Takes effect on next camera reconnect. Default: 2" title="JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = better quality and larger files; higher = more compressed. Takes effect on next camera reconnect. Default: 2" tabindex="0" aria-label="Help: JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = be..."></span></span>
-            <input name="snapshot_quality" type="number" min="2" max="31" step="1" placeholder="2" /></label>
-          <label>
-            <span>Video Decoding <span class="info-tip" data-tip="Where camera video is decoded for motion, object and face detection. Automatic uses an NVIDIA GPU's video decoder (NVDEC) when one is present and ffmpeg supports it, which takes the heaviest work off the CPU; a camera whose GPU decoding fails falls back to the CPU on its own. Recording and sound are unaffected. Cameras reconnect once when this changes. Default: Automatic" title="Where camera video is decoded for motion, object and face detection. Automatic uses an NVIDIA GPU's video decoder (NVDEC) when one is present and ffmpeg supports it, which takes the heaviest work off the CPU; a camera whose GPU decoding fails falls back to the CPU on its own. Recording and sound are unaffected. Cameras reconnect once when this changes. Default: Automatic" tabindex="0" aria-label="Help: Where camera video is decoded for motion, object and face detection. Automatic uses a..."></span></span>
-            <select name="video_decode">
-              <option value="auto">Automatic (GPU if available)</option>
-              <option value="gpu">GPU (NVIDIA)</option>
-              <option value="cpu">CPU</option>
-            </select></label>
+        <div class="settings-group">
+          <h3 class="settings-group-title">Detection Timing</h3>
+          <p class="settings-group-hint">How often each camera is checked.</p>
+          <div class="form-grid">
+            <label>
+              <span>Detection Interval (s) <span class="info-tip" data-tip="How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s" title="How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s" tabindex="0" aria-label="Help: How often AI checks each camera for motion and objects. Lower = faster alerts, h..."></span></span>
+              <input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.5" /></label>
+            <label>
+              <span>Face Detection Interval (s) <span class="info-tip" data-tip="How often the secondary face model scans each frame, independent of object detection. Raise it to cut GPU use on cameras where face alerts do not need sub-second latency; the pass is skipped entirely for cameras with no face rules. Default: 1s" title="How often the secondary face model scans each frame, independent of object detection. Raise it to cut GPU use on cameras where face alerts do not need sub-second latency; the pass is skipped entirely for cameras with no face rules. Default: 1s" tabindex="0" aria-label="Help: How often the secondary face model scans each frame."></span></span>
+              <input name="face_detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="1" /></label>
+            <label>
+              <span>Detection Frame Rate (fps) <span class="info-tip" data-tip="Frames per second decoded from the camera stream for AI detection. Lower = less CPU; higher = catches faster movements. Takes effect on next camera reconnect. Default: 4" title="Frames per second decoded from the camera stream for AI detection. Lower = less CPU; higher = catches faster movements. Takes effect on next camera reconnect. Default: 4" tabindex="0" aria-label="Help: Frames per second decoded from the camera stream for AI detection. Lower = less ..."></span></span>
+              <input name="ingest_frame_fps" type="number" min="1" max="30" step="1" placeholder="4" /></label>
+            <label>
+              <span>Adaptive Detection Cadence <span class="info-tip" data-tip="Stretch the detection interval on a quiet scene and when the inference queue is backed up, so a busy camera is not starved by an idle one. A scene that has been still for a while is sampled progressively less often (up to 4x the configured interval) and recovers to the full rate the moment motion returns. The stretch is also capped so a frame is never more than 10s stale, and a camera can be pinned back to its exact interval. Disable to run every cycle at exactly the Detection Interval below. Default: Enabled" title="Stretch the detection interval on quiet scenes and under inference load. Recovers to the full rate on motion. Default: Enabled" tabindex="0" aria-label="Help: Stretch the detection interval on quiet scenes and under inference load. Recovers to the full rate on motion. Default: Enabled"></span></span>
+              <select name="adaptive_detection_enabled">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select></label>
+            <label>
+              <span>Background Detection <span class="info-tip" data-tip="Keep running detection (alerts, recordings, and snapshots) even when no Live Cameras page is open. Default: Enabled" title="Keep running detection (alerts, recordings, and snapshots) even when no Live Cameras page is open. Default: Enabled" tabindex="0" aria-label="Help: Keep running detection (alerts, recordings, and snapshots) even when no Live Cameras page is open. Default: Enabled"></span></span>
+              <select name="background_detection_enabled">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select></label>
+          </div>
+        </div>
+        <div class="settings-group">
+          <h3 class="settings-group-title">Confirmation</h3>
+          <p class="settings-group-hint">Require an object to repeat before it can alert or record.</p>
+          <div class="form-grid">
+            <label>
+              <span>Confirm Frames <span class="info-tip" data-tip="Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off (react on the first frame). 2-3 suppresses single-frame false positives when needed. Default: 1" title="Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off (react on the first frame). 2-3 suppresses single-frame false positives when needed. Default: 1" tabindex="0" aria-label="Help: Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off. Default: 1"></span></span>
+              <input name="detection_confirm_frames" type="number" min="1" max="10" step="1" placeholder="1" /></label>
+            <label>
+              <span>Confirm Window <span class="info-tip" data-tip="How many recent detection cycles the Confirm Frames count looks back over (the M in 'N of the last M'). Only applies when Confirm Frames is above 1. Default: 1" title="How many recent detection cycles the Confirm Frames count looks back over (the M in 'N of the last M'). Only applies when Confirm Frames is above 1. Default: 1" tabindex="0" aria-label="Help: How many recent detection cycles the Confirm Frames count looks back over. Default: 1"></span></span>
+              <input name="detection_confirm_window" type="number" min="1" max="30" step="1" placeholder="1" /></label>
+            <label>
+              <span>Confirm Location (IoU) <span class="info-tip" data-tip="Also require a confirmed object to stay in roughly the same place across the confirmation window, not just repeat its label. 0 = off (label-only). Raise (try 0.2) to suppress noise whose false detections jump around the frame each cycle - rain/snow streaks, IR sensor noise, wind-blown foliage - while a real subject that barely moves between cycles still passes. Only applies when Confirm Frames is above 1. Default: 0" title="Also require a confirmed object to stay in roughly the same place across the confirmation window, not just repeat its label. 0 = off. Raise (try 0.2) to suppress rain, IR noise, and foliage false positives. Only applies when Confirm Frames is above 1. Default: 0" tabindex="0" aria-label="Help: Also require a confirmed object to stay in roughly the same place across cycles. 0 = off. Raise to suppress rain/IR/foliage false positives. Default: 0"></span></span>
+              <input name="detection_confirm_iou" type="number" min="0" max="0.9" step="0.05" placeholder="0" /></label>
+          </div>
+        </div>
+        <div class="settings-group">
+          <h3 class="settings-group-title">Object Detection</h3>
+          <p class="settings-group-hint">When object detection runs and the extra passes that help it find small or dim subjects.</p>
+          <div class="form-grid">
+            <label>
+              <span>Always Run Object Detection <span class="info-tip" data-tip="Run YOLO object detection on every cycle regardless of motion. Maximum recall - a still, slow, or low-contrast subject is never hidden from the detector. Disable to restore the CPU-saving motion gate (object detection only when motion fires) on low-power hardware. Pair with Confirm Frames = 2 when false-positive resistance is more important than minimum alert latency. Motion detection still runs independently. Default: Enabled" title="Run YOLO object detection on every cycle regardless of motion. Maximum recall. Disable to restore the CPU-saving motion gate. Pair with Confirm Frames = 2 when needed. Default: Enabled" tabindex="0" aria-label="Help: Run object detection every cycle regardless of motion. Maximum recall. Disable for the CPU-saving motion gate. Default: Enabled"></span></span>
+              <select name="always_run_object_detection">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select></label>
+            <label>
+              <span>Motion-Region Boost <span class="info-tip" data-tip="After the full-frame scan, re-run object detection zoomed into the moving regions so small or distant subjects (a person far from the camera) are detected at higher resolution. Higher CPU/GPU (extra inference per motion region). Best enabled after validating on your footage. Default: Disabled" title="Re-run object detection zoomed into moving regions to catch small/distant subjects. Higher CPU. Default: Disabled" tabindex="0" aria-label="Help: Re-run detection zoomed into moving regions for small/distant subjects. Higher CPU. Default: Disabled"></span></span>
+              <select name="object_detection_region_boost">
+                <option value="false">Disabled</option>
+                <option value="true">Enabled</option>
+              </select></label>
+            <label>
+              <span>Tiled Inference <span class="info-tip" data-tip="Also run object detection on a grid of overlapping tiles covering the whole frame every cycle, so small subjects anywhere - including stationary ones - are detected at higher resolution. Costs one inference per tile (e.g. 3x3 = 9x). Best on cameras covering a large or deep area (driveways, yards, lots). Off for tight/doorway views. Default: Off" title="Run object detection on a grid of overlapping tiles to catch small/stationary subjects anywhere. Costs one inference per tile. Default: Off" tabindex="0" aria-label="Help: Tiled inference runs detection on a grid of tiles to catch small subjects anywhere. Higher CPU. Default: Off"></span></span>
+              <select name="object_detection_tiling">
+                <option value="off">Off</option>
+                <option value="2x2">2 × 2 (4 tiles)</option>
+                <option value="3x3">3 × 3 (9 tiles)</option>
+                <option value="4x4">4 × 4 (16 tiles)</option>
+              </select></label>
+            <label>
+              <span>Low-Light Enhancement <span class="info-tip" data-tip="Boost local contrast (CLAHE) on the copy of the frame the object detector sees, so a dim subject at night or at the edge of the IR light stands out. Snapshots and recordings are not changed. Automatic only enhances dark frames. Can also lift sensor noise - check the result on your own night footage. Default: Off" title="Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off" tabindex="0" aria-label="Help: Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off"></span></span>
+              <select name="object_detection_low_light">
+                <option value="off">Off</option>
+                <option value="auto">Automatic (Dark Frames Only)</option>
+                <option value="on">Always</option>
+              </select></label>
+            <label>
+              <span>Second Look <span class="info-tip" data-tip="When a watched object scores just under its threshold, zoom in on it at full resolution and check it again (plus a mirrored copy) before giving up. Catches small or dim subjects without lowering thresholds for everything. Adds up to 4 extra inferences on a cycle with a near-miss. Default: Disabled" title="Re-check near-miss detections on a zoomed crop before dropping them. Up to 4 extra inferences per cycle. Default: Disabled" tabindex="0" aria-label="Help: Re-check near-miss detections on a zoomed crop before dropping them. Default: Disabled"></span></span>
+              <select name="object_detection_second_look">
+                <option value="false">Disabled</option>
+                <option value="true">Enabled</option>
+              </select></label>
+          </div>
+        </div>
+        <div class="settings-group">
+          <h3 class="settings-group-title">Events</h3>
+          <p class="settings-group-hint">How detections become events.</p>
+          <div class="form-grid">
+            <label>
+              <span>Event Merge Window (s) <span class="info-tip" data-tip="Merges repeat detections of an object into one event. Only used for objects with no zone rule (for example a camera without zones): an object with a zone rule uses that rule&#x27;s own Cooldown on the Zones page instead. Default: 10s" title="Merges repeat detections of an object into one event. Only used for objects with no zone rule (for example a camera without zones): an object with a zone rule uses that rule&#x27;s own Cooldown on the Zones page instead. Default: 10s" tabindex="0" aria-label="Help: Merges repeat detections into one event. Only used for objects with no zone rule. Default: 10s"></span></span>
+              <input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /></label>
+            <label>
+              <span>Object Priority Window (s) <span class="info-tip" data-tip="Objects take priority over motion. Motion with no object is held this long in case an object appears in the same zone (headlights before a car), and motion this close to an object in its zone counts as that object. 0 = motion alerts immediately. Default: 3s" title="Objects take priority over motion. Motion with no object is held this long in case an object appears in the same zone (headlights before a car), and motion this close to an object in its zone counts as that object. 0 = motion alerts immediately. Default: 3s" tabindex="0" aria-label="Help: Objects take priority over motion. Motion with no object is held this long for an object to appear. Default: 3s"></span></span>
+              <input name="motion_object_grace_seconds" type="number" min="0" max="10" step="0.5" placeholder="3" /></label>
+            <label>
+              <span>Detection History (min) <span class="info-tip" data-tip="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" title="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" tabindex="0" aria-label="Help: How many minutes of detection data to keep per camera for recording playback ove..."></span></span>
+              <input name="detection_history_minutes" type="number" min="1" max="120" step="1" placeholder="10" /></label>
+          </div>
+        </div>
+        <div class="settings-group">
+          <h3 class="settings-group-title">Live View &amp; Display</h3>
+          <p class="settings-group-hint">The Live page and video decoding. These do not change what is detected.</p>
+          <div class="form-grid">
+            <label>
+              <span>Snapshot Refresh (ms) <span class="info-tip" data-tip="How often the live camera image updates. Lower = more responsive, higher = less bandwidth. Default: 500ms" title="How often the live camera image updates. Lower = more responsive, higher = less bandwidth. Default: 500ms" tabindex="0" aria-label="Help: How often the live camera image updates. Lower = more responsive, higher = less ..."></span></span>
+              <input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="500" /></label>
+            <label>
+              <span>Detection Status Refresh (ms) <span class="info-tip" data-tip="How often the detection status and live overlay update with new detections. Lower = more responsive overlay, higher = less CPU. Default: 2000ms" title="How often the detection status and live overlay update with new detections. Lower = more responsive overlay, higher = less CPU. Default: 2000ms" tabindex="0" aria-label="Help: How often the detection status and live overlay update with new detections. Lowe..."></span></span>
+              <input name="detection_status_refresh_ms" type="number" min="100" max="15000" step="100" placeholder="2000" /></label>
+            <label>
+              <span>Snapshot Quality <span class="info-tip" data-tip="JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = better quality and larger files; higher = more compressed. Takes effect on next camera reconnect. Default: 2" title="JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = better quality and larger files; higher = more compressed. Takes effect on next camera reconnect. Default: 2" tabindex="0" aria-label="Help: JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = be..."></span></span>
+              <input name="snapshot_quality" type="number" min="2" max="31" step="1" placeholder="2" /></label>
+            <label>
+              <span>Video Decoding <span class="info-tip" data-tip="Where camera video is decoded for motion, object and face detection. Automatic uses an NVIDIA GPU's video decoder (NVDEC) when one is present and ffmpeg supports it, which takes the heaviest work off the CPU; a camera whose GPU decoding fails falls back to the CPU on its own. Recording and sound are unaffected. Cameras reconnect once when this changes. Default: Automatic" title="Where camera video is decoded for motion, object and face detection. Automatic uses an NVIDIA GPU's video decoder (NVDEC) when one is present and ffmpeg supports it, which takes the heaviest work off the CPU; a camera whose GPU decoding fails falls back to the CPU on its own. Recording and sound are unaffected. Cameras reconnect once when this changes. Default: Automatic" tabindex="0" aria-label="Help: Where camera video is decoded for motion, object and face detection. Automatic uses a..."></span></span>
+              <select name="video_decode">
+                <option value="auto">Automatic (GPU if available)</option>
+                <option value="gpu">GPU (NVIDIA)</option>
+                <option value="cpu">CPU</option>
+              </select></label>
+          </div>
         </div>
         <details class="settings-advanced">
           <summary>Advanced Motion Engine</summary>
@@ -191,6 +220,35 @@
     </section>
 
     </div><!-- /panel-detection -->
+
+    <div class="settings-panel" id="panel-profiles" role="tabpanel" aria-labelledby="tab-profiles" data-panel="profiles" hidden>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🌗</div>
+        <div>
+          <h2>Camera Profiles</h2>
+          <p class="settings-section-subtitle">Named sets of detection settings for Day or Night. Choose one of each per camera on the Cameras page. Editing a profile updates every camera that uses it, and a value left on Global Default follows Detection &amp; Live.</p>
+        </div>
+      </div>
+      <div class="button-row profile-library-actions">
+        <button type="button" class="primary" data-profile-new="day">New Day Profile</button>
+        <button type="button" class="secondary" data-profile-new="night">New Night Profile</button>
+      </div>
+      <div id="profileEditor" class="profile-editor" hidden></div>
+      <div class="profile-library">
+        <div class="profile-library-column">
+          <h3 class="settings-group-title">☀️ Day Profiles</h3>
+          <div id="profileListDay" class="profile-list" aria-live="polite"></div>
+        </div>
+        <div class="profile-library-column">
+          <h3 class="settings-group-title">🌙 Night Profiles</h3>
+          <div id="profileListNight" class="profile-list" aria-live="polite"></div>
+        </div>
+      </div>
+      <p id="profilesMessage" class="muted" aria-live="polite"></p>
+    </section>
+    </div>
 
     <div class="settings-panel" id="panel-recording" role="tabpanel" aria-labelledby="tab-recording" data-panel="recording" hidden>
 
@@ -585,5 +643,7 @@
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
   <script src="/static/settings.js"></script>
+  <script src="/static/profile-fields.js"></script>
+  <script src="/static/camera-profiles.js"></script>
 </body>
 </html>

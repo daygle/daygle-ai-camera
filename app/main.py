@@ -159,6 +159,14 @@ def _startup() -> None:
     # detector. INT8 quantization runs during detector construction, so this
     # ordering lets its camera-aware calibration sample real frames on the
     # initial startup as well as on later detector reloads.
+    # Day/Night profiles are shared, linked presets: link cameras saved by an
+    # older version (keeping exactly what they run) and refresh every camera
+    # from its profile before the runtime config is built.
+    try:
+        from app.profile_presets import migrate_stored_camera_profiles
+        migrate_stored_camera_profiles(database)
+    except Exception as exc:  # never block start-up on a profile migration
+        _logger.warning('Camera profile migration failed: %s', exc)
     cameras_config = effective_cameras_config()
     _state.cameras_config = cameras_config
     camera_config = cameras_config[0] if cameras_config else {}

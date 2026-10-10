@@ -9,19 +9,25 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(path.resolve(here, '../web/cameras.js'), 'utf8');
 
-test('camera profiles remain distinct day and night values', () => {
+test('camera profiles are chosen per mode, not edited on the camera page', () => {
   assert.doesNotMatch(source, /const CAT_PROFILE_SUGGESTIONS = \{/);
-  assert.match(source, /day: \{/);
-  assert.match(source, /night: \{/);
-  assert.match(source, /applyPendingProfile\(mode, preset/);
-});
-
-test('cat profile shortcut is removed while reusable presets remain', () => {
-  assert.doesNotMatch(source, /cat-profile-suggest-btn/);
-  assert.doesNotMatch(source, /Suggest Cat Profiles/);
-  assert.match(source, /profile-apply-day-btn/);
-  assert.match(source, /profile-save-day-preset-btn/);
-  assert.match(source, /profile-save-night-preset-btn/);
+  assert.doesNotMatch(source, /cat-profile-suggest-btn|Suggest Cat Profiles/);
+  // One select per mode, linked to a shared profile by id...
+  assert.match(source, /<select name="profile_' \+ mode \+ '_preset" data-profile-select="' \+ mode \+ '">'/);
+  assert.match(source, /day_preset_id: getName\('profile_day_preset'\) \|\| null/);
+  assert.match(source, /night_preset_id: getName\('profile_night_preset'\) \|\| null/);
+  assert.match(source, /globalDefaultProfileId\(mode\)/);
+  assert.match(source, /Custom \(This Camera Only\)/);
+  // ...managed on the Settings page, with no per-camera editor or preset buttons.
+  assert.match(source, /href="\/settings#profiles"/);
+  for (const gone of ['profileSectionHtml', 'readProfileFromForm', 'applyPendingProfile', 'profile-apply-day-btn',
+    'profile-save-day-preset-btn', 'profile-update-day-preset-btn', 'profile-delete-day-preset-btn',
+    "api('/api/camera-profile-presets'"]) {
+    assert.ok(!source.includes(gone), gone);
+  }
+  // Only the legacy motion overrides ride along in the mode dicts.
+  assert.match(source, /day: legacyOverrides\('day'\)/);
+  assert.match(source, /night: legacyOverrides\('night'\)/);
 });
 
 test('PTZ Motion Detection switch is editable and collected into detection', () => {
@@ -44,20 +50,13 @@ test('camera table exposes day and night profiles and editor can collapse', () =
   assert.match(source, /camera-profile-pill/);
   assert.match(source, /Solar \(Daily Sunrise\/Sunset\)/);
   assert.match(source, /ONVIF IR State \(Fallback Schedule\)/);
-  // Per-camera motion overrides are trimmed to what differs per camera (night
-  // / IR noise); the engine choice lives on the global Advanced Motion Engine.
-  assert.match(source, /Ignore Small Light Changes/);
-  assert.doesNotMatch(source, /selectField\('motion_algorithm'/);
   assert.match(source, /data-legacy-motion-override/);
-  assert.match(source, /Global Default/);
-  assert.match(source, /Choose a Preset…/);
-  assert.doesNotMatch(source, /Choose a preset…/);
+  assert.match(source, /'Global Default'/);
   assert.doesNotMatch(source, /Global default/);
   assert.match(source, /Solar sunrise and sunset times update daily/);
   assert.match(source, /runtimeSource === 'onvif'/);
   assert.match(source, /profiles\.source === 'solar' \? 'Solar'/);
   assert.match(source, /cameraProfilePresets\.find/);
-  assert.match(source, /camera-profile-preset/);
   assert.match(source, /activeProfile\.charAt\(0\)\.toUpperCase\(\)/);
   assert.doesNotMatch(source, /Check IR State Now|ir-check-btn|\/ir-state/);
   assert.match(source, /renderCameraSortHeader\('Status', 'status'\) \+\s*'<th scope="col">Profiles<\/th>'/);
@@ -69,48 +68,3 @@ test('camera table exposes day and night profiles and editor can collapse', () =
   assert.doesNotMatch(source, /insertAdjacentHTML\('afterend', safeHtml\(\[formHtml\]\)\)/);
 });
 
-test('day and night profiles are edited in separate, always-visible sections', () => {
-  // Both sections render from their OWN stored values...
-  assert.match(source, /profileSectionHtml\(camera, 'day'\)/);
-  assert.match(source, /profileSectionHtml\(camera, 'night'\)/);
-  assert.match(source, /<h4 class="cam-edit-section-title">' \+ label \+ ' Profile<\/h4>/);
-  // ...and both are collected independently on save.
-  assert.match(source, /readProfileFromForm\(form, 'day'\)/);
-  assert.match(source, /readProfileFromForm\(form, 'night'\)/);
-  // Adaptive Cadence is available in both profile forms, typed as a boolean,
-  // and included in the profile field allowlist used by reads and presets.
-  assert.match(source, /'adaptive_detection_enabled'/);
-  assert.match(source, /selectField\('adaptive_detection_enabled'/);
-  assert.match(source, /label: 'Adaptive Cadence'/);
-  assert.match(source, /case 'adaptive_detection_enabled'/);
-  // Switching the Active Profile select must NOT reload stored values into
-  // the form: the old change handler silently discarded unsaved edits, which
-  // is what made profile updates look like they reverted.
-  assert.doesNotMatch(source, /profileSelect\.addEventListener\('change'/);
-  // Field names are namespaced per mode so the two editors cannot collide.
-  assert.match(source, /mode \+ '_' \+ profileFieldName\(key\)/);
-});
-
-test('day and night select and apply presets independently', () => {
-  assert.match(source, /name="profile_day_preset"/);
-  assert.match(source, /name="profile_night_preset"/);
-  assert.match(source, /profile-apply-day-btn/);
-  assert.match(source, /profile-apply-night-btn/);
-  assert.match(source, /requestApplyPreset\('day'\)/);
-  assert.match(source, /requestApplyPreset\('night'\)/);
-  assert.match(source, /day_preset_id: dayPresetId/);
-  assert.match(source, /night_preset_id: nightPresetId/);
-  assert.doesNotMatch(source, /Apply to Both/);
-});
-
-test('camera editor exposes reusable preset lifecycle actions per profile', () => {
-  assert.match(source, /profile-save-day-preset-btn/);
-  assert.match(source, /profile-save-night-preset-btn/);
-  assert.match(source, /profile-update-day-preset-btn/);
-  assert.match(source, /profile-update-night-preset-btn/);
-  assert.match(source, /profile-delete-day-preset-btn/);
-  assert.match(source, /profile-delete-night-preset-btn/);
-  assert.match(source, /api\('\/api\/camera-profile-presets'/);
-  assert.match(source, /api\('\/api\/camera-profile-presets\/'/);
-  assert.match(source, /mode: mode, settings: current\[mode\]/);
-});

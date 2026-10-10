@@ -41,9 +41,11 @@ from app.profile_automation import (
     suggest_solar_schedule,
 )
 from app.profile_presets import (
+    cameras_using_profile,
     create_preset,
     custom_presets,
     get_preset,
+    link_camera_profiles,
     list_presets,
     normalize_preset,
 )
@@ -102,7 +104,7 @@ async def update_cameras(
     settings = validate_cameras_settings(await read_json_body(request))
     # Stopping ingest workers, migrating state and restarting cameras is
     # blocking work (thread joins, ffmpeg teardown); keep it off the event loop.
-    await run_in_threadpool(_persist_and_apply_cameras, settings, db, apply_cameras_settings)
+    settings = await run_in_threadpool(_persist_and_apply_cameras, settings, db, apply_cameras_settings)
     write_audit_log(request, db, 'update', 'settings.cameras', details={'count': len(settings)})
     return {
         'cameras': [
@@ -112,7 +114,7 @@ async def update_cameras(
     }
 
 
-def _persist_and_apply_cameras(settings, db, apply_cameras_settings) -> None:
+def _persist_and_apply_cameras(settings, db, apply_cameras_settings) -> list:
     old_configs = list(effective_cameras_config())
     # Only migrate state/dirs for unambiguous single renames. See
     # ``camera_id_renames``: pairing the two lists positionally would migrate a
@@ -138,9 +140,12 @@ def _persist_and_apply_cameras(settings, db, apply_cameras_settings) -> None:
     # Serialize against the profile monitor's persist (and the other API
     # writers) so its stale whole-list snapshot cannot resurrect a reverted
     # edit over this one.
+    # Linked Day/Night profiles: copy each camera's chosen profile in.
+    settings, _changed = link_camera_profiles(settings, db.get_setting('camera_profile_presets'))
     with _state._cameras_config_write_lock:
         db.set_setting('cameras', settings, utc_now())
         apply_cameras_settings(settings)
+    return settings
 
 
 @router.put('/api/cameras/{camera_id}')
@@ -170,6 +175,7 @@ def _upsert_camera(normalized, payload, request, db, apply_cameras_settings):
         for index, current in enumerate(settings_list):
             if current.get('id') == normalized:
                 settings_list[index] = validate_camera_settings({**payload, 'id': normalized}, current=current, index=index + 1)
+                settings_list, _changed = link_camera_profiles(settings_list, db.get_setting('camera_profile_presets'))
                 db.set_setting('cameras', settings_list, utc_now())
                 apply_cameras_settings(settings_list)
                 write_audit_log(request, db, 'update', 'settings.camera', normalized, {'camera_name': settings_list[index].get('name')})
@@ -180,6 +186,8 @@ def _upsert_camera(normalized, payload, request, db, apply_cameras_settings):
         # Upsert: a PUT to an unknown id creates the camera
         created = validate_camera_settings({**payload, 'id': normalized}, index=len(settings_list) + 1)
         settings_list.append(created)
+        settings_list, _changed = link_camera_profiles(settings_list, db.get_setting('camera_profile_presets'))
+        created = settings_list[-1]
         db.set_setting('cameras', settings_list, utc_now())
         apply_cameras_settings(settings_list)
         write_audit_log(request, db, 'create', 'settings.camera', normalized, {'camera_name': created.get('name')})
@@ -193,7 +201,11 @@ def _upsert_camera(normalized, payload, request, db, apply_cameras_settings):
 def list_camera_profile_presets(request: Request, db=Depends(get_database)):
     """List built-in and user-created mode-specific camera presets."""
     require_admin(request)
-    return {'presets': list_presets(db.get_setting('camera_profile_presets'))}
+    cameras = effective_cameras_config()
+    return {'presets': [
+        {**preset, 'used_by': cameras_using_profile(cameras, preset['id'])}
+        for preset in list_presets(db.get_setting('camera_profile_presets'))
+    ]}
 
 
 @router.post('/api/camera-profile-presets')
@@ -211,7 +223,12 @@ async def create_camera_profile_preset(request: Request, db=Depends(get_database
 
 
 @router.put('/api/camera-profile-presets/{preset_id}')
-async def update_camera_profile_preset(preset_id: str, request: Request, db=Depends(get_database)):
+async def update_camera_profile_preset(
+    preset_id: str,
+    request: Request,
+    db=Depends(get_database),
+    apply_cameras_settings=Depends(get_apply_cameras_settings),
+):
     require_admin(request)
     current = get_preset(db.get_setting('camera_profile_presets'), preset_id)
     if current is None:
@@ -225,8 +242,19 @@ async def update_camera_profile_preset(preset_id: str, request: Request, db=Depe
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     customs = [preset for preset in custom_presets(db.get_setting('camera_profile_presets')) if preset['id'] != preset_id]
     db.set_setting('camera_profile_presets', customs + [updated], utc_now())
+    # Linked profiles: every camera using this one picks up the change.
+    used_by = await run_in_threadpool(_relink_cameras, db, apply_cameras_settings, preset_id)
     write_audit_log(request, db, 'update', 'settings.camera_profile_preset', preset_id, {'name': updated['name']})
-    return updated
+    return {**updated, 'used_by': used_by}
+
+
+def _relink_cameras(db, apply_cameras_settings, preset_id: str) -> list[str]:
+    with _state._cameras_config_write_lock:
+        cameras, changed = link_camera_profiles(list(effective_cameras_config()), db.get_setting('camera_profile_presets'))
+        if changed:
+            db.set_setting('cameras', cameras, utc_now())
+            apply_cameras_settings(cameras)
+    return cameras_using_profile(cameras, preset_id)
 
 
 @router.delete('/api/camera-profile-presets/{preset_id}')
@@ -237,6 +265,13 @@ def delete_camera_profile_preset(preset_id: str, request: Request, db=Depends(ge
         raise HTTPException(status_code=404, detail='Profile preset not found.')
     if current['builtin']:
         raise HTTPException(status_code=400, detail='Built-in profile presets cannot be removed.')
+    used_by = cameras_using_profile(effective_cameras_config(), preset_id)
+    if used_by:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This profile is used by {', '.join(used_by)}. Choose another profile for "
+                   f"{'that camera' if len(used_by) == 1 else 'those cameras'} first.",
+        )
     remaining = [preset for preset in custom_presets(db.get_setting('camera_profile_presets')) if preset['id'] != preset_id]
     db.set_setting('camera_profile_presets', remaining, utc_now())
     write_audit_log(request, db, 'delete', 'settings.camera_profile_preset', preset_id)

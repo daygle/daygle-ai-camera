@@ -178,3 +178,87 @@ def test_presets_never_carry_legacy_per_camera_motion_overrides():
     })['settings']
     assert saved['motion_pixel_threshold'] == 40
     assert not LEGACY_MOTION_OVERRIDE_KEYS & set(saved)
+
+
+# ---------------------------------------------------------------------------
+# Linked camera profiles
+# ---------------------------------------------------------------------------
+
+from app.profile_presets import (  # noqa: E402
+    cameras_using_profile,
+    global_default_profile_id,
+    link_camera_profiles,
+    migrate_camera_profile_links,
+    profile_settings,
+)
+
+
+def _camera(name, day=None, night=None, **ids):
+    return {'id': name.lower(), 'name': name, 'detection_profiles': {
+        'active': 'day', 'day': day or {}, 'night': night or {}, **ids,
+    }}
+
+
+def test_linking_copies_the_profile_and_keeps_a_legacy_camera_override():
+    custom = create_preset({'name': 'Porch', 'mode': 'night', 'settings': {'detection_interval_seconds': 0.4}}, list_presets(None))
+    camera = _camera('Porch', night={'detection_interval_seconds': 2, 'motion_gate_fraction': 0.002},
+                     day_preset_id='cat-small-animal-day', night_preset_id=custom['id'])
+    [linked], changed = link_camera_profiles([camera], [custom])
+    assert changed
+    profiles = linked['detection_profiles']
+    assert profiles['day'] == profile_settings(None, 'cat-small-animal-day', 'day')
+    assert profiles['night'] == {'detection_interval_seconds': 0.4, 'motion_gate_fraction': 0.002}
+    assert linked['detection_interval_seconds'] == profiles['day']['detection_interval_seconds']  # active projection
+    assert camera['detection_profiles']['night']['detection_interval_seconds'] == 2  # input untouched
+    # Linking again is a no-op.
+    assert link_camera_profiles([linked], [custom]) == ([linked], False)
+
+
+def test_global_default_clears_the_profile_and_unknown_ids_keep_values():
+    camera = _camera('Yard', day={'detection_interval_seconds': 1}, night={'ingest_frame_fps': 6},
+                     day_preset_id=global_default_profile_id('day'), night_preset_id='gone-night')
+    [linked], _ = link_camera_profiles([camera], None)
+    assert linked['detection_profiles']['day'] == {}
+    assert linked['detection_profiles']['night'] == {'ingest_frame_fps': 6}
+
+
+def test_migration_keeps_what_each_camera_runs():
+    cat_day = profile_settings(None, 'cat-small-animal-day', 'day')
+    cameras = [
+        _camera('Driveway', day=dict(cat_day), night={'detection_interval_seconds': 0.3, 'motion_pixel_threshold': 41}),
+        _camera('Gate'),
+        # Applied a preset, then edited a field: no longer that preset.
+        _camera('Porch', day={**cat_day, 'ingest_frame_fps': 9}, day_preset_id='cat-small-animal-day'),
+    ]
+    migrated, customs, changed = migrate_camera_profile_links(cameras, None)
+    assert changed
+    driveway, gate, porch = (camera['detection_profiles'] for camera in migrated)
+    assert driveway['day_preset_id'] == 'cat-small-animal-day'
+    assert gate['day_preset_id'] == global_default_profile_id('day')
+    assert gate['night_preset_id'] == global_default_profile_id('night')
+    by_id = {preset['id']: preset for preset in customs}
+    assert by_id[driveway['night_preset_id']]['name'] == 'Driveway (Night)'
+    assert by_id[driveway['night_preset_id']]['settings'] == {'detection_interval_seconds': 0.3, 'motion_pixel_threshold': 41}
+    assert by_id[porch['day_preset_id']]['name'] == 'Porch (Day)'
+    # Re-linking from the new profiles reproduces every camera's values exactly.
+    relinked, _ = link_camera_profiles(migrated, customs)
+    for before, after in zip(cameras, relinked):
+        for mode in ('day', 'night'):
+            assert after['detection_profiles'][mode] == before['detection_profiles'][mode], (before['name'], mode)
+    # A second migration changes nothing.
+    assert migrate_camera_profile_links(relinked, customs)[2] is False
+
+
+def test_two_cameras_with_the_same_custom_values_share_one_profile():
+    night = {'detection_interval_seconds': 0.3}
+    migrated, customs, _ = migrate_camera_profile_links([_camera('A', night=night), _camera('B', night=night)], None)
+    assert len(customs) == 1
+    assert cameras_using_profile(migrated, customs[0]['id']) == ['A', 'B']
+
+
+def test_a_new_camera_with_nothing_set_links_to_global_default():
+    [linked], changed = link_camera_profiles([_camera('New')], None)
+    assert changed
+    profiles = linked['detection_profiles']
+    assert profiles['day_preset_id'] == global_default_profile_id('day')
+    assert profiles['night_preset_id'] == global_default_profile_id('night')
