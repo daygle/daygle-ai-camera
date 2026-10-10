@@ -75,6 +75,8 @@ def test_conversion_cleans_up_its_temporary_file(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mu, '_FFMPEG', '/usr/bin/ffmpeg')
     monkeypatch.setattr(mu, 'probe_video_duration', lambda _path: 1.0)
+    # CPU only, so the GPU capability check does not run through fake_run.
+    monkeypatch.setattr(mu, '_playback_encode_attempts', lambda: [('cpu', [], ['-c:v', 'libx264'])])
     monkeypatch.setattr(mu.subprocess, 'run', fake_run)
     try:
         mu.transcode_recording_to_mp4(source, output)
