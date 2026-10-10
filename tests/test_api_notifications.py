@@ -101,6 +101,7 @@ def test_push_notification_title_lists_all_triggered_labels(monkeypatch):
         captured.append({
             'url': request.full_url,
             'title': request.headers.get('Title'),
+            'tags': request.headers.get('Tags'),
             'body': request.data.decode('utf-8') if request.data else '',
         })
         return FakeResponse()
@@ -134,6 +135,8 @@ def test_push_notification_title_lists_all_triggered_labels(monkeypatch):
         # Title-cased message + Event ID line, matching the email body.
         assert 'Cat Matched' in entry['body'] or 'Person Matched' in entry['body']
         assert 'Event ID: 42' in entry['body']
+        # The app opens the event from this tag rather than the body text.
+        assert entry['tags'] == 'daygle-event-42'
         assert 'Object - ' not in entry['body']
         assert 'Detected at:' not in entry['body']
 

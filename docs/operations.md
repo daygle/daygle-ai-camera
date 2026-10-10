@@ -89,6 +89,7 @@ Filter by camera ID, event type, or severity when investigating a specific strea
 - **Recording** - event clip timing (pre/post-event, keep-recording-after-motion, max clip length), retention/auto-purge, and storage directories. Retention purges expired recording media and removes events whose associated media is no longer retained.
 - **Zones** - draw zones directly in the zone editor with **Draw polygon** or **Full Frame**, use the per-zone **Shape** control to convert areas between full frame and polygon, manage zone rules, and use the per-zone visibility controls to show or hide overlays while configuring the scene.
 - **Notifications** - push (ntfy), camera offline alerts, and email (SMTP) delivery, each with a test action.
+  Detection alert pushes carry a `daygle-event-<id>` ntfy tag naming the triggering event; the Android app uses it to open that event when the notification is tapped.
 - **System** - software updates, Cloudflare Tunnel, database backup/restore, login security, and the Danger Zone. Software Updates appears above Cloudflare Tunnel; the tunnel card shows whether the service is running, stopped, unconfigured, or needs attention.
 
 ## Cloudflare Tunnel

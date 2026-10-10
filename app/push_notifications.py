@@ -21,6 +21,11 @@ class PushNotificationError(Exception):
 # without redeploying with extra logging.
 logger = logging.getLogger('daygle.notifications')
 
+# ntfy tag carrying the triggering event's id on alert pushes, e.g.
+# ``daygle-event-42``. The Android app reads it to open that event's snapshot
+# when the notification is tapped, instead of parsing the message text.
+EVENT_TAG_PREFIX = 'daygle-event-'
+
 
 def _encode_ntfy_header(value: str) -> str:
     """Percent-encode non-ASCII characters for ntfy HTTP header values.
@@ -72,14 +77,14 @@ class PushNotificationService:
             detected_at=detected_at,
             motion_state=alert.get('motion_state'),
         )
-        self._deliver(content.subject, content.plain_text)
+        self._deliver(content.subject, content.plain_text, tags=[f'{EVENT_TAG_PREFIX}{int(event_id)}'])
 
     def send_test(self) -> None:
         if not self.configured():
             raise PushNotificationError("Push notifications are not configured.")
         self._deliver("Daygle AI Camera test notification", "If you received this, your push notification settings are working.")
 
-    def _deliver(self, title: str, body: str) -> None:
+    def _deliver(self, title: str, body: str, *, tags: list[str] | None = None) -> None:
         server_url = str(self.settings.get("server_url", "")).rstrip("/")
         topic = str(self.settings.get("topic", "")).strip()
         priority = str(self.settings.get("priority", "default")).strip() or "default"
@@ -92,6 +97,8 @@ class PushNotificationService:
             "Priority": priority,
             "Content-Type": "text/plain; charset=utf-8",
         }
+        if tags:
+            headers["Tags"] = ",".join(tags)
         if username:
             token = base64.b64encode(f"{username}:{password}".encode()).decode()
             headers["Authorization"] = f"Basic {token}"
