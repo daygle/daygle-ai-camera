@@ -22,6 +22,9 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import threading
+import time
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -133,15 +136,55 @@ def recording_playback_sidecar_path(file_path: Path) -> Path:
     return file_path.with_name(f'{file_path.stem}.h264-audio.mp4')
 
 
+# One conversion per recording at a time. A browser opening a clip usually
+# sends more than one stream request (setting ``src`` then calling ``load()``),
+# and each one ran its own ffmpeg into the same temporary file: one deleted the
+# other's output mid-write, both reported failure, and the clip was then marked
+# unplayable (recording 21395: "Converted MP4 does not contain a video stream"
+# and "MP4 conversion did not create an output file" in the same second).
+_conversion_locks: dict[str, threading.Lock] = {}
+_conversion_locks_guard = threading.Lock()
+
+# A failed conversion is not retried on every play, but it is retried after
+# this long, so a transient failure does not leave a clip unplayable for good.
+PLAYBACK_FAILURE_RETRY_SECONDS = 1800
+
+
+def _conversion_lock(file_path: Path) -> threading.Lock:
+    key = str(file_path.resolve(strict=False))
+    with _conversion_locks_guard:
+        lock = _conversion_locks.get(key)
+        if lock is None:
+            lock = _conversion_locks[key] = threading.Lock()
+        return lock
+
+
+def _fresh_sidecar(file_path: Path, playback_path: Path) -> bool:
+    return playback_path.exists() and file_path.exists() and playback_path.stat().st_mtime >= file_path.stat().st_mtime
+
+
 def recording_stream_path(file_path: Path) -> Path:
     playback_path = recording_playback_sidecar_path(file_path)
-    if playback_path.exists() and file_path.exists() and (playback_path.stat().st_mtime >= file_path.stat().st_mtime):
+    if _fresh_sidecar(file_path, playback_path):
         return playback_path
     if file_path.suffix.lower() == '.mp4' and mp4_is_browser_playable(file_path):
         return file_path
     failed_marker = file_path.with_name(f'{file_path.stem}.playback.failed')
-    if failed_marker.exists() and file_path.exists() and (failed_marker.stat().st_mtime >= file_path.stat().st_mtime):
-        return file_path
+    with _conversion_lock(file_path):
+        # Another request may have finished (or failed) the conversion while
+        # this one waited.
+        if _fresh_sidecar(file_path, playback_path):
+            return playback_path
+        if (
+            failed_marker.exists() and file_path.exists()
+            and failed_marker.stat().st_mtime >= file_path.stat().st_mtime
+            and time.time() - failed_marker.stat().st_mtime < PLAYBACK_FAILURE_RETRY_SECONDS
+        ):
+            return file_path
+        return _convert_for_playback(file_path, playback_path, failed_marker)
+
+
+def _convert_for_playback(file_path: Path, playback_path: Path, failed_marker: Path) -> Path:
     try:
         transcode_recording_to_mp4(file_path, playback_path)
     except Exception as exc:
@@ -281,9 +324,9 @@ def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
     ffmpeg = _FFMPEG or shutil.which('ffmpeg')
     if not ffmpeg:
         raise RuntimeError('ffmpeg is required to convert recordings for browser playback.')
-    tmp_path = output_path.with_name(f'{output_path.stem}.tmp{output_path.suffix}')
-    if tmp_path.exists():
-        tmp_path.unlink(missing_ok=True)
+    # Unique per attempt, so a concurrent attempt can never delete or replace
+    # this one's output while ffmpeg is writing it.
+    tmp_path = output_path.with_name(f'{output_path.stem}.{uuid.uuid4().hex[:8]}.tmp{output_path.suffix}')
     command = [
         ffmpeg, '-y',
         '-fflags', '+discardcorrupt', '-err_detect', 'ignore_err',
@@ -296,17 +339,20 @@ def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
     ]
     duration = probe_video_duration(source_path) or 0.0
     timeout_seconds = max(120, int(duration * 3) + 60)
-    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds, check=False)
-    if not tmp_path.exists():
-        raise RuntimeError('MP4 conversion did not create an output file.')
-    if result.returncode != 0 and (not mp4_has_video_stream(tmp_path)):
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds, check=False)
+        if not tmp_path.exists():
+            raise RuntimeError('MP4 conversion did not create an output file.')
+        if result.returncode != 0 and (not mp4_has_video_stream(tmp_path)):
+            error_detail = f'{result.stderr[:500]}\n...\n{result.stderr[-1000:]}'
+            raise RuntimeError(f'ffmpeg failed to convert recording for browser playback: {error_detail}')
+        if not mp4_has_video_stream(tmp_path):
+            raise RuntimeError('Converted MP4 does not contain a video stream.')
+        tmp_path.replace(output_path)
+    finally:
+        # Whatever happened (including an ffmpeg timeout), never leave this
+        # attempt's partial file behind.
         tmp_path.unlink(missing_ok=True)
-        error_detail = f'{result.stderr[:500]}\n...\n{result.stderr[-1000:]}'
-        raise RuntimeError(f'ffmpeg failed to convert recording for browser playback: {error_detail}')
-    if not mp4_has_video_stream(tmp_path):
-        tmp_path.unlink(missing_ok=True)
-        raise RuntimeError('Converted MP4 does not contain a video stream.')
-    tmp_path.replace(output_path)
 
 
 def mp4_has_video_stream(file_path: Path) -> bool:
