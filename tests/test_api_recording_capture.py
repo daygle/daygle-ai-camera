@@ -1363,6 +1363,8 @@ def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
     })
 
     def fake_run(command, *_args, **_kwargs):
+        if '-i' not in command:  # capability probes (GPU, encoders): no output file
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
         # The output path is the last positional arg in the ffmpeg command.
         Path(command[-1]).write_bytes(b'not-a-real-video')
         return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
@@ -1416,6 +1418,8 @@ def test_write_rtsp_clip_keeps_clip_with_video_stream(tmp_path, monkeypatch):
     })
 
     def fake_run(command, *_args, **_kwargs):
+        if '-i' not in command:  # capability probes (GPU, encoders): no output file
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
         Path(command[-1]).write_bytes(b'valid-video-bytes')
         return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
 
@@ -1442,6 +1446,8 @@ def test_write_rtsp_clip_explicitly_records_optional_audio_as_aac(tmp_path, monk
     commands = []
 
     def fake_run(command, *_args, **_kwargs):
+        if '-i' not in command:  # capability probes (GPU, encoders): no output file
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
         commands.append(command)
         Path(command[-1]).write_bytes(b'valid-video-bytes')
         return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
@@ -1466,6 +1472,8 @@ def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatc
     commands = []
 
     def fake_run(command, *_args, **_kwargs):
+        if '-i' not in command:  # capability probes (GPU, encoders): no output file
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
         commands.append(command)
         Path(command[-1]).write_bytes(b'playback-video')
         return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
@@ -1482,7 +1490,7 @@ def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatc
 
     mods.media_utils.transcode_recording_to_mp4(source_path, output_path)
 
-    command = commands[0]
+    command = next(c for c in commands if "-map" in c)  # skip capability probes
     assert output_path.name == 'source.h264-audio.mp4'
     assert '-an' not in command
     assert command[command.index('-map') + 1] == '0:v:0'

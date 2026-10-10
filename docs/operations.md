@@ -37,6 +37,13 @@ Use the camera connection test before saving a new stream URL or ONVIF configura
 
 Daygle accepts H.264/AVC and H.265/HEVC RTSP streams. Camera-vendor H.265+ streams are handled as HEVC when FFmpeg can decode the resulting bitstream; H.265+ is not a separate codec standard. The shared recording workers stream-copy the camera codec into prebuffer and continuous-recording segments, while browser playback creates an H.264 sidecar for HEVC recordings because HEVC support in browsers is inconsistent.
 
+What happens to an H.265/H.265+ recording:
+
+- **Files stay H.265** (stream-copied, no quality loss), tagged `hvc1` so they also play on iPhone, iPad and Mac (QuickTime). ffmpeg's default `hev1` tag is refused by Apple players. Recordings made before this change keep the `hev1` tag.
+- **Browser playback** uses an H.264 copy (`<name>.h264-audio.mp4`). An **event clip** gets it in the background right after it is saved (one clip at a time, at low priority), so opening it is instant; a **continuous chunk** is converted the first time it is played. Only one conversion runs per clip, however many requests arrive for it.
+- **GPU conversion:** when **Video Decoding** uses the GPU and this ffmpeg has the NVIDIA encoder (`h264_nvenc`), the H.264 copy is made on the GPU; otherwise, or if that fails, with libx264 on the CPU.
+- A failed conversion is retried after 30 minutes rather than on every play.
+
 For reliable AI detection, use the H.264 detection/ingest stream and reserve H.265 or H.265+ for the main/recording stream. If the connection test reports that FFmpeg lacks the HEVC decoder, update the FFmpeg package or choose standard H.265/H.264 output on the camera. A proprietary H.265+ bitstream that FFmpeg cannot decode cannot be made compatible by the application.
 
 ### One connection per camera
