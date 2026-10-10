@@ -95,6 +95,9 @@ const sandbox = {
   BroadcastChannel: undefined,
   URLSearchParams,
   console,
+  // Playback errors are popups (showToast schedules its own removal).
+  setTimeout: () => 0,
+  clearTimeout() {},
 };
 sandbox.window.daygleUi = null;
 vm.createContext(sandbox);

@@ -4,7 +4,6 @@ const els = {
   // (web/library_filters.js).
   filterMount: document.getElementById('recordingFilters'),
   clipPlayer: document.getElementById('clipPlayer'),
-  clipPlayerStatus: document.getElementById('clipPlayerStatus'),
   recordingDetails: document.getElementById('recordingDetails'),
   deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
   clipOverlay: document.getElementById('clipOverlay'),
@@ -766,7 +765,6 @@ function hideInlinePlayer() {
   clearClipOverlay();
   resetClipTimeline();
   activeRecording = null;
-  if (els.clipPlayerStatus) els.clipPlayerStatus.textContent = '';
   if (els.recordingDetails) els.recordingDetails.innerHTML = '';
   if (els.clipPlayerTitle) els.clipPlayerTitle.textContent = 'Recording';
   if (els.videoModalSubtitle) {
@@ -789,7 +787,7 @@ async function playRecording(id) {
   showInlinePlayer();
   if (recording.media_ready === false) {
     clearClipOverlay();
-    els.clipPlayerStatus.textContent = `Recording #${id} is still being prepared.`;
+    window.showToast?.(`Recording #${id} is still being prepared.`);
     return;
   }
   if (els.videoModalDownload) {
@@ -801,20 +799,17 @@ async function playRecording(id) {
   els.clipPlayer.load();
   els.clipPlayer.src = `/api/recordings/${id}/stream?t=${Date.now()}`;
   drawClipOverlay();
-  els.clipPlayerStatus.textContent = `Loading recording #${id}...`;
+  window.showToast?.(`Loading recording #${id}...`);
   try {
     els.clipPlayer.load();
     await els.clipPlayer.play();
-    // Successful playback is self-evident from the native video controls;
-    // reserve this line for preparation, loading, and error feedback.
-    els.clipPlayerStatus.textContent = '';
   } catch (error) {
     // <video>.play() media error (never an api() throw) - redirect guard skipped by design.
     if (['AbortError', 'NotAllowedError'].includes(error?.name)) {
       window.showToast?.(`Recording #${id} loaded.`);
       return;
     }
-    els.clipPlayerStatus.textContent = `Unable to play recording #${id}: ${error?.message || 'media playback failed'}.`;
+    window.showToast?.(`Unable to play recording #${id}: ${error?.message || 'media playback failed'}.`, true);
   }
 }
 
@@ -991,7 +986,7 @@ els.clipPlayer.addEventListener('error', () => {
     4: 'The recording format is not supported by this browser.',
   };
   clearClipOverlay();
-  els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
+  window.showToast?.(messages[error?.code] || 'Unable to play this recording.', true);
 });
 
 // timeupdate is intentionally omitted - the requestVideoFrameCallback/rAF loop

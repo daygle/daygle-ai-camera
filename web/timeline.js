@@ -17,7 +17,6 @@ const els = {
   // the global renderLegend() call in favour of per-card renderCardKey()
   // driven by the shared partitionRecordingsForKeys() helper.
   clipPlayer: document.getElementById('clipPlayer'),
-  clipPlayerStatus: document.getElementById('clipPlayerStatus'),
   clipOverlay: document.getElementById('clipOverlay'),
   clipOverlayToggle: document.getElementById('clipOverlayToggle'),
   recordingDetails: document.getElementById('recordingDetails'),
@@ -1113,7 +1112,7 @@ async function playRecording(recordingId, updateHistory = true) {
     els.clipPlayer.removeAttribute('src');
     els.clipPlayer.load();
     clearClipOverlay();
-    els.clipPlayerStatus.textContent = `Recording #${recording.id} is still being prepared.`;
+    window.showToast?.(`Recording #${recording.id} is still being prepared.`);
     return;
   }
 
@@ -1122,27 +1121,23 @@ async function playRecording(recordingId, updateHistory = true) {
   els.clipPlayer.pause();
   els.clipPlayer.src = `/api/recordings/${recording.id}/stream?t=${Date.now()}`;
   drawClipOverlay();
-  els.clipPlayerStatus.textContent = `Loading recording #${recording.id}...`;
+  window.showToast?.(`Loading recording #${recording.id}...`);
   try {
     els.clipPlayer.load();
     await els.clipPlayer.play();
-    // Successful playback is self-evident from the native video controls;
-    // reserve this line for preparation, loading, and error feedback.
-    els.clipPlayerStatus.textContent = '';
   } catch (error) {
     // <video>.play() media error (never an api() throw) - redirect guard skipped by design.
     if (['AbortError', 'NotAllowedError'].includes(error?.name)) {
-      els.clipPlayerStatus.textContent = `Recording #${recording.id} loaded.`;
+      window.showToast?.(`Recording #${recording.id} loaded.`);
       return;
     }
-    els.clipPlayerStatus.textContent = `Unable to play recording #${recording.id}: ${error?.message || 'media playback failed'}.`;
+    window.showToast?.(`Unable to play recording #${recording.id}: ${error?.message || 'media playback failed'}.`, true);
   }
 }
 
 function clearPlayback(updateHistory = true) {
   state.activeRecordingId = null;
   closeVideoModal();
-  if (els.clipPlayerStatus) els.clipPlayerStatus.textContent = '';
   if (els.recordingDetails) els.recordingDetails.innerHTML = '';
   highlightActiveRecording();
   if (updateHistory) replaceUrl(null);
@@ -1349,7 +1344,7 @@ TIMELINE_CARDS.forEach((card) => {
     playRecording(button.dataset.recordingId).catch((error) => {
       // Skip UI updates if api() triggered a 401 redirect
       if (window.daygleAuth?.redirecting) return;
-      els.clipPlayerStatus.textContent = error.message;
+      window.showToast?.(error.message, true);
     });
   });
 });
@@ -1370,7 +1365,7 @@ els.clipPlayer.addEventListener('error', () => {
     4: 'The recording format is not supported by this browser.',
   };
   clearClipOverlay();
-  els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
+  window.showToast?.(messages[error?.code] || 'Unable to play this recording.', true);
 });
 
 // timeupdate is intentionally omitted - the requestVideoFrameCallback/rAF loop
@@ -1476,7 +1471,7 @@ loadAuth().then(async () => {
 }).catch((error) => {
   // Skip UI updates if api() triggered a 401 redirect
   if (window.daygleAuth?.redirecting) return;
-  els.clipPlayerStatus.textContent = error.message;
+  window.showToast?.(error.message, true);
   reportTimelineError(error.message);
 });
 
