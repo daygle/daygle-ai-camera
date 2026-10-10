@@ -75,6 +75,23 @@ class PushNotificationsNarrowExceptTests(unittest.TestCase):
         self.assertIn('401', str(cm.exception))
         self.assertIn('Unauthorized', str(cm.exception))
 
+    def test_tags_header_only_when_tags_given(self) -> None:
+        svc = self._service()
+        sent = []
+
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *_a): return False
+
+        def fake_urlopen(request, timeout=10):
+            sent.append(request.headers.get('Tags'))
+            return FakeResponse()
+
+        with patch('app.push_notifications.urllib.request.urlopen', side_effect=fake_urlopen):
+            svc._deliver('Camera Offline: Gate', 'Body')
+            svc._deliver('Title', 'Body', tags=['daygle-event-7'])
+        self.assertEqual(sent, [None, 'daygle-event-7'])
+
     def test_url_error_wraps_as_push_notification_error(self) -> None:
         import urllib.error
         svc = self._service()
@@ -294,7 +311,7 @@ class AlertConfidenceNoneSafetyTests(unittest.TestCase):
             'server_url': 'https://ntfy.example.invalid',
             'topic': 'daygle-test',
         })
-        svc._deliver = lambda title, body: captured.append((title, body))  # type: ignore[assignment]
+        svc._deliver = lambda title, body, **_kwargs: captured.append((title, body))  # type: ignore[assignment]
         svc.send_alert(
             {'label': 'person', 'rule_name': 'r', 'message': 'm', 'confidence': None},
             event_id=1,
