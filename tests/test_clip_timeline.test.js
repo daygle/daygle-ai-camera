@@ -71,7 +71,7 @@ const sample = (t) => ({ t, detections: [{ label: 'person', confidence: 0.9 }] }
 test('a single detection is reported as such, never as an invented 1.0s span', () => {
   const { legend, bar } = render({ track: [sample(12)] });
   const texts = legend.map((item) => item.text);
-  assert.ok(texts.includes('Event: single detection'), texts.join(' | '));
+  assert.ok(texts.includes('Event: Single Detection'), texts.join(' | '));
   assert.ok(!texts.some((text) => /^Event \d/.test(text)), texts.join(' | '));
   // The tail runs from the detection itself, not from an inflated span end.
   assert.ok(texts.includes('Tail 48s'), texts.join(' | '));

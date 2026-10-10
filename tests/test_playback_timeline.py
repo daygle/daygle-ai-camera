@@ -18,7 +18,7 @@ def test_single_sample_event_stays_visible_without_an_invented_span():
     source = CLIP_TIMELINE.read_text(encoding='utf-8')
     assert 'minimumEventSpan' not in source
     assert 'clip-seg-event-single' in source
-    assert "'Event: single detection'" in source
+    assert "'Event: Single Detection'" in source
     styles = (ROOT / 'web' / 'styles.css').read_text(encoding='utf-8')
     assert '.clip-seg-event-single' in styles
 

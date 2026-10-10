@@ -212,7 +212,7 @@ function renderClipTimeline() {
   els.clipTimelineLegend.innerHTML = '';
   for (const seg of segments) {
     const text = seg.cls === 'event' && singleDetection
-      ? 'Event: single detection'
+      ? 'Event: Single Detection'
       : `${seg.label} ${fmtClipSeconds(Math.max(0, seg.end - seg.start))}`;
     appendClipLegendItem(`clip-seg-${seg.cls}`, text, `${seg.label}: measured from ${seg.basis}`);
   }
