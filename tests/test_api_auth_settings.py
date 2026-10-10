@@ -1380,6 +1380,55 @@ def test_label_group_rename_updates_zone_rules(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_linked_camera_profiles_follow_profile_edits(tmp_path, monkeypatch):
+    """A camera's Day/Night profile is a link: editing the profile on the
+    Settings page reaches every camera using it, and an in-use profile cannot
+    be deleted."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        headers = {"X-CSRF-Token": csrf}
+        status, _h, profile = client.request(
+            "/api/camera-profile-presets", method="POST", headers=headers,
+            json_body={"name": "Yard Night", "mode": "night", "settings": {"detection_interval_seconds": 0.4}},
+        )
+        assert status == 200
+        status, _h, _camera = client.request(
+            "/api/cameras/camera-1", method="PUT", headers=headers,
+            json_body={"backend": "rtsp", "device": "rtsp", "stream_url": "rtsp://127.0.0.1:554/s",
+                       "detection_profiles": {"active": "night", "day_preset_id": "global-default-day",
+                                              "night_preset_id": profile["id"]}},
+        )
+        assert status == 200
+
+        def camera_profiles():
+            return client.request("/api/cameras")[2]["cameras"][0]["detection_profiles"]
+
+        assert camera_profiles()["night"] == {"detection_interval_seconds": 0.4}
+        assert camera_profiles()["day"] == {}
+
+        status, _h, updated = client.request(
+            f"/api/camera-profile-presets/{profile['id']}", method="PUT", headers=headers,
+            json_body={"settings": {"detection_interval_seconds": 0.25, "ingest_frame_fps": 6}},
+        )
+        assert status == 200
+        assert len(updated["used_by"]) == 1
+        assert camera_profiles()["night"] == {"detection_interval_seconds": 0.25, "ingest_frame_fps": 6}
+
+        listed = {p["id"]: p for p in client.request("/api/camera-profile-presets")[2]["presets"]}
+        assert listed[profile["id"]]["used_by"]
+
+        status, _h, body = client.request(f"/api/camera-profile-presets/{profile['id']}", method="DELETE", headers=headers)
+        assert status == 409
+        assert "used by" in body["detail"]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_viewer_responses_redact_camera_and_alert_credentials(tmp_path, monkeypatch):
     """Viewer-role accounts must never receive camera ONVIF/stream or alert
     channel credentials: ``GET /api/config`` redacts the camera records and
