@@ -199,7 +199,7 @@ def _camera(name, day=None, night=None, **ids):
     }}
 
 
-def test_linking_copies_the_profile_and_keeps_a_legacy_camera_override():
+def test_linking_copies_the_profile_and_drops_legacy_camera_overrides():
     custom = create_preset({'name': 'Porch', 'mode': 'night', 'settings': {'detection_interval_seconds': 0.4}}, list_presets(None))
     camera = _camera('Porch', night={'detection_interval_seconds': 2, 'motion_gate_fraction': 0.002},
                      day_preset_id='cat-small-animal-day', night_preset_id=custom['id'])
@@ -207,7 +207,7 @@ def test_linking_copies_the_profile_and_keeps_a_legacy_camera_override():
     assert changed
     profiles = linked['detection_profiles']
     assert profiles['day'] == profile_settings(None, 'cat-small-animal-day', 'day')
-    assert profiles['night'] == {'detection_interval_seconds': 0.4, 'motion_gate_fraction': 0.002}
+    assert profiles['night'] == {'detection_interval_seconds': 0.4}
     assert linked['detection_interval_seconds'] == profiles['day']['detection_interval_seconds']  # active projection
     assert camera['detection_profiles']['night']['detection_interval_seconds'] == 2  # input untouched
     # Linking again is a no-op.
@@ -262,3 +262,11 @@ def test_a_new_camera_with_nothing_set_links_to_global_default():
     profiles = linked['detection_profiles']
     assert profiles['day_preset_id'] == global_default_profile_id('day')
     assert profiles['night_preset_id'] == global_default_profile_id('night')
+
+
+def test_unlinked_and_flat_legacy_overrides_are_cleared_too():
+    camera = {**_camera('Old', day={'ingest_frame_fps': 5, 'motion_background_alpha': 0.02}), 'motion_background_alpha': 0.02}
+    [linked], changed = link_camera_profiles([camera], None)
+    assert changed
+    assert linked['detection_profiles']['day'] == {'ingest_frame_fps': 5}
+    assert 'motion_background_alpha' not in linked

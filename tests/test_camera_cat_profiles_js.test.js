@@ -25,9 +25,11 @@ test('camera profiles are chosen per mode, not edited on the camera page', () =>
     "api('/api/camera-profile-presets'"]) {
     assert.ok(!source.includes(gone), gone);
   }
-  // Only the legacy motion overrides ride along in the mode dicts.
-  assert.match(source, /day: legacyOverrides\('day'\)/);
-  assert.match(source, /night: legacyOverrides\('night'\)/);
+  // Only the profile ids are sent: no per-mode values, summaries or legacy
+  // motion override notes on the camera page.
+  for (const gone of ['legacyOverrides', 'data-legacy-motion-override', 'Use the global values', 'profileSelectSummary']) {
+    assert.ok(!source.includes(gone), gone);
+  }
 });
 
 test('PTZ Motion Detection switch is editable and collected into detection', () => {
@@ -50,7 +52,6 @@ test('camera table exposes day and night profiles and editor can collapse', () =
   assert.match(source, /camera-profile-pill/);
   assert.match(source, /Solar \(Daily Sunrise\/Sunset\)/);
   assert.match(source, /ONVIF IR State \(Fallback Schedule\)/);
-  assert.match(source, /data-legacy-motion-override/);
   assert.match(source, /'Global Default'/);
   assert.doesNotMatch(source, /Global default/);
   assert.match(source, /Solar sunrise and sunset times update daily/);

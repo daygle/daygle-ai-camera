@@ -10,11 +10,14 @@ PLAYBACK_FILES = (
 )
 
 
-def test_playback_cards_clear_status_after_successful_playback():
+def test_playback_messages_are_popups_not_an_inline_status_line():
     for path in PLAYBACK_FILES:
         source = path.read_text(encoding='utf-8')
         assert 'Playing recording #' not in source
-        assert "els.clipPlayerStatus.textContent = '';" in source
+        assert 'clipPlayerStatus' not in source
+        assert "window.showToast?.(`Loading recording #" in source
+    for page in ('recordings.html', 'timeline.html'):
+        assert 'clipPlayerStatus' not in (ROOT / 'web' / page).read_text(encoding='utf-8')
 
 
 def test_playback_cards_keep_preparation_loading_and_error_feedback():

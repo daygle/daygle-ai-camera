@@ -9,10 +9,9 @@ from app.recording_settings import normalize_camera_detection_profiles
 _PRESET_ID_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
 _MAX_PRESETS = 100
 _MAX_NAME_LENGTH = 80
-# Motion-engine values that moved to the global Advanced Motion Engine. A camera
-# profile still honours one an older version stored (the camera form lists it
-# with a "Use the global values" button), so a preset must never carry them:
-# applying it would quietly bring the per-camera override back.
+# Motion-engine values that moved to the global Advanced Motion Engine. They are
+# never part of a profile, and ``link_camera_profiles`` drops any a camera saved
+# by an older version still carries, so every camera follows the global values.
 LEGACY_MOTION_OVERRIDE_KEYS: frozenset[str] = frozenset({
     'motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha', 'motion_algorithm',
 })
@@ -440,12 +439,6 @@ def _profile_values(values: Any) -> dict[str, Any]:
     return {key: value for key, value in normalized.items() if key not in LEGACY_MOTION_OVERRIDE_KEYS}
 
 
-def _legacy_values(values: Any) -> dict[str, Any]:
-    if not isinstance(values, dict):
-        return {}
-    return {key: value for key, value in values.items() if key in LEGACY_MOTION_OVERRIDE_KEYS and value is not None}
-
-
 def profile_settings(raw_presets: Any, preset_id: Any, mode: str) -> dict[str, Any] | None:
     """Settings of the profile ``preset_id`` for ``mode``, or None if unknown."""
     resolved = str(preset_id or '').strip().lower()
@@ -462,9 +455,10 @@ def profile_settings(raw_presets: Any, preset_id: Any, mode: str) -> dict[str, A
 def link_camera_profiles(cameras: list[dict[str, Any]], raw_presets: Any) -> tuple[list[dict[str, Any]], bool]:
     """Copy each camera's linked Day/Night profile into its mode dicts.
 
-    A per-camera legacy motion override (see ``LEGACY_MOTION_OVERRIDE_KEYS``)
-    is kept: it belongs to the camera, not the profile, and the camera form
-    offers to clear it. Unlinked modes and unknown ids keep their values.
+    Per-camera values for the settings that moved to the global Advanced Motion
+    Engine (``LEGACY_MOTION_OVERRIDE_KEYS``) are dropped: no profile carries
+    them and nothing on the camera page shows them, so they would be silent
+    hidden overrides. Unlinked modes and unknown ids keep their other values.
     Returns ``(cameras, changed)``; the input list is not modified.
     """
     changed = False
@@ -479,14 +473,14 @@ def link_camera_profiles(cameras: list[dict[str, Any]], raw_presets: Any) -> tup
             if not profiles.get(f'{mode}_preset_id') and not _profile_values(profiles.get(mode)):
                 # Nothing set and nothing linked (a new camera): that is Global Default.
                 updated[f'{mode}_preset_id'] = global_default_profile_id(mode)
+            current = profiles.get(mode) if isinstance(profiles.get(mode), dict) else {}
             settings = profile_settings(raw_presets, updated.get(f'{mode}_preset_id'), mode)
             if settings is None:
-                continue
-            current = profiles.get(mode) if isinstance(profiles.get(mode), dict) else {}
-            linked = {**settings, **_legacy_values(current)}
-            if linked != current:
-                updated[mode] = linked
-        if updated != profiles:
+                settings = {key: value for key, value in current.items() if key not in LEGACY_MOTION_OVERRIDE_KEYS}
+            if settings != current:
+                updated[mode] = settings
+        stale_flat = any(camera.get(key) is not None for key in LEGACY_MOTION_OVERRIDE_KEYS)
+        if updated != profiles or stale_flat:
             changed = True
             camera = {**camera, 'detection_profiles': updated}
             active = updated.get('active') if updated.get('active') in ('day', 'night') else 'day'

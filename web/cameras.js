@@ -57,13 +57,6 @@ function setMessage(text, isError = false) {
 // Camera Profiles (camera-profiles.js). The camera stores which profile each
 // mode uses; the server copies that profile's values in whenever the camera or
 // the profile is saved (app/profile_presets.py::link_camera_profiles).
-const LEGACY_MOTION_LABELS = {
-  motion_gate_fraction: 'Wake-Up Threshold',
-  motion_scale_fraction: 'Motion Score Scale',
-  motion_background_alpha: 'Background Adapt Speed',
-  motion_algorithm: 'Background Model',
-};
-
 function globalDefaultProfileId(mode) {
   return 'global-default-' + mode;
 }
@@ -90,51 +83,17 @@ function profileSelectOptionsHtml(mode, selectedId) {
     (builtin.length ? '<optgroup label="Built-in">' + builtin.map(function(preset) { return option(preset.id, preset.name); }).join('') + '</optgroup>' : '');
 }
 
-function profileSelectSummary(camera, mode, selectedId) {
-  if (selectedId === globalDefaultProfileId(mode)) return 'Follows Detection & Live on the Settings page.';
-  var preset = cameraProfileById(selectedId, mode);
-  var settings = preset ? preset.settings : ((camera.detection_profiles || {})[mode] || {});
-  var values = {};
-  Object.keys(settings || {}).forEach(function(key) {
-    if (!Object.prototype.hasOwnProperty.call(LEGACY_MOTION_LABELS, key)) values[key] = settings[key];
-  });
-  return profileSummary(values) || 'No changes: follows Detection & Live.';
-}
-
-// Motion-engine values an older version stored on this camera. They moved to
-// the global Advanced Motion Engine and are not part of any profile, but still
-// apply until cleared, so they ride along in hidden fields and are listed.
-function legacyMotionOverridesHtml(camera, mode) {
-  var stored = ((camera.detection_profiles || {})[mode]) || {};
-  var keys = Object.keys(LEGACY_MOTION_LABELS);
-  var hidden = keys.map(function(key) {
-    var value = stored[key];
-    return '<input type="hidden" name="' + mode + '_' + key + '" data-legacy-motion-override="' + mode + '" value="' + escapeHtml(value == null ? '' : String(value)) + '" />';
-  }).join('');
-  var set = keys.filter(function(key) { return stored[key] != null && stored[key] !== ''; });
-  var label = mode === 'night' ? 'Night' : 'Day';
-  var note = set.length
-    ? '<p class="form-help muted" data-legacy-motion-note="' + mode + '">In ' + label + ' this camera also overrides ' +
-      escapeHtml(set.map(function(key) { return LEGACY_MOTION_LABELS[key] + ' (' + stored[key] + ')'; }).join(', ')) +
-      ', set before these moved to the global Advanced Motion Engine. <button type="button" class="secondary legacy-motion-clear" data-clear-legacy-motion="' + mode + '">Use the global values</button></p>'
-    : '';
-  return hidden + note;
-}
-
 function profileLinkSectionHtml(camera) {
   var profiles = camera.detection_profiles || {};
   var field = function(mode) {
     var label = mode === 'night' ? 'Night Profile' : 'Day Profile';
     var selected = profiles[mode + '_preset_id'] || '';
     return '<label><span>' + label + '</span><select name="profile_' + mode + '_preset" data-profile-select="' + mode + '">' +
-      profileSelectOptionsHtml(mode, selected) + '</select>' +
-      '<small class="profile-select-summary" data-profile-summary="' + mode + '">' + escapeHtml(profileSelectSummary(camera, mode, selected)) + '</small></label>';
+      profileSelectOptionsHtml(mode, selected) + '</select></label>';
   };
   return '<div class="cam-edit-section">' +
-    '<h4 class="cam-edit-section-title">Day &amp; Night Profiles</h4>' +
-    '<p class="form-help muted">Each profile is a named set of detection settings. Create and edit them on <a href="/settings#profiles">Settings → Camera Profiles</a>; editing a profile there updates every camera that uses it.</p>' +
+    '<h4 class="cam-edit-section-title">Day &amp; Night Profiles <a class="cam-edit-section-link" href="/settings#profiles">Manage Profiles</a></h4>' +
     '<div class="form-grid profile-link-grid">' + field('day') + field('night') + '</div>' +
-    legacyMotionOverridesHtml(camera, 'day') + legacyMotionOverridesHtml(camera, 'night') +
     '</div>';
 }
 
@@ -573,15 +532,6 @@ function wireEditFormHandlers(index) {
   bindPtzTrackPicker(form);
 
   bindPixelThresholdPresets(form);
-  form.querySelectorAll('[data-clear-legacy-motion]').forEach(function(button) {
-    button.addEventListener('click', function() {
-      var mode = button.dataset.clearLegacyMotion;
-      form.querySelectorAll('[data-legacy-motion-override="' + mode + '"]').forEach(function(input) { input.value = ''; });
-      var note = form.querySelector('[data-legacy-motion-note="' + mode + '"]');
-      if (note) note.textContent = 'Older engine overrides cleared. Save the camera to apply.';
-    });
-  });
-
   // Backend toggle
   var backendSelect = form.querySelector('[name="backend"]');
   if (backendSelect) {
@@ -628,14 +578,6 @@ function wireEditFormHandlers(index) {
       }
     });
   }
-  // Show what the chosen Day / Night profile changes as soon as it is picked.
-  form.querySelectorAll('[data-profile-select]').forEach(function(select) {
-    select.addEventListener('change', function() {
-      var mode = select.dataset.profileSelect;
-      var summary = form.querySelector('[data-profile-summary="' + mode + '"]');
-      if (summary) summary.textContent = profileSelectSummary(cameras[index] || {}, mode, select.value);
-    });
-  });
 
 
   // Form submit
@@ -727,18 +669,8 @@ function collectFormData(form) {
   var cameraIndex = parseInt(getVal('camera_index'), 10);
   var existingProfiles = cameras[cameraIndex]?.detection_profiles || {};
   var activeProfile = getName('detection_profile') || existingProfiles.active || 'day';
-  // Only which profile each mode uses is sent; the server copies the profile's
-  // values in. The hidden legacy motion fields go too, so "Use the global
-  // values" can clear them (an empty field is sent as null).
-  var legacyOverrides = function(mode) {
-    var values = {};
-    form.querySelectorAll('[data-legacy-motion-override="' + mode + '"]').forEach(function(input) {
-      var key = input.name.slice(mode.length + 1);
-      var raw = String(input.value || '').trim();
-      values[key] = raw === '' ? null : (key === 'motion_algorithm' ? raw : Number(raw));
-    });
-    return values;
-  };
+  // Only which profile each mode uses is sent; the server copies the
+  // profile's values in.
   var profiles = {
     active: activeProfile === 'night' ? 'night' : 'day',
     source: ['manual', 'schedule', 'solar', 'onvif'].includes(getName('profile_source')) ? getName('profile_source') : 'manual',
@@ -746,8 +678,6 @@ function collectFormData(form) {
     night_preset_id: getName('profile_night_preset') || null,
     day_start: getName('profile_day_start') || '07:00',
     night_start: getName('profile_night_start') || '19:00',
-    day: legacyOverrides('day'),
-    night: legacyOverrides('night'),
   };
   return {
     id: getName('id') || ('camera-' + (cameras.length + 1)),
