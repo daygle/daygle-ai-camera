@@ -20,6 +20,8 @@ Exported symbols:
 from __future__ import annotations
 
 import logging
+import os
+import queue
 import shutil
 import subprocess
 import threading
@@ -163,7 +165,7 @@ def _fresh_sidecar(file_path: Path, playback_path: Path) -> bool:
     return playback_path.exists() and file_path.exists() and playback_path.stat().st_mtime >= file_path.stat().st_mtime
 
 
-def recording_stream_path(file_path: Path) -> Path:
+def recording_stream_path(file_path: Path, *, low_priority: bool = False) -> Path:
     playback_path = recording_playback_sidecar_path(file_path)
     if _fresh_sidecar(file_path, playback_path):
         return playback_path
@@ -181,12 +183,12 @@ def recording_stream_path(file_path: Path) -> Path:
             and time.time() - failed_marker.stat().st_mtime < PLAYBACK_FAILURE_RETRY_SECONDS
         ):
             return file_path
-        return _convert_for_playback(file_path, playback_path, failed_marker)
+        return _convert_for_playback(file_path, playback_path, failed_marker, low_priority)
 
 
-def _convert_for_playback(file_path: Path, playback_path: Path, failed_marker: Path) -> Path:
+def _convert_for_playback(file_path: Path, playback_path: Path, failed_marker: Path, low_priority: bool = False) -> Path:
     try:
-        transcode_recording_to_mp4(file_path, playback_path)
+        transcode_recording_to_mp4(file_path, playback_path, **({'low_priority': True} if low_priority else {}))
     except Exception as exc:
         logger.warning('Recording playback conversion failed for %s: %s', file_path, exc)
         try:
@@ -320,27 +322,104 @@ def probe_video_duration(file_path: Path) -> float | None:
         return None
 
 
-def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
+# H.264 encoders for the browser-playback copy, tried in order. NVENC (the
+# NVIDIA card's video encoder) is used when the app already decodes video on the
+# GPU (Settings > Video Decoding) and this ffmpeg has it: an H.265/H.265+ clip
+# then converts many times faster than real time without loading the CPU. Any
+# failure falls back to libx264 on the CPU.
+_NVENC_PROBE_TTL_SECONDS = 600.0
+_nvenc_probe: dict[str, Any] = {'at': 0.0, 'ok': False}
+
+
+def _ffmpeg_has_h264_nvenc() -> bool:
+    if _nvenc_probe['at'] and time.monotonic() - float(_nvenc_probe['at']) < _NVENC_PROBE_TTL_SECONDS:
+        return bool(_nvenc_probe['ok'])
+    ffmpeg = _FFMPEG or shutil.which('ffmpeg')
+    ok = False
+    if ffmpeg:
+        try:
+            result = subprocess.run([ffmpeg, '-hide_banner', '-encoders'], capture_output=True, text=True, timeout=10, check=False)
+            ok = result.returncode == 0 and any(
+                len(line.split()) >= 2 and line.split()[1] == 'h264_nvenc' for line in (result.stdout or '').splitlines()
+            )
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+    _nvenc_probe.update(at=time.monotonic(), ok=ok)
+    return ok
+
+
+def _playback_encode_attempts() -> list[tuple[str, list[str], list[str]]]:
+    """``(name, input_args, video_output_args)`` per encoder, in order."""
+    cpu = ('cpu', [], ['-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'main', '-level', '4.0', '-pix_fmt', 'yuv420p'])
+    try:
+        from app.config_facades import effective_live_config
+        from app.video_decode import resolve_video_decode
+        decode = resolve_video_decode(effective_live_config().get('video_decode'))
+    except Exception:  # noqa: BLE001 - no settings yet (tests, early start-up): CPU
+        decode = 'cpu'
+    if decode == 'gpu' and _ffmpeg_has_h264_nvenc():
+        gpu = ('gpu', ['-hwaccel', 'cuda'], ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23', '-profile:v', 'main', '-pix_fmt', 'yuv420p'])
+        return [gpu, cpu]
+    return [cpu]
+
+
+def _lower_priority() -> None:  # pragma: no cover - runs in the ffmpeg child
+    try:
+        os.nice(10)
+    except OSError:
+        pass
+
+
+def transcode_recording_to_mp4(source_path: Path, output_path: Path, *, low_priority: bool = False) -> None:
+    """Write a browser-playable H.264/AAC copy of ``source_path`` to ``output_path``.
+
+    ``low_priority`` (background pre-conversion) runs ffmpeg at a lower CPU
+    priority so it never competes with live detection.
+    """
     ffmpeg = _FFMPEG or shutil.which('ffmpeg')
     if not ffmpeg:
         raise RuntimeError('ffmpeg is required to convert recordings for browser playback.')
+    duration = probe_video_duration(source_path) or 0.0
+    timeout_seconds = max(120, int(duration * 3) + 60)
+    last_error: BaseException | None = None
+    for name, input_args, video_args in _playback_encode_attempts():
+        try:
+            _transcode_attempt(ffmpeg, source_path, output_path, input_args, video_args, timeout_seconds, low_priority)
+            return
+        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+            last_error = exc
+            if name != 'cpu':
+                logger.info('GPU playback conversion failed for %s, retrying on the CPU: %s', source_path, exc)
+    assert last_error is not None
+    raise last_error
+
+
+def _transcode_attempt(
+    ffmpeg: str,
+    source_path: Path,
+    output_path: Path,
+    input_args: list[str],
+    video_args: list[str],
+    timeout_seconds: int,
+    low_priority: bool,
+) -> None:
     # Unique per attempt, so a concurrent attempt can never delete or replace
     # this one's output while ffmpeg is writing it.
     tmp_path = output_path.with_name(f'{output_path.stem}.{uuid.uuid4().hex[:8]}.tmp{output_path.suffix}')
     command = [
         ffmpeg, '-y',
         '-fflags', '+discardcorrupt', '-err_detect', 'ignore_err',
+        *input_args,
         '-i', str(source_path),
         '-map', '0:v:0', '-map', '0:a:0?',
-        '-c:v', 'libx264', '-c:a', 'aac', '-b:a', '128k',
-        '-preset', 'veryfast', '-profile:v', 'main', '-level', '4.0',
-        '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+        *video_args,
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
         str(tmp_path),
     ]
-    duration = probe_video_duration(source_path) or 0.0
-    timeout_seconds = max(120, int(duration * 3) + 60)
+    extra: dict[str, Any] = {'preexec_fn': _lower_priority} if low_priority and os.name == 'posix' else {}
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds, check=False)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds, check=False, **extra)
         if not tmp_path.exists():
             raise RuntimeError('MP4 conversion did not create an output file.')
         if result.returncode != 0 and (not mp4_has_video_stream(tmp_path)):
@@ -353,6 +432,107 @@ def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
         # Whatever happened (including an ffmpeg timeout), never leave this
         # attempt's partial file behind.
         tmp_path.unlink(missing_ok=True)
+
+
+def hevc_mp4_tag_args(file_path: Path | None) -> list[str]:
+    """``['-tag:v', 'hvc1']`` when ``file_path``'s video is H.265, else ``[]``.
+
+    ffmpeg stream-copies H.265 into MP4 with the ``hev1`` tag, which Apple
+    players (iPhone, iPad, Mac / QuickTime) refuse; ``hvc1`` plays everywhere.
+    The tag must not be set on H.264 - ffmpeg then fails to write the file.
+    """
+    if file_path is None:
+        return []
+    return ['-tag:v', 'hvc1'] if mp4_sample_entry_codec(Path(file_path)) == 'hevc' else []
+
+
+_MP4_CODEC_ENTRIES = ((b'hvc1', 'hevc'), (b'hev1', 'hevc'), (b'avc1', 'h264'), (b'avc3', 'h264'))
+_MP4_SCAN_BYTES = 256 * 1024
+
+
+def mp4_sample_entry_codec(file_path: Path) -> str | None:
+    """``'hevc'`` / ``'h264'`` from an MP4's video sample entry, else None.
+
+    Reads the codec's four-character code (``hvc1``/``hev1``/``avc1``) from the
+    file's ``moov`` box at the start (fragmented or faststart files) or the end
+    (plain segment output) without starting an ffprobe process: it runs for
+    every recorded segment and chunk. Unknown -> None, i.e. no special tag.
+    """
+    try:
+        size = file_path.stat().st_size
+        with file_path.open('rb') as handle:
+            head = handle.read(_MP4_SCAN_BYTES)
+            tail = b''
+            if size > _MP4_SCAN_BYTES:
+                handle.seek(max(_MP4_SCAN_BYTES, size - _MP4_SCAN_BYTES))
+                tail = handle.read(_MP4_SCAN_BYTES)
+    except OSError:
+        return None
+    for chunk in (head, tail):
+        stsd = chunk.find(b'stsd')
+        if stsd < 0:
+            continue
+        entry = chunk[stsd:stsd + 64]
+        for code, codec in _MP4_CODEC_ENTRIES:
+            if code in entry:
+                return codec
+    return None
+
+
+def newest_video_file(directory: Path | None) -> Path | None:
+    """The most recent finished ``.mp4`` in ``directory`` (to learn a camera's codec)."""
+    if directory is None:
+        return None
+    try:
+        candidates = [
+            path for path in Path(directory).glob('*.mp4')
+            if path.is_file() and '.tmp' not in path.name and path.stat().st_size > 0
+        ]
+    except OSError:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
+
+
+# Background pre-conversion: an H.265/H.265+ recording gets its H.264 playback
+# copy right after it is saved, one clip at a time and at low priority, so
+# opening it later is instant instead of waiting (possibly past a reverse
+# proxy's request timeout) for the conversion.
+_preconvert_queue: queue.Queue[Path] = queue.Queue()
+_preconvert_pending: set[str] = set()
+_preconvert_guard = threading.Lock()
+_preconvert_thread: threading.Thread | None = None
+
+
+def schedule_playback_conversion(file_path: Path | str | None) -> bool:
+    """Queue ``file_path`` for its browser-playback copy. Returns whether queued."""
+    global _preconvert_thread
+    if not file_path:
+        return False
+    path = Path(file_path)
+    key = str(path)
+    with _preconvert_guard:
+        if key in _preconvert_pending:
+            return False
+        _preconvert_pending.add(key)
+        if _preconvert_thread is None or not _preconvert_thread.is_alive():
+            _preconvert_thread = threading.Thread(target=_preconvert_worker, name='playback-preconvert', daemon=True)
+            _preconvert_thread.start()
+    _preconvert_queue.put(path)
+    return True
+
+
+def _preconvert_worker() -> None:
+    while True:
+        path = _preconvert_queue.get()
+        try:
+            if path.exists() and not mp4_is_browser_playable(path):
+                recording_stream_path(path, low_priority=True)
+        except Exception as exc:  # noqa: BLE001 - background best effort
+            logger.debug('Background playback conversion skipped for %s: %s', path, exc)
+        finally:
+            with _preconvert_guard:
+                _preconvert_pending.discard(str(path))
+            _preconvert_queue.task_done()
 
 
 def mp4_has_video_stream(file_path: Path) -> bool:

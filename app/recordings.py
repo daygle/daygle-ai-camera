@@ -18,6 +18,7 @@ from typing import Any, Callable
 import app.state as _state
 from app.camera_id import camera_storage_key
 from app.detection_status import json_safe_detections
+from app.media_utils import hevc_mp4_tag_args, newest_video_file
 from app.frame_capture_clock import (
     FrameCaptureClock,
     detection_frame_output_args,
@@ -787,6 +788,8 @@ class RecordingService:
         chunks_dir.mkdir(parents=True, exist_ok=True)
         output_pattern = chunks_dir / f'continuous_{camera_key}_%Y%m%dT%H%M%S.mp4'
         list_file = chunks_dir / '.segment_list.txt'
+        # The camera's codec, learned from its last chunk (hvc1 for H.265).
+        video_tag_args = hevc_mp4_tag_args(newest_video_file(chunks_dir))
 
         consecutive_failures = 0
         while not stop_event.is_set():
@@ -805,6 +808,7 @@ class RecordingService:
                 '-map', '0:v:0',
                 '-map', '0:a:0?',
                 '-c:v', 'copy',
+                *video_tag_args,
                 '-c:a', 'aac',
                 '-b:a', '128k',
                 '-f', 'segment',
@@ -1117,6 +1121,8 @@ class RecordingService:
             # from imperfect RTSP segments.
             '-c',
             'copy',
+            # H.265 copied into MP4 needs the hvc1 tag to play on Apple devices.
+            *hevc_mp4_tag_args(segments[0] if segments else None),
             '-avoid_negative_ts',
             'make_zero',
             '-movflags',
@@ -1553,6 +1559,9 @@ class RecordingService:
                     '-map', '0:v:0',
                     '-map', '0:a:0?',
                     '-c:v', 'copy',
+                    # The camera's codec, from its newest chunk or pre-roll
+                    # segment (hvc1 for H.265 so Apple devices can play it).
+                    *hevc_mp4_tag_args(newest_video_file(chunks_dir) or newest_video_file(camera_dir)),
                     '-c:a', 'aac',
                     '-b:a', '128k',
                     '-f', 'segment',
@@ -2891,6 +2900,7 @@ class RecordingService:
                 '1:a:0',
                 '-c:v',
                 'copy',
+                *hevc_mp4_tag_args(video_path),
                 '-c:a',
                 'aac',
                 '-b:a',

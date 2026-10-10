@@ -120,7 +120,7 @@ from app.detection_status import (
     detection_label_strings,
     json_safe_detections,
 )
-from app.media_utils import probe_video_duration, safe_storage_path
+from app.media_utils import probe_video_duration, safe_storage_path, schedule_playback_conversion
 
 logger = logging.getLogger('daygle.ai')
 
@@ -1025,6 +1025,9 @@ def start_rtsp_recording_capture(
                 content_start_ts, content_start_ts + content_seconds,
             )
             captured_end_ts_holder['ts'] = content_start_ts + content_seconds
+            # An H.265/H.265+ clip gets its browser-playback copy now, in the
+            # background, so opening it later does not wait for a conversion.
+            schedule_playback_conversion(file_path)
         except Exception as exc:
             logger.warning(
                 'RTSP recording capture failed for event %s, writing generated fallback: %s',
