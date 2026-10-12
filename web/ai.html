@@ -66,26 +66,28 @@
         <div class="settings-section-icon" aria-hidden="true">💬</div>
         <div>
           <h2>Descriptions &amp; Search</h2>
-          <p class="settings-section-subtitle">The model writes a one-sentence description of each event and tags notable objects (e.g. ladder, parcel). Descriptions lead your email and push notifications, show in the Events list, and make footage searchable in plain English on the <a href="/events">Events</a> page.</p>
+          <p class="settings-section-subtitle">The model writes a one-sentence description of events and/or tags notable objects (e.g. ladder, parcel), set separately for alert events and all other events. Descriptions lead your email and push notifications, show in the Events list, and make footage searchable in plain English on the <a href="/events">Events</a> page.</p>
         </div>
       </div>
       <div class="form-grid">
         <label>
-          <span>Describe Events <span class="info-tip" data-tip="Alerts only: events that notify. All events: every event with a snapshot, described in the background (more GPU time, and everything becomes searchable). Default: Off" title="Alerts only: events that notify. All events: every event with a snapshot, described in the background (more GPU time, and everything becomes searchable). Default: Off" tabindex="0" aria-label="Help: Alerts only: events that notify. All events: every event with a snapshot, described in the background (more GPU time, and everything becomes searchable). Default: Off"></span></span>
-          <select name="describe_events">
+          <span>Alert Events <span class="info-tip" data-tip="What the model writes for events that send an alert. A description leads the email and push notification; tags show in the Events list and search. Tags only is the quickest reply. Default: Off" title="What the model writes for events that send an alert. A description leads the email and push notification; tags show in the Events list and search. Tags only is the quickest reply. Default: Off" tabindex="0" aria-label="Help: What the model writes for events that send an alert. A description leads the email and push notification; tags show in the Events list and search. Tags only is the quickest reply. Default: Off"></span></span>
+          <select name="describe_alerts">
             <option value="off">Off</option>
-            <option value="alerts">Alerts Only</option>
-            <option value="all">All Events</option>
+            <option value="tags">Tags Only</option>
+            <option value="description">Description Only</option>
+            <option value="both">Description and Tags</option>
           </select></label>
         <label>
-          <span>Describe With <span class="info-tip" data-tip="What the model writes for each described event. Tags only is the quickest reply: just object tags (e.g. ladder, parcel) for the Events list, search and AI tag alerts, with no sentence in notifications. Cameras with an AI tag alert always get what that alert matches on. Default: Description and tags" title="What the model writes for each described event. Tags only is the quickest reply: just object tags (e.g. ladder, parcel) for the Events list, search and AI tag alerts, with no sentence in notifications. Cameras with an AI tag alert always get what that alert matches on. Default: Description and tags" tabindex="0" aria-label="Help: What the model writes for each described event. Tags only is the quickest reply: just object tags (e.g. ladder, parcel) for the Events list, search and AI tag alerts, with no sentence in notifications. Cameras with an AI tag alert always get what that alert matches on. Default: Description and tags"></span></span>
-          <select name="describe_content">
-            <option value="both">Description and Tags</option>
-            <option value="description">Description Only</option>
+          <span>Other Events <span class="info-tip" data-tip="What the model writes for every other event with a snapshot, in the background behind alert work (more GPU time; Tags only is the quickest). Makes all footage searchable. Default: Off" title="What the model writes for every other event with a snapshot, in the background behind alert work (more GPU time; Tags only is the quickest). Makes all footage searchable. Default: Off" tabindex="0" aria-label="Help: What the model writes for every other event with a snapshot, in the background behind alert work (more GPU time; Tags only is the quickest). Makes all footage searchable. Default: Off"></span></span>
+          <select name="describe_other_events">
+            <option value="off">Off</option>
             <option value="tags">Tags Only</option>
+            <option value="description">Description Only</option>
+            <option value="both">Description and Tags</option>
           </select></label>
         <fieldset class="ai-verification-cameras">
-          <legend>Cameras <span class="info-tip" data-tip="Cameras whose events are described (per Describe Events). None ticked = all cameras. Cameras with an AI tag alert are always described." title="Cameras whose events are described (per Describe Events). None ticked = all cameras. Cameras with an AI tag alert are always described." tabindex="0" aria-label="Help: Cameras whose events are described (per Describe Events). None ticked = all cameras. Cameras with an AI tag alert are always described."></span></legend>
+          <legend>Cameras <span class="info-tip" data-tip="Cameras whose events are described (per Alert Events and Other Events). None ticked = all cameras. Cameras with an AI tag alert are always described." title="Cameras whose events are described (per Alert Events and Other Events). None ticked = all cameras. Cameras with an AI tag alert are always described." tabindex="0" aria-label="Help: Cameras whose events are described (per Alert Events and Other Events). None ticked = all cameras. Cameras with an AI tag alert are always described."></span></legend>
           <div id="aiCameras" class="ai-verification-camera-list"><span class="muted">Loading cameras…</span></div>
         </fieldset>
       </div>
@@ -102,7 +104,7 @@
         <button id="aiBackfillBtn" class="secondary" type="button">Describe Past Events</button>
         <span id="aiBackfillStatus" class="muted" aria-live="polite"></span>
       </div>
-      <p class="muted ai-page-note">Save <strong>Describe Events</strong> first; past events use the saved settings.</p>
+      <p class="muted ai-page-note">Save <strong>Alert Events</strong> and <strong>Other Events</strong> first; past events use the saved settings.</p>
     </section>
 
     <div class="button-row ai-save-row">

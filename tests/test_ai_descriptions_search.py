@@ -653,7 +653,12 @@ def catch_up(av, monkeypatch):
         db = _CatchUpDb(events)
         monkeypatch.setattr(av._state, 'database', db)
         monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, describe_events='all'))
-        monkeypatch.setattr(av, 'camera_describe_mode', lambda cid, _s: (modes or {}).get(cid, 'all'))
+
+        def content(cid, _s, *, alerted):
+            mode = (modes or {}).get(cid, 'all')
+            return 'both' if mode == 'all' or (mode == 'alerts' and alerted) else 'off'
+
+        monkeypatch.setattr(av, 'camera_describe_content', content)
 
         def describe(event, event_id, _settings_, _name, *, evaluate_rules=True, background=False):
             calls.append((event_id, evaluate_rules))

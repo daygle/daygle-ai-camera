@@ -384,6 +384,16 @@ def test_unticked_rule_delivers_directly(av, submit_env):
     assert direct == [1] and queued == []
 
 
+def test_other_event_descriptions_alone_do_not_hold_alerts_in_the_ai_queue(av, submit_env):
+    use, _pool, direct, queued = submit_env
+    use(_settings(av, describe_alerts='off', describe_other_events='tags'))
+    av.submit_alert_notification_with_verification([{'label': 'person', 'confidence': 0.5}], 5, [], camera_id='cam')
+    assert direct == [5] and queued == []
+    use(_settings(av, describe_alerts='tags', describe_other_events='off'))
+    av.submit_alert_notification_with_verification([{'label': 'person', 'confidence': 0.5}], 6, [], camera_id='cam')
+    assert queued == [6]
+
+
 def test_ticked_rule_queues_and_full_queue_fails_open(av, submit_env):
     use, pool, direct, queued = submit_env
     use(_settings(av))
@@ -613,11 +623,39 @@ def test_describe_prompt_and_reply_follow_the_content_choice(av):
         av.parse_description_reply('A man walks by.', 'tags')
 
 
-def test_describe_content_is_validated(av, no_stored_settings):
-    assert av.validate_ai_verification_settings({'describe_content': ' Tags '})['describe_content'] == 'tags'
-    assert av.validate_ai_verification_settings({})['describe_content'] == 'both'
+def test_alert_and_other_event_content_are_validated(av, no_stored_settings):
+    settings = av.validate_ai_verification_settings({'describe_alerts': ' Both ', 'describe_other_events': 'tags'})
+    assert (settings['describe_alerts'], settings['describe_other_events']) == ('both', 'tags')
+    # The old single mode is kept in step for anything still reading it.
+    assert settings['describe_events'] == 'all'
+    assert av.validate_ai_verification_settings({'describe_alerts': 'description'})['describe_events'] == 'alerts'
     with pytest.raises(HTTPException):
-        av.validate_ai_verification_settings({'describe_content': 'everything'})
+        av.validate_ai_verification_settings({'describe_alerts': 'everything'})
+
+
+def test_turning_both_off_is_not_overridden_by_the_old_mode(av, monkeypatch):
+    stored = {'describe_alerts': 'both', 'describe_other_events': 'tags', 'describe_events': 'all'}
+    monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, **stored))
+    settings = av.validate_ai_verification_settings({'describe_alerts': 'off', 'describe_other_events': 'off'})
+    assert settings['describe_events'] == 'off' and av.describe_mode(settings) == 'off'
+
+
+@pytest.mark.parametrize('legacy, alerts, others', [('off', 'off', 'off'), ('alerts', 'both', 'off'), ('all', 'both', 'both')])
+def test_old_describe_events_setting_maps_onto_the_two_settings(av, monkeypatch, no_stored_settings,
+                                                               legacy, alerts, others):
+    monkeypatch.setattr(av._state, 'database', _FakeDb({'describe_events': legacy}))
+    settings = av._build_effective_settings()
+    assert (settings['describe_alerts'], settings['describe_other_events']) == (alerts, others)
+    # An older API client that only sends the single mode.
+    payload = av.validate_ai_verification_settings({'describe_events': legacy})
+    assert (payload['describe_alerts'], payload['describe_other_events']) == (alerts, others)
+
+
+@pytest.mark.parametrize('alerts, others, mode', [
+    ('off', 'off', 'off'), ('tags', 'off', 'alerts'), ('off', 'tags', 'all'), ('both', 'description', 'all'),
+])
+def test_describe_mode_follows_the_two_settings(av, alerts, others, mode):
+    assert av.describe_mode(_settings(av, describe_alerts=alerts, describe_other_events=others)) == mode
 
 
 @pytest.mark.parametrize('content, modes, expected', [
@@ -627,10 +665,28 @@ def test_describe_content_is_validated(av, no_stored_settings):
     ('description', {'both'}, 'description'),
     ('description', {'tags'}, 'both'),
     ('both', {'tags'}, 'both'),
+    ('off', {'tags'}, 'both'),
 ])
 def test_tag_rules_widen_the_content_to_what_they_match_on(av, monkeypatch, content, modes, expected):
-    monkeypatch.setattr(importlib.import_module('app.ai_tag_alerts'), 'camera_rule_match_modes', lambda _cid: modes)
-    assert av.camera_describe_content('cam', _settings(av, describe_content=content)) == expected
+    tag_alerts = importlib.import_module('app.ai_tag_alerts')
+    monkeypatch.setattr(tag_alerts, 'camera_has_rules', lambda _cid: True)
+    monkeypatch.setattr(tag_alerts, 'camera_rule_match_modes', lambda _cid: modes)
+    settings = _settings(av, describe_alerts=content, describe_other_events=content)
+    assert av.camera_describe_content('cam', settings, alerted=True) == expected
+    assert av.camera_describe_content('cam', settings, alerted=False) == expected
+
+
+def test_content_is_chosen_per_event_kind_and_camera_scope(av, monkeypatch):
+    monkeypatch.setattr(importlib.import_module('app.ai_tag_alerts'), 'camera_has_rules', lambda _cid: False)
+    settings = _settings(av, describe_alerts='both', describe_other_events='tags', camera_ids=['cam'])
+    assert av.camera_describe_content('cam', settings, alerted=True) == 'both'
+    assert av.camera_describe_content('cam', settings, alerted=False) == 'tags'
+    assert av.camera_describe_content('elsewhere', settings, alerted=True) == 'off'
+    alerted = {'alert_triggered': True, 'metadata': {'camera_id': 'cam'}}
+    rejected = {**alerted, 'metadata': {'camera_id': 'cam', 'ai_verification': {'delivered': False}}}
+    assert av.event_describe_content(alerted, settings) == 'both'
+    assert av.event_describe_content(rejected, settings) == 'tags'
+    assert av.event_describe_content({'metadata': {'camera_id': 'cam'}}, settings) == 'tags'
 
 
 @pytest.fixture
@@ -748,14 +804,40 @@ def test_all_rejected_in_alerts_mode_stores_no_description(av, combined):
 
 def test_tags_only_description_is_stored_without_text(av, combined):
     configure, forwarded, calls, catch_ups = combined
-    db = configure(check=({'person': (True, 'ok')}, ('', ['ladder'])),
-                   describe_events='alerts', describe_content='tags')
+    db = configure(check=({'person': (True, 'ok')}, ('', ['ladder'])), describe_alerts='tags')
     triggered = [_alert('person', 0.6)]
     av.verify_and_forward(triggered, 26, [], '', camera_id='cam')
     assert calls == [('check', ('person',), 'tags')]
     assert db.descriptions[26]['text'] == '' and db.descriptions[26]['tags'] == ['ladder']
     # No sentence to lead the notification, and nothing left for the catch-up.
     assert forwarded == [triggered] and catch_ups == []
+
+
+def test_alerts_and_other_events_get_their_own_content(av, combined):
+    configure, forwarded, calls, _ = combined
+    configure(check=({'person': (True, 'walking')}, ('A person at the gate.', ['bag'])),
+              describe_alerts='both', describe_other_events='tags')
+    av.verify_and_forward([_alert('person', 0.6)], 27, [], '', camera_id='cam')
+    assert calls == [('check', ('person',), 'both')]
+    assert forwarded[0][0]['ai_description'] == 'A person at the gate.'
+
+
+def test_rejected_alert_is_described_as_another_event(av, combined):
+    configure, forwarded, calls, _ = combined
+    db = configure(check=({'person': (False, 'shadow')}, ('A shadow on the path.', ['bag'])),
+                   describe=('', ['bin']), describe_alerts='both', describe_other_events='tags')
+    av.verify_and_forward([_alert('person', 0.6)], 28, [], '', camera_id='cam')
+    # The combined reply was written for an alert; the event is not one now.
+    assert calls == [('check', ('person',), 'both'), ('describe', 'tags')]
+    assert forwarded == [] and db.descriptions[28]['tags'] == ['bin']
+
+
+def test_alert_description_off_still_verifies_in_one_question(av, combined):
+    configure, forwarded, calls, _ = combined
+    db = configure(describe_alerts='off', describe_other_events='tags')
+    av.verify_and_forward([_alert('person', 0.6)], 29, [], '', camera_id='cam')
+    assert calls == [('ask', 'person')]
+    assert forwarded == [[_alert('person', 0.6)]] and db.descriptions == {}
 
 
 def test_small_objects_far_apart_get_their_own_close_ups(av):

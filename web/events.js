@@ -478,7 +478,7 @@ async function runEventSearch(query) {
   }
   renderStats();
   if (!allEvents.length) {
-    els.eventFeed.innerHTML = '<p class="muted empty-state">No described events matched. Only events described by the AI model are searchable this way; turn on Describe Events under Intelligence → AI, or describe past events there. The Search button matches labels, cameras, zones and faces on every event.</p>';
+    els.eventFeed.innerHTML = '<p class="muted empty-state">No described events matched. Only events described by the AI model are searchable this way; turn on Alert Events or Other Events descriptions under Intelligence → AI, or describe past events there. The Search button matches labels, cameras, zones and faces on every event.</p>';
     updateEventListStatus();
     return;
   }

@@ -22,7 +22,8 @@ queue, led by the description. It is labelled *unconfirmed*: unlike object
 detection, nothing but the language model saw the object.
 
 Cameras with an enabled rule have every event described, whatever the global
-"Describe Events" mode, because a rule can only see described events.
+Alert Events / Other Events settings, because a rule can only see described
+events, and get at least what their rules match on.
 Backfilled (past) events never fire rules.
 """
 
