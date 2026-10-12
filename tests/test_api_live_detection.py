@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from tests.support import _load_app, _m
+from tests.support import LocalClient, _load_app, _login, _m, _server, _setup_admin
 
 
 def test_live_status_preserves_best_object_confidence_for_vision_card(tmp_path, monkeypatch):
@@ -724,3 +724,76 @@ def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_
     assert event['recordings'][0]['trigger_type'] == 'continuous'
     status = mods.detection_status.live_detection_status_payload('camera-1')
     assert status['recording_state'] == 'linked'
+
+
+def _jpeg(width, height):
+    cv2 = pytest.importorskip('cv2')
+    np = pytest.importorskip('numpy')
+    ok, encoded = cv2.imencode('.jpg', np.zeros((height, width, 3), dtype=np.uint8))
+    assert ok
+    return encoded.tobytes()
+
+
+def _jpeg_width(data):
+    cv2 = pytest.importorskip('cv2')
+    np = pytest.importorskip('numpy')
+    return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR).shape[1]
+
+
+def test_live_snapshot_width_downscales_and_caches_per_frame(monkeypatch):
+    """Grid tiles ask for a narrower frame; one encode serves every poll of that frame."""
+    import app.api.live_router as live_router
+    import app.live_snapshot as live_snapshot
+
+    monkeypatch.setattr(live_router, '_scaled_snapshots', {})
+    frame = _jpeg(1920, 1080)
+    renders = []
+    real_render = live_snapshot.render_live_snapshot_jpeg_overlay
+    monkeypatch.setattr(live_snapshot, 'render_live_snapshot_jpeg_overlay',
+                        lambda *a, **kw: renders.append(kw) or real_render(*a, **kw))
+
+    small = live_router._scaled_snapshot('camera-1', frame, 10.0, 640)
+    assert _jpeg_width(small) == 640 and len(small) < len(frame)
+    assert live_router._scaled_snapshot('camera-1', frame, 10.0, 640) is small
+    assert len(renders) == 1
+    # A new frame is encoded again; no width serves the frame untouched.
+    live_router._scaled_snapshot('camera-1', frame, 11.0, 640)
+    assert len(renders) == 2
+    assert live_router._scaled_snapshot('camera-1', frame, 11.0, None) is frame
+    # Never upscaled.
+    assert _jpeg_width(live_router._scaled_snapshot('camera-1', _jpeg(320, 180), 12.0, 1280)) == 320
+
+
+def test_live_snapshot_endpoint_serves_the_requested_width(monkeypatch):
+    import app.api.live_router as live_router
+
+    monkeypatch.setattr(live_router, '_scaled_snapshots', {})
+    monkeypatch.setattr(live_router, 'require_user', lambda _request: None)
+    monkeypatch.setattr(live_router, 'get_camera_config', lambda _cid: {'id': 'camera-1'})
+    monkeypatch.setattr(live_router, 'build_stream_url', lambda _config: 'rtsp://camera')
+    monkeypatch.setattr(live_router, '_queue_detection_snapshot', lambda *a, **kw: None)
+    frame = _jpeg(1920, 1080)
+
+    class Recording:
+        def latest_frame_jpeg(self, _camera_id):
+            return frame, 42.0
+
+    full = live_router.live_snapshot(None, camera_id='camera-1', width=None, recording_service=Recording())
+    assert full.body == frame and full.headers['X-Frame-Timestamp'] == '42.000000'
+    tile = live_router.live_snapshot(None, camera_id='camera-1', width=640, recording_service=Recording())
+    assert _jpeg_width(tile.body) == 640
+
+
+@pytest.mark.parametrize('width', [10, 100000, 'wide'])
+def test_live_snapshot_rejects_an_unusable_width(tmp_path, monkeypatch, width):
+    app, _db = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        status, _headers, _body = client.request(f'/api/live/snapshot?camera_id=camera-1&width={width}')
+        assert status == 422
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
