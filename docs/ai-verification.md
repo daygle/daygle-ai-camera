@@ -93,9 +93,11 @@ Go to **Intelligence → AI** (admin only). The page has four sections: Model Se
 | Server URL | `http://127.0.0.1:11434/v1` | The OpenAI-compatible base URL. |
 | Model | `gemma3:4b` | Must be a model that can read images. |
 | API Key | (none) | Only if the server requires one. Ollama doesn't. |
-| Timeout (seconds) | 20 | Per question for alerts. On timeout the alert is sent unverified. Background descriptions (Describe Events: All events, catch-up, Describe Past Events) wait up to 90 s, because the model keeps working on a request the app gives up on. |
+| Timeout (seconds) | 20 | Per question for alerts. On timeout the alert is sent unverified. Background descriptions (Other Events, catch-up, Describe Past Events) wait up to 90 s, because the model keeps working on a request the app gives up on. |
 | Focus on Object | Enabled | Sends a close-up around the detected object, with context, instead of the whole frame. Small models judge small or distant objects much better this way. |
-| Cameras | (all) | Under Descriptions & Search. Tick cameras to limit **Describe Events** to them. It does not affect verification, which is set per alert. |
+| Alert Events | Off | Under Descriptions & Search. What the model writes for events that send an alert: **Off**, **Tags only**, **Description only**, or **Description and tags**. See [Event descriptions](#event-descriptions). |
+| Other Events | Off | The same choice for every other event with a snapshot. |
+| Cameras | (all) | Under Descriptions & Search. Tick cameras to limit **Alert Events** and **Other Events** to them. It does not affect verification, which is set per alert. |
 
 **Test on Latest Event** sends the most recent object event's snapshot to the
 model, using the unsaved form values, and shows the verdict and how long it
@@ -104,16 +106,29 @@ tick AI Verify on any alerts.
 
 ## Event descriptions
 
-With **Describe Events** set, the same model writes one factual sentence about
-each event's snapshot, for example *"A courier in a hi-vis vest leaves a
-parcel at the front door."*
+The same model can write one factual sentence about each event's snapshot,
+for example *"A courier in a hi-vis vest leaves a parcel at the front door."*,
+and tag the notable objects in it (*courier*, *hi-vis vest*, *parcel*).
 
-- **Alerts only**: events that send a notification. The sentence is the first
-  line of the email and the push notification, replacing "Alert triggered:
-  person detected (87%)"; the confidence and other details stay below it.
-- **All events**: also every event that does not alert, described in the
+Two settings choose what is written, so alerts and everything else can
+differ (say, a description for alerts and tags only for the rest):
+
+- **Alert Events**: events that send a notification. A description is the
+  first line of the email and the push notification, replacing "Alert
+  triggered: person detected (87%)"; the confidence and other details stay
+  below it. An event whose every alert the model rejected counts as an other
+  event.
+- **Other Events**: every event that does not alert, described in the
   background behind alert work. This makes all footage searchable, but uses
-  more GPU time: one model call per event. A burst of events (a car parking
+  more GPU time: one model call per event.
+
+Each is **Off**, **Tags only**, **Description only** or **Description and
+tags**. Tags only asks for the shortest reply, so it is the quickest and
+lightest on the GPU; tags still show in the Events list, are searchable and
+feed AI tag alerts, but notifications have no sentence. A camera with an AI
+tag alert always gets what its alert matches on (see below).
+
+- **Catch-up.** A burst of events (a car parking
   can log five in a second) outruns a small model, so events that do not fit
   in the AI queue are described a little later, once the model is idle, newest
   first. Events from the last 3 hours are caught up; use **Describe Past
@@ -134,9 +149,22 @@ parcel at the front door."*
   later request queued behind it and timed out too. Skipped events are
   described by the catch-up once the model is free.
 - The description appears under the detections in the Events list and is
-  stored in the event's metadata (`ai_description`: text, model, time).
-- Verification runs first. An alert the model rejects is not described in
-  *Alerts only* mode.
+  stored in the event's metadata (`ai_description`: text, tags, model, time).
+  With **Tags only** the text is empty and only tags are kept.
+- **One request per alert.** When an alert is both verified and described,
+  or verifies several objects (a person and a car), the questions go to the
+  model in one request rather than one each: the image is the slow part of a
+  request, so this saves whole model calls before the notification goes out.
+  If the reply leaves an object unanswered, that object is asked about on its
+  own; if it leaves out the description, the event is described separately.
+  Separate requests are also used when one image cannot serve every
+  question: two small objects at opposite edges of the frame (each gets its
+  own close-up), or a camera with an AI tag alert, whose description needs the
+  whole frame, when verification wants a close-up.
+- Verification and description come back together. An event whose every
+  alert the model rejects is described as an other event: with Other Events
+  off it is not described, and with a different choice than Alert Events it
+  is described again with that choice.
 - If describing fails or times out, the notification is sent without the
   sentence. Descriptions are never a reason for an alert to be late or lost.
 - Uses the same server and model as verification. The **Cameras** list limits
@@ -185,8 +213,14 @@ class for it. Set it up per area:
 
 How it behaves:
 
-- **Every event on that camera is described**, whatever the Describe Events
-  setting. A rule can only see described events. Descriptions use the whole
+- **Every event in a rule's area is described**, whatever the Alert Events
+  and Other Events settings. A rule can only see described events. Where a
+  setting is Off, or leaves out what a rule matches on (Tags only for a rule
+  matching the description, Description only for a rule matching tags), the
+  event gets both a description and tags. An event outside every rule's
+  area could fire no rule, so it is checked before anything is queued and is
+  described only as the two settings say: with them Off, it costs no model
+  call at all. Descriptions use the whole
   scene on tag-rule cameras so a small-object focus crop cannot hide another
   area's objects; the independent check then restricts evidence to the area.
 - **An event counts as in the area** when one of its detections (object or
@@ -217,8 +251,8 @@ How it behaves:
 
 **Describe Past Events** (Intelligence → AI) describes events from the last 24 hours to
 30 days that have no description yet, up to 500 at a time, so they become
-searchable. It respects the selected cameras and **Alerts only** versus
-**All events** modes, runs in the background one event at a time, pauses while
+searchable. It respects the selected cameras and the **Alert Events** and
+**Other Events** settings, runs in the background one event at a time, pauses while
 the live AI pool is busy, and stops if descriptions are switched off.
 Already-described events are reused rather than captioned twice.
 
@@ -249,7 +283,7 @@ search runs against a full-text index that matches word forms ("carrying"
 finds "carries"). If nothing mentions every concept, it shows events that
 match any of them and says so.
 
-The model interprets questions when **Describe Events** is on. Otherwise, or
+The model interprets questions when **Alert Events** or **Other Events** is on. Otherwise, or
 without a reachable model, search still works on keywords, camera names and
 simple times (today, yesterday, this morning, this afternoon, last night).
 Only events that have a description are searchable. Non-admin users see the

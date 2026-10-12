@@ -1933,12 +1933,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         # an AI call on a notification that delivery would then skip.
         submit_alert_notification_with_verification(
             notifying, event_id, zone_rules,
-            camera_id=camera_id, camera_name=str(settings.get('name') or ''),
+            camera_id=camera_id, camera_name=str(settings.get('name') or ''), detections=recording_detections,
         )
     else:
         # No alert: in 'describe all events' mode the AI pool still captions
         # the snapshot in the background so the event is searchable.
-        submit_event_description(event_id, camera_id=camera_id, camera_name=str(settings.get('name') or ''))
+        submit_event_description(event_id, camera_id=camera_id, camera_name=str(settings.get('name') or ''),
+                                 detections=recording_detections)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     email_rules = [
         rule for rule in zone_rules

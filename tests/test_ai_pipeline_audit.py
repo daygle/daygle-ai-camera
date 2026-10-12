@@ -157,7 +157,6 @@ def test_backfill_filters_camera_and_alert_scope_before_limit(av, monkeypatch):
     monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS,
                                                                        'describe_events': 'alerts', 'camera_ids': ['cam']})
     monkeypatch.setattr(av, '_undescribed_events', lambda _: iter(events))
-    monkeypatch.setattr(av, 'camera_describe_mode', lambda cid, _: 'alerts' if cid == 'cam' else 'off')
     monkeypatch.setattr(av, '_backfill_state', {'running': False})
     captured = []
 
@@ -179,7 +178,8 @@ def test_catch_up_naive_timestamp_and_changed_scope(av, monkeypatch):
     monkeypatch.setattr(av, '_catch_up_attempted', set())
     monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: {})
     mode = ['off']
-    monkeypatch.setattr(av, 'camera_describe_mode', lambda *a: mode[0])
+    monkeypatch.setattr(av, 'camera_describe_content',
+                        lambda *_a, alerted, event=None: 'both' if mode[0] == 'all' or (mode[0] == 'alerts' and alerted) else 'off')
     calls = []
     monkeypatch.setattr(av, '_describe_and_store', lambda *a, **kw: calls.append(kw))
     assert not av.catch_up_once()

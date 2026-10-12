@@ -18,7 +18,8 @@ const AI_FORM_DEFAULTS = {
   model: 'gemma3:4b',
   api_key: '',
   timeout_seconds: 20,
-  describe_events: 'off',
+  describe_alerts: 'off',
+  describe_other_events: 'off',
 };
 // Alert verification's focus_crop is no longer on this form; the PUT merges
 // onto the stored settings, so its saved value (default on) is kept.

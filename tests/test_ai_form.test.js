@@ -24,3 +24,25 @@ test('AI settings submits an empty API key to clear stored credentials', () => {
   assert.equal(payload.timeout_seconds, 20);
   assert.equal('focus_crop' in payload, false, 'focus_crop left the form; the stored value must not be overwritten');
 });
+
+test('AI settings sends alert and other event description choices separately', () => {
+  const fields = {
+    server_url: { value: 'http://localhost:11434/v1' },
+    model: { value: 'gemma3:4b' },
+    api_key: { value: '' },
+    timeout_seconds: { value: '20' },
+    describe_alerts: { value: 'both' },
+    describe_other_events: { value: 'tags' },
+  };
+  const form = { elements: fields, addEventListener() {}, querySelectorAll: () => [] };
+  const context = vm.createContext({
+    document: { getElementById: (id) => id === 'aiSettingsForm' ? form : null },
+    window: { daygleAuthReady: new Promise(() => {}) },
+    console,
+  });
+  vm.runInContext(readFileSync(new URL('../web/ai.js', import.meta.url), 'utf8'), context);
+  const payload = vm.runInContext('aiPayload()', context);
+  assert.equal(payload.describe_alerts, 'both');
+  assert.equal(payload.describe_other_events, 'tags');
+  assert.equal('describe_events' in payload, false);
+});

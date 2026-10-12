@@ -180,6 +180,14 @@ def flow(av, monkeypatch):
             return caption, list(tags)
 
         monkeypatch.setattr(av.VisionVerifier, 'describe', describe)
+
+        def check(_self, _img, labels, _cam='', *, content=None, **_kw):
+            # The combined request answers like the separate ones would; a
+            # failed caption leaves the description for a separate request.
+            described = None if (not content or isinstance(caption, Exception)) else (caption, list(tags))
+            return dict.fromkeys(labels, verdict), described
+
+        monkeypatch.setattr(av.VisionVerifier, 'check', check)
         return db
 
     return configure, forwarded
@@ -645,7 +653,12 @@ def catch_up(av, monkeypatch):
         db = _CatchUpDb(events)
         monkeypatch.setattr(av._state, 'database', db)
         monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, describe_events='all'))
-        monkeypatch.setattr(av, 'camera_describe_mode', lambda cid, _s: (modes or {}).get(cid, 'all'))
+
+        def content(cid, _s, *, alerted, event=None):
+            mode = (modes or {}).get(cid, 'all')
+            return 'both' if mode == 'all' or (mode == 'alerts' and alerted) else 'off'
+
+        monkeypatch.setattr(av, 'camera_describe_content', content)
 
         def describe(event, event_id, _settings_, _name, *, evaluate_rules=True, background=False):
             calls.append((event_id, evaluate_rules))

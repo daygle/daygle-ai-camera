@@ -389,3 +389,57 @@ def test_ai_tag_alert_email_has_no_confidence_line():
     detector = build_alert_content({'rule_name': 'Pergola / Lawn / bird', 'label': 'bird', 'confidence': 0.54},
                                    event_id=6, camera_name='Pergola')
     assert 'Confidence: 54.00%' in detector.plain_text and detector.detection_type == 'Object'
+
+
+# ---------------------------------------------------------------------------
+# Zone pre-check: only events a rule could fire on are described for it
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def gate_camera(monkeypatch):
+    av = importlib.import_module('app.ai_verification')
+    ata = importlib.import_module('app.ai_tag_alerts')
+    cam = {'id': 'cam', 'name': 'Front', 'detection': {'zones': [_zone(_rule(match='tags'))]}}
+    monkeypatch.setattr(ata, '_camera_settings', lambda _cid: cam)
+    return av, ata
+
+
+IN_GATE = {'detections': [{'label': 'person', 'box': {'x': 0.6, 'y': 0.6, 'width': 0.1, 'height': 0.1}}]}
+OUTSIDE = {'detections': [{'label': 'person', 'box': {'x': 0.05, 'y': 0.05, 'width': 0.1, 'height': 0.1}}]}
+
+
+def test_event_outside_every_rule_zone_is_not_described_for_the_rules(gate_camera):
+    av, ata = gate_camera
+    off = {**av.DEFAULT_AI_VERIFICATION_SETTINGS}
+    assert ata.camera_rule_match_modes('cam', IN_GATE) == {'tags'}
+    assert ata.camera_rule_match_modes('cam', OUTSIDE) == set()
+    assert av.camera_describe_content('cam', off, alerted=False, event=IN_GATE) == 'both'
+    assert av.camera_describe_content('cam', off, alerted=False, event=OUTSIDE) == 'off'
+    # Unknown event: every rule counts, as before.
+    assert av.camera_describe_content('cam', off, alerted=False) == 'both'
+    # Outside the zones, the settings apply unwidened.
+    described = {**off, 'describe_other_events': 'description'}
+    assert av.camera_describe_content('cam', described, alerted=False, event=IN_GATE) == 'both'
+    assert av.camera_describe_content('cam', described, alerted=False, event=OUTSIDE) == 'description'
+
+
+def test_zone_pre_check_keeps_events_out_of_the_ai_queue(gate_camera, monkeypatch):
+    av, _ata = gate_camera
+    pools = importlib.import_module('app.postprocess_pool')
+    dispatch = importlib.import_module('app.alert_dispatch')
+    queued: list[str] = []
+
+    class _Pool:
+        def submit(self, _fn, *_args, label='', **_kwargs):
+            queued.append(label)
+            return True
+
+    monkeypatch.setattr(pools, 'verification_pool', lambda: _Pool())
+    monkeypatch.setattr(dispatch, 'submit_alert_notification', lambda *_a: True)
+    monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS})
+    assert av.submit_event_description(1, camera_id='cam', detections=OUTSIDE['detections']) is False
+    assert av.submit_event_description(2, camera_id='cam', detections=IN_GATE['detections']) is True
+    alert = [{'label': 'person', 'confidence': 0.6}]
+    av.submit_alert_notification_with_verification(alert, 3, [], camera_id='cam', detections=OUTSIDE['detections'])
+    av.submit_alert_notification_with_verification(alert, 4, [], camera_id='cam', detections=IN_GATE['detections'])
+    assert queued == ['describe-event-2', 'verify-event-4']
