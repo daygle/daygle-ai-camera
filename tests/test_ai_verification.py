@@ -567,3 +567,214 @@ def test_ai_page_is_admin_only_and_served(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+# ---------------------------------------------------------------------------
+# Combined check: every label (and the description) in one request
+# ---------------------------------------------------------------------------
+
+def test_check_prompt_names_every_label_and_the_description_fields(av):
+    prompt = av.build_check_prompt(['person', 'car'], 'Gate', content='both', detected=['person', 'car'])
+    assert '"person"' in prompt and '"car"' in prompt and 'Gate' in prompt
+    assert '"checks"' in prompt and '"description"' in prompt and '"tags"' in prompt
+    tags_only = av.build_check_prompt(['person'], content='tags')
+    assert '"tags"' in tags_only and '"description"' not in tags_only
+    verify_only = av.build_check_prompt(['person', 'car'])
+    assert '"description"' not in verify_only and '"tags"' not in verify_only
+
+
+def test_parse_check_reply_reads_verdicts_and_description(av):
+    reply = ('```json\n{"checks": {"Person": {"present": "yes", "reason": "man at door"}, '
+             '"traffic light": {"present": false, "reason": "a lamp"}}, '
+             '"description": "A man waits at the door.", "tags": ["Parcel", "image"]}\n```')
+    verdicts, description = av.parse_check_reply(reply, ['person', 'traffic_light'], 'both')
+    assert verdicts == {'person': (True, 'man at door'), 'traffic_light': (False, 'a lamp')}
+    assert description == ('A man waits at the door.', ['parcel'])
+
+
+@pytest.mark.parametrize('reply, labels, content, verdicts, description', [
+    ('not json at all', ['person'], 'both', {}, None),
+    ('{"checks": {"person": {"present": "maybe"}}, "description": ""}', ['person'], 'both', {}, None),
+    ('{"checks": {"person": {"present": true}}}', ['person', 'car'], 'description', {'person': (True, '')}, None),
+    ('{"checks": {"car": {"present": false}}, "tags": ["bin"]}', ['car'], 'tags', {'car': (False, '')}, ('', ['bin'])),
+    ('{"checks": {"car": {"present": true}}, "description": "A car.", "tags": ["bin"]}', ['car'], 'description',
+     {'car': (True, '')}, ('A car.', [])),
+])
+def test_parse_check_reply_leaves_out_what_it_cannot_read(av, reply, labels, content, verdicts, description):
+    assert av.parse_check_reply(reply, labels, content) == (verdicts, description)
+
+
+def test_describe_prompt_and_reply_follow_the_content_choice(av):
+    assert '"description"' not in av.build_describe_prompt(content='tags')
+    assert '"tags"' not in av.build_describe_prompt(content='description')
+    assert av.parse_description_reply('{"tags": ["Ladder"]}', 'tags') == ('', ['ladder'])
+    assert av.parse_description_reply('{"description": "A man.", "tags": ["hat"]}', 'description') == ('A man.', [])
+    with pytest.raises(av.VerificationError):
+        av.parse_description_reply('A man walks by.', 'tags')
+
+
+def test_describe_content_is_validated(av, no_stored_settings):
+    assert av.validate_ai_verification_settings({'describe_content': ' Tags '})['describe_content'] == 'tags'
+    assert av.validate_ai_verification_settings({})['describe_content'] == 'both'
+    with pytest.raises(HTTPException):
+        av.validate_ai_verification_settings({'describe_content': 'everything'})
+
+
+@pytest.mark.parametrize('content, modes, expected', [
+    ('tags', set(), 'tags'),
+    ('tags', {'tags', 'both'}, 'tags'),
+    ('tags', {'description'}, 'both'),
+    ('description', {'both'}, 'description'),
+    ('description', {'tags'}, 'both'),
+    ('both', {'tags'}, 'both'),
+])
+def test_tag_rules_widen_the_content_to_what_they_match_on(av, monkeypatch, content, modes, expected):
+    monkeypatch.setattr(importlib.import_module('app.ai_tag_alerts'), 'camera_rule_match_modes', lambda _cid: modes)
+    assert av.camera_describe_content('cam', _settings(av, describe_content=content)) == expected
+
+
+@pytest.fixture
+def combined(av, monkeypatch):
+    """The verify-and-forward flow with the combined check, ask and describe faked."""
+    dispatch = importlib.import_module('app.alert_dispatch')
+    tag_alerts = importlib.import_module('app.ai_tag_alerts')
+    forwarded: list[list[dict]] = []
+    calls: list[tuple] = []
+    monkeypatch.setattr(dispatch, 'submit_alert_notification',
+                        lambda _fn, triggered, _event_id, _rules: forwarded.append(list(triggered)) or True)
+    monkeypatch.setattr(av, '_read_snapshot', lambda _event: b'jpeg')
+    monkeypatch.setattr(tag_alerts, 'camera_has_rules', lambda _cid: False)
+    monkeypatch.setattr(tag_alerts, 'camera_rule_match_modes', lambda _cid: set())
+    catch_ups: list[bool] = []
+    monkeypatch.setattr(av, 'start_description_catch_up', lambda: catch_ups.append(True) or True)
+
+    class Db(_FakeDb):
+        def __init__(self, settings):
+            super().__init__(settings)
+            self.descriptions: dict[int, dict] = {}
+
+        def set_event_description(self, event_id, record):
+            self.descriptions[event_id] = record
+            return True
+
+        def add_ai_recording_tags(self, _event_id, _tags):
+            return 0
+
+    def configure(*, check=None, ask=(True, 'ok'), describe=('A person at the gate.', ['bag']), **settings):
+        db = Db(_settings(av, **settings))
+        monkeypatch.setattr(av._state, 'database', db)
+
+        def fake_check(_self, _image, labels, _camera='', *, content=None, **_kw):
+            calls.append(('check', tuple(labels), content))
+            if isinstance(check, Exception):
+                raise check
+            return check
+
+        def fake_ask(_self, _image, label, _camera='', **_kw):
+            calls.append(('ask', label))
+            return ask
+
+        def fake_describe(_self, _image, _camera='', *, content='both', **_kw):
+            calls.append(('describe', content))
+            return describe
+
+        monkeypatch.setattr(av.VisionVerifier, 'check', fake_check)
+        monkeypatch.setattr(av.VisionVerifier, 'ask', fake_ask)
+        monkeypatch.setattr(av.VisionVerifier, 'describe', fake_describe)
+        return db
+
+    return configure, forwarded, calls, catch_ups
+
+
+def test_several_labels_are_verified_in_one_request(av, combined):
+    configure, forwarded, calls, _ = combined
+    db = configure(check=({'person': (True, 'walking'), 'car': (False, 'a poster')}, None))
+    triggered = [_alert('person', 0.6), _alert('car', 0.5)]
+    av.verify_and_forward(triggered, 20, [], 'Gate')
+    assert calls == [('check', ('person', 'car'), None)]
+    assert forwarded == [[triggered[0]]]
+    record = db.metadata[20]['ai_verification']
+    assert record['status'] == 'filtered' and record['combined'] is True
+
+
+def test_single_label_without_description_keeps_the_plain_question(av, combined):
+    configure, forwarded, calls, _ = combined
+    configure()
+    av.verify_and_forward([_alert('person', 0.6)], 21, [], '')
+    assert calls == [('ask', 'person')]
+
+
+def test_verification_and_description_share_one_request(av, combined):
+    configure, forwarded, calls, catch_ups = combined
+    db = configure(check=({'person': (True, 'walking')}, ('A person at the gate.', ['bag', 'person'])),
+                   describe_events='alerts')
+    db.get_event = lambda event_id: {'id': event_id, 'snapshot_path': 'x.jpg',
+                                      'detections': [{'label': 'person'}], 'metadata': {}}
+    av.verify_and_forward([_alert('person', 0.6)], 22, [], 'Gate', camera_id='cam')
+    assert calls == [('check', ('person',), 'both')]
+    assert forwarded[0][0]['ai_description'] == 'A person at the gate.'
+    assert db.descriptions[22]['text'] == 'A person at the gate.'
+    # A tag repeating a detection is hidden from the stored tags.
+    assert db.descriptions[22]['tags'] == ['bag']
+    assert catch_ups == []
+
+
+def test_unanswered_parts_are_asked_separately(av, combined):
+    configure, forwarded, calls, _ = combined
+    db = configure(check=({'person': (True, 'walking')}, None), ask=(False, 'a bush'), describe_events='all')
+    triggered = [_alert('person', 0.6), _alert('dog', 0.5)]
+    av.verify_and_forward(triggered, 23, [], '', camera_id='cam')
+    assert calls == [('check', ('person', 'dog'), 'both'), ('ask', 'dog'), ('describe', 'both')]
+    assert forwarded == [[{**triggered[0], 'ai_description': 'A person at the gate.'}]]
+    assert db.metadata[23]['ai_verification']['labels']['dog'] == {'present': False, 'reason': 'a bush'}
+
+
+def test_unreachable_model_is_not_asked_again_per_label(av, combined):
+    configure, forwarded, calls, _ = combined
+    db = configure(check=av.VerificationError('model did not answer within 20s (busy or slow)'))
+    triggered = [_alert('person', 0.6), _alert('car', 0.5)]
+    av.verify_and_forward(triggered, 24, [], '')
+    assert calls == [('check', ('person', 'car'), None)]
+    assert forwarded == [triggered]
+    assert db.metadata[24]['ai_verification']['status'] == 'error'
+
+
+def test_all_rejected_in_alerts_mode_stores_no_description(av, combined):
+    configure, forwarded, calls, _ = combined
+    db = configure(check=({'person': (False, 'shadow')}, ('Nothing notable.', [])), describe_events='alerts')
+    av.verify_and_forward([_alert('person', 0.6)], 25, [], '', camera_id='cam')
+    assert forwarded == [] and db.descriptions == {}
+
+
+def test_tags_only_description_is_stored_without_text(av, combined):
+    configure, forwarded, calls, catch_ups = combined
+    db = configure(check=({'person': (True, 'ok')}, ('', ['ladder'])),
+                   describe_events='alerts', describe_content='tags')
+    triggered = [_alert('person', 0.6)]
+    av.verify_and_forward(triggered, 26, [], '', camera_id='cam')
+    assert calls == [('check', ('person',), 'tags')]
+    assert db.descriptions[26]['text'] == '' and db.descriptions[26]['tags'] == ['ladder']
+    # No sentence to lead the notification, and nothing left for the catch-up.
+    assert forwarded == [triggered] and catch_ups == []
+
+
+def test_small_objects_far_apart_get_their_own_close_ups(av):
+    left = {'label': 'person', 'x': 0.02, 'y': 0.4, 'width': 0.05, 'height': 0.1}
+    right = {'label': 'dog', 'x': 0.9, 'y': 0.5, 'width': 0.05, 'height': 0.05}
+    settings = _settings(av)
+    assert av._check_image(b'jpeg', [left, right], ['person', 'dog'], settings,
+                           describing=False, camera_id=None) is None
+    big = {'label': 'car', 'x': 0.1, 'y': 0.1, 'width': 0.7, 'height': 0.7}
+    assert av._check_image(b'jpeg', [big], ['car'], settings, describing=True, camera_id=None) == (b'jpeg', False)
+    assert av._check_image(b'jpeg', [left, right], ['person', 'dog'], _settings(av, focus_crop=False),
+                           describing=False, camera_id=None) == (b'jpeg', False)
+
+
+def test_client_check_sends_one_request(av):
+    reply = '{"checks": {"person": {"present": true, "reason": "walking"}}, "tags": ["bag"]}'
+    with _FakeModelServer(reply) as server:
+        verifier = av.VisionVerifier({**_settings(av), 'server_url': server.url, 'timeout_seconds': 5})
+        assert verifier.check(b'jpeg', ['person'], 'Gate', content='tags') == (
+            {'person': (True, 'walking')}, ('', ['bag']))
+    assert len(server.requests) == 1
+    assert '"checks"' in server.requests[0]['messages'][1]['content'][0]['text']

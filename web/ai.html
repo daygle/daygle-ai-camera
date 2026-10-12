@@ -77,6 +77,13 @@
             <option value="alerts">Alerts Only</option>
             <option value="all">All Events</option>
           </select></label>
+        <label>
+          <span>Describe With <span class="info-tip" data-tip="What the model writes for each described event. Tags only is the quickest reply: just object tags (e.g. ladder, parcel) for the Events list, search and AI tag alerts, with no sentence in notifications. Cameras with an AI tag alert always get what that alert matches on. Default: Description and tags" title="What the model writes for each described event. Tags only is the quickest reply: just object tags (e.g. ladder, parcel) for the Events list, search and AI tag alerts, with no sentence in notifications. Cameras with an AI tag alert always get what that alert matches on. Default: Description and tags" tabindex="0" aria-label="Help: What the model writes for each described event. Tags only is the quickest reply: just object tags (e.g. ladder, parcel) for the Events list, search and AI tag alerts, with no sentence in notifications. Cameras with an AI tag alert always get what that alert matches on. Default: Description and tags"></span></span>
+          <select name="describe_content">
+            <option value="both">Description and Tags</option>
+            <option value="description">Description Only</option>
+            <option value="tags">Tags Only</option>
+          </select></label>
         <fieldset class="ai-verification-cameras">
           <legend>Cameras <span class="info-tip" data-tip="Cameras whose events are described (per Describe Events). None ticked = all cameras. Cameras with an AI tag alert are always described." title="Cameras whose events are described (per Describe Events). None ticked = all cameras. Cameras with an AI tag alert are always described." tabindex="0" aria-label="Help: Cameras whose events are described (per Describe Events). None ticked = all cameras. Cameras with an AI tag alert are always described."></span></legend>
           <div id="aiCameras" class="ai-verification-camera-list"><span class="muted">Loading cameras…</span></div>

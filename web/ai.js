@@ -19,6 +19,7 @@ const AI_FORM_DEFAULTS = {
   api_key: '',
   timeout_seconds: 20,
   describe_events: 'off',
+  describe_content: 'both',
 };
 // Alert verification's focus_crop is no longer on this form; the PUT merges
 // onto the stored settings, so its saved value (default on) is kept.

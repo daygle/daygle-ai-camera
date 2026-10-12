@@ -95,6 +95,7 @@ Go to **Intelligence → AI** (admin only). The page has four sections: Model Se
 | API Key | (none) | Only if the server requires one. Ollama doesn't. |
 | Timeout (seconds) | 20 | Per question for alerts. On timeout the alert is sent unverified. Background descriptions (Describe Events: All events, catch-up, Describe Past Events) wait up to 90 s, because the model keeps working on a request the app gives up on. |
 | Focus on Object | Enabled | Sends a close-up around the detected object, with context, instead of the whole frame. Small models judge small or distant objects much better this way. |
+| Describe With | Description and tags | Under Descriptions & Search. What the model writes for a described event: **Description and tags**, **Description only**, or **Tags only** (the shortest reply, with no sentence in notifications). A camera with an AI tag alert always gets what its alert matches on: a tags-only alert under Description only, or a description-only alert under Tags only, gets both. |
 | Cameras | (all) | Under Descriptions & Search. Tick cameras to limit **Describe Events** to them. It does not affect verification, which is set per alert. |
 
 **Test on Latest Event** sends the most recent object event's snapshot to the
@@ -134,9 +135,20 @@ parcel at the front door."*
   later request queued behind it and timed out too. Skipped events are
   described by the catch-up once the model is free.
 - The description appears under the detections in the Events list and is
-  stored in the event's metadata (`ai_description`: text, model, time).
-- Verification runs first. An alert the model rejects is not described in
-  *Alerts only* mode.
+  stored in the event's metadata (`ai_description`: text, tags, model, time).
+  With **Describe With: Tags only** the text is empty and only tags are kept.
+- **One request per alert.** When an alert is both verified and described,
+  or verifies several objects (a person and a car), the questions go to the
+  model in one request rather than one each: the image is the slow part of a
+  request, so this saves whole model calls before the notification goes out.
+  If the reply leaves an object unanswered, that object is asked about on its
+  own; if it leaves out the description, the event is described separately.
+  Separate requests are also used when one image cannot serve every
+  question: two small objects at opposite edges of the frame (each gets its
+  own close-up), or a camera with an AI tag alert, whose description needs the
+  whole frame, when verification wants a close-up.
+- Verification and description come back together, but an alert the model
+  rejects is still not described in *Alerts only* mode.
 - If describing fails or times out, the notification is sent without the
   sentence. Descriptions are never a reason for an alert to be late or lost.
 - Uses the same server and model as verification. The **Cameras** list limits

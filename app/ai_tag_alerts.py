@@ -71,6 +71,11 @@ def camera_has_rules(camera_id: Any) -> bool:
     return bool(zone_rules(_camera_settings(camera_id)))
 
 
+def camera_rule_match_modes(camera_id: Any) -> set[str]:
+    """What the camera's rules match on: 'tags', 'description' and/or 'both'."""
+    return {str(rule.get('match') or 'both') for _zone, rule in zone_rules(_camera_settings(camera_id))}
+
+
 def _singular(word: str) -> str:
     if len(word) > 4 and word.endswith('ies'):
         return word[:-3] + 'y'

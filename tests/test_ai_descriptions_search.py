@@ -180,6 +180,14 @@ def flow(av, monkeypatch):
             return caption, list(tags)
 
         monkeypatch.setattr(av.VisionVerifier, 'describe', describe)
+
+        def check(_self, _img, labels, _cam='', *, content=None, **_kw):
+            # The combined request answers like the separate ones would; a
+            # failed caption leaves the description for a separate request.
+            described = None if (not content or isinstance(caption, Exception)) else (caption, list(tags))
+            return dict.fromkeys(labels, verdict), described
+
+        monkeypatch.setattr(av.VisionVerifier, 'check', check)
         return db
 
     return configure, forwarded

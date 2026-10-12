@@ -62,8 +62,14 @@ DEFAULT_AI_VERIFICATION_SETTINGS: dict[str, Any] = {
     # list, and searchable): 'off', 'alerts' (events that notify) or 'all'
     # (every event with a snapshot on the in-scope cameras).
     'describe_events': 'off',
+    # What the model writes for a described event: 'both' (a sentence and
+    # object tags), 'description' (the sentence only) or 'tags' (tags only,
+    # the shortest reply). Cameras with AI tag alert rules always get what
+    # their rules match on.
+    'describe_content': 'both',
 }
 DESCRIBE_MODES = ('off', 'alerts', 'all')
+DESCRIBE_CONTENTS = ('both', 'description', 'tags')
 MAX_DESCRIPTION_CHARS = 300
 
 # Labels that are never sent to the model: face alerts are identity rules
@@ -105,8 +111,20 @@ _TAG_NOISE = frozenset({
 })
 
 
-def build_describe_prompt(camera_name: str = '', detected: list[str] | None = None, close_up: bool = False) -> str:
-    where = f' from the camera "{camera_name}"' if camera_name else ''
+_EXAMPLE_DESCRIPTION = '"description": "A courier in a hi-vis vest leaves a parcel at the front door."'
+_EXAMPLE_TAGS = '"tags": ["courier", "hi-vis vest", "parcel"]'
+_DESCRIPTION_FIELD = (
+    '"description": one sentence of at most 25 words for a notification, mentioning the people, '
+    'vehicles and animals, what they are doing, and notable colours, clothing or objects they carry. '
+    'Do not guess who anyone is. If nothing notable is visible, say so briefly. '
+)
+_TAGS_FIELD = (
+    '"tags": up to 8 short lowercase nouns (1-3 words) for the notable objects clearly visible, '
+    'including things like tools, bags, parcels, bins or clothing; an empty list if none. '
+)
+
+
+def _describe_context(detected: list[str] | None, close_up: bool) -> str:
     # A small model shown a wide frame (resized to under 1000 px) will guess
     # at a distant blob, e.g. call a magpie "a black cat". Tell it what the
     # detector found and, with a close-up, where to look.
@@ -115,18 +133,29 @@ def build_describe_prompt(camera_name: str = '', detected: list[str] | None = No
         context = f'An object detector flagged: {", ".join(detected)}. It can be wrong. '
     if close_up:
         context += 'The image is a close-up around what the detector found, with some of its surroundings. '
+    return context
+
+
+def _describe_examples(content: str) -> list[str]:
+    return ([_EXAMPLE_DESCRIPTION] if content != 'tags' else []) + ([_EXAMPLE_TAGS] if content != 'description' else [])
+
+
+def _describe_fields(content: str) -> str:
+    return (_DESCRIPTION_FIELD if content != 'tags' else '') + (_TAGS_FIELD if content != 'description' else '')
+
+
+def build_describe_prompt(camera_name: str = '', detected: list[str] | None = None, close_up: bool = False,
+                          content: str = 'both') -> str:
+    where = f' from the camera "{camera_name}"' if camera_name else ''
+    task = (f'List the notable things in this security camera image{where}. ' if content == 'tags'
+            else f'Describe what is happening in this security camera image{where}. ')
     return (
-        f'Describe what is happening in this security camera image{where}. {context}'
+        f'{task}{_describe_context(detected, close_up)}'
         'Only name people, animals and objects you can clearly make out; if something is too small '
         'or blurry to identify, call it "a small animal" or "an object" rather than guessing. '
-        'Reply with JSON exactly like {"description": "A courier in a hi-vis vest leaves a parcel at the '
-        'front door.", "tags": ["courier", "hi-vis vest", "parcel"]}. '
-        '"description": one sentence of at most 25 words for a notification, mentioning the people, '
-        'vehicles and animals, what they are doing, and notable colours, clothing or objects they carry. '
-        'Do not guess who anyone is. If nothing notable is visible, say so briefly. '
-        '"tags": up to 8 short lowercase nouns (1-3 words) for the notable objects clearly visible, '
-        'including things like tools, bags, parcels, bins or clothing; an empty list if none.'
-    )
+        f'Reply with JSON exactly like {{{", ".join(_describe_examples(content))}}}. '
+        f'{_describe_fields(content)}'
+    ).strip()
 
 
 def clean_tags(raw: Any, exclude: set[str] | frozenset[str] = frozenset()) -> list[str]:
@@ -147,25 +176,48 @@ def clean_tags(raw: Any, exclude: set[str] | frozenset[str] = frozenset()) -> li
     return tags
 
 
-def parse_description_reply(text: str) -> tuple[str, list[str]]:
-    """``(description, tags)`` from the model reply.
-
-    Accepts the requested JSON (also fenced or wrapped in prose); a reply that
-    is not JSON is taken as a bare caption with no tags, so a model that
-    ignores the format still produces a description.
-    """
+def _reply_object(text: str) -> dict[str, Any] | None:
+    """The outermost JSON object in a reply (also fenced or wrapped in prose)."""
     content = str(text or '')
     start, end = content.find('{'), content.rfind('}')
     if 0 <= start < end:
         try:
             data = json.loads(content[start:end + 1])
         except ValueError:
-            data = None
-        if isinstance(data, dict) and isinstance(data.get('description'), str):
-            return clean_description(data['description']), clean_tags(data.get('tags'))
-    if content.lstrip().startswith(('{', '[', '```')):
+            return None
+        return data if isinstance(data, dict) else None
+    return None
+
+
+def _description_from(data: dict[str, Any], content: str) -> tuple[str, list[str]] | None:
+    """``(text, tags)`` for ``content`` from a parsed reply, or None if missing."""
+    if content == 'tags':
+        return ('', clean_tags(data['tags'])) if isinstance(data.get('tags'), list) else None
+    if not isinstance(data.get('description'), str):
+        return None
+    tags = clean_tags(data.get('tags')) if content == 'both' else []
+    return clean_description(data['description']), tags
+
+
+def parse_description_reply(text: str, content: str = 'both') -> tuple[str, list[str]]:
+    """``(description, tags)`` from the model reply.
+
+    Accepts the requested JSON (also fenced or wrapped in prose); a reply that
+    is not JSON is taken as a bare caption with no tags, so a model that
+    ignores the format still produces a description. In ``tags`` mode the
+    description is empty and a tag list is required; in ``description`` mode
+    tags are dropped.
+    """
+    data = _reply_object(text)
+    if data is not None:
+        result = _description_from(data, content)
+        if result is not None:
+            return result
+    if content == 'tags':
+        raise VerificationError('model returned no tag list')
+    if str(text or '').lstrip().startswith(('{', '[', '```')):
         raise VerificationError('model returned an invalid description object')
-    return clean_description(content), []
+    return clean_description(text), []
 
 
 def clean_description(text: str) -> str:
@@ -281,6 +333,11 @@ def validate_ai_verification_settings(payload: dict[str, Any]) -> dict[str, Any]
         raise _bad("describe_events must be 'off', 'alerts' or 'all'.")
     settings['describe_events'] = describe
 
+    content = str(settings['describe_content'] or 'both').strip().lower()
+    if content not in DESCRIBE_CONTENTS:
+        raise _bad("describe_content must be 'both', 'description' or 'tags'.")
+    settings['describe_content'] = content
+
     settings['camera_ids'] = _string_list(settings['camera_ids'], 'camera_ids')
     return settings
 
@@ -308,6 +365,30 @@ def camera_describe_mode(camera_id: Any, settings: dict[str, Any]) -> str:
     if camera_id is not None and camera_has_rules(camera_id):
         return 'all'
     return describe_mode(settings) if _camera_in_scope(camera_id, settings) else 'off'
+
+
+def describe_content(settings: dict[str, Any]) -> str:
+    content = str(settings.get('describe_content') or 'both').lower()
+    return content if content in DESCRIBE_CONTENTS else 'both'
+
+
+def camera_describe_content(camera_id: Any, settings: dict[str, Any]) -> str:
+    """What the model writes for one camera's events.
+
+    The global choice, widened to 'both' when the camera has an AI tag alert
+    rule that matches on what the choice leaves out (a tags-only rule under
+    'description', a description-only rule under 'tags'): a rule must never
+    be starved of what it matches on.
+    """
+    content = describe_content(settings)
+    if content == 'both' or camera_id is None:
+        return content
+    from app.ai_tag_alerts import camera_rule_match_modes
+
+    modes = camera_rule_match_modes(camera_id)
+    if (content == 'description' and 'tags' in modes) or (content == 'tags' and 'description' in modes):
+        return 'both'
+    return content
 
 
 def describes_camera(camera_id: Any, settings: dict[str, Any] | None = None) -> bool:
@@ -372,6 +453,82 @@ def build_prompt(label: str, camera_name: str = '', source: str = 'An object det
     )
 
 
+def build_check_prompt(labels: list[str], camera_name: str = '', *, content: str | None = None,
+                       detected: list[str] | None = None, close_up: bool = False,
+                       source: str = 'An object detector') -> str:
+    """One request that verifies every label and, with ``content``, describes.
+
+    Asking once instead of once per label plus once for the description
+    saves whole model calls on the alert path: the image is the slow part of
+    a request, the extra reply text is cheap.
+    """
+    where = f' from the camera "{camera_name}"' if camera_name else ''
+    reported = ', '.join(f'"{label}"' for label in labels)
+    checks = ', '.join(f'"{label}": {{"present": true, "reason": "short reason"}}' for label in labels)
+    example = [f'"checks": {{{checks}}}']
+    describe = ''
+    if content:
+        example += _describe_examples(content)
+        describe = (
+            ('Then list the notable things in the image. ' if content == 'tags'
+             else 'Then describe what is happening in the image. ')
+            + _describe_context(detected, close_up)
+            + 'Only name people, animals and objects you can clearly make out; if something is too small '
+            'or blurry to identify, call it "a small animal" or "an object" rather than guessing. '
+        )
+    return (
+        f'{source} reported {reported} in this security camera image{where}. '
+        'For each, decide whether a real one is actually visible. It is NOT real if it is only a shadow, '
+        'reflection, picture, poster, statue, toy, plant, rubbish bin, or another object that looks like it, '
+        'or if the image shows nothing clear. '
+        f'{describe}'
+        f'Reply with JSON exactly like {{{", ".join(example)}}}. '
+        '"checks": one entry for each reported object, keyed by its name as given, with "present" true or '
+        'false and a reason of at most 15 words. '
+        f'{_describe_fields(content) if content else ""}'
+    ).strip()
+
+
+def parse_check_reply(
+    text: str, labels: list[str], content: str | None = None,
+) -> tuple[dict[str, tuple[bool, str]], tuple[str, list[str]] | None]:
+    """``(verdicts, description)`` from a combined reply.
+
+    Never raises: a label the reply does not answer clearly is left out of
+    ``verdicts`` and a missing or unusable description is None, so the caller
+    asks for just those parts separately.
+    """
+    data = _reply_object(text)
+    if data is None:
+        return {}, None
+    verdicts: dict[str, tuple[bool, str]] = {}
+    checks = data.get('checks')
+    if isinstance(checks, dict):
+        by_name = {str(key).strip().lower(): value for key, value in checks.items()}
+        for label in labels:
+            answer = by_name.get(label.lower(), by_name.get(label.lower().replace('_', ' ')))
+            if not isinstance(answer, dict):
+                continue
+            present = _present_value(answer.get('present'))
+            if present is not None:
+                verdicts[label] = (present, ' '.join(str(answer.get('reason') or '').split())[:200])
+    description = None
+    if content:
+        try:
+            description = _description_from(data, content)
+        except VerificationError:
+            description = None
+    return verdicts, description
+
+
+def _present_value(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in {'true', 'false', 'yes', 'no'}:
+        return value.strip().lower() in {'true', 'yes'}
+    return None
+
+
 def parse_verdict(text: str) -> tuple[bool, str]:
     """Parse the model reply into ``(present, reason)``.
 
@@ -386,13 +543,8 @@ def parse_verdict(text: str) -> tuple[bool, str]:
         except ValueError:
             continue
         if isinstance(data, dict) and 'present' in data:
-            present = data.get('present')
-            if isinstance(present, str):
-                lowered = present.strip().lower()
-                if lowered not in {'true', 'false', 'yes', 'no'}:
-                    continue
-                present = lowered in {'true', 'yes'}
-            if isinstance(present, bool):
+            present = _present_value(data.get('present'))
+            if present is not None:
                 reason = ' '.join(str(data.get('reason') or '').split())[:200]
                 return present, reason
     match = re.match(r'^\W*(yes|no|true|false)\b[\s.,:;-]*(.*)$', content, re.IGNORECASE | re.DOTALL)
@@ -522,18 +674,37 @@ class VisionVerifier:
         return parse_verdict(reply)
 
     def describe(self, image_bytes: bytes, camera_name: str = '', *, detected: list[str] | None = None,
-                 close_up: bool = False) -> tuple[str, list[str]]:
+                 close_up: bool = False, content: str = 'both') -> tuple[str, list[str]]:
         # One image per request: a second image roughly doubled the model's
         # time on a small GPU and pushed descriptions past the timeout.
-        content: list[dict[str, Any]] = [
-            {'type': 'text', 'text': build_describe_prompt(camera_name, detected, close_up)},
+        parts: list[dict[str, Any]] = [
+            {'type': 'text', 'text': build_describe_prompt(camera_name, detected, close_up, content)},
             self._image_part(image_bytes),
         ]
         reply = self.chat([
             {'role': 'system', 'content': DESCRIBE_SYSTEM_PROMPT},
-            {'role': 'user', 'content': content},
-        ], max_tokens=200)
-        return parse_description_reply(reply)
+            {'role': 'user', 'content': parts},
+        ], max_tokens=120 if content == 'tags' else 200)
+        return parse_description_reply(reply, content)
+
+    def check(self, image_bytes: bytes, labels: list[str], camera_name: str = '', *,
+              content: str | None = None, detected: list[str] | None = None,
+              close_up: bool = False) -> tuple[dict[str, tuple[bool, str]], tuple[str, list[str]] | None]:
+        """Verify every label (and describe, with ``content``) in one request.
+
+        Raises VerificationError only when the model could not be asked
+        (unreachable, busy, timed out); see parse_check_reply for a reply
+        that answers only part of the question.
+        """
+        reply = self.chat([
+            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'user', 'content': [
+                {'type': 'text', 'text': build_check_prompt(labels, camera_name, content=content,
+                                                            detected=detected, close_up=close_up)},
+                self._image_part(image_bytes),
+            ]},
+        ], max_tokens=60 * len(labels) + (200 if content else 0))
+        return parse_check_reply(reply, labels, content)
 
 
 # ---------------------------------------------------------------------------
@@ -668,6 +839,62 @@ def _read_snapshot(event: dict[str, Any]) -> bytes | None:
 # Verification flow
 # ---------------------------------------------------------------------------
 
+def _crops(box: tuple[float, float, float, float] | None) -> bool:
+    """Whether focus_image crops around ``box`` (see its size rule)."""
+    return box is not None and max(3.0 * max(box[2] - box[0], box[3] - box[1]), 0.35) < 0.9
+
+
+def _object_labels(detections: list[dict[str, Any]]) -> list[str]:
+    return sorted({str(d.get('label') or '').strip().lower() for d in detections} - {'', 'motion'})
+
+
+def _check_image(
+    image: bytes, detections: list[dict[str, Any]], labels: list[str], settings: dict[str, Any],
+    *, describing: bool, camera_id: Any,
+) -> tuple[bytes, bool] | None:
+    """``(image, close_up)`` for one combined request, or None when one image
+    would serve some part worse than separate requests do.
+
+    The image is the close-up around all the checked labels' boxes, as
+    verification of a single label uses. Separate requests are kept when
+    that union is the whole frame but a label on its own would have had a
+    close-up (two small objects at opposite edges), and when an AI tag rule
+    needs the whole frame described but verification wants a close-up.
+    """
+    if not settings.get('focus_crop', True):
+        return image, False
+    wanted = [d for d in detections if str(d.get('label') or '').strip().lower() in labels]
+    union_crops = _crops(_label_box(wanted, None))
+    if not union_crops and any(_crops(_label_box(detections, label)) for label in labels):
+        return None
+    if not union_crops:
+        return image, False
+    if describing:
+        from app.ai_tag_alerts import camera_has_rules
+
+        if camera_id is not None and camera_has_rules(camera_id):
+            return None
+    focused = focus_image(image, wanted, None)
+    return focused, focused is not image
+
+
+def _description_record(text: str, tags: list[str], detections: list[dict[str, Any]],
+                        settings: dict[str, Any], started: float) -> dict[str, Any]:
+    # A tag that repeats a real detection label adds nothing: the detection
+    # already shows it (and is the authoritative source for that object).
+    detected = {str(d.get('label') or '').strip().lower() for d in detections}
+    return {
+        'text': text,
+        'tags': [tag for tag in tags if tag not in detected],
+        # Ephemeral: tags-only zone rules must still see model tags that repeat
+        # detector labels. They are hidden from redundant display chips only.
+        '_model_tags': tags,
+        'model': settings.get('model'),
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'latency_ms': int((time.monotonic() - started) * 1000),
+    }
+
+
 def verify_event(
     event: dict[str, Any],
     labels: list[str],
@@ -677,6 +904,30 @@ def verify_event(
     verifier: VisionVerifier | None = None,
 ) -> dict[str, Any]:
     """Ask the model about each label; return the ``ai_verification`` record."""
+    record, _description = verify_and_describe_event(event, labels, settings, camera_name=camera_name,
+                                                     verifier=verifier)
+    return record
+
+
+def verify_and_describe_event(
+    event: dict[str, Any],
+    labels: list[str],
+    settings: dict[str, Any],
+    *,
+    camera_name: str = '',
+    content: str | None = None,
+    camera_id: Any = None,
+    verifier: VisionVerifier | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Verify each label and, with ``content``, describe the event.
+
+    Returns the ``ai_verification`` record and the description record (as
+    describe_event builds it) or None when the event was not described here.
+    Whenever it saves a model call (several labels, or a label plus a
+    description) the questions go in one request; a label the reply leaves
+    unanswered is then asked on its own, and a missing description is left
+    to the caller.
+    """
     record: dict[str, Any] = {
         'model': settings.get('model'),
         'checked_at': datetime.now(timezone.utc).isoformat(),
@@ -686,10 +937,38 @@ def verify_event(
     image = _read_snapshot(event)
     if image is None:
         record.update(status='skipped', reason='No snapshot to check.')
-        return record
+        return record, None
     verifier = verifier or VisionVerifier(settings)
     detections = event.get('detections') or []
+    description = None
+    plan = None
+    if len(labels) > 1 or (labels and content):
+        plan = _check_image(image, detections, labels, settings, describing=bool(content), camera_id=camera_id)
+    if plan is not None:
+        try:
+            verdicts, described = verifier.check(
+                plan[0], labels, camera_name, content=content,
+                detected=[label.replace('_', ' ') for label in _object_labels(detections)], close_up=plan[1],
+            )
+        except VerificationError as exc:
+            # The model could not be asked at all: asking again per label
+            # would only wait out the same timeout once more.
+            verdicts, described = {}, None
+            for label in labels:
+                record['labels'][label] = {'present': None, 'error': str(exc)[:200]}
+        except Exception as exc:  # noqa: BLE001 - fail open on anything unexpected
+            logger.exception('Combined AI check failed unexpectedly')
+            verdicts, described = {}, None
+            for label in labels:
+                record['labels'][label] = {'present': None, 'error': f'unexpected error: {exc}'[:200]}
+        for label, (present, reason) in verdicts.items():
+            record['labels'][label] = {'present': present, 'reason': reason}
+        record['combined'] = True
+        if described is not None:
+            description = _description_record(*described, detections, settings, started)
     for label in labels:
+        if label in record['labels']:
+            continue
         try:
             focused = focus_image(image, detections, label) if settings.get('focus_crop', True) else image
             present, reason = verifier.ask(focused, label, camera_name)
@@ -707,7 +986,7 @@ def verify_event(
         record['status'] = 'confirmed'
     else:
         record['status'] = 'error'
-    return record
+    return record, description
 
 
 def _forward(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None) -> None:
@@ -744,14 +1023,15 @@ def describe_event(
         raise VerificationError('no snapshot to describe')
     started = time.monotonic()
     detections = event.get('detections') or []
-    labels = sorted({str(d.get('label') or '').strip().lower() for d in detections} - {'', 'motion'})
+    labels = _object_labels(detections)
+    camera_id = (event.get('metadata') or {}).get('camera_id')
     # A small object (a bird on a wide lawn) is a few pixels once the frame
     # is resized for the model, so describe a close-up with context instead;
     # a large one is described from the whole frame.
     close_up = False
     from app.ai_tag_alerts import camera_has_rules
 
-    tag_rules_active = camera_has_rules((event.get('metadata') or {}).get('camera_id'))
+    tag_rules_active = camera_has_rules(camera_id)
     if labels and settings.get('focus_crop', True) and not tag_rules_active:
         box = _label_box(detections, None)
         if box and max(box[2] - box[0], box[3] - box[1]) <= SMALL_OBJECT_FRACTION:
@@ -765,26 +1045,20 @@ def describe_event(
         verifier = VisionVerifier(settings, timeout=timeout)
     text, tags = verifier.describe(
         image, camera_name, detected=[label.replace('_', ' ') for label in labels], close_up=close_up,
+        content=camera_describe_content(camera_id, settings),
     )
-    # A tag that repeats a real detection label adds nothing: the detection
-    # already shows it (and is the authoritative source for that object).
-    detected = {str(d.get('label') or '').strip().lower() for d in detections}
-    return {
-        'text': text,
-        'tags': [tag for tag in tags if tag not in detected],
-        # Ephemeral: tags-only zone rules must still see model tags that repeat
-        # detector labels. They are hidden from redundant display chips only.
-        '_model_tags': tags,
-        'model': settings.get('model'),
-        'created_at': datetime.now(timezone.utc).isoformat(),
-        'latency_ms': int((time.monotonic() - started) * 1000),
-    }
+    return _description_record(text, tags, detections, settings, started)
 
 
 def _describe_and_store(
     event: dict[str, Any], event_id: int, settings: dict[str, Any], camera_name: str,
-    *, evaluate_rules: bool = True, background: bool = False,
+    *, evaluate_rules: bool = True, background: bool = False, record: dict[str, Any] | None = None,
 ) -> str | None:
+    """Describe (or store the given ``record``) and run the AI tag rules.
+
+    Returns the description text ('' for a tags-only description), or None
+    when the event was not described.
+    """
     database = _state.database
     key = (id(database), int(event_id))
     with _description_lock:
@@ -799,10 +1073,10 @@ def _describe_and_store(
                 return None
             event = current
         existing = (event.get('metadata') or {}).get('ai_description')
-        if isinstance(existing, dict) and existing.get('text'):
-            return str(existing['text'])
+        if isinstance(existing, dict) and (existing.get('text') or existing.get('created_at')):
+            return str(existing.get('text') or '')
         return _describe_and_store_claimed(event, event_id, settings, camera_name,
-                                           evaluate_rules=evaluate_rules, background=background)
+                                           evaluate_rules=evaluate_rules, background=background, record=record)
     except Exception:
         logger.exception('AI description job failed for event %s', event_id)
         return None
@@ -813,15 +1087,17 @@ def _describe_and_store(
 
 def _describe_and_store_claimed(
     event: dict[str, Any], event_id: int, settings: dict[str, Any], camera_name: str,
-    *, evaluate_rules: bool = True, background: bool = False,
+    *, evaluate_rules: bool = True, background: bool = False, record: dict[str, Any] | None = None,
 ) -> str | None:
     """Describe and persist; returns the text, or None (logged) on failure.
 
     ``evaluate_rules`` runs the zone AI tag alert rules on the result; the
     backfill of past events turns it off so old events never alert.
+    ``record`` is a description already made (by the combined alert check).
     """
     try:
-        record = describe_event(event, settings, camera_name=camera_name, background=background)
+        if record is None:
+            record = describe_event(event, settings, camera_name=camera_name, background=background)
     except VerificationError as exc:
         logger.warning('AI description unavailable for event %s: %s', event_id, exc)
         return None
@@ -893,8 +1169,11 @@ def _verify_and_forward(
     except Exception:  # noqa: BLE001
         event = {}
     kept = list(triggered)
+    described = None
     if labels:
-        record = verify_event(event, labels, settings, camera_name=camera_name)
+        content = camera_describe_content(camera_id, settings) if mode != 'off' else None
+        record, described = verify_and_describe_event(event, labels, settings, camera_name=camera_name,
+                                                      content=content, camera_id=camera_id)
         rejected = {label for label, result in record['labels'].items() if result.get('present') is False}
         kept = [
             alert for alert in triggered
@@ -914,10 +1193,12 @@ def _verify_and_forward(
                 logger.warning('AI verification unavailable for event %s (%s): %s; alert delivered unverified.',
                                event_id, label, result['error'])
     if mode == 'all' or (mode == 'alerts' and kept):
-        text = _describe_and_store(event, event_id, settings, camera_name)
+        # A description from the combined check is stored as is; otherwise
+        # (no labels to verify, or the reply left it out) describe now.
+        text = _describe_and_store(event, event_id, settings, camera_name, record=described)
         if text:
             kept = [{**alert, 'ai_description': text} for alert in kept]
-        else:
+        elif text is None:
             # Usually a timeout during a burst of events: the alert goes out
             # now and the catch-up tags the event once the model is idle.
             start_description_catch_up()
@@ -1248,7 +1529,7 @@ def _run_backfill(events: list[dict[str, Any]]) -> None:
             text = _describe_and_store(event, int(event['id']), settings, camera_name, evaluate_rules=False,
                                        background=True)
             with _backfill_lock:
-                _backfill_state['done' if text else 'failed'] += 1
+                _backfill_state['done' if text is not None else 'failed'] += 1
     finally:
         with _backfill_lock:
             _backfill_state.update(running=False, finished_at=datetime.now(timezone.utc).isoformat())
