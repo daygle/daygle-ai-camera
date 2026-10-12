@@ -256,9 +256,21 @@ function normalizeLabelList(value) {
   });
 }
 
-function snapshotUrl(camera = selectedCamera) {
+function snapshotUrl(camera = selectedCamera, width = 0) {
   const cameraId = encodeURIComponent(camera?.id || '');
-  return `/api/live/snapshot?camera_id=${cameraId}&t=${Date.now()}`;
+  const size = width ? `&width=${width}` : '';
+  return `/api/live/snapshot?camera_id=${cameraId}${size}&t=${Date.now()}`;
+}
+
+// Grid tiles only need a frame as wide as they are drawn. Rounded up to a
+// step so every tile of one size shares the server's cached downscale.
+const GRID_FRAME_WIDTH_STEP = 320;
+const GRID_FRAME_STALL_MS = 10000;
+
+function gridFrameWidth(image) {
+  const drawn = (image.clientWidth || 0) * (window.devicePixelRatio || 1);
+  if (!drawn) return GRID_FRAME_WIDTH_STEP * 2;
+  return Math.min(3840, Math.max(GRID_FRAME_WIDTH_STEP, Math.ceil(drawn / GRID_FRAME_WIDTH_STEP) * GRID_FRAME_WIDTH_STEP));
 }
 
 function isAllCameraMode() {
@@ -307,9 +319,26 @@ async function refreshFrame() {
 function renderCameraGridFrames() {
   if (!liveEls.cameraGrid) return;
   liveEls.cameraGrid.querySelectorAll('img[data-camera-id]').forEach((image) => {
-    image.src = snapshotUrl(cameras.find((camera) => camera.id === image.dataset.cameraId));
+    // A tile still loading its last frame keeps it: replacing src would
+    // abort that download, and on a slow link no frame would ever finish.
+    // One stalled for GRID_FRAME_STALL_MS is given up on.
+    const since = Number(image.dataset.loadingSince) || 0;
+    if (since && Date.now() - since < GRID_FRAME_STALL_MS) return;
+    image.dataset.loadingSince = String(Date.now());
+    const camera = cameras.find((item) => item.id === image.dataset.cameraId);
+    image.src = snapshotUrl(camera, gridFrameWidth(image));
   });
 }
+
+function settleGridFrame(event) {
+  if (event.target instanceof HTMLImageElement && event.target.dataset.cameraId) {
+    delete event.target.dataset.loadingSince;
+  }
+}
+
+// load/error do not bubble: listen in the capture phase for every tile.
+liveEls.cameraGrid?.addEventListener('load', settleGridFrame, true);
+liveEls.cameraGrid?.addEventListener('error', settleGridFrame, true);
 
 // True when the backend reports a live measured source rate (source
 // 'detected') for this camera. Configured and fallback values are static

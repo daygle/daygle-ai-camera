@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from app.auth_gates import require_user
 from app.config_facades import get_camera_config
@@ -111,8 +112,43 @@ def live_pipeline_timing_api(request: Request, camera_id: str | None = None):
     return payload
 
 
+# A grid of live tiles (the web "all cameras" view, the mobile dashboard) does
+# not need full-resolution frames; downscaled ones download several times
+# faster over a slow link. Every viewer polling the same camera at the same
+# width gets the one frame encoded once: (camera, width) -> (frame ts, bytes).
+LIVE_SNAPSHOT_MIN_WIDTH = 160
+LIVE_SNAPSHOT_MAX_WIDTH = 3840
+_scaled_snapshots: dict[tuple[str, int], tuple[float, bytes]] = {}
+_scaled_snapshots_lock = threading.Lock()
+
+
+def _scaled_snapshot(camera_id: str, image_bytes: bytes, timestamp: float, width: int | None) -> bytes:
+    """The frame at most ``width`` pixels wide (never upscaled)."""
+    if not width:
+        return image_bytes
+    from app.live_snapshot import render_live_snapshot_jpeg_overlay
+
+    key = (camera_id, width)
+    with _scaled_snapshots_lock:
+        cached = _scaled_snapshots.get(key)
+    if cached is not None and cached[0] == timestamp:
+        return cached[1]
+    scaled = render_live_snapshot_jpeg_overlay(image_bytes, [], max_width=width)
+    with _scaled_snapshots_lock:
+        _scaled_snapshots[key] = (timestamp, scaled)
+    return scaled
+
+
 @router.get('/api/live/snapshot')
-def live_snapshot(request: Request, camera_id: str | None = None, recording_service=Depends(get_recording_service)):
+def live_snapshot(
+    request: Request,
+    camera_id: str | None = None,
+    width: int | None = Query(
+        None, ge=LIVE_SNAPSHOT_MIN_WIDTH, le=LIVE_SNAPSHOT_MAX_WIDTH,
+        description='Downscale the frame to at most this many pixels wide (for grids of live tiles).',
+    ),
+    recording_service=Depends(get_recording_service),
+):
     # M1 fix: defence-in-depth handler gate (mirror
     # ``live_detection_status_api``).
     require_user(request)
@@ -129,7 +165,7 @@ def live_snapshot(request: Request, camera_id: str | None = None, recording_serv
                 captured_ts=sample[1],
             )
             return Response(
-                content=sample[0],
+                content=_scaled_snapshot(resolved_id, sample[0], float(sample[1]), width),
                 media_type='image/jpeg',
                 headers={'X-Frame-Timestamp': f'{float(sample[1]):.6f}'},
             )
@@ -151,9 +187,10 @@ def live_snapshot(request: Request, camera_id: str | None = None, recording_serv
             width=frame.get('width'),
             height=frame.get('height'),
         )
+        timestamp = float(frame.get('timestamp') or time.time())
         return Response(
-            content=image_bytes,
+            content=_scaled_snapshot(resolved_id, image_bytes, timestamp, width),
             media_type='image/jpeg',
-            headers={'X-Frame-Timestamp': f'{float(frame.get("timestamp") or time.time()):.6f}'},
+            headers={'X-Frame-Timestamp': f'{timestamp:.6f}'},
         )
     raise HTTPException(status_code=503, detail='Live snapshots require an ONVIF/RTSP camera backend.')
