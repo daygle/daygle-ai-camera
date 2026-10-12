@@ -179,7 +179,7 @@ def test_catch_up_naive_timestamp_and_changed_scope(av, monkeypatch):
     monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: {})
     mode = ['off']
     monkeypatch.setattr(av, 'camera_describe_content',
-                        lambda *_a, alerted: 'both' if mode[0] == 'all' or (mode[0] == 'alerts' and alerted) else 'off')
+                        lambda *_a, alerted, event=None: 'both' if mode[0] == 'all' or (mode[0] == 'alerts' and alerted) else 'off')
     calls = []
     monkeypatch.setattr(av, '_describe_and_store', lambda *a, **kw: calls.append(kw))
     assert not av.catch_up_once()

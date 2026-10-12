@@ -654,7 +654,7 @@ def catch_up(av, monkeypatch):
         monkeypatch.setattr(av._state, 'database', db)
         monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, describe_events='all'))
 
-        def content(cid, _s, *, alerted):
+        def content(cid, _s, *, alerted, event=None):
             mode = (modes or {}).get(cid, 'all')
             return 'both' if mode == 'all' or (mode == 'alerts' and alerted) else 'off'
 

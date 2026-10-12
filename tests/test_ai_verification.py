@@ -670,7 +670,7 @@ def test_describe_mode_follows_the_two_settings(av, alerts, others, mode):
 def test_tag_rules_widen_the_content_to_what_they_match_on(av, monkeypatch, content, modes, expected):
     tag_alerts = importlib.import_module('app.ai_tag_alerts')
     monkeypatch.setattr(tag_alerts, 'camera_has_rules', lambda _cid: True)
-    monkeypatch.setattr(tag_alerts, 'camera_rule_match_modes', lambda _cid: modes)
+    monkeypatch.setattr(tag_alerts, 'camera_rule_match_modes', lambda _cid, _event=None: modes)
     settings = _settings(av, describe_alerts=content, describe_other_events=content)
     assert av.camera_describe_content('cam', settings, alerted=True) == expected
     assert av.camera_describe_content('cam', settings, alerted=False) == expected
@@ -700,7 +700,7 @@ def combined(av, monkeypatch):
                         lambda _fn, triggered, _event_id, _rules: forwarded.append(list(triggered)) or True)
     monkeypatch.setattr(av, '_read_snapshot', lambda _event: b'jpeg')
     monkeypatch.setattr(tag_alerts, 'camera_has_rules', lambda _cid: False)
-    monkeypatch.setattr(tag_alerts, 'camera_rule_match_modes', lambda _cid: set())
+    monkeypatch.setattr(tag_alerts, 'camera_rule_match_modes', lambda _cid, _event=None: set())
     catch_ups: list[bool] = []
     monkeypatch.setattr(av, 'start_description_catch_up', lambda: catch_ups.append(True) or True)
 

@@ -21,9 +21,11 @@ event is flagged as alerted) and delivered through the normal notification
 queue, led by the description. It is labelled *unconfirmed*: unlike object
 detection, nothing but the language model saw the object.
 
-Cameras with an enabled rule have every event described, whatever the global
-Alert Events / Other Events settings, because a rule can only see described
-events, and get at least what their rules match on.
+Cameras with an enabled rule have every event in a rule's zone described,
+whatever the global Alert Events / Other Events settings, because a rule can
+only see described events, and get at least what their rules match on. An
+event in no rule's zone could fire no rule, so it is described only as the
+global settings say.
 Backfilled (past) events never fire rules.
 """
 
@@ -72,9 +74,14 @@ def camera_has_rules(camera_id: Any) -> bool:
     return bool(zone_rules(_camera_settings(camera_id)))
 
 
-def camera_rule_match_modes(camera_id: Any) -> set[str]:
-    """What the camera's rules match on: 'tags', 'description' and/or 'both'."""
-    return {str(rule.get('match') or 'both') for _zone, rule in zone_rules(_camera_settings(camera_id))}
+def camera_rule_match_modes(camera_id: Any, event: dict[str, Any] | None = None) -> set[str]:
+    """What the camera's rules match on: 'tags', 'description' and/or 'both'.
+
+    With ``event``, only the rules whose zone the event is in (see
+    event_in_zone); empty when it is in none, so no rule could fire on it.
+    """
+    return {str(rule.get('match') or 'both') for zone, rule in zone_rules(_camera_settings(camera_id))
+            if event is None or event_in_zone(event, zone)}
 
 
 def _singular(word: str) -> str:

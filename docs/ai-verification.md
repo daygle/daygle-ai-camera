@@ -213,11 +213,14 @@ class for it. Set it up per area:
 
 How it behaves:
 
-- **Every event on that camera is described**, whatever the Alert Events
+- **Every event in a rule's area is described**, whatever the Alert Events
   and Other Events settings. A rule can only see described events. Where a
   setting is Off, or leaves out what a rule matches on (Tags only for a rule
-  matching the description, Description only for a rule matching tags), that
-  camera gets both a description and tags. Descriptions use the whole
+  matching the description, Description only for a rule matching tags), the
+  event gets both a description and tags. An event outside every rule's
+  area could fire no rule, so it is checked before anything is queued and is
+  described only as the two settings say: with them Off, it costs no model
+  call at all. Descriptions use the whole
   scene on tag-rule cameras so a small-object focus crop cannot hide another
   area's objects; the independent check then restricts evidence to the area.
 - **An event counts as in the area** when one of its detections (object or

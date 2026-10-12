@@ -406,14 +406,20 @@ def camera_describe_mode(camera_id: Any, settings: dict[str, Any]) -> str:
     return describe_mode(settings) if _camera_in_scope(camera_id, settings) else 'off'
 
 
-def camera_describe_content(camera_id: Any, settings: dict[str, Any], *, alerted: bool) -> str:
+def camera_describe_content(camera_id: Any, settings: dict[str, Any], *, alerted: bool,
+                            event: dict[str, Any] | None = None) -> str:
     """What the model writes for one camera's alerted or other events.
 
-    The matching setting for in-scope cameras ('off' for the rest). A camera
-    with an AI tag alert rule is always described (a rule only sees
+    The matching setting for in-scope cameras ('off' for the rest). An event
+    an AI tag alert rule could fire on is always described (a rule only sees
     described events) and gets at least what its rules match on: 'off'
     becomes 'both', and a tags-only rule under 'description' or a
     description-only rule under 'tags' widens it to 'both'.
+
+    With ``event`` (its detections are what matter), only the rules whose
+    zone the event is in count: an event outside every rule's zone could
+    fire none, so it costs no model call the settings did not ask for.
+    Without it, every rule on the camera counts.
     """
     content = _resolve_content(settings, 'describe_alerts' if alerted else 'describe_other_events')
     if not _camera_in_scope(camera_id, settings):
@@ -424,7 +430,9 @@ def camera_describe_content(camera_id: Any, settings: dict[str, Any], *, alerted
 
     if not camera_has_rules(camera_id):
         return content
-    modes = camera_rule_match_modes(camera_id)
+    modes = camera_rule_match_modes(camera_id, event)
+    if not modes:
+        return content  # the event is in no rule's zone
     if content == 'off' or (content == 'description' and 'tags' in modes) or (
             content == 'tags' and 'description' in modes):
         return 'both'
@@ -448,7 +456,7 @@ def _alert_delivered(event: dict[str, Any]) -> bool:
 def event_describe_content(event: dict[str, Any], settings: dict[str, Any]) -> str:
     """What the model writes for a stored event (catch-up, backfill, background)."""
     camera_id = (event.get('metadata') or {}).get('camera_id')
-    return camera_describe_content(camera_id, settings, alerted=_alert_delivered(event))
+    return camera_describe_content(camera_id, settings, alerted=_alert_delivered(event), event=event)
 
 
 def describes_camera(camera_id: Any, settings: dict[str, Any] | None = None) -> bool:
@@ -1238,7 +1246,8 @@ def _verify_and_forward(
         event = {}
     kept = list(triggered)
     described = None
-    alert_content = camera_describe_content(camera_id, settings, alerted=True)
+    # An event that could not be read is checked against every tag rule.
+    alert_content = camera_describe_content(camera_id, settings, alerted=True, event=event or None)
     if labels:
         record, described = verify_and_describe_event(
             event, labels, settings, camera_name=camera_name,
@@ -1264,7 +1273,8 @@ def _verify_and_forward(
                 logger.warning('AI verification unavailable for event %s (%s): %s; alert delivered unverified.',
                                event_id, label, result['error'])
     # An event whose every alert was rejected is described as any other event.
-    content = alert_content if kept else camera_describe_content(camera_id, settings, alerted=False)
+    content = alert_content if kept else camera_describe_content(camera_id, settings, alerted=False,
+                                                                 event=event or None)
     if content != 'off':
         # A description from the combined check is stored as is when it was
         # written for this content; otherwise describe now.
@@ -1283,13 +1293,13 @@ def _verify_and_forward(
 def describe_only(event_id: int, camera_name: str = '', camera_id: Any = None) -> None:
     """AI-pool job for an event that notifies nobody (other events described for its camera)."""
     settings = effective_ai_verification_settings()
-    if camera_describe_content(camera_id, settings, alerted=False) == 'off':
-        return
     try:
         event = _state.database.get_event(event_id)
     except Exception:  # noqa: BLE001
         event = None
     if not event or (event.get('metadata') or {}).get('ai_description'):
+        return
+    if camera_describe_content(camera_id, settings, alerted=False, event=event) == 'off':
         return
     if model_cooling_down():
         # The model just timed out and is still working through it; leave
@@ -1299,16 +1309,19 @@ def describe_only(event_id: int, camera_name: str = '', camera_id: Any = None) -
     _describe_and_store(event, event_id, settings, camera_name, background=True)
 
 
-def submit_event_description(event_id: int, *, camera_id: Any = None, camera_name: str = '') -> bool:
+def submit_event_description(event_id: int, *, camera_id: Any = None, camera_name: str = '',
+                             detections: list[dict[str, Any]] | None = None) -> bool:
     """Queue a background description for an event without alerts.
 
     Only when other events are described for its camera, behind alert work
     (lower priority), and never blocking the live monitor: when the AI pool's
     queue is full the event is left for the catch-up below, which describes
-    it once the model is idle.
+    it once the model is idle. ``detections`` (the event's) let an event in
+    no AI tag rule's zone skip the queue when the settings describe nothing.
     """
     settings = effective_ai_verification_settings()
-    if camera_describe_content(camera_id, settings, alerted=False) == 'off':
+    event = {'detections': detections} if detections is not None else None
+    if camera_describe_content(camera_id, settings, alerted=False, event=event) == 'off':
         return False
     from app.postprocess_pool import PRIORITY_BACKGROUND, verification_pool
 
@@ -1429,6 +1442,7 @@ def submit_alert_notification_with_verification(
     *,
     camera_id: Any = None,
     camera_name: str = '',
+    detections: list[dict[str, Any]] | None = None,
 ) -> bool:
     """Queue an alert's notifications, via AI verification when it applies.
 
@@ -1440,9 +1454,11 @@ def submit_alert_notification_with_verification(
 
     try:
         settings = effective_ai_verification_settings()
-        # Other-event descriptions alone never hold an alert in the AI queue.
+        # Other-event descriptions alone never hold an alert in the AI queue,
+        # nor does an AI tag rule whose zone the event is not in.
+        event = {'detections': detections} if detections is not None else None
         needs_ai = bool(labels_to_verify(triggered)
-                        or camera_describe_content(camera_id, settings, alerted=True) != 'off')
+                        or camera_describe_content(camera_id, settings, alerted=True, event=event) != 'off')
     except Exception:
         logger.exception('AI settings unavailable; forwarding event %s unverified', event_id)
         return submit_alert_notification(deliver_alert_notifications, triggered, event_id, rules)
