@@ -219,7 +219,10 @@ versions, from `https://download.pytorch.org/whl/cpu`). Torch is only used to
 export models, current CUDA torch wheels no longer run on Pascal, and their
 CUDA 13 dependencies are what overwrite cuDNN in the first place. The CPU build
 carries no NVIDIA wheels, so exports run on the CPU and cannot break GPU
-inference. FP16 export needs a CUDA torch; on a P4, export FP32 models.
+inference. Ultralytics 8.4.x can still export FP16 from a CPU torch (it
+converts the weights to FP16 after export and keeps the model's inputs and
+outputs FP32), but Pascal's FP16 throughput is very low, so on a P4 export
+FP32 models.
 
 If the model **Update** button fails after removing the cu13 wheels by hand,
 `import torch` is broken. Install the CPU build:

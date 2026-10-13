@@ -22,7 +22,7 @@ Cluster membership:
 
 - ``precision_export_kwargs(precision, device, onnxruntime_gpu_available)``
   -- emit the Ultralytics ``YOLO(...).export(...)`` kwargs string fragment
-  for the requested precision. ``fp16`` only emits ``half=True`` when
+  for the requested precision. ``fp16`` only emits ``quantize=16`` when
   device is CUDA AND onnxruntime-gpu is available; ``int8`` is NOT
   honored at export time (Ultralytics' ``int8=True`` requires calibration
   data -- INT8 happens at runtime via ``quantize_int8``).
@@ -885,7 +885,8 @@ def precision_export_kwargs(
 ) -> str:
     """Return the kwargs string fragment for the requested ``precision``.
 
-    - ``fp16``: emits ``half=True`` when ``device`` is ``'cuda'`` OR
+    - ``fp16``: emits ``quantize=16`` (the Ultralytics 8.4.172+ spelling of
+      the deprecated ``half=True``) when ``device`` is ``'cuda'`` OR
       ``'auto'`` AND onnxruntime-gpu is registered. ``'auto'`` is treated
       like CUDA here because the detector's ``auto`` device resolution
       lands on the CUDA provider whenever it is available, so an fp16
@@ -901,5 +902,5 @@ def precision_export_kwargs(
     - ``fp32``: always returns ``''``.
     """
     if precision == 'fp16' and device.lower() in ('cuda', 'auto') and onnxruntime_gpu:
-        return 'half=True'
+        return 'quantize=16'
     return ''

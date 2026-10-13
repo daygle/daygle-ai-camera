@@ -124,20 +124,20 @@ def test_normalize_precision(value, expected):
 # -- precision_export_kwargs ----------------------------------------------
 
 
-def test_precision_export_kwargs_fp16_cuda_gpu_returns_half_true():
-    """``fp16 + cuda + onnxruntime-gpu available`` emits ``half=True``."""
-    assert precision_export_kwargs('fp16', 'cuda', onnxruntime_gpu=True) == 'half=True'
+def test_precision_export_kwargs_fp16_cuda_gpu_returns_quantize_16():
+    """``fp16 + cuda + onnxruntime-gpu available`` emits ``quantize=16``."""
+    assert precision_export_kwargs('fp16', 'cuda', onnxruntime_gpu=True) == 'quantize=16'
 
 
-def test_precision_export_kwargs_fp16_auto_gpu_returns_half_true():
-    """``fp16 + auto + onnxruntime-gpu available`` emits ``half=True``.
+def test_precision_export_kwargs_fp16_auto_gpu_returns_quantize_16():
+    """``fp16 + auto + onnxruntime-gpu available`` emits ``quantize=16``.
 
     ``device='auto'`` resolves to the CUDA provider whenever it is available
     (same resolution the detector uses), so an fp16 request under the default
     ``device=auto`` must produce a genuine half-precision model on a
     CUDA-capable host -- not silently export FP32.
     """
-    assert precision_export_kwargs('fp16', 'auto', onnxruntime_gpu=True) == 'half=True'
+    assert precision_export_kwargs('fp16', 'auto', onnxruntime_gpu=True) == 'quantize=16'
 
 
 def test_precision_export_kwargs_fp16_cuda_no_gpu_returns_empty():
@@ -179,10 +179,10 @@ def test_precision_export_kwargs_fp32_always_empty(precision):
 # -- model_management._export_kwargs ---------------------------------------
 
 
-def test_export_kwargs_fp16_auto_gpu_emits_half_true(monkeypatch):
+def test_export_kwargs_fp16_auto_gpu_emits_quantize_16(monkeypatch):
     """``model_management._export_kwargs`` delegates its fp16 decision to
     ``precision_export_kwargs``: ``fp16 + device=auto`` on a GPU host emits
-    ``half=True`` (previously only an explicit ``device='cuda'`` did)."""
+    ``quantize=16`` (previously only an explicit ``device='cuda'`` did)."""
     import app.model_management as mm
     # ``test_api._load_app`` pops the whole ``app.*`` namespace from
     # ``sys.modules`` mid-session, so this file's module-level
@@ -193,47 +193,76 @@ def test_export_kwargs_fp16_auto_gpu_emits_half_true(monkeypatch):
     # production reads (otherwise ``onnxruntime_gpu_available`` stays unpatched).
     quantization = importlib.import_module('app.quantization')
 
-    monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
+    monkeypatch.setattr(mm, '_onnxslim_available', lambda: False)
     monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: True)
     kwargs = mm._export_kwargs(nms_free=False, precision='fp16', device='auto')
-    assert 'half=True' in kwargs
+    assert 'quantize=16' in kwargs
 
 
-def test_export_kwargs_fp16_auto_no_gpu_omits_half_true(monkeypatch):
+def test_export_kwargs_fp16_auto_no_gpu_omits_quantize_16(monkeypatch):
     """On a CPU-only host under the default ``device=auto``, fp16 stays a
-    silent no-op (no ``half=True``) so the export succeeds as FP32."""
+    silent no-op (no ``quantize=16``) so the export succeeds as FP32."""
     import app.model_management as mm
     quantization = importlib.import_module('app.quantization')  # live module -- see fp16_auto_gpu test
 
-    monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
+    monkeypatch.setattr(mm, '_onnxslim_available', lambda: False)
     monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: False)
     kwargs = mm._export_kwargs(nms_free=False, precision='fp16', device='auto')
-    assert 'half=True' not in kwargs
+    assert 'quantize=16' not in kwargs
 
 
-def test_export_kwargs_fp16_cpu_gpu_omits_half_true(monkeypatch):
-    """Explicit ``device='cpu'`` never emits ``half=True`` even when
+def test_export_kwargs_fp16_cpu_gpu_omits_quantize_16(monkeypatch):
+    """Explicit ``device='cpu'`` never emits ``quantize=16`` even when
     onnxruntime-gpu is present -- FP16 is CUDA-only."""
     import app.model_management as mm
     quantization = importlib.import_module('app.quantization')  # live module -- see fp16_auto_gpu test
 
-    monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
+    monkeypatch.setattr(mm, '_onnxslim_available', lambda: False)
     monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: True)
     kwargs = mm._export_kwargs(nms_free=False, precision='fp16', device='cpu')
-    assert 'half=True' not in kwargs
+    assert 'quantize=16' not in kwargs
 
 
-def test_export_kwargs_int8_never_emits_half_true(monkeypatch):
+def test_export_kwargs_int8_never_emits_quantize_16(monkeypatch):
     """INT8 is a runtime concern -- the export kwargs must never carry
-    ``half=True`` for any device / GPU combination."""
+    ``quantize=16`` for any device / GPU combination."""
     import app.model_management as mm
     quantization = importlib.import_module('app.quantization')  # live module -- see fp16_auto_gpu test
 
-    monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
+    monkeypatch.setattr(mm, '_onnxslim_available', lambda: False)
     for device in ('auto', 'cuda', 'cpu'):
         monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: True)
         kwargs = mm._export_kwargs(nms_free=False, precision='int8', device=device)
-        assert 'half=True' not in kwargs
+        assert 'quantize=16' not in kwargs
+
+
+def test_export_kwargs_use_current_ultralytics_spellings(monkeypatch):
+    """Ultralytics 8.4.172+ deprecates ``end2end`` (-> ``nms``) and ``half`` /
+    ``int8`` (-> ``quantize``); the export kwargs must never emit them."""
+    import app.model_management as mm
+    quantization = importlib.import_module('app.quantization')  # live module -- see fp16_auto_gpu test
+
+    monkeypatch.setattr(mm, '_onnxslim_available', lambda: True)
+    monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: True)
+    for nms_free in (False, True):
+        for precision in ('fp32', 'fp16', 'int8'):
+            kwargs = mm._export_kwargs(nms_free=nms_free, precision=precision, device='auto')
+            for deprecated in ('end2end=', 'half=', 'int8='):
+                assert deprecated not in kwargs
+
+
+def test_export_kwargs_always_set_simplify_explicitly(monkeypatch):
+    """Ultralytics defaults ``simplify=True`` and auto-installs ``onnxslim``
+    when it is missing, so the kwarg must always be explicit: ``True`` with
+    onnxslim importable, ``False`` without it."""
+    import app.model_management as mm
+
+    monkeypatch.setattr(mm, '_onnxslim_available', lambda: True)
+    assert 'simplify=True' in mm._export_kwargs(nms_free=False)
+    monkeypatch.setattr(mm, '_onnxslim_available', lambda: False)
+    kwargs = mm._export_kwargs(nms_free=False)
+    assert 'simplify=False' in kwargs
+    assert 'simplify=True' not in kwargs
 
 
 # -- capability detection --------------------------------------------------

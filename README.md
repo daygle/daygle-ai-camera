@@ -110,12 +110,14 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
    same script. The generated GPU lock is local deployment output unless it is
    reviewed and committed for a specific supported GPU platform.
 
-   `onnxsim` is intentionally not part of the base server install. The model
-   exporter detects it at runtime and skips optional graph simplification when
-   it is absent. Install it only on hosts that need simplified ONNX exports:
+   `onnxslim` (the graph simplifier Ultralytics uses) is intentionally not part
+   of the base server install. The model exporter detects it at runtime and
+   exports with `simplify=False` when it is absent, so Ultralytics never tries
+   to auto-install it. Install it only on hosts that need simplified ONNX
+   exports:
 
    ```bash
-   pip install --no-cache-dir onnxsim
+   pip install --no-cache-dir onnxslim
    ```
 
 4. Create the bootstrap config:

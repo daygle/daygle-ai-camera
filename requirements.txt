@@ -52,6 +52,9 @@ onnxscript>=0.7.2,<1.0
 # The export kwargs themselves were migrated off the deprecated end2end
 # alias in the same change (_export_kwargs now emits nms=False / nms=None;
 # byte-identical vs the old end2end spelling, verified by the same A/B).
+# Likewise fp16 exports emit quantize=16 instead of the deprecated half=True
+# (byte-identical on 8.4.176), and simplify is always passed explicitly:
+# 8.4.x defaults it to True and pip auto-installs onnxslim when it is missing.
 ultralytics==8.4.176
 # Bumped to the 5.x line on 2026-07-27. Audited every cv2 symbol this repo
 # uses (imdecode/imencode, cvtColor, resize INTER_NEAREST/LINEAR, rectangle,

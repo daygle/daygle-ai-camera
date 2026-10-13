@@ -214,11 +214,15 @@ class OnnxYoloDetector:
         # branch only ever fires when the session is CUDA-bound.
         self._use_io_binding = bool(use_io_binding)
         # The numpy dtype the model's input tensor expects. Resolved from the
-        # loaded session below; an FP16 (``half=True``) export declares a
+        # loaded session below; a GPU FP16 (``quantize=16``) export declares a
         # ``tensor(float16)`` input and rejects a float32 array, so the
         # preprocess step casts to whatever the model actually wants. Stays
         # None until the session loads; ``_preprocess`` falls back to float32.
         self._input_dtype: Any = None
+        # True when the export recorded FP16 weights behind float32 I/O
+        # (Ultralytics 8.4.x CPU ``quantize=16`` exports keep their I/O types),
+        # so ``active_precision`` can report fp16 for such a model.
+        self._fp16_weights = False
 
         cpu_count = os.cpu_count() or 1
         # Let each inference use multiple cores so it finishes fast, then cap how
@@ -455,6 +459,7 @@ class OnnxYoloDetector:
             # raises an ORT type-mismatch, so ``_preprocess`` casts to match.
             input_type = getattr(model_input, 'type', None)
             self._input_dtype = np.float16 if input_type == 'tensor(float16)' else np.float32
+            self._fp16_weights = _export_quantize_scheme(self.session) == '16'
             logger.info(
                 "Detector startup diagnostics: model_path=%s model_type=%s "
                 "active_providers=%s precision=%s nms_free=%s "
@@ -591,12 +596,16 @@ class OnnxYoloDetector:
           rewrites ``self._precision`` to ``'fp32'`` when it can't quantize).
         - FP16 is reported only when the loaded model genuinely declares a
           ``float16`` input; an FP16 request that produced an FP32 export (a
-          CPU host that dropped ``half=True``) correctly reads back as fp32.
+          CPU host that dropped ``quantize=16``) correctly reads back as fp32.
+          A CPU-side Ultralytics ``quantize=16`` export keeps float32 I/O
+          around FP16 weights; its recorded export args mark it fp16.
         - Everything else is fp32.
         """
         if self._precision == 'int8':
             return 'int8'
         if self._input_dtype is not None and np is not None and np.dtype(self._input_dtype) == np.float16:
+            return 'fp16'
+        if self._fp16_weights:
             return 'fp16'
         return 'fp32'
 
@@ -1128,6 +1137,26 @@ def _int8_precision_supported_for_detector(nms_free: bool) -> bool:
     silently returning zero detections.
     """
     return not bool(nms_free)
+
+
+def _export_quantize_scheme(session: Any) -> str | None:
+    """Return the ``quantize`` arg an Ultralytics export recorded, as a string.
+
+    Ultralytics 8.4.x writes its export args into the ONNX metadata as a
+    Python dict literal (e.g. ``"{'quantize': 16, 'nms': None, ...}"``).
+    Returns ``None`` when the model carries no such record (older exports,
+    hand-built or quantized-at-runtime graphs) or it cannot be parsed.
+    """
+    import ast
+
+    try:
+        raw = session.get_modelmeta().custom_metadata_map.get('args')
+        args = ast.literal_eval(raw) if raw else None
+    except Exception:
+        return None
+    if not isinstance(args, dict) or args.get('quantize') is None:
+        return None
+    return str(args['quantize'])
 
 
 def _detect_model_type(model_path: str) -> bool:

@@ -151,9 +151,11 @@ touch these. Change one at a time so you can attribute any per-frame impact.
 
 - **Precision** - inference precision.
   - *FP32* - full precision (default).
-  - *FP16* - half precision, CUDA only. Exported as FP16 when Device is CUDA or
-    Auto on a CUDA-capable host; on CPU-only hosts the export silently falls
-    back to FP32.
+  - *FP16* - half precision, CUDA only. Exported as FP16 (Ultralytics
+    `quantize=16`) when Device is CUDA or Auto on a CUDA-capable host; on
+    CPU-only hosts the export silently falls back to FP32. An FP16 export made
+    with a CPU-only torch keeps FP32 inputs and outputs around FP16 weights;
+    the Status panel still reports it as FP16.
   - *INT8* - CPU-only quantization with automatic calibration. ~4x smaller
     model, ~1-2 mAP cost, and the biggest CPU performance win.
 - **IoU Threshold** - intersection-over-union threshold for merging overlapping

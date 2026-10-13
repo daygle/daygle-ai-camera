@@ -407,11 +407,42 @@ def test_active_precision_reports_fp16_from_model_input_dtype():
 
 def test_active_precision_fp16_request_but_fp32_model_reads_fp32():
     """FP16 requested but the loaded model has a float32 input (a CPU export
-    that dropped half=True) reports fp32 -- the truth, not the request."""
+    that dropped quantize=16) reports fp32 -- the truth, not the request."""
     det = _detector(nms_free=False)
     det._precision = 'fp16'
     det._input_dtype = np.float32
     assert det.active_precision == 'fp32'
+
+
+def test_active_precision_reports_fp16_for_fp32_io_fp16_weights():
+    """Ultralytics 8.4.x CPU ``quantize=16`` exports keep float32 I/O around
+    FP16 weights; the recorded export args still mark them fp16."""
+    det = _detector(nms_free=False)
+    det._precision = 'fp16'
+    det._input_dtype = np.float32
+    det._fp16_weights = True
+    assert det.active_precision == 'fp16'
+
+
+class _MetaSession:
+    def __init__(self, args):
+        self._meta = type('Meta', (), {'custom_metadata_map': {} if args is None else {'args': args}})()
+
+    def get_modelmeta(self):
+        return self._meta
+
+
+@pytest.mark.parametrize('args, expected', [
+    ("{'batch': 1, 'quantize': 16, 'nms': None, 'simplify': True, 'opset': 13}", '16'),
+    ("{'batch': 1, 'quantize': None, 'nms': False}", None),
+    ("{'batch': 1, 'half': False}", None),
+    (None, None),
+    ('not a dict literal', None),
+])
+def test_export_quantize_scheme_reads_ultralytics_args(args, expected):
+    from app.detector import _export_quantize_scheme
+
+    assert _export_quantize_scheme(_MetaSession(args)) == expected
 
 
 def test_active_precision_defaults_fp32():
