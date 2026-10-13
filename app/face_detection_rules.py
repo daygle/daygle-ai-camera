@@ -71,16 +71,6 @@ def _coerce_optional_float(value: Any) -> float | None:
     return num if math.isfinite(num) and 0 <= num <= 1 else None
 
 
-def _coerce_non_negative_int(value: Any, default: int = 5) -> int:
-    """Return a safe integer for user-controlled rule settings."""
-    if isinstance(value, bool) or value in (None, ''):
-        return default
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError, OverflowError):
-        return default
-
-
 def _coerce_detection_confidence(value: Any) -> float:
     """Convert detector confidence to a finite value for rule comparisons."""
     try:
@@ -124,7 +114,6 @@ def _validate_rule(rule: dict[str, Any]) -> dict[str, Any]:
         'email_enabled': _coerce_bool(rule.get('email_enabled'), False),
         'push_enabled': _coerce_bool(rule.get('push_enabled'), False),
         'email_recipients': _normalize_recipients_field(rule.get('email_recipients')),
-        'cooldown_minutes': _coerce_non_negative_int(rule.get('cooldown_minutes')),
         'min_confidence': _coerce_optional_float(rule.get('min_confidence')),
         # Optional scoping (People card on the Zones page). Empty means the
         # legacy global behaviour: the rule applies on every camera / any
@@ -181,7 +170,7 @@ def enabled_unknown_rule() -> dict[str, Any] | None:
     """Return the ``_unknown`` system rule when it is enabled, else ``None``.
 
     The ``_unknown`` rule is the single place unknown-person alerting is
-    configured (enable/disable, email + push toggles, recipients, cooldown).
+    configured (enable/disable, email + push toggles, recipients).
     It replaced the legacy ``alert_unknown`` / ``alert_unknown_email``
     face-recognition settings, which the Face Rules tab superseded. Returns
     ``None`` when the rule is absent or disabled, so the unknown-face alert
@@ -226,7 +215,6 @@ def heal_legacy_unknown_alert_config() -> bool:
         'email_enabled': bool(legacy_email),
         'push_enabled': legacy_unknown,
         'email_recipients': legacy_email,
-        'cooldown_minutes': 5,
     }
     from app.auth import utc_now
 

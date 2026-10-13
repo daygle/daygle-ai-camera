@@ -64,11 +64,19 @@ night can drop out of detection for a few seconds at a time. If it comes back on
 exactly its settled box within 10 minutes, it gets its old track back, still
 anchored, instead of starting as a new object. A new object is judged only by
 its changed pixels, so a moth or rain streak crossing it at that moment would
-otherwise read it as *moving*. It annotates each detection with `track_id`,
+otherwise read it as *moving*. A small box (a distant car) must have at least
+6 changed pixels in the motion thumbnail (or a quarter of a box too tiny to
+hold that many) before it reads *moving*: one or two stray pixels from a
+swaying branch or night sensor noise are not movement, while a really moving
+object changes most of its box. It annotates each detection with `track_id`,
 `track_age` (cycles seen), and `track_new` (first sighting). The moving/still
 classifier reads a track's age and movement: on a second sighting a box that grew
-or shrank reads *moving*, while a box that only shifted is judged by the motion
-mask, as a first sighting is. These ids flow into
+or shrank reads *moving* (a size change under 0.5% of the frame is detector
+jitter, which matters for small, distant boxes), while a box that only shifted
+is judged by the motion mask, as a first sighting is. Each detection in a
+recording's track also records why it was judged moving or still
+(`motion_basis`: `displacement`, `track_step`, `mask` or `no_mask`) with its
+`track_age` and `track_displacement`, so a wrong verdict can be traced. These ids flow into
 the detection history and recording rows, giving the playback overlay continuity
 and providing the foundation for de-duplicated events, dwell-time, and
 line-crossing.

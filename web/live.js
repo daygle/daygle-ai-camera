@@ -605,8 +605,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     if (objectReason?.code === 'below_threshold') {
       const threshold = confidenceFor(objectReason.threshold);
       suffix = `below alert threshold${threshold != null ? ` (${Math.round(threshold * 100)}%)` : ''}`;
-    } else if (/debounce|suppressed/i.test(reason)) suffix = 'event suppressed (debounce active)';
-    else if (/cooldown/i.test(reason)) suffix = 'alert rule in cooldown';
+    } else if (/nothing new in view/i.test(reason)) suffix = 'already in view (no new event)';
     else if (/no alert rule|no matching|no new alert/i.test(reason)) suffix = 'no matching alert rule';
     else if (/no detections matched/i.test(reason)) suffix = 'outside monitored zones';
     else suffix = reason || 'no alert triggered';

@@ -69,6 +69,7 @@ streak resets and a fresh streak can alert again later.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Any
 
@@ -109,6 +110,23 @@ _STILL_ALERT_MAX_MINUTES = 1440
 # floor below keeps a lone noise pixel from flipping a huge box.
 _MOVING_BOX_FRACTION = 0.01
 _MOVING_MIN_CHANGED_PIXELS = 2
+# Noise floor for SMALL boxes. 1% of a small box is under one pixel, so the
+# 2-pixel floor alone let two stray changed pixels (a swaying branch, night
+# sensor noise) call a distant parked car "moving" and pass a Moving Only rule
+# (event 62053: a ~17x6-cell car box flipped while its box never moved). A
+# genuinely moving subject changes most of its box, so a small box needs
+# ``_MOVING_SMALL_BOX_PIXELS`` changed pixels - or, for a box too tiny to hold
+# that many, ``_MOVING_TINY_BOX_FRACTION`` of it. Boxes large enough that 1%
+# already exceeds the floor are unaffected.
+_MOVING_SMALL_BOX_PIXELS = 6
+_MOVING_TINY_BOX_FRACTION = 0.25
+
+
+def _moving_pixels_required(region_cells: int) -> int:
+    """Changed pixels a box of ``region_cells`` mask cells needs to read moving."""
+    small_box_floor = min(_MOVING_SMALL_BOX_PIXELS, math.ceil(region_cells * _MOVING_TINY_BOX_FRACTION))
+    return max(_MOVING_MIN_CHANGED_PIXELS, small_box_floor, math.ceil(region_cells * _MOVING_BOX_FRACTION))
+
 
 # Track-displacement override of the mask verdict (see module docstring). The
 # tracker annotates each detection with ``track_displacement``: the net
@@ -138,6 +156,12 @@ _TRACK_SIZE_JITTER_FRACTION = 0.05
 # path's own (3x more conservative) threshold, preserving the deliberate
 # difference: one cycle of measurement is noisier than eight.
 _TRACK_SIZE_REFERENCE = _TRACK_STEP_MOVING / _TRACK_SIZE_JITTER_FRACTION
+# Edge jitter is a few source pixels whatever the box size, so on a SMALL box it
+# is a large relative change: a distant parked car's box (5% of the frame wide)
+# wobbled 0.0539 -> 0.0514, ~5% "growth" that read as an approaching subject on
+# its second sighting (event 62053). A one-cycle size change below this many
+# frame units is jitter, not a subject approaching or receding.
+_TRACK_MIN_SIZE_STEP = 0.005
 
 
 def normalize_mode(value: Any, default: str = MODE_ANY) -> str:
@@ -482,8 +506,10 @@ def _step_components(detection: dict[str, Any]) -> tuple[float, float] | None:
     # Thresholded in RELATIVE units, so a small object's identical relative
     # growth is not silently discarded and a large parked box cannot clear an
     # absolute bar on detector drift alone.
-    size_step = (abs(current_size - previous_size) / mean_size) * _TRACK_SIZE_REFERENCE if mean_size > 0.0 else 0.0
-    return center_step, size_step
+    size_change = abs(current_size - previous_size)
+    if mean_size <= 0.0 or size_change < _TRACK_MIN_SIZE_STEP:
+        return center_step, 0.0
+    return center_step, (size_change / mean_size) * _TRACK_SIZE_REFERENCE
 
 
 def _two_point_step(detection: dict[str, Any]) -> float | None:
@@ -492,12 +518,18 @@ def _two_point_step(detection: dict[str, Any]) -> float | None:
     return max(components) if components is not None else None
 
 
-def detection_motion_state(
+def classify_motion_state(
     detection: dict[str, Any],
     diff_mask: Any,
     track_displacement: float | None = None,
-) -> str:
-    """Classify one detection as ``moving`` or ``still``.
+) -> tuple[str, str]:
+    """Classify one detection as ``moving`` or ``still``, and say on what basis.
+
+    Returns ``(state, basis)``; ``basis`` names the evidence that decided it:
+    ``displacement`` (the tracker's box history), ``track_step`` (a young
+    track's last step), ``mask`` (changed pixels in the box) or ``no_mask``
+    (no pixel change measured). It is stamped on detections as
+    ``motion_basis`` so a wrong verdict can be traced afterwards.
 
     ``diff_mask`` is the boolean (HxW) changed-pixel thumbnail from
     ``detect_frame_motion`` (or ``None`` when no change was measured / the
@@ -518,8 +550,8 @@ def detection_motion_state(
     if track_displacement is not None:
         try:
             if float(track_displacement) <= _TRACK_DISPLACEMENT_STILL:
-                return MODE_STILL
-            return MODE_MOVING
+                return MODE_STILL, 'displacement'
+            return MODE_MOVING, 'displacement'
         except (TypeError, ValueError):
             pass  # corrupt annotation -> fall through to mask classification
     else:
@@ -550,7 +582,7 @@ def detection_motion_state(
             # would be dropped under Moving Only.
             components = _step_components(detection)
             if components is None or max(components) < _TRACK_STEP_MOVING:
-                return MODE_STILL
+                return MODE_STILL, 'track_step'
             # A box that GREW or shrank (a subject approaching or receding) is
             # moving, whether or not it also translated. A box that only
             # TRANSLATED is not proof on its own: an id swapped between two
@@ -558,17 +590,17 @@ def detection_motion_state(
             # decides it as it would a first sighting - a walker's box is full
             # of changed pixels, a parked car's is not.
             if components[1] >= _TRACK_STEP_MOVING:
-                return MODE_MOVING
+                return MODE_MOVING, 'track_step'
     if diff_mask is None:
-        return MODE_STILL
+        return MODE_STILL, 'no_mask'
     box = detection.get('box')
     if not isinstance(box, dict):
-        return MODE_STILL
+        return MODE_STILL, 'mask'
     try:
         import numpy as np
         mask = np.asarray(diff_mask)
         if mask.ndim != 2 or mask.size == 0:
-            return MODE_STILL
+            return MODE_STILL, 'mask'
         height, width = mask.shape
         try:
             x = float(box.get('x') or 0.0)
@@ -576,7 +608,7 @@ def detection_motion_state(
             w = float(box.get('width') or 0.0)
             h = float(box.get('height') or 0.0)
         except (TypeError, ValueError):
-            return MODE_STILL
+            return MODE_STILL, 'mask'
         # Map the normalised box onto the thumbnail grid. Clamp so a
         # degenerate box can never produce an empty/NaN slice.
         x1 = int(round(max(0.0, min(1.0, x)) * width))
@@ -586,18 +618,24 @@ def detection_motion_state(
         x1, x2 = min(x1, width), max(min(x2, width), min(x1, width))
         y1, y2 = min(y1, height), max(min(y2, height), min(y1, height))
         if x2 <= x1 or y2 <= y1:
-            return MODE_STILL
+            return MODE_STILL, 'mask'
         region = mask[y1:y2, x1:x2]
         if region.size == 0:
-            return MODE_STILL
+            return MODE_STILL, 'mask'
         changed = int(region.sum())
-        if changed < _MOVING_MIN_CHANGED_PIXELS:
-            return MODE_STILL
-        fraction = float(changed) / float(region.size)
-        return MODE_MOVING if fraction >= _MOVING_BOX_FRACTION else MODE_STILL
+        return (MODE_MOVING if changed >= _moving_pixels_required(int(region.size)) else MODE_STILL), 'mask'
     except Exception as exc:  # pragma: no cover - unexpected mask/box shapes
         logger.debug('Unexpected error classifying detection motion state: %s', exc)
-        return MODE_STILL
+        return MODE_STILL, 'mask'
+
+def detection_motion_state(
+    detection: dict[str, Any],
+    diff_mask: Any,
+    track_displacement: float | None = None,
+) -> str:
+    """Classify one detection as ``moving`` or ``still`` (see
+    :func:`classify_motion_state`, which also reports the basis)."""
+    return classify_motion_state(detection, diff_mask, track_displacement)[0]
 
 
 def _resolved_motion_state(detection: dict[str, Any], diff_mask: Any) -> str:
@@ -635,10 +673,11 @@ def annotate_motion_states(
         return detections
     if camera_motion:
         return [{**detection, 'motion_state': 'unknown', 'camera_motion': True} for detection in detections]
-    return [
-        {**detection, 'motion_state': detection_motion_state(detection, diff_mask, detection.get('track_displacement'))}
-        for detection in detections
-    ]
+    annotated = []
+    for detection in detections:
+        state, basis = classify_motion_state(detection, diff_mask, detection.get('track_displacement'))
+        annotated.append({**detection, 'motion_state': state, 'motion_basis': basis})
+    return annotated
 
 
 def filter_detections_by_motion_mode(

@@ -829,3 +829,52 @@ def test_still_dwell_reuses_a_stamped_state():
     stamped_still = {**_det('car'), 'motion_state': 'still'}
     out = os.still_dwell_candidates([stamped_still], _mask_all_changed(), settings)
     assert len(out) == 1 and out[0]['label'] == 'car'
+
+
+# Event 62053: a distant parked car (box ~0.054 x 0.023 of the frame, ~17x6
+# cells of the 320x240 motion thumbnail) passed a Moving Only rule.
+_DISTANT_CAR_BOX = {'x': 0.4482, 'y': 0.0342, 'width': 0.0539, 'height': 0.0232}
+
+
+def _mask_with_pixels_in(box, count):
+    mask = np.zeros((240, 320), dtype=bool)
+    x1, y1 = int(round(box['x'] * 320)), int(round(box['y'] * 240))
+    x2 = int(round((box['x'] + box['width']) * 320))
+    cells = [(row, col) for row in range(y1, y1 + 5) for col in range(x1, x2)]
+    for row, col in cells[:count]:
+        mask[row, col] = True
+    return mask
+
+
+def test_small_box_needs_more_than_a_few_noise_pixels_to_read_moving():
+    car = {'label': 'car', 'confidence': 0.55, 'box': dict(_DISTANT_CAR_BOX)}
+    assert os.classify_motion_state(car, _mask_with_pixels_in(_DISTANT_CAR_BOX, 2), None) == ('still', 'mask')
+    assert os.classify_motion_state(car, _mask_with_pixels_in(_DISTANT_CAR_BOX, 5), None) == ('still', 'mask')
+    assert os.classify_motion_state(car, _mask_with_pixels_in(_DISTANT_CAR_BOX, 6), None) == ('moving', 'mask')
+    # A really moving small car changes most of its box.
+    assert os.detection_motion_state(car, _mask_all_changed(), None) == 'moving'
+
+
+def test_moving_pixel_floor_only_changes_small_boxes():
+    assert os._moving_pixels_required(8) == 2  # tiny box: 25% of it
+    assert os._moving_pixels_required(100) == 6  # small box: noise floor
+    assert os._moving_pixels_required(3000) == 30  # large box: 1% as before
+
+
+def test_age_two_size_jitter_on_a_small_box_is_not_approach():
+    """The same car's box wobbling 0.0539 -> 0.0514 (~5%) between sightings is
+    detector jitter, not a subject approaching."""
+    wobble = {'label': 'car', 'confidence': 0.55, 'box': dict(_DISTANT_CAR_BOX), 'track_id': 15, 'track_age': 2,
+              'track_prev_center': (0.4752, 0.0458), 'track_center': (0.4756, 0.0460),
+              'track_prev_box': (0.4482, 0.0342, 0.0539, 0.0232),
+              'track_box': (0.4499, 0.0347, 0.0514, 0.0225)}
+    assert os._step_components(wobble)[1] == 0.0
+    assert os.classify_motion_state(wobble, _mask_all_changed(), None) == ('still', 'track_step')
+
+
+def test_annotate_stamps_the_basis_of_each_verdict():
+    tracked = {**_det('car'), 'track_id': 3, 'track_age': 5}
+    annotated = os.annotate_motion_states(
+        [{**tracked, 'track_displacement': 0.0}, _det('person')], _mask_changed_inside_box(),
+    )
+    assert [(d['motion_state'], d['motion_basis']) for d in annotated] == [('still', 'displacement'), ('moving', 'mask')]

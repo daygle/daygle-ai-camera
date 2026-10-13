@@ -52,3 +52,16 @@ def test_live_history_track_keeps_the_motion_fraction():
     track = build_track_from_live_history('cam-fraction', 999.0, 1001.0)
     assert track is not None
     assert [d.get('motion_fraction') for d in track[0]['detections']] == [0.05, None]
+
+
+def test_live_history_track_keeps_the_motion_diagnostics():
+    """Why a detection was judged moving rides into the recording's track, so
+    a wrong verdict can be traced afterwards (event 62053)."""
+    car = {'label': 'car', 'confidence': 0.55, 'box': {'x': 0.4, 'y': 0.03, 'width': 0.05, 'height': 0.02},
+           'motion_state': 'moving', 'motion_basis': 'mask', 'track_id': 15, 'track_age': 7,
+           'track_displacement': 0.0123456}
+    record_live_detection_history('cam-diagnostics', [car], sample_ts=1000.0)
+    track = build_track_from_live_history('cam-diagnostics', 999.0, 1001.0)
+    assert track is not None
+    sample = track[0]['detections'][0]
+    assert (sample['motion_basis'], sample['track_age'], sample['track_displacement']) == ('mask', 7, 0.0123)

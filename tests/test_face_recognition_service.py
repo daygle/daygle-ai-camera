@@ -65,7 +65,7 @@ def test_validate_malformed_rule_payloads_does_not_crash():
     result = validate_face_detection_rules({
         'rules': [None, 'not-a-rule', {'id': 'x', 'name': 'Alex', 'cooldown_minutes': 'bad', 'min_confidence': float('nan')}],
     })
-    assert result['rules'][0]['cooldown_minutes'] == 5
+    assert 'cooldown_minutes' not in result['rules'][0]  # retired: presence gate
     assert result['rules'][0]['min_confidence'] is None
 
 
