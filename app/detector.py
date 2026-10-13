@@ -196,9 +196,9 @@ class OnnxYoloDetector:
         self._execution_mode = (execution_mode or "parallel").lower()
         # ``confidence_only_nms`` lets a YOLO26 (NMS-free) deployment drop the
         # class-aware NMS dedupe pass entirely and rely on the model head's
-        # one-to-one label assignment + the confidence threshold. Off by
-        # default so existing recordings keep their current dedupe behavior;
-        # flip on after validating on a labeled set.
+        # one-to-one label assignment + the confidence threshold. Only read
+        # on the NMS-free output path; ``create_detector`` resolves the
+        # Automatic setting to True so any NMS-free output skips the pass.
         self._confidence_only_nms = bool(confidence_only_nms)
         # ``precision`` selects the on-disk / runtime model layout.
         # ``fp32`` (default -- prior behavior) loads the source ONNX.
@@ -926,8 +926,8 @@ class OnnxYoloDetector:
         # is set the model head's one-to-one label assignment plus the
         # confidence threshold already give us a clean detection list --
         # skipping the class-aware NMS saves the per-frame Python sort +
-        # IoU matrix cost. Off by default so existing recordings keep
-        # their dedupe behavior; flip on after A/B on a labeled set.
+        # IoU matrix cost. Set by default (Automatic); "Force Class-Aware
+        # NMS" clears it to run the dedupe here anyway.
         if filtered_boxes.shape[0] > 0 and not self._confidence_only_nms:
             keep = non_max_suppression(
                 filtered_boxes, filtered_scores, filtered_class_ids, self.iou_threshold
@@ -1225,7 +1225,7 @@ def create_face_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector | None:
         gpu_mem_limit=_optional_int('gpu_mem_limit'),
         nms_free=nms_free,
         execution_mode=str(ai_config.get('execution_mode', 'parallel') or 'parallel').lower(),
-        confidence_only_nms=_resolve_confidence_only_nms(ai_config.get('confidence_only_nms'), nms_free),
+        confidence_only_nms=_resolve_confidence_only_nms(ai_config.get('confidence_only_nms')),
         precision=str(ai_config.get('precision', 'fp32') or 'fp32').strip().lower(),
         use_io_binding=normalize_bool_setting(ai_config.get('use_io_binding'), False),
         # YOLO-face exports are YOLOv8-pose models with a 5-point facial
@@ -1269,34 +1269,35 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         gpu_mem_limit=_optional_int("gpu_mem_limit"),
         nms_free=bool(nms_free),
         execution_mode=str(ai_config.get("execution_mode", "parallel") or "parallel").lower(),
-        confidence_only_nms=_resolve_confidence_only_nms(ai_config.get("confidence_only_nms"), nms_free),
+        confidence_only_nms=_resolve_confidence_only_nms(ai_config.get("confidence_only_nms")),
         precision=str(ai_config.get("precision", "fp32") or "fp32").strip().lower(),
         use_io_binding=normalize_bool_setting(ai_config.get("use_io_binding"), False),
         keypoint_count=_optional_int("keypoint_count") or 0,
     )
 
 
-def _resolve_confidence_only_nms(value: Any, nms_free: bool) -> bool:
+def _resolve_confidence_only_nms(value: Any) -> bool:
     """Resolve the tri-state ``confidence_only_nms`` setting to a bool.
 
     NMS-free heads (YOLO26) already perform one-to-one label assignment in the
     model, so the extra class-aware NMS pass is redundant work that can also
-    wrongly suppress genuinely overlapping objects. The setting is tri-state:
+    wrongly suppress genuinely overlapping objects. The flag is only consulted
+    on the NMS-free postprocess path, which ``_postprocess`` picks from the
+    model's actual output shape -- grid heads (YOLOv8/YOLO11) always run NMS.
+    The setting is tri-state:
 
-    - ``'auto'`` / ``None`` (default): follow the model -- skip the NMS pass
-      for NMS-free heads, keep it for grid heads (YOLOv8/YOLO11).
-    - ``'on'`` / truthy: always skip the NMS pass (confidence threshold only).
+    - ``'auto'`` / ``None`` (default): follow the model's output -- skip the
+      NMS pass whenever the output is NMS-free, whatever the file is called.
+    - ``'on'`` / truthy: skip the NMS pass (same effect as auto today).
     - ``'off'`` / falsy: always run the class-aware NMS dedupe.
 
     Legacy persisted bools are honoured (``True`` -> skip, ``False`` -> run).
     """
     if value is None:
-        return bool(nms_free)
+        return True
     if isinstance(value, bool):
         return value
     text = str(value).strip().lower()
-    if text in {'on', '1', 'true', 'yes'}:
-        return True
     if text in {'off', '0', 'false', 'no'}:
         return False
-    return bool(nms_free)  # 'auto' or any unknown value follows the model
+    return True  # 'auto', 'on' or any unknown value

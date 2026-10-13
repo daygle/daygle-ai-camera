@@ -173,7 +173,9 @@ touch these. Change one at a time so you can attribute any per-frame impact.
   on your hardware.
 - **NMS Dedupe** - class-aware NMS dedupe pass.
   - *Auto* (recommended) - skips the extra dedupe for NMS-free YOLO26 models and
-    keeps it for YOLOv8/YOLO11.
+    keeps it for YOLOv8/YOLO11. The choice follows the model's actual output
+    format, not its file name, so a renamed or custom NMS-free model is
+    handled the same way.
   - *Skip (NMS-Free Models Only)* - confidence threshold only; affects NMS-free
     YOLO26 models. YOLOv8/YOLO11 always run class-aware NMS because their grid
     head emits thousands of raw boxes.
