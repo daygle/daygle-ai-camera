@@ -221,6 +221,7 @@ def _m():
     ns.live_snapshot = sys.modules["app.live_snapshot"]
     ns.detection_state = sys.modules["app.detection_state"]
     ns.event_debounce = sys.modules["app.event_debounce"]
+    ns.event_presence = sys.modules["app.event_presence"]
     ns.alert_dispatch = sys.modules["app.alert_dispatch"]
     ns.detection_status = sys.modules["app.detection_status"]
     ns.recording_extension = sys.modules["app.recording_extension"]

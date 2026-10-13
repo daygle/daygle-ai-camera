@@ -97,8 +97,8 @@ def test_cleanup_camera_runtime_state_removes_all_dicts(state):
         state.live_detection_confirm_history['cam-old'] = deque(maxlen=10)
     with state.live_detection_status_lock:
         state.live_detection_status['cam-old'] = {'state': 'checked'}
-    with state.live_event_last_emitted_lock:
-        state.live_event_last_emitted['cam-old'] = {'timestamp': 1.0, 'labels': ['person'], 'label_times': {}}
+    with state.live_event_presence_lock:
+        state.live_event_presence['cam-old'] = {'person': {'high': 1, 'pending_cycles': 0, 'last_seen': 1.0}}
     with state._still_dwell_lock:
         state._still_dwell['cam-old'] = {'person': {'still_since': 1.0, 'alerted': False}}
     with state._object_tracks_lock:
@@ -136,7 +136,7 @@ def test_cleanup_camera_runtime_state_removes_all_dicts(state):
     assert 'cam-old' not in state.live_detection_history
     assert 'cam-old' not in state.live_detection_confirm_history
     assert 'cam-old' not in state.live_detection_status
-    assert 'cam-old' not in state.live_event_last_emitted
+    assert 'cam-old' not in state.live_event_presence
     assert 'cam-old' not in state._still_dwell
     assert 'cam-old' not in state._object_tracks
     assert 'cam-old' not in state._motion_confirm_streaks

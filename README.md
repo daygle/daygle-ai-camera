@@ -11,7 +11,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 - CPU and CUDA (NVIDIA GPU) inference with FP32, FP16, and INT8 precision options
 - Sound detection using YAMNet TFLite
 - Three-layer detection: pixel-diff motion gate, YOLO object detection, and per-zone motion rules
-- Monitoring zones, motion and object rules, per-label confidence and cooldowns
+- Monitoring zones, motion and object rules, per-label confidence, and one event per object (no cooldowns)
 - Per-object detection behavior: choose, per class, whether detections count for moving subjects, still subjects, or both (a parked car can be ignored while a passing one still alerts)
 - Umbrella `animal` / `pet` group labels so one rule can match any related class (e.g. a cat misread as a dog at night)
 - Per-rule object size and shape limits (min/max share of the frame, min/max width-to-height), so an oversized or wrongly shaped box never alerts

@@ -171,9 +171,9 @@ def _cleanup_camera_runtime_state(removed_ids: set[str]) -> None:
     with _state.live_detection_status_lock:
         for cam_id in removed_ids:
             _state.live_detection_status.pop(cam_id, None)
-    with _state.live_event_last_emitted_lock:
+    with _state.live_event_presence_lock:
         for cam_id in removed_ids:
-            _state.live_event_last_emitted.pop(cam_id, None)
+            _state.live_event_presence.pop(cam_id, None)
     with _state._still_dwell_lock:
         for cam_id in removed_ids:
             _state._still_dwell.pop(cam_id, None)

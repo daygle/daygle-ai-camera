@@ -989,7 +989,7 @@ def test_zone_object_alert_rules_includes_motion_rules_from_motion_only_zones():
     assert rules[0]['zone_id'] == 'porch'
 
 
-def test_zone_object_alert_rules_expands_schedules_with_independent_windows_and_cooldowns(monkeypatch):
+def test_zone_object_alert_rules_expands_schedules_with_independent_windows(monkeypatch):
     from app import zone_detection as zd
     settings = {
         'id': 'cam-1', 'name': 'Cam 1',
@@ -1011,13 +1011,11 @@ def test_zone_object_alert_rules_expands_schedules_with_independent_windows_and_
         'Cam 1 / Porch / person [Schedule 1]',
         'Cam 1 / Porch / person [Schedule 2]',
     ]
-    assert [rule['cooldown_key'] for rule in rules] == [
-        'cam-1::porch::person::day', 'cam-1::porch::person::night',
-    ]
+    assert [rule['schedule_id'] for rule in rules] == ['day', 'night']
     assert [rule['active_start'] for rule in rules] == ['06:00', '18:00']
     assert rules[0]['email_recipients'] == ['day@example.com']
     assert rules[1]['push_enabled'] is True
-    assert all(rule['min_confidence'] == 0.6 and rule['cooldown_seconds'] == 45 for rule in rules)
+    assert all(rule['min_confidence'] == 0.6 and 'cooldown_seconds' not in rule for rule in rules)
 
     from app.alerts import AlertEngine
     import app.alerts as alerts_module
@@ -1092,7 +1090,6 @@ def test_zone_object_alert_rules_email_recipients_cleaned(monkeypatch):
     assert len(rules) == 1
     assert rules[0]['email_recipients'] == ['admin@example.com']
     assert rules[0]['push_enabled'] is True
-    assert rules[0]['cooldown_key'] == 'cam-1::zon::person'
 
 
 def test_zone_detection_alert_rule_names_includes_each_configured_schedule():

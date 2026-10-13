@@ -95,7 +95,7 @@ Cluster membership (21 helpers, 290 lines original):
   normalization so 'human' aliases to 'person'.
 
 - ``zone_object_alert_rules`` -- builds the per-zone AlertEngine rule
-  list with ``cooldown_key``, contact fields, and 4 notification-window
+  list with contact fields, and 4 notification-window
   strings. Routes ``email_recipients`` through
   ``main.normalize_email_recipients`` and ``email_enabled`` /
   ``push_enabled`` through ``main.normalize_bool_setting``.
@@ -856,7 +856,6 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
         and (zone.get('monitor_objects', True) or zone.get('monitor_motion', True) or _has_enabled_face_rule(zone))
     ]
     rules: list[dict[str, Any]] = []
-    camera_key = str(settings.get('id') or settings.get('name') or 'camera').strip() or 'camera'
     for zone in zones:
         zone_id = str(zone.get('id') or zone.get('name') or 'zone')
         label_totals: dict[str, int] = {}
@@ -903,16 +902,12 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
             label_seen[label] = label_seen.get(label, 0) + 1
             rule_suffix = f" [{rule.get('id') or label_seen[label]}]" if label_totals.get(label, 0) > 1 else ''
             base_name = zone_rule_name(settings, zone, rule) + rule_suffix
-            cooldown_key = f'{camera_key}::{zone_id}::{label}'
-            if label_totals.get(label, 0) > 1:
-                cooldown_key += f'::{rule.get("id") or label_seen[label]}'
             for schedule_index, schedule in deliverable_schedules:
                 schedule_id = str(schedule.get('id') or f'schedule-{schedule_index}')
                 schedule_name = f'{base_name} [Schedule {schedule_index}]' if len(schedules) > 1 else base_name
                 rules.append({
                     'name': schedule_name,
                     'schedule_name': base_name,
-                    'cooldown_key': f'{cooldown_key}::{schedule_id}' if len(schedules) > 1 else cooldown_key,
                     'object': label,
                     'zone_id': zone_id,
                     # Motion's and face's canonical confidence default is 0.45
@@ -924,7 +919,6 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                     'min_confidence': rule.get('min_confidence', 0.45 if label in ('motion', 'face') else 0.5),
                     'max_confidence': rule.get('max_confidence', 1.0),
                     **{key: rule.get(key) for key in BOX_LIMIT_KEYS},
-                    'cooldown_seconds': rule.get('cooldown_seconds', 60),
                     'ai_verify': bool(rule.get('ai_verify', False)),
                     'ai_verify_skip_above': rule.get('ai_verify_skip_above', 1.0),
                     'enabled': True,

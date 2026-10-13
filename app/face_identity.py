@@ -44,10 +44,6 @@ _FACE_LABEL = 'face'
 # ``None`` means "recognised as unknown so far" and is retried each cycle; a
 # MatchResult is cached and reused for the life of the track.
 _cache: dict[str, dict[Any, Any]] = {}
-# Per-camera map of unknown-face track id -> the set of unknown-rule ids that
-# already fired for it, so a lingering stranger raises one alert per rule
-# rather than one per ~4 Hz cycle (see ``unknown_face_alerts``).
-_alerted_unknown: dict[str, dict[Any, set[str]]] = {}
 # Per-camera set of unknown-face track ids already captured for review.
 _captured_unknown: dict[str, set[Any]] = {}
 # Per-camera set of track ids already enriched, to avoid re-enriching the
@@ -316,7 +312,6 @@ def _clear_camera_identity_state(camera_id: str, *, clear_generation: bool = Fal
     a camera produces a cycle without faces.
     """
     _cache.pop(camera_id, None)
-    _alerted_unknown.pop(camera_id, None)
     _captured_unknown.pop(camera_id, None)
     _enriched_tracks.pop(camera_id, None)
     if clear_generation:
@@ -328,10 +323,9 @@ def _prune_camera_identity_state(camera_id: str, live: set[Any]) -> None:
 
     Callers must hold ``_lock``.
     """
-    for store in (_cache, _alerted_unknown):
-        entries = store.get(camera_id)
-        if entries is not None:
-            store[camera_id] = {tid: value for tid, value in entries.items() if tid in live}
+    entries = _cache.get(camera_id)
+    if entries is not None:
+        _cache[camera_id] = {tid: value for tid, value in entries.items() if tid in live}
     for store in (_captured_unknown, _enriched_tracks):
         entries = store.get(camera_id)
         if entries is not None:
@@ -483,20 +477,21 @@ def face_identity_metadata(detections: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def unknown_face_alerts(camera_id: str, detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return the unknown-face detections that should raise a new alert.
+    """Return this cycle's unknown faces, each with the unknown rules it matches.
 
-    A no-op (``[]``) unless recognition is available AND the ``_unknown``
+    A no-op (``[]``) unless recognition is available AND an ``_unknown``
     system face-detection rule is enabled (the Face Rules tab is where
-    unknown-person alerting is configured -- it replaced the legacy
-    ``alert_unknown`` recognition setting). Only faces already annotated as
-    unknown (``recognized`` with no ``person_id``) count, and each is alerted
-    **once per track** -- a stranger who lingers does not flood the alert
-    feed. Tracks are forgotten when they leave the frame, so the same person
-    returning later alerts again.
+    unknown-person alerting is configured). Only faces already annotated as
+    unknown (``recognized`` with no ``person_id``) count; each is returned with
+    ``face_rule_ids`` naming the rules it matches (scope + confidence).
+
+    This decides only *which* faces match. Whether one is a NEW alert is the
+    live pipeline's presence gate (:mod:`app.event_presence`): one alert per
+    rule when a stranger appears, another only when more strangers are in view
+    together than before -- never per cycle, and without a cooldown.
 
     Must be called after :func:`annotate_face_identities` (it reads the identity
-    annotations) and only decides *which* faces are alert-worthy; the caller
-    turns them into alert-history entries.
+    annotations).
     """
     service = get_face_recognition_service()
     if not service.available:
@@ -504,71 +499,41 @@ def unknown_face_alerts(camera_id: str, detections: list[dict[str, Any]]) -> lis
     rules = effective_face_detection_rules().get('rules') or []
     if not any(is_unknown_rule(rule) for rule in rules):
         return []
-    face_track_ids: set[Any] = set()
-    new_alerts: list[dict[str, Any]] = []
-    with _lock:
-        # Per-camera map of still-present track ids -> the unknown-rule ids
-        # that already fired for that track (one alert per rule per track).
-        alerted = _alerted_unknown.setdefault(camera_id, {})
-        for detection in detections:
-            if not _is_face(detection) or not detection.get('recognized'):
+    matches: list[dict[str, Any]] = []
+    for detection in detections:
+        if not _is_face(detection) or not detection.get('recognized'):
+            continue
+        if detection.get('person_id') is not None:
+            continue
+        # Zone-scoped stranger alerts: the live pipeline stamps faces with
+        # their containing zone; ``_unknown`` matches everywhere while an
+        # ``_unknown:<zone>`` variant only fires inside its own zone.
+        det_zone = str(detection.get('zone_id') or '')
+        try:
+            det_conf = float(detection.get('confidence') or 0)
+        except (TypeError, ValueError):
+            det_conf = 0.0
+        rule_ids: list[str] = []
+        for rule in rules:
+            if not (is_unknown_rule(rule)
+                    and _coerce_bool(rule.get('enabled'), False)
+                    and rule_scope_matches(rule, camera_id, det_zone)):
                 continue
-            track_id = detection.get('track_id')
-            if track_id is None:
+            # Per-rule confidence gate: only faces at/above the rule's
+            # ``min_confidence`` fire it. Blank = any detected face.
+            rule_min_conf = rule.get('min_confidence')
+            if rule_min_conf is not None and det_conf < float(rule_min_conf):
                 continue
-            face_track_ids.add(track_id)
-            if detection.get('person_id') is not None:
-                continue
-            # Zone-scoped stranger alerts: the live pipeline stamps faces with
-            # their containing zone; ``_unknown`` matches everywhere while an
-            # ``_unknown:<zone>`` variant only fires inside its own zone.
-            det_zone = str(detection.get('zone_id') or '')
-            matched_rules = [
-                rule for rule in rules
-                if is_unknown_rule(rule)
-                and _coerce_bool(rule.get('enabled'), False)
-                and rule_scope_matches(rule, camera_id, det_zone)
-            ]
-            if not matched_rules:
-                continue
-            try:
-                det_conf = float(detection.get('confidence') or 0)
-            except (TypeError, ValueError):
-                det_conf = 0.0
-            fired_ids: list[str] = []
-            for rule in matched_rules:
-                # Per-rule confidence gate: only faces at/above the rule's
-                # ``min_confidence`` fire it. Blank = any detected face.
-                rule_min_conf = rule.get('min_confidence')
-                if rule_min_conf is not None and det_conf < float(rule_min_conf):
-                    continue
-                # One alert per (rule, track): a stranger who lingers does not
-                # re-fire the same zone's rule, but each configured zone gets
-                # its own alert when several zones carry unknown-rules.
-                rule_id = str(rule.get('id') or '')
-                fired_for_track = alerted.setdefault(track_id, set())
-                if rule_id in fired_for_track:
-                    continue
-                fired_for_track.add(rule_id)
-                fired_ids.append(rule_id)
-            if fired_ids:
-                new_alerts.append({**detection, 'face_rule_ids': fired_ids, 'zone_id': det_zone})
-        # Forget tracks the tracker has retired so a returning stranger
-        # re-alerts and the map cannot grow unbounded; a face merely missing
-        # from this cycle (the face model runs on its own clock) keeps its
-        # entry, or a lingering stranger would re-alert on every face pass.
-        live = face_track_ids | live_track_ids(camera_id, _FACE_LABEL)
-        _alerted_unknown[camera_id] = {
-            tid: rule_ids for tid, rule_ids in alerted.items() if tid in live
-        }
-    return new_alerts
+            rule_ids.append(str(rule.get('id') or ''))
+        if rule_ids:
+            matches.append({**detection, 'face_rule_ids': rule_ids, 'zone_id': det_zone})
+    return matches
 
 
 def reset_camera_identities(camera_id: str) -> None:
     """Drop the identity + unknown-alert caches for a camera (stop/reconfigure)."""
     with _lock:
         _cache.pop(camera_id, None)
-        _alerted_unknown.pop(camera_id, None)
         _captured_unknown.pop(camera_id, None)
         _enriched_tracks.pop(camera_id, None)
         _cache_generation.pop(camera_id, None)

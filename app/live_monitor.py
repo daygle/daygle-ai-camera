@@ -28,7 +28,6 @@ from app.detection_state import (
     confirm_motion_detections,
     confirm_object_detections,
     detect_frame_motion,
-    detection_label_set,
     frame_motion_lock,
     update_camera_motion,
     record_live_detection_history,
@@ -108,15 +107,13 @@ from app.ptz_tracking import update_auto_tracking
 from app.camera_models import camera_detector
 from app.detector import DetectorUnavailableError
 from app.event_debounce import (
-    _remember_track_event,
-    _track_fresh_labels,
     clear_live_camera_backoff,
-    live_event_fresh_labels,
-    remember_live_event,
     schedule_live_camera_backoff,
 )
+from app.event_presence import absence_seconds, bind_presence_recording, drop_covered_motion, observe_presence
 from app.recording_extension import (
     _make_continuous_chunk_callback,
+    active_recording_id,
     attach_event_recording,
     continue_active_recording,
     extend_active_rtsp_recording,
@@ -218,6 +215,46 @@ def _below_threshold_object_reason(
     if not candidates:
         return None
     return max(candidates, key=lambda item: item['confidence'])
+
+
+def _new_known_face_alerts(
+    camera_id: str, matches: list[dict[str, Any]], *, absence: float, recording_id: int | None,
+) -> list[dict[str, Any]]:
+    """Keep one alert per person rule that is NEW in view (presence-gated)."""
+    counts: dict[str, int] = {}
+    for match in matches:
+        key = f"person:{match.get('face_rule_id') or match.get('rule_name') or ''}"
+        counts[key] = counts.get(key, 0) + 1
+    new = observe_presence(camera_id, counts, absence=absence, recording_id=recording_id)
+    alerts: list[dict[str, Any]] = []
+    for match in matches:
+        key = f"person:{match.get('face_rule_id') or match.get('rule_name') or ''}"
+        if key in new:
+            new.discard(key)
+            alerts.append(match)
+    return alerts
+
+
+def _new_unknown_face_alerts(
+    camera_id: str, matches: list[dict[str, Any]], *, absence: float, recording_id: int | None,
+) -> list[dict[str, Any]]:
+    """Keep the unknown-face rules whose stranger count in view went up.
+
+    Each unknown rule alerts when a stranger appears, and again only when more
+    strangers are in view together than before.
+    """
+    counts: dict[str, int] = {}
+    for match in matches:
+        for rule_id in match.get('face_rule_ids') or []:
+            counts[f'unknown-face:{rule_id}'] = counts.get(f'unknown-face:{rule_id}', 0) + 1
+    new = observe_presence(camera_id, counts, absence=absence, recording_id=recording_id)
+    alerts: list[dict[str, Any]] = []
+    for match in matches:
+        fired = [rule_id for rule_id in match.get('face_rule_ids') or [] if f'unknown-face:{rule_id}' in new]
+        if fired:
+            new.difference_update(f'unknown-face:{rule_id}' for rule_id in fired)
+            alerts.append({**match, 'face_rule_ids': fired})
+    return alerts
 
 
 def _parse_motion_override(raw_value: Any, fallback: Any, cast=float) -> Any:
@@ -1486,8 +1523,18 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Empty unless recognition is enabled and an unknown-person face-detection
     # rule is on (global _unknown, or a zone-scoped _unknown:<zone> variant
     # created by the Zones page People card).
+    #
+    # Faces go through the presence gate (app.event_presence) like objects, so
+    # no cooldown: one alert per person while they stay in view, and one per
+    # unknown-face rule while the number of strangers in view does not grow.
+    _presence_cycle_start = time.time()
+    _presence_absence = absence_seconds(_state.camera_event_recording_config(settings))
+    _presence_recording_id = active_recording_id(camera_id)
     _unknown_face_alerts = (
-        [] if camera_motion['active'] else unknown_face_alerts(camera_id, object_detections)
+        [] if camera_motion['active'] else _new_unknown_face_alerts(
+            camera_id, unknown_face_alerts(camera_id, object_detections),
+            absence=_presence_absence, recording_id=_presence_recording_id,
+        )
     )
     # Face detection rules (Stage 2c): per-person alert rules with email/push
     # notifications, checked after identity annotation so each face carries
@@ -1495,7 +1542,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # face-rule paths too; they do not pass through AlertEngine's unknown-state
     # guard.
     _known_face_rule_alerts = (
-        [] if camera_motion['active'] else known_face_rules_for_camera(camera_id, object_detections)
+        [] if camera_motion['active'] else _new_known_face_alerts(
+            camera_id, known_face_rules_for_camera(camera_id, object_detections),
+            absence=_presence_absence, recording_id=_presence_recording_id,
+        )
     )
     # Still-dwell alerts (Objects page: "still for N minutes"): a label that
     # has been detected continuously still for its configured threshold fires
@@ -1674,6 +1724,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         return None
     _alerts_started = time.perf_counter()
     triggered = _state.alerts.process(alert_detections, rules=zone_rules)
+    # Zone-rule alerts lead ``triggered``; only those of NEW objects survive
+    # the presence gate below (dwell and face alerts carry their own gating).
+    _zone_alert_count = len(triggered)
     _cycle_timer.add(STAGE_ALERTS, (time.perf_counter() - _alerts_started) * 1000.0)
     # Dwell alerts are first-class in-app alerts added directly to ``triggered``
     # (they fire once per still streak by construction, so a zone-style rule
@@ -1692,9 +1745,8 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             'message': f"Alert triggered: {_dwell_label} still for {_dwell.get('still_alert_minutes')} minutes",
             'motion_state': 'still',  # a dwell streak only fires while still
         })
-    # Unknown-face alerts (Stage 2c): one per stranger track, added directly to
-    # ``triggered`` like dwell alerts (they self-debounce per track, so a
-    # cooldown rule is unnecessary).
+    # Unknown-face alerts (Stage 2c), added directly to ``triggered`` like
+    # dwell alerts: already filtered to new ones by the presence gate above.
     for _unknown in _unknown_face_alerts:
         triggered.append({
             'rule_name': 'Unknown face',
@@ -1708,7 +1760,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             'message': 'Alert triggered: unrecognized face detected',
         })
     # Known-face rules: per-person alerts that fire when a face rule is
-    # enabled and the person is detected, debounced by cooldown per track.
+    # enabled and the person appears (presence-gated above).
     for _known in _known_face_rule_alerts:
         triggered.append(_known)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
@@ -1759,77 +1811,43 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         recording_detections.append({**_dwell, 'alert_matched': True, 'alert_triggered': True})
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
     camera_recording_config = _state.camera_event_recording_config(settings)
-    debounced_labels = detection_label_set([detection for detection in recording_detections if detection.get('alert_triggered')])
-    if not debounced_labels:
-        debounced_labels = detection_label_set(recording_detections)
-    global_debounce = max(0.0, float(live_settings.get('event_debounce_seconds', 10.0)))
-    label_cooldowns: dict[str, float] = {}
-    for _zone in (settings.get('detection') or {}).get('zones', []):
-        for _rule in _zone.get('object_rules') or []:
-            if not _rule.get('enabled', True):
-                continue
-            _lbl = str(_rule.get('label') or '').strip().lower()
-            if not _lbl:
-                continue
-            try:
-                _cd = max(0.0, float(_rule.get('cooldown_seconds', 60)))
-            except (TypeError, ValueError):
-                _cd = 60.0
-            if _lbl not in label_cooldowns or _cd > label_cooldowns[_lbl]:
-                label_cooldowns[_lbl] = _cd
-    # Each label is debounced against its OWN cooldown window (per-label
-    # debounce), so a label whose window has elapsed fires a new event even
-    # while a slower label on the same camera is still cooling. Labels without
-    # a rule cooldown use the global event_debounce_seconds.
-    resolved_cooldowns = {_lbl: label_cooldowns.get(_lbl, global_debounce) for _lbl in debounced_labels}
     frame_capture_time = datetime.fromtimestamp(frame_capture_ts, tz=timezone.utc).isoformat()
-    # Debounce gates EVENT creation, not just recording: a camera whose alert
-    # rules match but whose record rules don't (or that has recording off)
-    # would otherwise create a fresh event + snapshot on every detection cycle
-    # (~4 Hz), flooding the timeline with duplicates of the same activity. The
-    # debounce window is derived from the same label cooldowns regardless of
-    # whether a recording attaches, so an alert-only camera is throttled to one
-    # event per window like a recording camera is.
-    #
-    # A still-dwell alert bypasses the debounce gate: it fires ONCE per still
-    # streak by construction, and its label's debounce window has been
-    # continuously refreshed by the very cycles that built the streak - so the
-    # normal gate would swallow it forever. Only the crossing cycle emits, so
-    # this branch is NOT a duplicate-event risk.
-    # Track-aware cooldown: two DIFFERENT objects of the same label within one
-    # cooldown window must not swallow each other's events. Classically the
-    # per-label key meant a passing car fired once and a second car arriving
-    # inside the window was suppressed as a "duplicate"; with stable track ids
-    # the event can key on identity instead. A fresh event fires when at least
-    # one CURRENT track of the firing labels is outside its window; the
-    # suppression branch only wins when EVERY track of every firing label is
-    # still inside its window (i.e. it really is the same objects continuing).
-    # Detections without track ids (motion events, no-box detections) contribute
-    # no anchors, so a mixed set keeps legacy behavior: the untracked label
-    # alone cannot justify bypassing the gate.
-    _track_ids_by_label: dict[str, set[int]] = {}
-    for _det in recording_detections:
+    # Presence gate (app.event_presence) - no cooldowns. An object raises one
+    # event when it appears and none while it stays in view; another object of
+    # the same type raises one when more of that type are in view together than
+    # before; a different type raises its own at once. Counting (not track ids)
+    # keeps an object that briefly hides - and comes back under a new track id -
+    # from alerting again. A type is forgotten once unseen for the extension
+    # step and its recording has ended, so it re-alerts only in new footage.
+    # This gates EVENT creation for alert-only cameras too, which would
+    # otherwise create an event + snapshot every detection cycle.
+    _presence_counts: dict[str, int] = {}
+    for _det in _confident_object_detections:
         _lbl = str(_det.get('label') or '').strip().lower()
-        _tid = _det.get('track_id')
-        if _lbl and isinstance(_tid, int) and _tid > 0:
-            _track_ids_by_label.setdefault(_lbl, set()).add(_tid)
-    # Face alerts (an unknown face, or an enrolled person's rule) bypass it for
-    # the same reason: each already fires once per face track (unknown) or per
-    # its own cooldown (known), and recognition usually lands a cycle or two
-    # AFTER the event for the person who walked in -- the normal gate would
-    # swallow "Alice detected" as a duplicate of that event, and the per-track
-    # guard, already spent, would never let it fire again.
-    if dwell_detections or _unknown_face_alerts or _known_face_rule_alerts:
-        pass
-    elif (
-        resolved_cooldowns
-        and not live_event_fresh_labels(camera_id, resolved_cooldowns)
-        and not (
-            _track_ids_by_label
-            and _track_fresh_labels(camera_id, resolved_cooldowns, _track_ids_by_label)
-        )
-    ):
-        debounce_seconds = max(resolved_cooldowns.values())
+        if _lbl:
+            _presence_counts[_lbl] = _presence_counts.get(_lbl, 0) + 1
+    if motion_detections:
+        _presence_counts['motion'] = 1
+    _presence_new = observe_presence(
+        camera_id, _presence_counts, absence=_presence_absence,
+        recording_id=active_recording_id(camera_id),
+    )
+    _presence_new = drop_covered_motion(camera_id, _presence_new)
+    # Zone-rule alerts only for the objects that are new this cycle: a person
+    # walking into the cat's footage alerts for the person, not the cat again.
+    # A dwell's own zone-rule alert stays: it carries the dwell's email/push.
+    _alertable_labels = _presence_new | {
+        str(_dwell.get('label') or '').strip().lower() for _dwell in dwell_detections
+    }
+    triggered = [
+        alert for index, alert in enumerate(triggered)
+        if index >= _zone_alert_count or str(alert.get('label') or '').strip().lower() in _alertable_labels
+    ]
+    # Dwell and face alerts are already new by construction (a dwell fires once
+    # per still streak; faces went through the presence gate above), and face
+    # recognition usually lands a cycle or two AFTER the event for the person
+    # who walked in, so each gets its own event.
+    if not (_presence_new or dwell_detections or _unknown_face_alerts or _known_face_rule_alerts):
         # Snapshot before extending: the extension retires a stale session itself.
         with _state.active_rtsp_recordings_lock:
             capture_blocked = (
@@ -1837,14 +1855,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
                 or bool(_state.last_rtsp_capture_capped.get(camera_id))
             )
         extended_recording_id = extend_active_rtsp_recording(camera_id=camera_id, event_time=frame_capture_time, recording_config=camera_recording_config, detections=recording_detections)
-        # Cooldown suppresses duplicate EVENTS, not continuing footage. A
+        # Nothing new suppresses duplicate EVENTS, not continuing footage. A
         # capped/frozen capture cannot extend; let a recording-enabled stream
-        # create one follow-on event/clip through the normal path below. With no
-        # capture at all, that applies only when the last clip was cut at its
-        # Max Clip ceiling: after a clip that ended normally, a detection inside
-        # the cooldown is exactly the duplicate the cooldown exists to suppress
-        # (otherwise every flicker of a lingering object opened a new event).
-        # Covered cycles and alert-only cameras keep their existing debounce.
+        # create one follow-on event/clip through the normal path below (with
+        # no alert: nothing in it is new). With no capture at all, that applies
+        # only when the last clip was cut at its Max Clip ceiling.
         needs_follow_on = (
             extended_recording_id is None
             and capture_blocked
@@ -1852,10 +1867,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             and _state.recording_service.should_record(recording_detections, camera_recording_config)[0]
         )
         if not needs_follow_on:
-            remember_live_event(camera_id, debounced_labels, merge=True)
-            # Refresh only these same objects' cooldown anchors.
-            _remember_track_event(camera_id, _track_ids_by_label)
-            update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+            _suppressed_reason = (
+                'Ongoing detection extended the active recording; nothing new in view.'
+                if extended_recording_id is not None
+                else 'Ongoing detection; nothing new in view.'
+            )
+            update_live_detection_status(camera_id, state='checked', reason=_suppressed_reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
             _telemetry_finish(_telemetry_mode)
             return None
     event_time = frame_capture_time
@@ -1912,16 +1929,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
                 Path(_orphan).unlink(missing_ok=True)
         raise
     recording_id = attach_event_recording(event_id, event_time, 'rtsp', recording_detections, camera_id=camera_id, recording_config=camera_recording_config)
+    if recording_id is not None:
+        bind_presence_recording(camera_id, recording_id, seen_since=_presence_cycle_start)
     _cycle_timer.add(STAGE_EVENT, (time.perf_counter() - _event_started) * 1000.0)
-    # Remember the event even when no recording attached: the debounce state
-    # must advance for alert-only events too, otherwise the next cycle (which
-    # sees the same labels) is not suppressed and the timeline floods with
-    # duplicates. ``remember_live_event`` no-ops on an empty label set.
-    remember_live_event(camera_id, debounced_labels)
-    # Anchor each participating track's window at THIS emission so its own
-    # cooldown starts now; a different track of the same label can still fire
-    # immediately (its anchor is untouched).
-    _remember_track_event(camera_id, _track_ids_by_label)
     # Alert rows were written in the same transaction as the event above. The
     # recording link is applied afterwards because clip creation is asynchronous
     # with respect to event persistence.

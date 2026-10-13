@@ -34,7 +34,6 @@ def face_rules(monkeypatch):
 
         monkeypatch.setattr(fdr._state, 'database', _Db())
         monkeypatch.setattr(fdr, 'effective_face_recognition_config', lambda: {'enabled': True})
-        fdr._face_rule_cooldowns.clear()
         return fdr
 
     return _use

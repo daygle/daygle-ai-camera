@@ -273,21 +273,27 @@ def test_known_alert_without_min_confidence_gates_nothing(monkeypatch):
     assert fdr.known_face_rules_for_camera('kE', [_known_face(1, 0.1)]) != []
 
 
-def test_known_alert_debounced_per_track_by_cooldown(monkeypatch):
-    # The cooldown claim under _face_rule_cooldown_lock means a lingering subject
-    # alerts once per track and is then suppressed until the window elapses.
-    _use_known_rules(monkeypatch, _known_rule(cooldown_minutes=5))
-    fdr._face_rule_cooldowns.pop('kCooldown', None)
-    assert fdr.known_face_rules_for_camera('kCooldown', [_known_face(7, 0.9)]) != []
-    # Same track, same camera, still inside the 5-minute window -> suppressed.
-    assert fdr.known_face_rules_for_camera('kCooldown', [_known_face(7, 0.9)]) == []
-    # A different track on the same camera is unaffected by the first's cooldown.
-    assert fdr.known_face_rules_for_camera('kCooldown', [_known_face(8, 0.9)]) != []
+def test_known_alert_fires_once_while_the_person_stays(monkeypatch):
+    """No cooldown: the presence gate alerts once per person while they stay
+    in view, even when the tracker re-acquires them under a new track id; a
+    different person alerts on their own."""
+    import app.live_monitor as lm
 
+    _use_known_rules(monkeypatch, _known_rule(), _known_rule(name='Bob', id='person_2', person_id=2))
+    fdr._state.live_event_presence.pop('kPresence', None)
 
-def test_cooldown_lock_is_a_real_module_level_lock():
-    # Regression guard: the cooldown guard must be a single lock object built at
-    # import, not lazily (a lazy initializer could race two callers into two
-    # different locks and silently defeat the double-alert guard).
-    import threading
-    assert isinstance(fdr._face_rule_cooldown_lock, type(threading.Lock()))
+    def gate(*faces):
+        return lm._new_known_face_alerts(
+            'kPresence', fdr.known_face_rules_for_camera('kPresence', list(faces)),
+            absence=45.0, recording_id=None,
+        )
+
+    try:
+        assert [a['rule_name'] for a in gate(_known_face(7, 0.9))] == ['Alice']
+        # Every sighting matches; only the first is new.
+        assert fdr.known_face_rules_for_camera('kPresence', [_known_face(7, 0.9)]) != []
+        assert gate(_known_face(7, 0.9)) == []
+        assert gate(_known_face(8, 0.9)) == []  # same person, new track id
+        assert [a['rule_name'] for a in gate(_known_face(8, 0.9), _known_face(9, 0.9, name='Bob', person_id=2))] == ['Bob']
+    finally:
+        fdr._state.live_event_presence.pop('kPresence', None)

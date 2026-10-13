@@ -860,7 +860,7 @@ def test_live_monitor_populates_detection_history(tmp_path, monkeypatch):
     # historical any default so the history-tracking logic is what's tested.
     main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
-    main.alerts.last_triggered.clear()
+    main._state.live_event_presence.clear()
 
     settings = _zone_camera_settings([
         {'label': 'person', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},

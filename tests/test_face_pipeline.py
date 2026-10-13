@@ -81,8 +81,16 @@ class _Stranger:
         return None
 
 
+def _presence_gate(camera, matches):
+    """The live pipeline's presence gate over unknown-face matches."""
+    from app.live_monitor import _new_unknown_face_alerts
+
+    return _new_unknown_face_alerts(camera, matches, absence=45.0, recording_id=None)
+
+
 def test_lingering_stranger_alerts_and_is_captured_once(monkeypatch):
     camera = 'cam-face-stranger'
+    state.live_event_presence.pop(camera, None)
     _reset_tracks(camera)
     face_identity.reset_camera_identities(camera)
     service = _Stranger()
@@ -99,8 +107,8 @@ def test_lingering_stranger_alerts_and_is_captured_once(monkeypatch):
         face_pass = cycle % 2 == 0  # 1s face interval at 0.5s detection cycles
         detections = update_object_tracks(camera, [_face()] if face_pass else [], hold_labels=set() if face_pass else {'face'})
         detections = face_identity.annotate_face_identities(camera, detections, frame)
-        alerts.extend(face_identity.unknown_face_alerts(camera, detections))
-    assert len(alerts) == 1, 'one stranger alert per track, not one per face pass'
+        alerts.extend(_presence_gate(camera, face_identity.unknown_face_alerts(camera, detections)))
+    assert len(alerts) == 1, 'one stranger alert while they stay, not one per face pass'
     assert len(captures) == 1, 'one Review capture per track'
     _reset_tracks(camera)
     face_identity.reset_camera_identities(camera)
@@ -138,23 +146,6 @@ def test_face_mode_set_on_the_faces_page_is_honoured():
     assert filter_detections_by_motion_mode([still_face], None, moving_only) == []
 
 
-def test_face_rule_cooldown_of_zero_is_honoured(monkeypatch):
-    from app import face_detection_rules as fdr
-
-    rule = {'id': 'alice', 'person_id': 7, 'name': 'Alice', 'enabled': True, 'cooldown_minutes': 0}
-    monkeypatch.setattr(fdr, 'effective_face_recognition_config', lambda: {'enabled': True})
-    monkeypatch.setattr(fdr, 'enabled_rules_for_label', lambda *_a, **_k: rule)
-    fdr._face_rule_cooldowns.pop('cam-zero', None)
-    face = {**_face(), 'recognized': True, 'track_id': 3, 'person_id': 7, 'person_name': 'Alice'}
-    assert len(fdr.known_face_rules_for_camera('cam-zero', [face])) == 1
-    assert len(fdr.known_face_rules_for_camera('cam-zero', [face])) == 1, 'cooldown 0 means no cooldown'
-    rule['cooldown_minutes'] = None
-    fdr._face_rule_cooldowns.pop('cam-zero', None)
-    assert len(fdr.known_face_rules_for_camera('cam-zero', [face])) == 1
-    assert fdr.known_face_rules_for_camera('cam-zero', [face]) == [], 'unset keeps the 5 minute default'
-    fdr._face_rule_cooldowns.pop('cam-zero', None)
-
-
 def test_late_face_alert_is_not_swallowed_by_the_person_event(tmp_path, monkeypatch):
     """Recognition lands a cycle after the person's event; the duplicate-event
     gate used to suppress that cycle, so "Alice detected" never fired."""
@@ -186,7 +177,7 @@ def test_late_face_alert_is_not_swallowed_by_the_person_event(tmp_path, monkeypa
     settings = {'id': 'cam-porch', 'name': 'Porch', 'detection': {'zones': [zone]}, 'recording': {'continuous': False}}
     base = time.time() - 30
     clock = {'now': base}
-    monkeypatch.setattr(mods.event_debounce, 'time', SimpleNamespace(time=lambda: clock['now']))
+    monkeypatch.setattr(mods.event_presence, 'time', SimpleNamespace(time=lambda: clock['now']))
 
     def cycle(offset):
         clock['now'] = base + offset
@@ -196,10 +187,10 @@ def test_late_face_alert_is_not_swallowed_by_the_person_event(tmp_path, monkeypa
 
     person_event = cycle(0.0)
     assert person_event is not None
-    assert cycle(0.5) is None, 'the same person inside its cooldown is still a duplicate'
+    assert cycle(0.5) is None, 'the same person still in view is not a new event'
     plan['face_alert'] = True
     face_event = cycle(1.0)
-    assert face_event is not None, 'the recognised face must not be swallowed by the person cooldown'
+    assert face_event is not None, 'the recognised face must not be swallowed by the person event'
     alerts = [row['rule_name'] for row in main.database.alerts(limit=20)]
     assert 'Alice' in alerts
 
@@ -208,6 +199,7 @@ def test_matcher_reload_keeps_the_stranger_alert_guard(monkeypatch):
     """Enrolling someone (or auto-enrich elsewhere) reloads the matcher; that
     invalidates cached matches but not which strangers already alerted."""
     camera = 'cam-face-reload'
+    state.live_event_presence.pop(camera, None)
     _reset_tracks(camera)
     face_identity.reset_camera_identities(camera)
     service = _Stranger()
@@ -222,7 +214,7 @@ def test_matcher_reload_keeps_the_stranger_alert_guard(monkeypatch):
         if cycle == 2:
             service.matcher_generation += 1
         detections = face_identity.annotate_face_identities(camera, update_object_tracks(camera, [_face()]), frame)
-        alerts.extend(face_identity.unknown_face_alerts(camera, detections))
+        alerts.extend(_presence_gate(camera, face_identity.unknown_face_alerts(camera, detections)))
     assert len(alerts) == 1
     assert service.recognitions == 4, 'unknown faces are retried; the reload itself must not break that'
     _reset_tracks(camera)

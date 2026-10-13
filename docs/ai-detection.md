@@ -340,10 +340,18 @@ missing alert does not necessarily mean ONNX missed the object. The audit of
 - **Temporal confirmation:** object confirmation defaults to 2 detections in a
   2-frame window (or the configured window), so an isolated valid detection is
   held until it persists. Optional spatial IoU confirmation is stricter.
-- **Cooldowns:** cooldown logic runs after matching and affects repeated alert
-  delivery, not detector output or live detection status. A “missed alert” with
-  a visible detection is therefore more likely to be cooldown/rule behavior
-  than inference failure.
+- **One event per object (no cooldowns):** after matching, the presence gate
+  (`app/event_presence.py`) decides whether a detection is a NEW event. An
+  object raises one event and alert when it appears and none while it stays in
+  view - even if it briefly hides and the tracker gives it a new id, because
+  the gate counts how many of each type are in view together rather than
+  trusting track ids. A second object of the same type alerts when both are in
+  view at once (the higher count must hold for two sightings); a different type
+  alerts straight away. A type is forgotten once it has been unseen for the
+  recording's extension step and its recording has ended. Faces use the same
+  gate: one alert per recognised person, and one per unknown-face rule unless
+  more strangers are in view together than before. Sound and behaviour rules
+  keep their own cooldowns.
 - **Motion gating:** object inference normally runs every cycle because
   `always_run_object_detection` defaults to true. If an operator disables that
   setting, no-motion frames skip ONNX; motion-only rules remain independently
@@ -373,7 +381,7 @@ before changing thresholds or rules.
 The detector is label-driven, so it can run a **face-detection** model in place
 of (or alongside, on a second camera profile) the COCO object models. A face
 model reports a single `face` label that flows through zones, object rules,
-cooldowns, the Events feed, and annotated snapshots exactly like `person` or
+the presence gate, the Events feed, and annotated snapshots exactly like `person` or
 `car` - you can, for example, write a rule that alerts only when a face is
 visible, rather than any time a full body is detected.
 

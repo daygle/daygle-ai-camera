@@ -389,6 +389,22 @@ def extend_active_rtsp_recording(
     return recording_id
 
 
+def active_recording_id(camera_id: str) -> int | None:
+    """The camera's capturing event clip, or ``None`` (no session, or a stale
+    one whose capture never cleaned up)."""
+    with _state.active_rtsp_recordings_lock:
+        session = _state.active_rtsp_recordings.get(camera_id)
+        if not session:
+            return None
+        max_deadline = float(session.get('max_capture_deadline_ts') or session.get('capture_deadline_ts') or 0)
+        if time.time() > max_deadline + STALE_CAPTURE_SESSION_GRACE_SECONDS:
+            return None
+        try:
+            return int(session.get('recording_id'))
+        except (TypeError, ValueError):
+            return None
+
+
 def continue_active_recording(
     *,
     camera_id: str,
