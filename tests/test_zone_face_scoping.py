@@ -121,7 +121,7 @@ def test_alert_rules_expose_face_rule_with_contacts():
     assert face_rules[0]['zone_id'] == 'door'
     assert face_rules[0]['email_recipients'] == ['a@example.com']
     assert face_rules[0]['push_enabled'] is True
-    assert face_rules[0]['cooldown_seconds'] == 30
+    assert 'cooldown_seconds' not in face_rules[0]  # presence gate, no cooldown
 
 
 def test_engine_fires_zone_face_alert_with_geometry_stamp():

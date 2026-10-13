@@ -132,9 +132,6 @@
           <p class="settings-group-hint">How detections become events.</p>
           <div class="form-grid">
             <label>
-              <span>Event Merge Window (s) <span class="info-tip" data-tip="Merges repeat detections of an object into one event. Only used for objects with no zone rule (for example a camera without zones): an object with a zone rule uses that rule&#x27;s own Cooldown on the Zones page instead. Default: 10s" title="Merges repeat detections of an object into one event. Only used for objects with no zone rule (for example a camera without zones): an object with a zone rule uses that rule&#x27;s own Cooldown on the Zones page instead. Default: 10s" tabindex="0" aria-label="Help: Merges repeat detections into one event. Only used for objects with no zone rule. Default: 10s"></span></span>
-              <input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /></label>
-            <label>
               <span>Object Priority Window (s) <span class="info-tip" data-tip="Objects take priority over motion. Motion with no object is held this long in case an object appears in the same zone (headlights before a car), and motion this close to an object in its zone counts as that object. 0 = motion alerts immediately. Default: 3s" title="Objects take priority over motion. Motion with no object is held this long in case an object appears in the same zone (headlights before a car), and motion this close to an object in its zone counts as that object. 0 = motion alerts immediately. Default: 3s" tabindex="0" aria-label="Help: Objects take priority over motion. Motion with no object is held this long for an object to appear. Default: 3s"></span></span>
               <input name="motion_object_grace_seconds" type="number" min="0" max="10" step="0.5" placeholder="3" /></label>
             <label>

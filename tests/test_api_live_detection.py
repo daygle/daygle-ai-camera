@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from tests.support import LocalClient, _load_app, _login, _m, _server, _setup_admin
+from tests.support import LocalClient, _load_app, _login, _m, _server, _setup_admin, _zone_camera_settings
 
 
 def test_live_status_preserves_best_object_confidence_for_vision_card(tmp_path, monkeypatch):
@@ -340,21 +340,18 @@ def test_live_stream_still_only_setting_keeps_still_person(tmp_path, monkeypatch
     assert status['detections'][0]['motion_state'] == 'still'
 
 
-def test_two_same_label_tracks_inside_cooldown_window_both_emit(tmp_path, monkeypatch):
-    """Per-track cooldown: a second car arriving while the label is still
-    cooling must get its OWN event instead of being swallowed as a duplicate.
-
-    Cycle 1 tracks car #11 (fresh everything) -> event 1. Cycle 2 tracks car
-    #12 (a different box the tracker assigns a new id) inside the 60s label
-    window -> the legacy per-label gate would suppress, but the track gate
-    sees an unanchored track and lets event 2 through. Cycle 3 sees #12 again:
-    every current track is now anchored and inside its window -> suppressed.
-    """
+def test_second_car_in_view_with_the_first_gets_its_own_event(tmp_path, monkeypatch):
+    """A second car entering while the first is still in view raises its own
+    event once the higher count holds for two sightings; the two cars staying
+    raise nothing more, and neither does the count dropping back and rising
+    again (they were already seen together)."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
     mods = _m()
 
-    seen = {'cycle': 0}
+    car_a = {'label': 'car', 'confidence': 0.93, 'box': {'x': 100, 'y': 300, 'width': 320, 'height': 200}}
+    car_b = {'label': 'car', 'confidence': 0.93, 'box': {'x': 800, 'y': 300, 'width': 320, 'height': 200}}
+    frames = iter([[car_a], [car_a, car_b], [car_a, car_b], [car_a, car_b], [car_a], [car_a, car_b], [car_a, car_b]])
 
     class FakeDetector:
         backend = 'onnx'
@@ -362,15 +359,7 @@ def test_two_same_label_tracks_inside_cooldown_window_both_emit(tmp_path, monkey
         unavailable_reason = None
 
         def detect_image(self, image_bytes, confidence=None):
-            seen['cycle'] += 1
-            if seen['cycle'] == 1:
-                box = {'x': 100, 'y': 300, 'width': 320, 'height': 200}
-            else:
-                # Far enough away that IoU vs cycle 1 is ~0: the tracker opens
-                # a NEW track id (what physically happens when a second car
-                # enters while the first is elsewhere).
-                box = {'x': 700, 'y': 300, 'width': 320, 'height': 200}
-            return [{'label': 'car', 'confidence': 0.93, 'box': box}]
+            return [dict(d, box=dict(d['box'])) for d in next(frames)]
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main._state.live_detection_last_checked.clear()
@@ -382,33 +371,26 @@ def test_two_same_label_tracks_inside_cooldown_window_both_emit(tmp_path, monkey
         'detection': {'zones': []},
         'recording': {'continuous': False},
     }
-
-    main._state.live_event_last_emitted.clear()
-    main._state.live_event_track_last_emitted.clear()
-    # The tracker is per-process state keyed by camera id; other tests in this
-    # module also use 'camera-1', so a leftover track (and its cooldown anchor
-    # from a previous scenario) would make cycle 2 reuse an anchored id.
+    main._state.live_event_presence.clear()
     with main._state._object_tracks_lock:
         main._state._object_tracks.pop('camera-1', None)
+
+    def run():
+        # enforce_interval=False: the cycles run back-to-back inside the 0.5s
+        # detection interval, which would otherwise drop them.
+        return mods.live_monitor.process_live_stream_alerts(b'jpeg', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+
     try:
-        # enforce_interval=False: the three cycles run back-to-back inside the
-        # 0.5s detection interval, which would otherwise silently drop cycles
-        # 2 and 3 (the throttle is a real-product feature; this test needs the
-        # debounce gate specifically).
-        event1 = mods.live_monitor.process_live_stream_alerts(b'jpeg-1', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+        event1 = run()
         assert event1 is not None
-
-        event2 = mods.live_monitor.process_live_stream_alerts(b'jpeg-2', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
-        # The whole point: the second car is NOT swallowed by the first car's
-        # 60s cooldown.
-        assert event2 is not None and event2 != event1
-
-        # Cycle 3: same track as cycle 2, still inside its window -> suppressed.
-        event3 = mods.live_monitor.process_live_stream_alerts(b'jpeg-3', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
-        assert event3 is None
+        assert run() is None, 'a single sighting of a second box is not confirmed yet'
+        event2 = run()
+        assert event2 is not None and event2 != event1, 'the second car gets its own event'
+        assert run() is None, 'both cars staying raise nothing more'
+        assert run() is None
+        assert run() is None and run() is None, 'two cars again: already seen together'
     finally:
-        main._state.live_event_last_emitted.clear()
-        main._state.live_event_track_last_emitted.clear()
+        main._state.live_event_presence.clear()
         with main._state._object_tracks_lock:
             main._state._object_tracks.pop('camera-1', None)
 
@@ -510,16 +492,15 @@ def test_continuing_track_rolls_over_at_max_clip_without_waiting_for_cooldown(tm
         assert len(started) == 1
     finally:
         main._state.active_rtsp_recordings.pop(camera, None)
-        main._state.live_event_last_emitted.pop(camera, None)
-        main._state.live_event_track_last_emitted.pop(camera, None)
+        main._state.live_event_presence.pop(camera, None)
         main._state._object_tracks.pop(camera, None)
 
 
-def test_one_event_per_label_per_recording_new_label_still_fires(tmp_path, monkeypatch):
-    """A cat wandering the yard is ONE cat event per recording, even when the
-    tracker re-acquires it under a new track id (which bypasses the label
-    cooldown); a person walking into the same footage still gets its own event
-    linked to the same clip. A clip that has ended covers nothing."""
+def test_one_cat_event_per_recording_and_a_person_still_fires(tmp_path, monkeypatch):
+    """A cat wandering the yard is ONE cat event for its recording, even when
+    it drops out of sight and the tracker re-acquires it under a new track id;
+    a person walking into the same footage still gets its own event (and only
+    the person's alert) linked to the same clip."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
     import app.utils
@@ -559,7 +540,14 @@ def test_one_event_per_label_per_recording_new_label_still_fires(tmp_path, monke
         }
 
     monkeypatch.setattr(mods.recording_extension, 'start_rtsp_recording_capture', start_capture)
-    settings = {'id': camera, 'name': 'Backyard', 'detection': {'zones': []}}
+    settings = {'id': camera, 'name': 'Backyard', 'detection': {'zones': [{
+        'id': 'yard', 'name': 'Yard', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
+        'monitor_motion': False, 'monitor_objects': True,
+        'object_rules': [
+            {'label': label, 'enabled': True, 'record_on_detect': True, 'push_enabled': True, 'min_confidence': 0.5}
+            for label in ('cat', 'person')
+        ],
+    }]}}
 
     def run():
         return mods.live_monitor.process_live_stream_alerts(
@@ -567,67 +555,46 @@ def test_one_event_per_label_per_recording_new_label_still_fires(tmp_path, monke
             settings, enforce_interval=False,
         )
 
+    def alert_labels(event_id):
+        return sorted(row['label'] for row in main.database.alerts(limit=50) if row['event_id'] == event_id)
+
     main._state.active_rtsp_recordings.pop(camera, None)
     main._state._object_tracks.pop(camera, None)
     try:
         cat_event = run()
         assert cat_event is not None
+        assert alert_labels(cat_event) == ['cat']
         assert len(started) == 1
         recording_id = started[0]
-        # The same cat keeps wandering past every cooldown window (and any
-        # track id): previously a second cat event; now it only extends the clip.
-        with main._state.live_event_last_emitted_lock:
-            emitted = main._state.live_event_last_emitted[camera]
-            emitted['timestamp'] = now - 600
-            emitted['label_times'] = {k: now - 600 for k in emitted['label_times']}
-            anchors = main._state.live_event_track_last_emitted.get(camera, {})
-            for key in anchors:
-                anchors[key] = now - 600
-        assert mods.live_monitor.live_event_fresh_labels(camera, {'cat': 10.0}) == {'cat'}
+        # The same cat keeps wandering, out of sight for longer than the absence
+        # window (and under a new track id) while the clip it is in still
+        # captures: still one cat event for this recording.
+        with main._state.live_event_presence_lock:
+            main._state.live_event_presence[camera]['cat']['last_seen'] = now - 600
+        main._state._object_tracks.pop(camera, None)
         assert run() is None
         # A person enters the cat's footage: its own event, same recording.
         person_event = run()
         assert person_event is not None and person_event != cat_event
         assert main.database.get_event(person_event)['recording_id'] == recording_id
         assert len(started) == 1
-        # Both labels now have their event in this clip.
+        assert alert_labels(person_event) == ['person'], 'the cat already alerted; only the person is new'
+        # Both in view, both already on record.
         assert run() is None
-        assert main._state.active_rtsp_recordings[camera]['event_labels'] == {'cat', 'person'}
-        # Once the clip is gone the next one starts with no labels on record.
+        # Once the clip has ended and the cat has been gone past the window,
+        # it is new footage: a new cat event.
         main._state.active_rtsp_recordings.pop(camera)
-        assert not mods.recording_extension.recording_covers_event_labels(camera, {'cat'})
+        with main._state.live_event_presence_lock:
+            for entry in main._state.live_event_presence[camera].values():
+                entry['last_seen'] = now - 600
+        frames.append([cat_near])
+        cycle['n'] = len(frames) - 1
+        assert run() is not None
+        assert len(started) == 2
     finally:
         main._state.active_rtsp_recordings.pop(camera, None)
-        main._state.live_event_last_emitted.pop(camera, None)
-        main._state.live_event_track_last_emitted.pop(camera, None)
+        main._state.live_event_presence.pop(camera, None)
         main._state._object_tracks.pop(camera, None)
-
-
-def test_recording_covers_event_labels_rules(tmp_path, monkeypatch):
-    """Covered only by an extendable clip that already holds an event for
-    every specific label; generic labels ride along once it has any event."""
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-    ext = _m().recording_extension
-    camera = 'cover-cam'
-    now = time.time()
-    session = {'recording_id': 5, 'start_capture_ts': now, 'capture_deadline_ts': now + 5,
-               'max_capture_deadline_ts': now + 60}
-    main._state.active_rtsp_recordings[camera] = session
-    try:
-        assert not ext.recording_covers_event_labels(camera, {'cat'})
-        assert not ext.recording_covers_event_labels(camera, {'motion'})
-        ext.note_active_recording_event_labels(camera, 99, {'cat'})  # another clip's id
-        assert not ext.recording_covers_event_labels(camera, {'cat'})
-        ext.note_active_recording_event_labels(camera, 5, {'Cat'})
-        assert ext.recording_covers_event_labels(camera, {'cat'})
-        assert ext.recording_covers_event_labels(camera, {'cat', 'motion'})
-        assert ext.recording_covers_event_labels(camera, {'motion'})
-        assert not ext.recording_covers_event_labels(camera, {'cat', 'person'})
-        session['deadline_frozen'] = True
-        assert not ext.recording_covers_event_labels(camera, {'cat'})
-    finally:
-        main._state.active_rtsp_recordings.pop(camera, None)
 
 
 def test_live_stream_default_any_mode_annotates_motion_state(tmp_path, monkeypatch):
@@ -647,9 +614,9 @@ def test_live_stream_still_alert_fires_once_streak_crosses_threshold(tmp_path, m
 
     Uses a JPEG-byte frame (no diff mask -> every detection is 'still') and a
     fake clock inside app.object_settings so the streak can be aged by six
-    minutes between two cycles. The dwell event must bypass the per-label
-    debounce (the label has been continuously detected, so its window is
-    always fresh-refreshed) and carry the still-alert marker into the event.
+    minutes between two cycles. The dwell event must bypass the presence gate
+    (the person has been in view all along, so it is not new) and carry the
+    still-alert marker into the event.
     """
     _load_app(tmp_path, monkeypatch)
     import app.main as main
@@ -714,7 +681,63 @@ def test_live_stream_still_alert_fires_once_streak_crosses_threshold(tmp_path, m
     event3 = mods.live_monitor.process_live_stream_alerts(
         b'jpeg-frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False,
     )
-    assert event3 is None  # debounced/suppressed - the streak already alerted
+    assert event3 is None  # still the same person, and the streak already alerted
+
+
+def test_dwell_alert_keeps_its_zone_rule_alert_for_delivery(tmp_path, monkeypatch):
+    """A dwell on an object already on record still carries the matching zone
+    rule's alert (its email/push delivery), though the object itself is not new."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.object_settings as object_settings
+    mods = _m()
+
+    class FakeTime:
+        current = 1000.0
+
+        @classmethod
+        def time(cls):
+            return cls.current
+
+    monkeypatch.setattr(object_settings, 'time', FakeTime)
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes, confidence=None):
+            return [{'label': 'person', 'confidence': 0.91, 'box': {'x': 64, 'y': 72, 'width': 320, 'height': 360}}]
+
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
+    main._state.live_detection_last_checked.clear()
+    main._state.live_event_presence.clear()
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    main.database.set_setting('objects', {'default_mode': 'any', 'still_alerts': {'person': 5}}, main.utc_now())
+    settings = _zone_camera_settings([
+        {'label': 'person', 'enabled': True, 'push_enabled': True, 'min_confidence': 0.5},
+    ])
+
+    def run():
+        return mods.live_monitor.process_live_stream_alerts(
+            b'jpeg-frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False,
+        )
+
+    def rule_names(event_id):
+        return {row['rule_name'] for row in main.database.alerts(limit=50) if row['event_id'] == event_id}
+
+    try:
+        first = run()
+        assert first is not None
+        assert rule_names(first) == {'Front Door / Full Frame / person'}
+        FakeTime.current = 1000.0 + 6 * 60
+        dwell = run()
+        assert dwell is not None
+        names = rule_names(dwell)
+        assert any(name.startswith('Still for 5 min') for name in names)
+        assert 'Front Door / Full Frame / person' in names, 'the dwell keeps its zone rule alert'
+    finally:
+        main._state.live_event_presence.clear()
 
 
 def test_live_stream_default_moving_mode_applies_to_all_labels(tmp_path, monkeypatch):

@@ -134,120 +134,86 @@ def test_confidence_signature_ignores_irrelevant_camera_metadata(monkeypatch):
         _ad._per_camera_min_rule_confidence_cache.clear()
 
 
-def test_live_event_fresh_labels_per_label_windows():
-    """Each label's window is its own: a fast label can fire while a slower
-    label on the same camera is still cooling."""
-    _state.live_event_last_emitted.clear()
-    try:
-        # First appearance: everything is fresh.
-        assert _ed.live_event_fresh_labels('camera-1', {'person': 60.0, 'motion': 300.0}) == {'person', 'motion'}
-        _ed.remember_live_event('camera-1', {'person', 'motion'})
-        # Both still inside their own windows: nothing fresh.
-        assert _ed.live_event_fresh_labels('camera-1', {'person': 60.0, 'motion': 300.0}) == set()
-        # Backdate only person's window past its 60s cooldown.
-        with _state.live_event_last_emitted_lock:
-            _state.live_event_last_emitted['camera-1']['label_times']['person'] = time.time() - 61
-        assert _ed.live_event_fresh_labels('camera-1', {'person': 60.0, 'motion': 300.0}) == {'person'}
-        # Backdating the legacy event timestamp also ages every label (min-anchor),
-        # so person stays fresh while motion remains inside its 300s window.
-        with _state.live_event_last_emitted_lock:
-            _state.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 200
-        assert _ed.live_event_fresh_labels('camera-1', {'person': 60.0, 'motion': 300.0}) == {'person'}
-    finally:
-        _state.live_event_last_emitted.clear()
+def _presence_module():
+    # Other test modules reload app.* modules; use the live one (and ITS state).
+    return importlib.import_module('app.event_presence')
 
 
-def test_live_event_fresh_labels_motion_trailing_suppression():
-    """Motion-only events are suppressed within the short trailing window after a
-    non-motion event, mirroring live_event_is_debounced."""
-    _state.live_event_last_emitted.clear()
-    try:
-        _ed.remember_live_event('camera-1', {'person'})
-        assert _ed.live_event_fresh_labels('camera-1', {'motion': 60.0}) == set()
-        # Beyond the trailing window motion fires independently.
-        with _state.live_event_last_emitted_lock:
-            _state.live_event_last_emitted['camera-1']['timestamp'] = time.time() - _ed._MOTION_TRAILING_SUPPRESSION_SECONDS - 1
-        assert _ed.live_event_fresh_labels('camera-1', {'motion': 60.0}) == {'motion'}
-    finally:
-        _state.live_event_last_emitted.clear()
+def _presence(counts, *, now, absence=45.0, recording_id=None, camera='camera-1'):
+    return _presence_module().observe_presence(camera, counts, absence=absence, recording_id=recording_id, now=now)
 
 
-# ---------------------------------------------------------------------------
-# Per-track cooldown keys (label+track anchored debounce)
-# ---------------------------------------------------------------------------
+@pytest.fixture
+def _clean_presence():
+    presence_state = _presence_module()._state
+    presence_state.live_event_presence.clear()
+    yield
+    presence_state.live_event_presence.clear()
 
 
-def test_track_fresh_labels_two_cars_both_fresh_when_unanchored():
-    """No remembered anchors -> every label is fresh (first event)."""
-    _state.live_event_track_last_emitted.clear()
-    try:
-        tracks = {'car': {11, 12}}
-        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, tracks) == {'car'}
-    finally:
-        _state.live_event_track_last_emitted.clear()
+def test_presence_one_event_while_an_object_stays(_clean_presence):
+    """No cooldown: the cat fires on first sight and never again while it is
+    seen, however long it stays."""
+    assert _presence({'cat': 1}, now=0.0) == {'cat'}
+    for t in range(1, 600):
+        assert _presence({'cat': 1}, now=float(t)) == set()
 
 
-def test_track_fresh_labels_second_car_fires_within_window():
-    """The regression scenario: car #11 fires, car #12 arrives 10s later. The
-    label is NOT fresh by the legacy per-label key, but it IS fresh per-track
-    because #12 has no anchor -- so the second car gets its own event."""
-    _state.live_event_track_last_emitted.clear()
-    try:
-        _ed._remember_track_event('camera-1', {'car': {11}})
-        # Same track #11 still inside its 60s window -> suppressed.
-        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11}}) == set()
-        # A NEW track #12 within the same window -> fresh.
-        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11, 12}}) == {'car'}
-        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {12}}) == {'car'}
-    finally:
-        _state.live_event_track_last_emitted.clear()
+def test_presence_brief_disappearance_is_still_the_same_object(_clean_presence):
+    """A cat behind a bush for a while (a new track id when it comes back) is
+    still one cat in view: no new event inside the absence window."""
+    assert _presence({'cat': 1}, now=0.0) == {'cat'}
+    assert _presence({}, now=20.0) == set()
+    assert _presence({'cat': 1}, now=40.0) == set()
 
 
-def test_track_anchor_ages_out_and_window_elapses():
-    """Backdating an anchor past its cooldown re-arms that track, and stale
-    anchors are pruned so the map cannot grow unbounded."""
-    _state.live_event_track_last_emitted.clear()
-    try:
-        _ed._remember_track_event('camera-1', {'car': {11}})
-        with _state.live_event_last_emitted_lock:
-            _state.live_event_track_last_emitted['camera-1']['car#11'] = time.time() - 61
-        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11}}) == {'car'}
-        # Anything older than the prune horizon disappears entirely.
-        with _state.live_event_last_emitted_lock:
-            table = _state.live_event_track_last_emitted['camera-1']
-            table['car#11'] = time.time() - _ed._TRACK_COOLDOWN_PRUNE_SECONDS - 5
-        _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11}})
-        assert 'car#11' not in _state.live_event_track_last_emitted['camera-1']
-    finally:
-        _state.live_event_track_last_emitted.clear()
+def test_presence_second_object_of_same_type_fires_once_confirmed(_clean_presence):
+    """Two cats in view together fire a second event - after two sightings, so
+    one frame of a duplicated box is not a "second cat"."""
+    assert _presence({'cat': 1}, now=0.0) == {'cat'}
+    assert _presence({'cat': 2}, now=1.0) == set(), 'a single-frame second box is not confirmed'
+    assert _presence({'cat': 1}, now=2.0) == set()
+    assert _presence({'cat': 2}, now=3.0) == set()
+    assert _presence({'cat': 2}, now=4.0) == {'cat'}
+    # Back to one and up to two again: both already seen together.
+    assert _presence({'cat': 1}, now=5.0) == set()
+    assert _presence({'cat': 2}, now=6.0) == set()
+    assert _presence({'cat': 2}, now=7.0) == set()
 
 
-def test_track_fresh_labels_requires_any_track_entitled():
-    """A label is fresh when ANY current track is entitled (new object or its
-    own window elapsed); NOT fresh only when every current track is inside its
-    window -- the same objects continuing must not re-fire."""
-    _state.live_event_track_last_emitted.clear()
-    try:
-        _ed._remember_track_event('camera-1', {'car': {11, 12}})
-        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11, 12}}) == set()
-        # Both aged out -> fresh again.
-        with _state.live_event_last_emitted_lock:
-            table = _state.live_event_track_last_emitted['camera-1']
-            table['car#11'] = time.time() - 61
-            table['car#12'] = time.time() - 61
-        assert _ed._track_fresh_labels('camera-1', {'car': 60.0}, {'car': {11, 12}}) == {'car'}
-    finally:
-        _state.live_event_track_last_emitted.clear()
+def test_presence_different_type_fires_immediately(_clean_presence):
+    assert _presence({'cat': 1}, now=0.0) == {'cat'}
+    assert _presence({'cat': 1, 'person': 1}, now=1.0) == {'person'}
 
 
-def test_track_anchors_do_not_leak_across_cameras():
-    _state.live_event_track_last_emitted.clear()
-    try:
-        _ed._remember_track_event('camera-1', {'car': {11}})
-        # camera-2 never emitted: its car #11 is fresh.
-        assert _ed._track_fresh_labels('camera-2', {'car': 60.0}, {'car': {11}}) == {'car'}
-    finally:
-        _state.live_event_track_last_emitted.clear()
+def test_presence_forgets_after_absence_window_without_a_recording(_clean_presence):
+    assert _presence({'cat': 1}, now=0.0) == {'cat'}
+    assert _presence({'cat': 1}, now=40.0, absence=45.0) == set(), 'unseen 40s: still the same cat'
+    assert _presence({'cat': 1}, now=86.0, absence=45.0) == {'cat'}, 'unseen 46s and no recording: new event'
+
+
+def test_presence_stays_covered_while_its_recording_captures(_clean_presence):
+    """A cat back after the absence window, while the clip it was seen in is
+    still capturing (other activity kept it going), is the same recording:
+    no new event. Once that clip has ended it is new footage: new event."""
+    assert _presence({'cat': 1}, now=0.0, recording_id=7) == {'cat'}
+    assert _presence({}, now=100.0, recording_id=7) == set()
+    assert _presence({'cat': 1}, now=101.0, recording_id=7) == set()
+    assert _presence({}, now=300.0, recording_id=8) == set()
+    assert _presence({'cat': 1}, now=301.0, recording_id=8) == {'cat'}
+
+
+def test_presence_does_not_leak_across_cameras(_clean_presence):
+    assert _presence({'cat': 1}, now=0.0, camera='camera-1') == {'cat'}
+    assert _presence({'cat': 1}, now=0.0, camera='camera-2') == {'cat'}
+
+
+def test_presence_absence_window_follows_the_extension_step():
+    from app.event_presence import MIN_ABSENCE_SECONDS, absence_seconds
+    assert absence_seconds({'extension_step_seconds': 45}) == 45.0
+    assert absence_seconds({'post_event_seconds': 20}) == 20.0
+    assert absence_seconds({'extension_step_seconds': 0}) == MIN_ABSENCE_SECONDS
+    assert absence_seconds(None) == 45.0
 
 
 # ---------------------------------------------------------------------------
@@ -360,9 +326,8 @@ def test_motion_alert_does_not_record_when_record_off(tmp_path, monkeypatch):
 
     def _reset_state() -> None:
         main._state.live_detection_last_checked.clear()
-        main._state.live_event_last_emitted.clear()
+        main._state.live_event_presence.clear()
         main._state._motion_confirm_streaks.clear()
-        main.alerts.last_triggered.clear()
         attached.clear()
 
     # Record OFF + Email ON: alert fires (event created, alert_matched) but NO recording.

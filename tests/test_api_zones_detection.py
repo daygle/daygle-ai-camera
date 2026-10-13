@@ -756,7 +756,7 @@ def test_zone_detection_creates_alert_and_recording(tmp_path, monkeypatch, label
     # historical any default so this zone/recording logic is what's tested.
     main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
-    main.alerts.last_triggered.clear()
+    main._state.live_event_presence.clear()
 
     settings = _zone_camera_settings([
         {'label': label, 'record_on_detect': True, 'email_enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
@@ -799,7 +799,7 @@ def test_confirmation_gate_holds_first_frame_then_alerts_on_second(tmp_path, mon
     # Enable 2-of-3 confirmation (the harness default pins single-frame).
     main.database.set_setting('live', {'detection_confirm_frames': 2, 'detection_confirm_window': 3}, main.utc_now())
     main._state.live_detection_last_checked.clear()
-    main.alerts.last_triggered.clear()
+    main._state.live_event_presence.clear()
 
     settings = _zone_camera_settings([
         {'label': 'person', 'record_on_detect': True, 'email_enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
@@ -843,7 +843,7 @@ def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeyp
     # historical any default so this zone/recording logic is what's tested.
     main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
-    main.alerts.last_triggered.clear()
+    main._state.live_event_presence.clear()
 
     settings = _zone_camera_settings([
         {'label': 'person', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
@@ -867,31 +867,19 @@ def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeyp
     assert cat_event['recordings'][0]['trigger_label']    == 'cat'
 
 
-def test_alert_cooldown_is_scoped_by_internal_key_even_when_rule_names_match():
+def test_alert_engine_reports_every_match_without_cooldown():
+    """The engine has no cooldown: it reports every matching rule each cycle,
+    and the live presence gate keeps only the alerts of new objects."""
     from app.alerts import AlertEngine
 
     engine = AlertEngine([])
-    detection = {
-        'label': 'cat',
-        'confidence': 0.92,
-        'zone_id': 'full-frame',
+    detection = {'label': 'cat', 'confidence': 0.92, 'zone_id': 'full-frame'}
+    rule = {
+        'name': 'Front Door / Full Frame / cat', 'object': 'cat', 'zone_id': 'full-frame',
+        'min_confidence': 0.5, 'cooldown_seconds': 60, 'enabled': True,
     }
-    base_rule = {
-        'name': 'Front Door / Full Frame / cat',
-        'object': 'cat',
-        'zone_id': 'full-frame',
-        'min_confidence': 0.5,
-        'cooldown_seconds': 60,
-        'enabled': True,
-    }
-
-    first = engine.process([detection], rules=[{**base_rule, 'cooldown_key': 'front-yard::full-frame::cat'}])
-    second = engine.process([detection], rules=[{**base_rule, 'cooldown_key': 'driveway::full-frame::cat'}])
-    repeated_first = engine.process([detection], rules=[{**base_rule, 'cooldown_key': 'front-yard::full-frame::cat'}])
-
-    assert len(first) == 1
-    assert len(second) == 1
-    assert repeated_first == []
+    assert len(engine.process([detection], rules=[rule])) == 1
+    assert len(engine.process([detection], rules=[rule])) == 1
 
 
 def test_alert_engine_respects_rule_max_confidence_upper_bound():
@@ -1051,44 +1039,29 @@ def test_compute_minimum_rule_confidence(tmp_path, monkeypatch, zone_rules, glob
     assert _alert_dispatch.compute_minimum_rule_confidence() == pytest.approx(expected)
 
 
-def test_motion_debounce_trailing_window_and_independent_recording(tmp_path, monkeypatch):
-    """Motion uses a short trailing suppression window after non-motion events.
+def test_motion_near_a_recorded_subject_is_not_a_new_event():
+    """Motion while an object (or face) is on record is that subject moving;
+    motion on its own is an event once, then covered while it continues."""
+    import app.state as state
+    from app.event_presence import drop_covered_motion, observe_presence
 
-    Within _MOTION_TRAILING_SUPPRESSION_SECONDS of a prior object/sound event,
-    motion is suppressed (background re-settling noise). Beyond that window it
-    fires independently. Motion after a prior motion event always uses the normal
-    label-overlap path so back-to-back motion events still merge correctly.
-    """
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-    import app.event_debounce as _ed
-
-    # Motion within the trailing window after a non-motion event → suppressed.
-    main._state.live_event_last_emitted.clear()
-    _ed.remember_live_event('camera-1', {'person'})
-    assert _ed.live_event_is_debounced('camera-1', {'motion'}, 60.0) is True
-
-    # Simulate elapsed time beyond the trailing window - motion records independently.
-    with main._state.live_event_last_emitted_lock:
-        main._state.live_event_last_emitted['camera-1']['timestamp'] = (
-            time.time() - _ed._MOTION_TRAILING_SUPPRESSION_SECONDS - 1
-        )
-    assert _ed.live_event_is_debounced('camera-1', {'motion'}, 60.0) is False
-
-    # A concrete object never uses the trailing path - label overlap decides.
-    _ed.remember_live_event('camera-1', {'person'})
-    assert _ed.live_event_is_debounced('camera-1', {'cat'}, 10.0) is False
-
-    # Motion after a prior motion event IS debounced via normal label overlap.
-    main._state.live_event_last_emitted.clear()
-    _ed.remember_live_event('camera-1', {'motion'})
-    assert _ed.live_event_is_debounced('camera-1', {'motion'}, 10.0) is True
+    state.live_event_presence.pop('camera-m', None)
+    try:
+        assert observe_presence('camera-m', {'person': 1}, absence=45.0, now=0.0) == {'person'}
+        new = observe_presence('camera-m', {'person': 1, 'motion': 1}, absence=45.0, now=1.0)
+        assert drop_covered_motion('camera-m', new) == set()
+        state.live_event_presence.pop('camera-m', None)
+        new = observe_presence('camera-m', {'motion': 1}, absence=45.0, now=2.0)
+        assert drop_covered_motion('camera-m', new) == {'motion'}
+        assert observe_presence('camera-m', {'motion': 1}, absence=45.0, now=3.0) == set()
+    finally:
+        state.live_event_presence.pop('camera-m', None)
 
 
-def test_debounce_window_refreshes_while_activity_continues(tmp_path, monkeypatch):
-    """Continuing detections must refresh the debounce window so a new event/recording
-    requires a quiet gap, instead of re-firing every debounce_seconds while the same
-    activity persists (which produced back-to-back duplicate recordings)."""
+def test_ongoing_activity_stays_one_event_until_it_has_been_gone(tmp_path, monkeypatch):
+    """No cooldown to outlast: the same person seen on and off for minutes is
+    one event; only after the person has been gone longer than the absence
+    window (with no recording keeping it) is the next sighting a new event."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
     import app.live_monitor as _lm
@@ -1107,35 +1080,29 @@ def test_debounce_window_refreshes_while_activity_continues(tmp_path, monkeypatc
     # historical any default so this zone/recording logic is what's tested.
     main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
-    main._state.live_event_last_emitted.clear()
-    main.alerts.last_triggered.clear()
-
+    main._state.live_event_presence.clear()
     settings = _zone_camera_settings([
-        {'label': 'person', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 30},
+        {'label': 'person', 'email_enabled': True, 'min_confidence': 0.5},
     ])
 
-    first_event = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    def run():
+        return _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+
+    def age_last_sighting(seconds):
+        entry = main._state.live_event_presence['camera-1']['person']
+        entry['last_seen'] = time.time() - seconds
+
+    first_event = run()
     assert first_event is not None
-
-    # Simulate the original event being 25s old (still inside the 30s window) when
-    # another scan sees the same person: it must be suppressed AND refresh the window.
-    main._state.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 25
-    suppressed = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
-    assert suppressed is None
-    refreshed_ts = main._state.live_event_last_emitted['camera-1']['timestamp']
-    assert time.time() - refreshed_ts < 5, 'suppressed detection must refresh the debounce window'
-
-    # 25s later again (would be 50s after the original event - past the old anchor)
-    # the same ongoing activity must STILL be suppressed thanks to the refresh.
-    main._state.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 25
-    still_suppressed = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
-    assert still_suppressed is None
-
-    # Only after a quiet gap longer than the window does a new event get created.
-    main._state.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 31
-    new_event = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
-    assert new_event is not None
-    assert new_event != first_event
+    # Seen 40s ago (inside the 45s default extension step): same person.
+    age_last_sighting(40)
+    assert run() is None
+    age_last_sighting(40)
+    assert run() is None
+    # Gone longer than the window: the next sighting is a new event.
+    age_last_sighting(46)
+    new_event = run()
+    assert new_event is not None and new_event != first_event
 
 
 def test_alert_only_event_is_debounced_without_recording(tmp_path, monkeypatch):
@@ -1162,8 +1129,8 @@ def test_alert_only_event_is_debounced_without_recording(tmp_path, monkeypatch):
     # historical any default so this zone/recording logic is what's tested.
     main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
-    main._state.live_event_last_emitted.clear()
-    main.alerts.last_triggered.clear()
+    main._state.live_event_presence.clear()
+    main._state.live_event_presence.clear()
 
     # Alert rule with NO record_on_detect: the detection fires the alert path but
     # never attaches a recording, so should_record_event is False.
@@ -1174,10 +1141,10 @@ def test_alert_only_event_is_debounced_without_recording(tmp_path, monkeypatch):
     first_event = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
     assert first_event is not None
 
-    # The same activity inside the 30s window: no recording ever attached, but
-    # the event must still be suppressed so the timeline doesn't flood.
+    # The same person still in view: no recording ever attached, but the event
+    # must still be suppressed so the timeline doesn't flood.
     suppressed = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
     assert suppressed is None
 
     events = main.database.search_events(limit=50)
-    assert len(events) == 1, 'alert-only activity must be debounced to one event per window'
+    assert len(events) == 1, 'alert-only activity must stay one event while the person is in view'

@@ -635,7 +635,7 @@ def test_object_detection_with_email_rule_delivers_email(tmp_path, monkeypatch, 
     # historical any default so the notification rules are what's tested.
     main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
-    main.alerts.last_triggered.clear()
+    main._state.live_event_presence.clear()
 
     sent = _email_alert_capture(main, monkeypatch)
     settings = _zone_camera_settings_with_email(label)
@@ -673,7 +673,7 @@ def test_object_detection_with_email_rule_delivers_one_envelope_per_recipient(tm
     # historical any default so the notification rules are what's tested.
     main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
-    main.alerts.last_triggered.clear()
+    main._state.live_event_presence.clear()
 
     sent = _email_alert_capture(main, monkeypatch)
     settings = _zone_camera_settings_with_email('cat')
@@ -786,7 +786,7 @@ def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, m
     # historical any default so the notification rules are what's tested.
     main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
-    main.alerts.last_triggered.clear()
+    main._state.live_event_presence.clear()
 
     # Global email left disabled; only the per-rule flag is on.
     main.database.set_setting(

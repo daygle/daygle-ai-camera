@@ -107,7 +107,7 @@
       <div>
         <p class="eyebrow">Notification Workspace</p>
         <h1>Alerts</h1>
-        <p class="muted">Create separate policies for objects, recognized people, and sounds. Give each policy its own schedule, threshold, cooldown, and delivery channels. Detection scope and recording are set on the Zones and Sounds pages.</p>
+        <p class="muted">Create separate policies for objects, recognized people, and sounds. Give each policy its own schedule, threshold, and delivery channels. Objects and people alert once when they appear, with no cooldown. Detection scope and recording are set on the Zones and Sounds pages.</p>
       </div>
       <div class="onnx-hero-mark hero-mark--amber" aria-hidden="true">
         <span class="onnx-hero-ring onnx-hero-ring-back"></span>
@@ -127,7 +127,7 @@
         <label><span>Alert Type</span><select id="alertTypeSelect"><option value="object">Object</option><option value="sound">Sound</option><option value="tripwire">Line Crossing</option><option value="loiter">Loitering</option><option value="time">Unusual Time</option><option value="activity">Activity Spike</option><option value="ai_tags">AI Tag</option><option value="people">Face</option></select></label>
         <button id="addAlertBtn" class="btn-info" type="button">＋ Add Face Alert</button>
       </div>
-      <p id="alertScopeHint" class="form-help muted">Objects, motion, and faces are assigned - and set to record - per area on the Zones page; sound classes on the Sounds page. This page configures how each assigned item notifies you - email, push, schedules, and cooldowns.</p>
+      <p id="alertScopeHint" class="form-help muted">Objects, motion, and faces are assigned - and set to record - per area on the Zones page; sound classes on the Sounds page. This page configures how each assigned item notifies you - email, push, and schedules.</p>
       <div id="alertsList" class="alerts-policy-list"></div>
       <div class="alerts-editor-footer">
         <button id="saveAlertsBtn" class="primary" type="button">

@@ -21,16 +21,6 @@ fi = importlib.import_module('app.face_identity')  # noqa: E402
 import pytest  # noqa: E402
 
 
-@pytest.fixture(autouse=True)
-def _reset_face_rule_state():
-    """The cooldown maps are module-level singletons; leak-free tests reset them."""
-    fdr._face_rule_cooldowns.clear()
-    fi._alerted_unknown.clear()
-    yield
-    fdr._face_rule_cooldowns.clear()
-    fi._alerted_unknown.clear()
-
-
 class _DbStub:
     def __init__(self, settings=None):
         self._settings = dict(settings or {})
@@ -165,18 +155,31 @@ def test_scoped_unknown_rule_fires_only_in_its_zone(monkeypatch):
     assert fi.unknown_face_alerts('uZ', [_unknown_face(3)]) == []
 
 
-def test_two_zone_unknown_rules_each_fire_once_per_track(monkeypatch):
+def test_two_zone_unknown_rules_each_fire_once_while_present(monkeypatch):
+    """Matching names the zone's own rule; the live presence gate then fires
+    each rule once while the stranger stays, with no cooldown."""
+    import app.live_monitor as lm
+    import app.state as state
+
     _use_service(monkeypatch)
     _store(monkeypatch, [_scoped_unknown('door'), _scoped_unknown('yard')])
     fi.reset_camera_identities('uW')
-    # A face stamped to one zone fires only that zone's rule.
-    alerts = fi.unknown_face_alerts('uW', [_unknown_face(5, zone_id='door')])
-    assert alerts[0]['face_rule_ids'] == ['_unknown:door']
-    # Same stranger, now in the other zone: the other rule still fires once.
-    alerts = fi.unknown_face_alerts('uW', [_unknown_face(5, zone_id='yard')])
-    assert alerts[0]['face_rule_ids'] == ['_unknown:yard']
-    # Lingering in the same zone does not re-fire.
-    assert fi.unknown_face_alerts('uW', [_unknown_face(5, zone_id='yard')]) == []
+    state.live_event_presence.pop('uW', None)
+
+    def gate(face):
+        return lm._new_unknown_face_alerts('uW', fi.unknown_face_alerts('uW', [face]), absence=45.0, recording_id=None)
+
+    try:
+        # A face stamped to one zone matches only that zone's rule.
+        assert fi.unknown_face_alerts('uW', [_unknown_face(5, zone_id='door')])[0]['face_rule_ids'] == ['_unknown:door']
+        assert gate(_unknown_face(5, zone_id='door'))[0]['face_rule_ids'] == ['_unknown:door']
+        # Same stranger, now in the other zone: the other rule still fires once.
+        assert gate(_unknown_face(5, zone_id='yard'))[0]['face_rule_ids'] == ['_unknown:yard']
+        # Lingering - even re-acquired under a new track id - does not re-fire.
+        assert gate(_unknown_face(5, zone_id='yard')) == []
+        assert gate(_unknown_face(9, zone_id='yard')) == []
+    finally:
+        state.live_event_presence.pop('uW', None)
 
 
 def test_is_unknown_rule_matches_zone_variants():

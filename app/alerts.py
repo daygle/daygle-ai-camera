@@ -78,8 +78,6 @@ def _now_hm_in_admin_tz() -> str:
 class AlertEngine:
     def __init__(self, rules: list[dict[str, Any]]) -> None:
         self.rules = rules
-        self.last_triggered: dict[str, float] = {}
-        self._lock = threading.Lock()
 
     def process(self, detections: list[dict[str, Any]], rules: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         effective_rules = rules if rules is not None else self.rules
@@ -137,16 +135,10 @@ class AlertEngine:
                 if not detection_within_box_limits(detection, rule):
                     continue
 
+                # No cooldown: this reports every rule the cycle matches. The
+                # live pipeline's presence gate (app.event_presence) decides
+                # which of them are new and keeps only those.
                 rule_name = str(rule.get('name') or label)
-                cooldown_key = str(rule.get('cooldown_key') or rule_name)
-                cooldown = int(rule.get('cooldown_seconds', 60))
-
-                now = time.time()
-                with self._lock:
-                    last = self.last_triggered.get(cooldown_key, 0)
-                    if now - last < cooldown:
-                        continue
-                    self.last_triggered[cooldown_key] = now
 
                 state = detection.get('motion_state')
                 alert_entry: dict[str, Any] = {
@@ -199,14 +191,6 @@ class AlertEngine:
                 continue
 
             rule_name = str(rule.get('name') or 'Motion')
-            cooldown_key = str(rule.get('cooldown_key') or rule_name)
-            cooldown = int(rule.get('cooldown_seconds', 60))
-            now = time.time()
-            with self._lock:
-                last = self.last_triggered.get(cooldown_key, 0)
-                if now - last < cooldown:
-                    continue
-                self.last_triggered[cooldown_key] = now
             alerts.append({
                 'rule_name': rule_name,
                 'label': 'motion',

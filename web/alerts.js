@@ -201,7 +201,7 @@ function renderSelectors() {
   const hint = $('alertScopeHint');
   if (hint) {
     hint.textContent = alertType === 'object'
-      ? 'Objects, motion, and faces are assigned - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
+      ? 'Objects, motion, and faces are assigned - and set to record - per area on the Zones page. Here you choose how each one notifies you. Each alerts once when it appears and not again while it stays in view; another of the same type, or a different type, alerts on its own.'
       : alertType === 'sound'
         ? 'Sound classes are assigned - and set to record - per camera on the Sounds page. Here you choose how each one notifies you.'
         : alertType === 'tripwire'
@@ -314,9 +314,7 @@ function renderPolicies() {
     // area moves"), set on the Zones page; it has no confidence window to edit.
     const motionPolicy = alertType === 'object' && String(rule.label || '').trim().toLowerCase() === 'motion';
     const confidence = people ? rule.min_confidence : sound ? rule.confidence_threshold : rule.min_confidence;
-    const cooldown = people ? rule.cooldown_minutes : rule.cooldown_seconds;
     const confidenceLabel = people ? 'Minimum Recognition Confidence' : sound ? 'Confidence Threshold' : 'Minimum Confidence';
-    const cooldownLabel = people ? 'Cooldown (Minutes)' : 'Cooldown (Seconds)';
     const schedules = alertType === 'object' ? ensureAlertSchedules(rule) : [];
     const emailEnabled = alertType === 'object' ? schedules.some((schedule) => schedule.email_enabled) : rule.email_enabled;
     const pushEnabled = alertType === 'object' ? schedules.some((schedule) => schedule.push_enabled) : rule.push_enabled;
@@ -355,7 +353,7 @@ function renderPolicies() {
         ${behaviour || motionPolicy ? '' : `<label><span>${confidenceLabel}</span><input data-field="${people ? 'min_confidence' : sound ? 'confidence_threshold' : 'min_confidence'}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(confidence ?? (people ? '' : 0.5)))}"></label>`}
         ${!people && !sound && !behaviour && !motionPolicy ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
         ${aiVerifiable(rule) ? `<label><span>AI Verify Skip Above <span class="info-tip" data-tip="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" title="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" tabindex="0" aria-label="Help: With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1"></span></span><input data-field="ai_verify_skip_above" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(rule.ai_verify_skip_above ?? 1))}"></label>` : ''}
-        <label><span>${cooldownLabel}</span><input data-field="${people ? 'cooldown_minutes' : 'cooldown_seconds'}" type="number" min="0" max="${people ? '1440' : '3600'}" step="${people ? '1' : '5'}" value="${escapeHtml(String(cooldown ?? (people ? 5 : 60)))}"></label>
+        ${alertType === 'object' || people ? '' : `<label><span>Cooldown (Seconds)</span><input data-field="cooldown_seconds" type="number" min="0" max="3600" step="5" value="${escapeHtml(String(rule.cooldown_seconds ?? 60))}"></label>`}
       </div>
       ${alertType === 'object' ? renderObjectSchedules(rule, index, schedules) : people ? '' : behaviour
         ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`

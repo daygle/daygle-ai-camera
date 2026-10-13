@@ -137,14 +137,12 @@ live_detection_confirm_history: dict = {}
 live_detection_status_lock: threading.Lock = threading.Lock()
 live_detection_status: dict = {}
 
-live_event_last_emitted_lock: threading.Lock = threading.Lock()
-live_event_last_emitted: dict = {}
-
-# Per-(camera, label, track_id) last-emitted timestamps for the track-aware
-# cooldown gate (``app.event_debounce``): two DIFFERENT objects of the same
-# label must not suppress each other's events within one cooldown window.
-# Values are float epoch seconds; entries are pruned opportunistically.
-live_event_track_last_emitted: dict = {}
+# Per-camera presence of what has already raised an event (``app.event_presence``):
+# camera_id -> key ('cat', 'person:<id>', 'unknown-face:<rule>') -> entry with
+# the most objects of that key seen together, when one was last seen, and the
+# recording it belongs to.
+live_event_presence_lock: threading.Lock = threading.Lock()
+live_event_presence: dict = {}
 
 live_detection_retry_after: dict = {}
 live_detection_failure_count: dict = {}

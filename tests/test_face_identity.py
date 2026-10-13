@@ -297,15 +297,14 @@ def _known_face(track_id):
             'person_id': 7, 'person_name': 'Alex', 'identity': 'Alex'}
 
 
-def test_unknown_alert_fires_once_per_track(monkeypatch):
+def test_unknown_face_matches_every_cycle(monkeypatch):
+    """Matching is stateless: a lingering stranger matches every cycle, and the
+    live presence gate (not a per-track memo) keeps it to one alert."""
     _use_service(monkeypatch, _AlertService())
     _use_rule(monkeypatch, _unknown_rule())
     fi.reset_camera_identities('uA')
-    first = fi.unknown_face_alerts('uA', [_unknown_face(1)])
-    assert len(first) == 1
-    # Same stranger next cycle -> no duplicate alert.
-    second = fi.unknown_face_alerts('uA', [_unknown_face(1)])
-    assert second == []
+    assert len(fi.unknown_face_alerts('uA', [_unknown_face(1)])) == 1
+    assert len(fi.unknown_face_alerts('uA', [_unknown_face(1)])) == 1
 
 
 def test_unknown_alert_off_when_rule_disabled_or_missing(monkeypatch):
@@ -330,10 +329,11 @@ def test_known_face_does_not_alert(monkeypatch):
     assert fi.unknown_face_alerts('uD', [_known_face(1)]) == []
 
 
-def test_untracked_unknown_face_does_not_alert(monkeypatch):
+def test_untracked_unknown_face_still_matches(monkeypatch):
+    # Presence counts faces, so a face without a track id is not dropped.
     _use_service(monkeypatch, _AlertService())
     _use_rule(monkeypatch, _unknown_rule())
-    assert fi.unknown_face_alerts('uE', [_unknown_face(None)]) == []
+    assert len(fi.unknown_face_alerts('uE', [_unknown_face(None)])) == 1
 
 
 def test_returning_stranger_realerts(monkeypatch):

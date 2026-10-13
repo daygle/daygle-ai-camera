@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import math
-import threading
 from typing import Any
 
 from fastapi import HTTPException
@@ -35,17 +34,6 @@ _DEFAULT_RULES: dict[str, Any] = {'rules': []}
 # faces not matching any enrolled person.
 UNKNOWN_RULE_ID = '_unknown'
 
-# Per-label cooldown tracks in the live pipeline keyed by camera_id,
-# same shape as the dwell/still streaks.
-_face_rule_cooldowns: dict[str, dict[str, float]] = {}
-# Guards the read-and-claim of a track's cooldown slot (and the stale-entry
-# prune) in ``known_face_rules_for_camera`` so two threads processing the same
-# camera concurrently cannot both see an expired window and double-alert, nor
-# mutate one camera's dict while another iterates it. Built at import like every
-# other lock in the codebase: constructing a ``threading.Lock`` at import is
-# safe, and unlike a lazily built one it cannot race two callers into two
-# different lock objects -- which would silently defeat the guard.
-_face_rule_cooldown_lock = threading.Lock()
 
 
 def effective_face_detection_rules() -> dict[str, Any]:
@@ -306,16 +294,13 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
 
         {'rule_name': 'Alice', 'label': 'face', 'confidence': 0.8, 'message': '...'}
 
-    One alert per unique ``track_id`` per camera (debounced via the cooldown
-    dict so a lingering subject does not re-alert).
+    Every matching face is returned, each carrying its ``face_rule_id``. The
+    live pipeline's presence gate (:mod:`app.event_presence`) turns these into
+    ONE alert per person while they stay in view -- no cooldown.
     """
-    import time as _time
-
     if not effective_face_recognition_config().get('enabled'):
         return []
 
-    now = _time.time()
-    cooldowns = _face_rule_cooldowns.setdefault(camera_id, {})
     new_alerts: list[dict[str, Any]] = []
     # Unknown faces are handled separately by unknown_face_alerts() (gated on
     # the _unknown system rule); this function only handles KNOWN faces.
@@ -324,9 +309,6 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
         if label != 'face':
             continue
         if not detection.get('recognized'):
-            continue
-        track_id = detection.get('track_id')
-        if track_id is None:
             continue
         # Use the person_name as the rule lookup key; falls back to
         # the synthetic UNKNOWN_RULE_ID if the name is missing.
@@ -352,23 +334,6 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
         normalized_min_conf = _coerce_optional_float(rule.get('min_confidence'))
         if normalized_min_conf is not None and det_conf < normalized_min_conf:
             continue
-        # Cooldown: ``cooldown_minutes`` between alerts for the same track.
-        # Read-and-claim the slot under the module's cooldown lock so two
-        # callers processing the same camera concurrently (thread overlap
-        # during a camera restart, API-triggered passes) cannot BOTH see an
-        # expired window between the read and the write and double-alert.
-        # ``or 5`` would turn an explicit 0 ("no cooldown") into five minutes.
-        raw_cooldown = rule.get('cooldown_minutes')
-        try:
-            cooldown_minutes = 5 if raw_cooldown in (None, '') else int(raw_cooldown)
-        except (TypeError, ValueError):
-            cooldown_minutes = 5
-        cooldown_sec = max(0, cooldown_minutes) * 60
-        with _face_rule_cooldown_lock:
-            last_fired = cooldowns.get(track_id, 0)
-            if now - last_fired < cooldown_sec:
-                continue
-            cooldowns[track_id] = now
         new_alerts.append({
             'rule_name': person_name,
             # Exact rule id so dispatch resolves recipients for THIS rule even
@@ -379,14 +344,6 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
             'confidence': det_conf,
             'message': f'Alert triggered: {person_name} detected',
         })
-    # Prune stale cooldown entries so the dict cannot grow unbounded. Under the
-    # same lock as the claim above: without it, iterating this camera's dict here
-    # while a concurrent caller claims a new slot could raise "dict changed size
-    # during iteration".
-    with _face_rule_cooldown_lock:
-        stale = [tid for tid, ts in cooldowns.items() if now - ts > 3600 * 6]
-        for tid in stale:
-            cooldowns.pop(tid, None)
     return new_alerts
 
 
