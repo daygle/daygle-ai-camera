@@ -196,9 +196,9 @@ class OnnxYoloDetector:
         self._execution_mode = (execution_mode or "parallel").lower()
         # ``confidence_only_nms`` lets a YOLO26 (NMS-free) deployment drop the
         # class-aware NMS dedupe pass entirely and rely on the model head's
-        # one-to-one label assignment + the confidence threshold. Off by
-        # default so existing recordings keep their current dedupe behavior;
-        # flip on after validating on a labeled set.
+        # one-to-one label assignment + the confidence threshold. Only read
+        # on the NMS-free output path; ``create_detector`` resolves the
+        # Automatic setting to True so any NMS-free output skips the pass.
         self._confidence_only_nms = bool(confidence_only_nms)
         # ``precision`` selects the on-disk / runtime model layout.
         # ``fp32`` (default -- prior behavior) loads the source ONNX.
@@ -214,11 +214,15 @@ class OnnxYoloDetector:
         # branch only ever fires when the session is CUDA-bound.
         self._use_io_binding = bool(use_io_binding)
         # The numpy dtype the model's input tensor expects. Resolved from the
-        # loaded session below; an FP16 (``half=True``) export declares a
+        # loaded session below; a GPU FP16 (``quantize=16``) export declares a
         # ``tensor(float16)`` input and rejects a float32 array, so the
         # preprocess step casts to whatever the model actually wants. Stays
         # None until the session loads; ``_preprocess`` falls back to float32.
         self._input_dtype: Any = None
+        # True when the export recorded FP16 weights behind float32 I/O
+        # (Ultralytics 8.4.x CPU ``quantize=16`` exports keep their I/O types),
+        # so ``active_precision`` can report fp16 for such a model.
+        self._fp16_weights = False
 
         cpu_count = os.cpu_count() or 1
         # Let each inference use multiple cores so it finishes fast, then cap how
@@ -455,6 +459,7 @@ class OnnxYoloDetector:
             # raises an ORT type-mismatch, so ``_preprocess`` casts to match.
             input_type = getattr(model_input, 'type', None)
             self._input_dtype = np.float16 if input_type == 'tensor(float16)' else np.float32
+            self._fp16_weights = _export_quantize_scheme(self.session) == '16'
             logger.info(
                 "Detector startup diagnostics: model_path=%s model_type=%s "
                 "active_providers=%s precision=%s nms_free=%s "
@@ -591,12 +596,16 @@ class OnnxYoloDetector:
           rewrites ``self._precision`` to ``'fp32'`` when it can't quantize).
         - FP16 is reported only when the loaded model genuinely declares a
           ``float16`` input; an FP16 request that produced an FP32 export (a
-          CPU host that dropped ``half=True``) correctly reads back as fp32.
+          CPU host that dropped ``quantize=16``) correctly reads back as fp32.
+          A CPU-side Ultralytics ``quantize=16`` export keeps float32 I/O
+          around FP16 weights; its recorded export args mark it fp16.
         - Everything else is fp32.
         """
         if self._precision == 'int8':
             return 'int8'
         if self._input_dtype is not None and np is not None and np.dtype(self._input_dtype) == np.float16:
+            return 'fp16'
+        if self._fp16_weights:
             return 'fp16'
         return 'fp32'
 
@@ -917,8 +926,8 @@ class OnnxYoloDetector:
         # is set the model head's one-to-one label assignment plus the
         # confidence threshold already give us a clean detection list --
         # skipping the class-aware NMS saves the per-frame Python sort +
-        # IoU matrix cost. Off by default so existing recordings keep
-        # their dedupe behavior; flip on after A/B on a labeled set.
+        # IoU matrix cost. Set by default (Automatic); "Force Class-Aware
+        # NMS" clears it to run the dedupe here anyway.
         if filtered_boxes.shape[0] > 0 and not self._confidence_only_nms:
             keep = non_max_suppression(
                 filtered_boxes, filtered_scores, filtered_class_ids, self.iou_threshold
@@ -1130,6 +1139,26 @@ def _int8_precision_supported_for_detector(nms_free: bool) -> bool:
     return not bool(nms_free)
 
 
+def _export_quantize_scheme(session: Any) -> str | None:
+    """Return the ``quantize`` arg an Ultralytics export recorded, as a string.
+
+    Ultralytics 8.4.x writes its export args into the ONNX metadata as a
+    Python dict literal (e.g. ``"{'quantize': 16, 'nms': None, ...}"``).
+    Returns ``None`` when the model carries no such record (older exports,
+    hand-built or quantized-at-runtime graphs) or it cannot be parsed.
+    """
+    import ast
+
+    try:
+        raw = session.get_modelmeta().custom_metadata_map.get('args')
+        args = ast.literal_eval(raw) if raw else None
+    except Exception:
+        return None
+    if not isinstance(args, dict) or args.get('quantize') is None:
+        return None
+    return str(args['quantize'])
+
+
 def _detect_model_type(model_path: str) -> bool:
     """Detect if a model uses NMS-free format based on filename.
 
@@ -1196,7 +1225,7 @@ def create_face_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector | None:
         gpu_mem_limit=_optional_int('gpu_mem_limit'),
         nms_free=nms_free,
         execution_mode=str(ai_config.get('execution_mode', 'parallel') or 'parallel').lower(),
-        confidence_only_nms=_resolve_confidence_only_nms(ai_config.get('confidence_only_nms'), nms_free),
+        confidence_only_nms=_resolve_confidence_only_nms(ai_config.get('confidence_only_nms')),
         precision=str(ai_config.get('precision', 'fp32') or 'fp32').strip().lower(),
         use_io_binding=normalize_bool_setting(ai_config.get('use_io_binding'), False),
         # YOLO-face exports are YOLOv8-pose models with a 5-point facial
@@ -1240,34 +1269,35 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         gpu_mem_limit=_optional_int("gpu_mem_limit"),
         nms_free=bool(nms_free),
         execution_mode=str(ai_config.get("execution_mode", "parallel") or "parallel").lower(),
-        confidence_only_nms=_resolve_confidence_only_nms(ai_config.get("confidence_only_nms"), nms_free),
+        confidence_only_nms=_resolve_confidence_only_nms(ai_config.get("confidence_only_nms")),
         precision=str(ai_config.get("precision", "fp32") or "fp32").strip().lower(),
         use_io_binding=normalize_bool_setting(ai_config.get("use_io_binding"), False),
         keypoint_count=_optional_int("keypoint_count") or 0,
     )
 
 
-def _resolve_confidence_only_nms(value: Any, nms_free: bool) -> bool:
+def _resolve_confidence_only_nms(value: Any) -> bool:
     """Resolve the tri-state ``confidence_only_nms`` setting to a bool.
 
     NMS-free heads (YOLO26) already perform one-to-one label assignment in the
     model, so the extra class-aware NMS pass is redundant work that can also
-    wrongly suppress genuinely overlapping objects. The setting is tri-state:
+    wrongly suppress genuinely overlapping objects. The flag is only consulted
+    on the NMS-free postprocess path, which ``_postprocess`` picks from the
+    model's actual output shape -- grid heads (YOLOv8/YOLO11) always run NMS.
+    The setting is tri-state:
 
-    - ``'auto'`` / ``None`` (default): follow the model -- skip the NMS pass
-      for NMS-free heads, keep it for grid heads (YOLOv8/YOLO11).
-    - ``'on'`` / truthy: always skip the NMS pass (confidence threshold only).
+    - ``'auto'`` / ``None`` (default): follow the model's output -- skip the
+      NMS pass whenever the output is NMS-free, whatever the file is called.
+    - ``'on'`` / truthy: skip the NMS pass (same effect as auto today).
     - ``'off'`` / falsy: always run the class-aware NMS dedupe.
 
     Legacy persisted bools are honoured (``True`` -> skip, ``False`` -> run).
     """
     if value is None:
-        return bool(nms_free)
+        return True
     if isinstance(value, bool):
         return value
     text = str(value).strip().lower()
-    if text in {'on', '1', 'true', 'yes'}:
-        return True
     if text in {'off', '0', 'false', 'no'}:
         return False
-    return bool(nms_free)  # 'auto' or any unknown value follows the model
+    return True  # 'auto', 'on' or any unknown value

@@ -18,9 +18,9 @@ def test_optional_model_simplifier_is_not_installed_on_every_server():
     model_management = _read("app/model_management.py")
     readme = _read("README.md")
 
-    assert "onnxsim" not in installer
-    assert "_onnxsim_available" in model_management
-    assert "pip install --no-cache-dir onnxsim" in readme
+    assert "onnxslim" not in installer
+    assert "_onnxslim_available" in model_management
+    assert "pip install --no-cache-dir onnxslim" in readme
 
 
 def test_dependency_variants_keep_cpu_and_gpu_onnx_runtime_exclusive():

@@ -13,6 +13,7 @@ Cluster membership:
 - ``_parse_semver(v)`` - parse a semantic version string to a tuple
 - ``_fetch_models_manifest()`` - build the remote YOLO export-version manifest
 - ``export_yolo_onnx(model_name, destination)`` - run Ultralytics YOLO export
+- ``model_export_info(path)`` - how an installed ONNX file was exported
 - ``_do_download_model(model_name, switch_active)`` - full export + persist + reload flow
 
 Pool-C reach (resolved lazily via lazy imports inside function bodies):
@@ -38,23 +39,28 @@ from pathlib import Path
 from typing import Any
 
 
-def _onnxsim_available() -> bool:
-    """Return ``True`` iff the ``onnxsim`` package is importable.
+def _onnxslim_available() -> bool:
+    """Return ``True`` iff the ``onnxslim`` package is importable.
 
-    Ultralytics' ``YOLO(...).export(simplify=True)`` requires ``onnxsim`` at
-    runtime; without it the export raises. We detect availability up front so
-    hosts that have not installed ``onnxsim`` (e.g. the export feature was
-    never their concern) still get a working ONNX file: we just skip the
-    constant-folding pass instead of failing the download with a 502.
+    Ultralytics' ``YOLO(...).export(simplify=True)`` graph simplifier is
+    ``onnxslim`` (it replaced ``onnxsim``). ``simplify`` also defaults to
+    ``True`` in Ultralytics 8.4.x, so leaving it unset on a host without
+    ``onnxslim`` makes the export try to pip auto-install it (plus an
+    ``onnxruntime`` build) from inside the running service. We detect
+    availability up front and pass an explicit ``simplify=False`` instead,
+    so minimal installs still get a working ONNX file with no package
+    changes behind the operator's back.
     """
-    return importlib.util.find_spec('onnxsim') is not None
+    return importlib.util.find_spec('onnxslim') is not None
 
 
 def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto') -> str:
     """Build the ``YOLO(...).export(...)`` kwargs string for the model variant.
 
-    Adds ``simplify=True`` when ``onnxsim`` is importable; otherwise omits it
-    silently so the export still succeeds on minimal installs. YOLO26 models
+    Emits ``simplify=True`` when ``onnxslim`` is importable and an explicit
+    ``simplify=False`` otherwise (Ultralytics defaults it to ``True`` and would
+    try to auto-install ``onnxslim``), so the export still succeeds on minimal
+    installs. YOLO26 models
     additionally need ``nms=False`` to fold NMS into the graph (end-to-end
     head) and emit the ``[N, 6]`` output ``_postprocess_nms_free`` decodes.
     Standard models get ``nms=None`` (the Ultralytics default), which carries
@@ -66,15 +72,16 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
     are usable on the exported model (the Ultralytics default opset often
     lands below 13 and skips some CPU-friendly fusions).
 
-    ``precision='fp16'`` emits ``half=True`` when ``device`` is ``'cuda'``
+    ``precision='fp16'`` emits ``quantize=16`` (Ultralytics 8.4.172+ replaced
+    the deprecated ``half=True`` with it) when ``device`` is ``'cuda'``
     OR ``'auto'`` (the default) AND ``onnxruntime-gpu`` is registered on the
     host. ``'auto'`` is treated like CUDA because the detector's auto device
     resolution lands on the CUDA provider whenever it is available -- an fp16
     request under the default ``device=auto`` must produce a genuine
     half-precision model on a CUDA-capable host. On CPU-only hosts (no
-    onnxruntime-gpu) we deliberately drop ``half=True`` so the export doesn't
-    crash trying to use FP16 CUDA tensors that the local Ultralytics install
-    can't emit -- an FP32 export is still a valid ORT input.
+    onnxruntime-gpu) we deliberately drop ``quantize=16``: an FP16 graph
+    gains nothing on the CPU provider, and an FP32 export is still a valid
+    ORT input.
     ``precision='int8'`` is NOT honored at export time (Ultralytics would
     require a calibration dataset which the download flow doesn't carry);
     INT8 is a runtime concern handled by ``app.quantization.quantize_int8``.
@@ -84,7 +91,7 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
     # kwarg (Ultralytics >=8.4.172).
     parts = ["format='onnx'", f"nms={'False' if nms_free else 'None'}", 'opset=13']
     # Delegate the precision rule to its single source of truth in
-    # ``app.quantization.precision_export_kwargs``: fp16 emits ``half=True``
+    # ``app.quantization.precision_export_kwargs``: fp16 emits ``quantize=16``
     # when ``device`` is 'cuda' OR 'auto' (the default) AND onnxruntime-gpu
     # is registered; fp32 and int8 never contribute export kwargs here (INT8
     # is a runtime concern handled by ``quantize_int8`` at detector load
@@ -102,8 +109,7 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
             'precision=fp16 requested but onnxruntime-gpu is not installed; '
             'exporting FP32. Install onnxruntime-gpu + CUDA drivers and re-export.',
         )
-    if _onnxsim_available():
-        parts.append('simplify=True')
+    parts.append(f"simplify={'True' if _onnxslim_available() else 'False'}")
     return ', '.join(parts)
 
 from fastapi import HTTPException
@@ -419,6 +425,77 @@ def _download_weights(
         tmp.unlink(missing_ok=True)
 
 
+# (path, mtime_ns, size) -> parsed export info. Parsing an ONNX file costs a
+# full protobuf load, so each file is read once per on-disk version.
+_export_info_cache: dict[tuple[str, int, int], dict[str, Any] | None] = {}
+
+
+def model_export_info(path: Path) -> dict[str, Any] | None:
+    """Return how an installed ONNX model was exported, read from the file.
+
+    Ultralytics records its export args (``quantize``, ``simplify``,
+    ``opset`` ...) and its own version in the ONNX metadata, so this reflects
+    what the file actually is -- including a fp16 request that exported as
+    fp32, or a simplify that was skipped -- not what was asked for. Keys:
+    ``precision`` ('fp32' | 'fp16' | 'int8'), ``simplified`` (bool, or None
+    when the file does not record it), ``opset`` (int or None) and
+    ``ultralytics_version`` (str or None). Returns None when the file cannot
+    be read or the ``onnx`` package is unavailable.
+    """
+    import ast
+
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    if key in _export_info_cache:
+        return _export_info_cache[key]
+    info: dict[str, Any] | None = None
+    try:
+        import onnx  # type: ignore[import-untyped]
+
+        model = onnx.load(str(path), load_external_data=False)
+        meta = {prop.key: prop.value for prop in model.metadata_props}
+        try:
+            args = ast.literal_eval(meta['args']) if meta.get('args') else {}
+        except (ValueError, SyntaxError):
+            args = {}
+        if not isinstance(args, dict):
+            args = {}
+        quantize = args.get('quantize')
+        input_fp16 = any(
+            graph_input.type.tensor_type.elem_type == onnx.TensorProto.FLOAT16
+            for graph_input in model.graph.input
+        )
+        # ``half`` covers files exported before Ultralytics 8.4.172 renamed it.
+        if str(quantize) == '16' or input_fp16 or args.get('half') is True:
+            precision = 'fp16'
+        elif str(quantize) == '8' or args.get('int8') is True:
+            precision = 'int8'
+        else:
+            precision = 'fp32'
+        simplified = args.get('simplify')
+        opset = next(
+            (int(entry.version) for entry in model.opset_import if entry.domain in ('', 'ai.onnx')),
+            None,
+        )
+        info = {
+            'precision': precision,
+            'simplified': simplified if isinstance(simplified, bool) else None,
+            'opset': opset,
+            'ultralytics_version': meta.get('version') or None,
+        }
+    except Exception as exc:
+        logger.debug('Could not read export info from %s: %s', path, exc)
+        info = None
+    # Drop stale entries for the same path so re-exports don't accumulate.
+    for stale in [cached for cached in _export_info_cache if cached[0] == key[0]]:
+        del _export_info_cache[stale]
+    _export_info_cache[key] = info
+    return info
+
+
 def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, precision: str = 'fp32', device: str = 'auto') -> int:
     if model_name not in YOLO_MODELS:
         raise ValueError(f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
@@ -447,12 +524,13 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
     #
     # YOLO26 models need nms=False for NMS-free export;
     # YOLOv8/YOLO11 models use nms=None (standard export, NMS at runtime).
-    # ``simplify=True`` is added when onnxsim is importable so the constant-
-    # folding pass runs without ever breaking the export on minimal installs.
+    # ``simplify=True`` is set when onnxslim is importable (``simplify=False``
+    # otherwise) so the graph-slimming pass runs without ever triggering an
+    # Ultralytics auto-install or breaking the export on minimal installs.
     # ``opset=13`` unlocks the newer ORT graph-fusion passes (the default
     # Ultralytics picks is often ``opset=12`` which skips some fusions that
     # matter on the per-camera hot path).
-    # ``precision='fp16'`` emits ``half=True`` only when the host has
+    # ``precision='fp16'`` emits ``quantize=16`` only when the host has
     # onnxruntime-gpu -- on CPU-only deployments it silently drops so the
     # export still succeeds. INT8 is NOT honored here; it's a runtime
     #    concern handled by ``app.quantization.quantize_int8``.

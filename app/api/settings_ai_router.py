@@ -27,6 +27,7 @@ from app.model_management import (
     _same_model_path,
     _read_installed_models,
     delete_model,
+    model_export_info,
 )
 from app.request_helpers import read_json_object, write_audit_log
 from app.media_utils import ONE_PIXEL_PNG
@@ -132,6 +133,7 @@ def list_ai_models():
                 'size_bytes': None,
                 'installed_version': None,
                 'exported_imgsz': None,
+                'export_info': None,
             })
             continue
         # Keep a download card alongside installed variants so another
@@ -152,6 +154,7 @@ def list_ai_models():
             'size_bytes': None,
             'installed_version': None,
             'exported_imgsz': None,
+            'export_info': None,
         })
         for variant in sorted(variants.values(), key=lambda item: int(item.get('imgsz', info.get('input_size', 640)))):
             path = str(variant['path'])
@@ -180,6 +183,7 @@ def list_ai_models():
                 'size_bytes': absolute.stat().st_size if absolute.is_file() else None,
                 'installed_version': variant.get('version'),
                 'exported_imgsz': int(variant['imgsz']),
+                'export_info': model_export_info(absolute) if absolute.is_file() else None,
             })
     return result
 

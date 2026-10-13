@@ -212,19 +212,17 @@ def test_run_inference_preserves_real_low_threshold():
 
 # -- confidence_only_nms tri-state resolution ------------------------------
 
-@pytest.mark.parametrize("value,nms_free,expected", [
-    (None, True, True),        # auto + NMS-free model -> skip NMS
-    (None, False, False),      # auto + grid model    -> run NMS
-    ("auto", True, True),
-    ("auto", False, False),
-    ("on", False, True),       # explicit on overrides regardless of model
-    ("off", True, False),      # explicit off overrides regardless of model
-    (True, False, True),       # legacy persisted bool
-    (False, True, False),      # legacy persisted bool
-    ("garbage", True, True),   # unknown -> follow the model (auto)
+@pytest.mark.parametrize("value,expected", [
+    (None, True),        # auto -> skip NMS on any NMS-free output
+    ("auto", True),
+    ("on", True),
+    ("off", False),      # explicit off always runs the dedupe
+    (True, True),        # legacy persisted bool
+    (False, False),      # legacy persisted bool
+    ("garbage", True),   # unknown -> auto
 ])
-def test_resolve_confidence_only_nms(value, nms_free, expected):
-    assert _resolve_confidence_only_nms(value, nms_free) is expected
+def test_resolve_confidence_only_nms(value, expected):
+    assert _resolve_confidence_only_nms(value) is expected
 
 
 # -- confidence_only_nms actually gates the NMS-free dedupe ----------------
@@ -254,6 +252,31 @@ def test_nms_free_skips_dedupe_when_enabled():
     det.input_width = det.input_height = 640
     res = det._postprocess_nms_free(_nms_free_overlapping_output()[0], SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
     assert len(res) == 2
+
+
+@pytest.mark.parametrize("setting,expected", [("auto", 2), ("off", 1)])
+def test_auto_dedupe_follows_model_output_not_file_name(setting, expected):
+    """A renamed NMS-free model (file name not ``yolo26*``) still skips the
+    dedupe on Automatic: the output shape, not the name, picks the path."""
+    import app.detector as detector_mod
+
+    det = detector_mod.create_detector({
+        "model_path": "/does-not-exist/custom-detector.onnx",
+        "confidence_only_nms": setting,
+        "categories": LABELS,
+    })
+    assert det._nms_free is False  # the file-name heuristic says "grid"
+    _stub_inference(det, _nms_free_overlapping_output())
+    assert len(det._run_inference(object(), 0.45)) == expected
+
+
+def test_grid_output_always_runs_nms_on_auto():
+    """Automatic never skips NMS for a grid head: its raw boxes overlap."""
+    det = OnnxYoloDetector(model_path="/does-not-exist.onnx", categories=LABELS,
+                           iou_threshold=0.45, nms_free=False, confidence_only_nms=True)
+    out = _grid_output(320, 240, 100, 100, 0, 0.9, extra=(325, 245, 100, 100, 0, 0.8))
+    _stub_inference(det, out)
+    assert len(det._run_inference(object(), 0.45)) == 1
 
 
 def test_nms_free_fp16_output_cast_before_nms():
@@ -407,11 +430,42 @@ def test_active_precision_reports_fp16_from_model_input_dtype():
 
 def test_active_precision_fp16_request_but_fp32_model_reads_fp32():
     """FP16 requested but the loaded model has a float32 input (a CPU export
-    that dropped half=True) reports fp32 -- the truth, not the request."""
+    that dropped quantize=16) reports fp32 -- the truth, not the request."""
     det = _detector(nms_free=False)
     det._precision = 'fp16'
     det._input_dtype = np.float32
     assert det.active_precision == 'fp32'
+
+
+def test_active_precision_reports_fp16_for_fp32_io_fp16_weights():
+    """Ultralytics 8.4.x CPU ``quantize=16`` exports keep float32 I/O around
+    FP16 weights; the recorded export args still mark them fp16."""
+    det = _detector(nms_free=False)
+    det._precision = 'fp16'
+    det._input_dtype = np.float32
+    det._fp16_weights = True
+    assert det.active_precision == 'fp16'
+
+
+class _MetaSession:
+    def __init__(self, args):
+        self._meta = type('Meta', (), {'custom_metadata_map': {} if args is None else {'args': args}})()
+
+    def get_modelmeta(self):
+        return self._meta
+
+
+@pytest.mark.parametrize('args, expected', [
+    ("{'batch': 1, 'quantize': 16, 'nms': None, 'simplify': True, 'opset': 13}", '16'),
+    ("{'batch': 1, 'quantize': None, 'nms': False}", None),
+    ("{'batch': 1, 'half': False}", None),
+    (None, None),
+    ('not a dict literal', None),
+])
+def test_export_quantize_scheme_reads_ultralytics_args(args, expected):
+    from app.detector import _export_quantize_scheme
+
+    assert _export_quantize_scheme(_MetaSession(args)) == expected
 
 
 def test_active_precision_defaults_fp32():
