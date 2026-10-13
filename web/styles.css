@@ -4059,6 +4059,29 @@ button.activity-item-action.activity-item-action-delete:hover {
   box-shadow: 0 0 0 3px rgba(255, 92, 138, 0.22);
 }
 
+/* On phones the frame is short (it follows the stream's aspect ratio), so the
+   pill's 18px insets and full padding made it cover a large slice of the
+   footage. Shrink the pill and tuck it into the corner on small screens. */
+@media (max-width: 640px) {
+  .live-status-pill {
+    right: 8px;
+    top: 8px;
+    gap: 6px;
+    padding: 4px 9px;
+    font-size: 10px;
+    background: rgba(7, 11, 19, 0.55);
+  }
+  .live-status-pill::before {
+    width: 6px;
+    height: 6px;
+    box-shadow: none;
+  }
+  .live-status-pill.live-status-online::before,
+  .live-status-pill.live-status-offline::before {
+    box-shadow: none;
+  }
+}
+
 /* PTZ overlay d-pad */
 /* ─── Frame + PTZ side-by-side layout ─────────────────────────────────── */
 .live-frame-ptz-layout {
