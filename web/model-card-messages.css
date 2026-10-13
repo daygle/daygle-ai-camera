@@ -119,3 +119,12 @@
   border-color: rgba(124, 58, 237, 0.2);
   color: #7c3aed;
 }
+
+/* ─── Export settings line for installed models ─────────────────────── */
+.model-export-info {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

@@ -86,3 +86,15 @@ test('a delete does not paint an empty payload over the status card', () => {
   assert.match(actionBlock, /else if \(result\.status\)/);
   assert.match(actionBlock, /renderAi\(await api\('\/api\/settings\/ai'\)\)/);
 });
+
+test('installed cards show how the model file was exported', () => {
+  const start = source.indexOf('function modelExportInfoHtml');
+  assert.ok(start !== -1, 'modelExportInfoHtml helper not found');
+  const block = source.slice(start, source.indexOf('\n}\n', start));
+  for (const field of ['precision', 'simplified', 'opset', 'ultralytics_version']) {
+    assert.match(block, new RegExp(`info\\.${field}`), `export line no longer shows ${field}`);
+  }
+  // Only installed cards carry export info; catalog cards stay unchanged.
+  assert.match(source, /isInstalled \? modelExportInfoHtml\(m\.export_info\) : ''/);
+  assert.match(block, /escapeHtml\(/);
+});

@@ -13,6 +13,7 @@ Cluster membership:
 - ``_parse_semver(v)`` - parse a semantic version string to a tuple
 - ``_fetch_models_manifest()`` - build the remote YOLO export-version manifest
 - ``export_yolo_onnx(model_name, destination)`` - run Ultralytics YOLO export
+- ``model_export_info(path)`` - how an installed ONNX file was exported
 - ``_do_download_model(model_name, switch_active)`` - full export + persist + reload flow
 
 Pool-C reach (resolved lazily via lazy imports inside function bodies):
@@ -422,6 +423,77 @@ def _download_weights(
         tmp.replace(destination)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+# (path, mtime_ns, size) -> parsed export info. Parsing an ONNX file costs a
+# full protobuf load, so each file is read once per on-disk version.
+_export_info_cache: dict[tuple[str, int, int], dict[str, Any] | None] = {}
+
+
+def model_export_info(path: Path) -> dict[str, Any] | None:
+    """Return how an installed ONNX model was exported, read from the file.
+
+    Ultralytics records its export args (``quantize``, ``simplify``,
+    ``opset`` ...) and its own version in the ONNX metadata, so this reflects
+    what the file actually is -- including a fp16 request that exported as
+    fp32, or a simplify that was skipped -- not what was asked for. Keys:
+    ``precision`` ('fp32' | 'fp16' | 'int8'), ``simplified`` (bool, or None
+    when the file does not record it), ``opset`` (int or None) and
+    ``ultralytics_version`` (str or None). Returns None when the file cannot
+    be read or the ``onnx`` package is unavailable.
+    """
+    import ast
+
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    if key in _export_info_cache:
+        return _export_info_cache[key]
+    info: dict[str, Any] | None = None
+    try:
+        import onnx  # type: ignore[import-untyped]
+
+        model = onnx.load(str(path), load_external_data=False)
+        meta = {prop.key: prop.value for prop in model.metadata_props}
+        try:
+            args = ast.literal_eval(meta['args']) if meta.get('args') else {}
+        except (ValueError, SyntaxError):
+            args = {}
+        if not isinstance(args, dict):
+            args = {}
+        quantize = args.get('quantize')
+        input_fp16 = any(
+            graph_input.type.tensor_type.elem_type == onnx.TensorProto.FLOAT16
+            for graph_input in model.graph.input
+        )
+        # ``half`` covers files exported before Ultralytics 8.4.172 renamed it.
+        if str(quantize) == '16' or input_fp16 or args.get('half') is True:
+            precision = 'fp16'
+        elif str(quantize) == '8' or args.get('int8') is True:
+            precision = 'int8'
+        else:
+            precision = 'fp32'
+        simplified = args.get('simplify')
+        opset = next(
+            (int(entry.version) for entry in model.opset_import if entry.domain in ('', 'ai.onnx')),
+            None,
+        )
+        info = {
+            'precision': precision,
+            'simplified': simplified if isinstance(simplified, bool) else None,
+            'opset': opset,
+            'ultralytics_version': meta.get('version') or None,
+        }
+    except Exception as exc:
+        logger.debug('Could not read export info from %s: %s', path, exc)
+        info = None
+    # Drop stale entries for the same path so re-exports don't accumulate.
+    for stale in [cached for cached in _export_info_cache if cached[0] == key[0]]:
+        del _export_info_cache[stale]
+    _export_info_cache[key] = info
+    return info
 
 
 def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, precision: str = 'fp32', device: str = 'auto') -> int:

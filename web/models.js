@@ -374,6 +374,10 @@ function renderCard(m) {
       resBadge = `<span class="model-badge model-badge-res">${m.exported_imgsz}\u00d7${m.exported_imgsz}</span>`;
     }
 
+    // How the installed file was actually exported (read from the ONNX
+    // metadata), so a fp16 or simplify request that fell back is visible.
+    const exportInfoHtml = isInstalled ? modelExportInfoHtml(m.export_info) : '';
+
     // Size bar (visual weight indicator)
     const maxMb = 131;
     const barWidth = Math.min(100, Math.round((m.approx_mb / maxMb) * 100));
@@ -429,9 +433,24 @@ function renderCard(m) {
           </div>
         </div>
         <p class="model-card-desc">${escapeHtml(m.description)}</p>
+        ${exportInfoHtml}
         ${messageHtml}
         <div class="model-card-actions">${actionsHtml}</div>
       </div>`;
+}
+
+// One-line summary of an installed model's export settings, e.g.
+// "Exported: FP16 · Simplified · Opset 13 · Ultralytics 8.4.176".
+function modelExportInfoHtml(info) {
+  if (!info || typeof info !== 'object') return '';
+  const parts = [];
+  if (info.precision) parts.push(String(info.precision).toUpperCase());
+  if (info.simplified === true) parts.push('Simplified');
+  else if (info.simplified === false) parts.push('Not simplified');
+  if (info.opset) parts.push(`Opset ${info.opset}`);
+  if (info.ultralytics_version) parts.push(`Ultralytics ${info.ultralytics_version}`);
+  if (!parts.length) return '';
+  return `<p class="model-export-info" title="How this model file was exported, read from the file itself">Exported: ${escapeHtml(parts.join(' \u00b7 '))}</p>`;
 }
 
 // Unified click handling for every model-card action button. Re-bound on
