@@ -120,6 +120,8 @@ from app.recording_extension import (
     attach_event_recording,
     continue_active_recording,
     extend_active_rtsp_recording,
+    note_active_recording_event_labels,
+    recording_covers_event_labels,
     recording_skip_reason,
 )
 from app.backup import purge_camera_diagnostics_by_policy
@@ -1819,14 +1821,24 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # AFTER the event for the person who walked in -- the normal gate would
     # swallow "Alice detected" as a duplicate of that event, and the per-track
     # guard, already spent, would never let it fire again.
+    #
+    # One event per label per recording: while a clip is capturing, a label
+    # that already raised an event in it only extends the clip, even past its
+    # cooldown or under a new track id (a cat wandering the yard re-acquired
+    # as a "new" cat must not alert again). A label new to the clip (a person
+    # walking into the cat's footage) still fires its own event. Once the clip
+    # ends - or hits Max Clip Duration - the next clip starts fresh.
+    _recording_covers = bool(resolved_cooldowns) and recording_covers_event_labels(camera_id, debounced_labels)
     if dwell_detections or _unknown_face_alerts or _known_face_rule_alerts:
         pass
-    elif (
-        resolved_cooldowns
-        and not live_event_fresh_labels(camera_id, resolved_cooldowns)
-        and not (
-            _track_ids_by_label
-            and _track_fresh_labels(camera_id, resolved_cooldowns, _track_ids_by_label)
+    elif resolved_cooldowns and (
+        _recording_covers
+        or (
+            not live_event_fresh_labels(camera_id, resolved_cooldowns)
+            and not (
+                _track_ids_by_label
+                and _track_fresh_labels(camera_id, resolved_cooldowns, _track_ids_by_label)
+            )
         )
     ):
         debounce_seconds = max(resolved_cooldowns.values())
@@ -1855,7 +1867,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             remember_live_event(camera_id, debounced_labels, merge=True)
             # Refresh only these same objects' cooldown anchors.
             _remember_track_event(camera_id, _track_ids_by_label)
-            update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+            if _recording_covers and extended_recording_id is not None:
+                _suppressed_reason = 'Ongoing detection extended active recording; these labels already have an event in this recording.'
+            elif extended_recording_id is not None:
+                _suppressed_reason = f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.'
+            else:
+                _suppressed_reason = f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.'
+            update_live_detection_status(camera_id, state='checked', reason=_suppressed_reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
             _telemetry_finish(_telemetry_mode)
             return None
     event_time = frame_capture_time
@@ -1912,6 +1930,8 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
                 Path(_orphan).unlink(missing_ok=True)
         raise
     recording_id = attach_event_recording(event_id, event_time, 'rtsp', recording_detections, camera_id=camera_id, recording_config=camera_recording_config)
+    if recording_id is not None:
+        note_active_recording_event_labels(camera_id, recording_id, debounced_labels)
     _cycle_timer.add(STAGE_EVENT, (time.perf_counter() - _event_started) * 1000.0)
     # Remember the event even when no recording attached: the debounce state
     # must advance for alert-only events too, otherwise the next cycle (which

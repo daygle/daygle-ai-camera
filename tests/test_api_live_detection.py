@@ -515,6 +515,121 @@ def test_continuing_track_rolls_over_at_max_clip_without_waiting_for_cooldown(tm
         main._state._object_tracks.pop(camera, None)
 
 
+def test_one_event_per_label_per_recording_new_label_still_fires(tmp_path, monkeypatch):
+    """A cat wandering the yard is ONE cat event per recording, even when the
+    tracker re-acquires it under a new track id (which bypasses the label
+    cooldown); a person walking into the same footage still gets its own event
+    linked to the same clip. A clip that has ended covers nothing."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.utils
+    mods = _m()
+    camera = 'yard-cam'
+    now = time.time()
+    cycle = {'n': 0}
+    cat_far = {'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.05, 'y': 0.6, 'width': 0.1, 'height': 0.1}}
+    cat_near = {'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.8, 'y': 0.6, 'width': 0.1, 'height': 0.1}}
+    person = {'label': 'person', 'confidence': 0.93, 'box': {'x': 0.4, 'y': 0.2, 'width': 0.1, 'height': 0.3}}
+    frames = [[cat_far], [cat_near], [cat_near, person], [cat_near, person]]
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _image, confidence=None):
+            cycle['n'] += 1
+            return [dict(d, box=dict(d['box'])) for d in frames[min(cycle['n'], len(frames)) - 1]]
+
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx'}, main.utc_now())
+    main.database.set_setting('objects', {'default_mode': 'any'}, main.utc_now())
+    config = {'pre_event_seconds': 0, 'post_event_seconds': 5,
+              'extension_step_seconds': 5, 'max_clip_seconds': 120, 'continuous': False}
+    monkeypatch.setattr(main._state, 'camera_event_recording_config', lambda _cfg: config)
+    monkeypatch.setattr(app.utils, 'build_stream_url', lambda _cfg: 'rtsp://example/stream')
+    monkeypatch.setattr(mods.live_monitor, 'zone_record_on_detect', lambda *_a: True)
+    started = []
+
+    def start_capture(*_args, **kwargs):
+        started.append(kwargs['recording_id'])
+        main._state.active_rtsp_recordings[camera] = {
+            'recording_id': kwargs['recording_id'], 'start_capture_ts': now,
+            'capture_deadline_ts': now + 5, 'max_capture_deadline_ts': now + 120,
+        }
+
+    monkeypatch.setattr(mods.recording_extension, 'start_rtsp_recording_capture', start_capture)
+    settings = {'id': camera, 'name': 'Backyard', 'detection': {'zones': []}}
+
+    def run():
+        return mods.live_monitor.process_live_stream_alerts(
+            b'jpeg', {'timestamp': now, 'width': 1280, 'height': 720},
+            settings, enforce_interval=False,
+        )
+
+    main._state.active_rtsp_recordings.pop(camera, None)
+    main._state._object_tracks.pop(camera, None)
+    try:
+        cat_event = run()
+        assert cat_event is not None
+        assert len(started) == 1
+        recording_id = started[0]
+        # The same cat keeps wandering past every cooldown window (and any
+        # track id): previously a second cat event; now it only extends the clip.
+        with main._state.live_event_last_emitted_lock:
+            emitted = main._state.live_event_last_emitted[camera]
+            emitted['timestamp'] = now - 600
+            emitted['label_times'] = {k: now - 600 for k in emitted['label_times']}
+            anchors = main._state.live_event_track_last_emitted.get(camera, {})
+            for key in anchors:
+                anchors[key] = now - 600
+        assert mods.live_monitor.live_event_fresh_labels(camera, {'cat': 10.0}) == {'cat'}
+        assert run() is None
+        # A person enters the cat's footage: its own event, same recording.
+        person_event = run()
+        assert person_event is not None and person_event != cat_event
+        assert main.database.get_event(person_event)['recording_id'] == recording_id
+        assert len(started) == 1
+        # Both labels now have their event in this clip.
+        assert run() is None
+        assert main._state.active_rtsp_recordings[camera]['event_labels'] == {'cat', 'person'}
+        # Once the clip is gone the next one starts with no labels on record.
+        main._state.active_rtsp_recordings.pop(camera)
+        assert not mods.recording_extension.recording_covers_event_labels(camera, {'cat'})
+    finally:
+        main._state.active_rtsp_recordings.pop(camera, None)
+        main._state.live_event_last_emitted.pop(camera, None)
+        main._state.live_event_track_last_emitted.pop(camera, None)
+        main._state._object_tracks.pop(camera, None)
+
+
+def test_recording_covers_event_labels_rules(tmp_path, monkeypatch):
+    """Covered only by an extendable clip that already holds an event for
+    every specific label; generic labels ride along once it has any event."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    ext = _m().recording_extension
+    camera = 'cover-cam'
+    now = time.time()
+    session = {'recording_id': 5, 'start_capture_ts': now, 'capture_deadline_ts': now + 5,
+               'max_capture_deadline_ts': now + 60}
+    main._state.active_rtsp_recordings[camera] = session
+    try:
+        assert not ext.recording_covers_event_labels(camera, {'cat'})
+        assert not ext.recording_covers_event_labels(camera, {'motion'})
+        ext.note_active_recording_event_labels(camera, 99, {'cat'})  # another clip's id
+        assert not ext.recording_covers_event_labels(camera, {'cat'})
+        ext.note_active_recording_event_labels(camera, 5, {'Cat'})
+        assert ext.recording_covers_event_labels(camera, {'cat'})
+        assert ext.recording_covers_event_labels(camera, {'cat', 'motion'})
+        assert ext.recording_covers_event_labels(camera, {'motion'})
+        assert not ext.recording_covers_event_labels(camera, {'cat', 'person'})
+        session['deadline_frozen'] = True
+        assert not ext.recording_covers_event_labels(camera, {'cat'})
+    finally:
+        main._state.active_rtsp_recordings.pop(camera, None)
+
+
 def test_live_stream_default_any_mode_annotates_motion_state(tmp_path, monkeypatch):
     """Even with no restricted labels, detections carry a moving/still tag."""
     event_id, status = _detect_frame_with_objects_setting(

@@ -389,6 +389,53 @@ def extend_active_rtsp_recording(
     return recording_id
 
 
+def active_recording_event_labels(camera_id: str) -> set[str] | None:
+    """Labels that already raised an event in the camera's in-flight clip.
+
+    ``None`` when no clip can take another event: there is no session, it is
+    stale, or its deadline is frozen (the capture stopped growing, so a new
+    detection belongs in a follow-on clip with its own events).
+    """
+    with _state.active_rtsp_recordings_lock:
+        session = _state.active_rtsp_recordings.get(camera_id)
+        if not session or session.get('deadline_frozen'):
+            return None
+        max_deadline = float(session.get('max_capture_deadline_ts') or session.get('capture_deadline_ts') or 0)
+        if time.time() > max_deadline + STALE_CAPTURE_SESSION_GRACE_SECONDS:
+            return None
+        return set(session.get('event_labels') or ())
+
+
+def note_active_recording_event_labels(camera_id: str, recording_id: int, labels: set[str]) -> None:
+    """Remember that ``labels`` raised an event in clip ``recording_id``.
+
+    No-op when the camera's slot now holds a different clip, so labels never
+    leak from a finished clip into the next one.
+    """
+    normalized = {str(label).strip().lower() for label in labels if str(label).strip()}
+    if not normalized:
+        return
+    with _state.active_rtsp_recordings_lock:
+        session = _state.active_rtsp_recordings.get(camera_id)
+        if session and int(session.get('recording_id', -1)) == int(recording_id):
+            session.setdefault('event_labels', set()).update(normalized)
+
+
+def recording_covers_event_labels(camera_id: str, labels: set[str]) -> bool:
+    """True when every label of a would-be event already has an event in the
+    camera's in-flight clip: one event per label per recording.
+
+    Generic labels (``motion`` ...) count as covered once the clip has any
+    event, so motion around a subject already on record does not add one.
+    A clip with no recorded events yet covers nothing.
+    """
+    event_labels = active_recording_event_labels(camera_id)
+    if not event_labels or not labels:
+        return False
+    specific = {str(label).strip().lower() for label in labels} - GENERIC_TRIGGER_LABELS
+    return specific <= event_labels
+
+
 def continue_active_recording(
     *,
     camera_id: str,
