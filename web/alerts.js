@@ -54,7 +54,6 @@ function defaultPeopleRule(personId, personName) {
     email_enabled: false,
     push_enabled: false,
     email_recipients: '',
-    cooldown_minutes: 5,
     min_confidence: null,
     camera_id: cameraId,
     zone_id: zoneId,
@@ -160,7 +159,7 @@ function defaultRule(label = 'person', type = alertType) {
     const sound = soundClasses.find((item) => item.id === label);
     return { class: label, name: sound?.label || label, enabled: true, record_on_detect: true, confidence_threshold: sound?.default_threshold ?? 0.35, cooldown_seconds: sound?.default_cooldown ?? 30, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null };
   }
-  return { id: `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, label, enabled: true, record_on_detect: true, min_confidence: label === 'motion' || label === 'face' ? 0.45 : 0.5, max_confidence: 1, cooldown_seconds: 60, ai_verify: false, ai_verify_skip_above: 1, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null, alert_schedules: [defaultAlertSchedule()] };
+  return { id: `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, label, enabled: true, record_on_detect: true, min_confidence: label === 'motion' || label === 'face' ? 0.45 : 0.5, max_confidence: 1, ai_verify: false, ai_verify_skip_above: 1, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null, alert_schedules: [defaultAlertSchedule()] };
 }
 
 function renderObjectSchedules(rule, ruleIndex, schedules) {
@@ -405,7 +404,7 @@ function renderPolicies() {
         details?.querySelector('.alerts-policy')?.classList.toggle('is-enabled', rule.enabled !== false);
       }
     } else if (key === 'email_recipients') rule[key] = alertType === 'people' ? field.value : field.value.split(',').map((item) => item.trim()).filter(Boolean);
-    else if (['min_confidence', 'max_confidence', 'confidence_threshold', 'cooldown_seconds', 'cooldown_minutes', 'ai_verify_skip_above'].includes(key)) rule[key] = field.value === '' ? null : Number(field.value);
+    else if (['min_confidence', 'max_confidence', 'confidence_threshold', 'cooldown_seconds', 'ai_verify_skip_above'].includes(key)) rule[key] = field.value === '' ? null : Number(field.value);
     else if (key === 'person_id') {
       rule.person_id = field.value || null;
       rule.name = enrolledPeople.find((person) => String(person.id) === field.value)?.name || 'Unknown Person';

@@ -339,7 +339,7 @@ def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
     assert rule['label'] == 'cat'
     assert rule['record_on_detect'] is False
     assert rule['min_confidence'] == 0.7
-    assert rule['cooldown_seconds'] == 5
+    assert 'cooldown_seconds' not in rule  # retired: presence gate, no cooldown
     assert rule['email_recipients'] == ['alerts@example.test']
     assert rule['active_start'] == '07:00'
     assert rule['active_end'] == '18:00'

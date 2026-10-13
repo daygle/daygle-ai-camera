@@ -4,7 +4,7 @@ The 7 helpers shipped here (plus the ``_LABEL_ALIASES`` label-canonicalization
 dict used by the public ``normalize_label_list`` helper) cluster around the
 **monitoring-zone schema**: per-zone geometry (point / rectangle / bounds),
 per-zone object-detection rules (label + per-rule min_confidence +
-cooldown + e-mail / push notification enablement), and the multi-zone
+e-mail / push notification enablement), and the multi-zone
 orchestrator that bundles ``detection.zones`` back into the canonical shape.
 
 Like the prior-cluster extractions (``app/auth_gates.py`` Phase-16,
@@ -38,7 +38,7 @@ Cluster membership:
 - ``normalize_zone_object_rules`` -- per-zone object-detection rules
   builder. Reads ``zone.object_rules`` OR synthesizes one rule per
   label in ``zone.object_labels``. For each rule: parses min_confidence
-  (float [0,1]) + cooldown_seconds (int >=0) + the optional object size /
+  (float [0,1]) + the optional object size /
   shape limits (``min_box_area`` ... ``max_aspect_ratio``, checked by
   ``detection_within_box_limits``), composes the canonical
   shape with normalized en-/disable + e-mail / push flags + 4
@@ -394,10 +394,6 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             min_confidence = float(rule.get('min_confidence', non_object_default))
         except (TypeError, ValueError):
             min_confidence = non_object_default
-        try:
-            cooldown_seconds = int(rule.get('cooldown_seconds', 60))
-        except (TypeError, ValueError):
-            cooldown_seconds = 60
         min_confidence = max(0.0, min(1.0, min_confidence))
         # ``max_confidence`` is the inclusive upper bound of the per-rule
         # confidence window: a detection fires the rule only when
@@ -470,7 +466,6 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             'trigger_fraction': trigger_fraction,
             'confirm_cycles': confirm_cycles,
             **box_limits,
-            'cooldown_seconds': max(0, cooldown_seconds),
             'ai_verify': ai_verify,
             'ai_verify_skip_above': ai_verify_skip_above,
             # Legacy top-level fields aggregate channels/recipients and mirror
@@ -994,7 +989,6 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
                 'scale_fraction': None,
                 'trigger_fraction': None,
                 'confirm_cycles': DEFAULT_MOTION_CONFIRM_CYCLES,
-                'cooldown_seconds': 60,
                 'email_enabled': False,
                 'email_recipients': [],
                 'active_start': None,

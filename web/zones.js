@@ -242,7 +242,6 @@ function defaultObjectRule(label = '') {
     // rule only). A new motion rule starts on Normal.
     trigger_fraction: normalized === 'motion' ? DEFAULT_MOTION_TRIGGER : null,
     confirm_cycles: normalized === 'motion' ? DEFAULT_MOTION_CONFIRM_CYCLES : null,
-    cooldown_seconds: 60,
     email_enabled: false,
     email_recipients: [],
     push_enabled: false,
@@ -278,8 +277,8 @@ function baseConfidenceFor(label) {
 }
 
 // Faces follow the exact motion pattern: stored as a plain object rule
-// (label 'face') so backend gating (confidence window, record, cooldown,
-// alerts, schedule) stays identical, presented as its own card. A camera
+// (label 'face') so backend gating (confidence window, record, alerts,
+// schedule) stays identical, presented as its own card. A camera
 // with at least one enabled Face rule scopes ALL face processing to those
 // zones -- faces detected elsewhere are dropped before recognition runs.
 function faceRuleOf(zone) {
@@ -601,7 +600,6 @@ function normalizeObjectRules(zone) {
         confirm_cycles: String(rule.label || '').trim().toLowerCase() === 'motion'
           ? motionConfirmCycles(rule) : null,
         ...objectBoxLimits(rule),
-        cooldown_seconds: Math.max(0, Number.parseInt(rule.cooldown_seconds ?? 60, 10) || 0),
         email_enabled: rule.email_enabled === true,
         email_recipients: normalizeEmailList(rule.email_recipients),
         push_enabled: rule.push_enabled === true,

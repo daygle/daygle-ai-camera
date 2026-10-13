@@ -34,8 +34,8 @@ Tests pin three contracts:
    - ``normalize_zone_object_rules``: seeds from ``zone.object_rules``
      OR synthesizes from ``zone.object_labels``; clamps
      ``min_confidence`` to [0.0, 1.0] (TypeError/ValueError -> 0.5);
-     clamps ``cooldown_seconds`` >= 0 (TypeError/ValueError -> 60);
-     all bool/cooldown/email/push/4 time-window fields normalized.
+     drops the retired ``cooldown_seconds`` (the presence gate replaced it);
+     all bool/email/push/4 time-window fields normalized.
    - ``zone_motion_min_confidence``: clamps min_confidence [0.0, 1.0],
      defaults to 0.45 when no motion rule enabled.
    - ``normalize_zone_point``: non-dict -> None; clamps x/y to [0.0, 1.0];
@@ -400,7 +400,7 @@ def test_normalize_zone_object_rules_seeds_from_object_rules_list(monkeypatch, z
     rule = rules[0]
     assert rule['label'] == 'person'
     assert rule['min_confidence'] == 0.6
-    assert rule['cooldown_seconds'] == 30
+    assert 'cooldown_seconds' not in rule  # retired: presence gate, no cooldown
     assert rule['email_recipients'] == ['a@example.com']
 
 
@@ -444,10 +444,10 @@ def test_normalize_zone_object_rules_synthesizes_from_object_labels_when_no_rule
     assert [r['label'] for r in rules] == ['person', 'car']
     # All synthesized rules use defaults.
     assert all(r['min_confidence'] == 0.5 for r in rules)
-    assert all(r['cooldown_seconds'] == 60 for r in rules)
+    assert all('cooldown_seconds' not in r for r in rules)
 
 
-def test_normalize_zone_object_rules_clamps_min_confidence_and_cooldown(monkeypatch, zs):
+def test_normalize_zone_object_rules_clamps_min_confidence_and_drops_cooldown(monkeypatch, zs):
     """TypeError/ValueError -> defaults (0.5 / 60); out-of-range clamps."""
     _install_zone_dependencies(monkeypatch)
     zone = {'object_rules': [
@@ -457,10 +457,10 @@ def test_normalize_zone_object_rules_clamps_min_confidence_and_cooldown(monkeypa
     rules = zs.normalize_zone_object_rules(zone)
     # First: clamps both to limit/default
     assert rules[0]['min_confidence'] == 1.0  # 99.0 -> 1.0
-    assert rules[0]['cooldown_seconds'] == 0  # -5 -> 0
+    assert 'cooldown_seconds' not in rules[0]
     # Second: TypeError -> defaults
     assert rules[1]['min_confidence'] == 0.5
-    assert rules[1]['cooldown_seconds'] == 60
+    assert 'cooldown_seconds' not in rules[1]
 
 
 def test_normalize_zone_object_rules_motion_defaults_to_045_not_05(monkeypatch, zs):
