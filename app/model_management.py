@@ -55,8 +55,12 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
 
     Adds ``simplify=True`` when ``onnxsim`` is importable; otherwise omits it
     silently so the export still succeeds on minimal installs. YOLO26 models
-    additionally need ``end2end=True`` to fold NMS into the graph and emit the
-    ``[N, 6]`` output ``_postprocess_nms_free`` decodes.
+    additionally need ``nms=False`` to fold NMS into the graph (end-to-end
+    head) and emit the ``[N, 6]`` output ``_postprocess_nms_free`` decodes.
+    Standard models get ``nms=None`` (the Ultralytics default), which carries
+    no meaning -- Ultralytics deprecated ``end2end`` in 8.4.172 in favour of
+    ``nms`` (``end2end=True`` maps to ``nms=False``, ``end2end=False`` to
+    ``nms=None``; see its ``cfg`` deprecation shim).
 
     ``opset=13`` is always set so the newer ONNX graph-fusion passes in ORT
     are usable on the exported model (the Ultralytics default opset often
@@ -75,7 +79,10 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
     require a calibration dataset which the download flow doesn't carry);
     INT8 is a runtime concern handled by ``app.quantization.quantize_int8``.
     """
-    parts = ["format='onnx'", f"end2end={'True' if nms_free else 'False'}", 'opset=13']
+    # nms=False = end-to-end/NMS-free head (YOLO26); nms=None = standard
+    # export with runtime NMS (YOLOv8/11). Replaces the deprecated end2end
+    # kwarg (Ultralytics >=8.4.172).
+    parts = ["format='onnx'", f"nms={'False' if nms_free else 'None'}", 'opset=13']
     # Delegate the precision rule to its single source of truth in
     # ``app.quantization.precision_export_kwargs``: fp16 emits ``half=True``
     # when ``device`` is 'cuda' OR 'auto' (the default) AND onnxruntime-gpu
@@ -438,8 +445,8 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
     # Pass the weights name and image size as argv rather than interpolating
     # into the ``python -c`` source.  Defence-in-depth against injection.
     #
-    # YOLO26 models need end2end=True for NMS-free export;
-    # YOLOv8/YOLO11 models use standard export (NMS handled at runtime).
+    # YOLO26 models need nms=False for NMS-free export;
+    # YOLOv8/YOLO11 models use nms=None (standard export, NMS at runtime).
     # ``simplify=True`` is added when onnxsim is importable so the constant-
     # folding pass runs without ever breaking the export on minimal installs.
     # ``opset=13`` unlocks the newer ORT graph-fusion passes (the default

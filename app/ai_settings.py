@@ -84,7 +84,7 @@ from app.utils import normalize_bool_setting
 # Each entry describes one downloadable model. Required keys: ``pt`` (source
 # weight name), ``onnx`` (exported filename), ``label``, ``approx_mb``,
 # ``input_size``, ``description``. Optional keys:
-#   ``nms_free``       - YOLO26 end-to-end head (exported with ``end2end=True``).
+#   ``nms_free``       - YOLO26 end-to-end head (exported with ``nms=False``).
 #   ``labels``         - project-relative labels file for a non-COCO model
 #                        (default ``models/coco.names``). A face detector ships
 #                        ``models/face.names``; the download flow binds it to the

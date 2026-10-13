@@ -49,9 +49,9 @@ onnxscript>=0.7.2,<1.0
 # 8.4.171 vs 8.4.176 produces byte-identical graphs once the embedded
 # deployment-date metadata is stripped, equal ONNX initializer hashes, and
 # byte-identical ORT CPU inference output on a fixed random input.
-# NOTE: 8.4.172+ deprecates export kwarg end2end=False in favour of
-# nms=None; the old kwarg still works on 8.4.176 and _export_kwargs in
-# app/model_management.py can migrate whenever we choose.
+# The export kwargs themselves were migrated off the deprecated end2end
+# alias in the same change (_export_kwargs now emits nms=False / nms=None;
+# byte-identical vs the old end2end spelling, verified by the same A/B).
 ultralytics==8.4.176
 # Bumped to the 5.x line on 2026-07-27. Audited every cv2 symbol this repo
 # uses (imdecode/imencode, cvtColor, resize INTER_NEAREST/LINEAR, rectangle,
