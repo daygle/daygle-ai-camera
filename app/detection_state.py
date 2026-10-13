@@ -132,6 +132,8 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
     car that passes a parked one keeps its identity visible on playback.
     ``motion_fraction`` (a motion detection's changed-pixel share) rides along
     so playback reports it instead of the capped motion confidence.
+    ``motion_basis``, ``track_age`` and ``track_displacement`` ride along as
+    diagnostics: which evidence decided moving/still, and what it read.
     Everything else is intentionally dropped -- the history is a compact box
     record, not a full detection dict."""
     sample = [
@@ -142,6 +144,11 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
             **({'motion_state': detection['motion_state']} if detection.get('motion_state') in ('moving', 'still') else {}),
             **({'track_id': detection['track_id']} if isinstance(detection.get('track_id'), int) and detection['track_id'] > 0 else {}),
             **({'motion_fraction': detection['motion_fraction']} if isinstance(detection.get('motion_fraction'), (int, float)) else {}),
+            # Why it was judged moving/still, and the tracker evidence behind
+            # it, so a wrong verdict in a recording can be traced afterwards.
+            **({'motion_basis': detection['motion_basis']} if isinstance(detection.get('motion_basis'), str) else {}),
+            **({'track_age': detection['track_age']} if isinstance(detection.get('track_age'), int) else {}),
+            **({'track_displacement': round(float(detection['track_displacement']), 4)} if isinstance(detection.get('track_displacement'), (int, float)) else {}),
         }
         for detection in detections
         if isinstance(detection.get('box'), dict)
