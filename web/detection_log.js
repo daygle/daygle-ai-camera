@@ -83,10 +83,20 @@ function describeKeptDetection(detection) {
   return parts.join(' · ');
 }
 
+// Why a detection was dropped, led by its tracker id so a parked car dropped
+// on every check reads as that same car: "#176 · seen 886x · Judged still…".
+function describeDroppedDetection(detection) {
+  const parts = [];
+  if (Number.isInteger(detection?.track_id) && detection.track_id > 0) parts.push(`#${detection.track_id}`);
+  if (Number.isInteger(detection?.track_age) && detection.track_age > 1) parts.push(`seen ${detection.track_age}x`);
+  parts.push(String(detection?.reason || 'Dropped'));
+  return parts.join(' · ');
+}
+
 function _logEntryHtml(detection, droppedEntry) {
   const confidence = Math.round(Number(detection?.confidence || 0) * 100);
   const name = `${_logTitle(detection?.label)} ${confidence}%`;
-  const detail = droppedEntry ? String(detection?.reason || 'Dropped') : describeKeptDetection(detection);
+  const detail = droppedEntry ? describeDroppedDetection(detection) : describeKeptDetection(detection);
   const status = droppedEntry ? 'Dropped' : 'Kept';
   return `<li class="detection-log-entry ${droppedEntry ? 'is-dropped' : 'is-kept'}">`
     + `<span class="detection-log-status">${status}</span>`

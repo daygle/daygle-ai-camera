@@ -558,6 +558,12 @@ label-only confirmation (the label repeats), but they never overlap themselves
 from one cycle to the next, so a small Confirm Location threshold filters them
 out while leaving a real, stationary-ish subject untouched.
 
+- **A tracked object that moves still confirms.** A person or car crossing the
+  frame can move further than its own width between checks (checks can be ~2s
+  apart on a quiet camera), so its boxes never overlap. When the object tracker
+  matched it to the same object in an earlier check (same tracker id), that
+  check counts too. Rain and snow ghosts keep no tracker identity, so they are
+  still filtered.
 - Only applies when Confirm Frames is above `1`; `face` detections and any
   detection without a box bypass the spatial test and fall back to label-only
   confirmation.
@@ -567,7 +573,9 @@ out while leaving a real, stationary-ish subject untouched.
 
 **Tuning tip:** If a camera fires false `cat` / `person` alerts in rain or at
 night, set Confirm Location to `0.2` (with Confirm Frames `2`-`3`). Lower it
-toward `0.1` if a fast-moving real subject is occasionally suppressed.
+toward `0.1` if a real subject is still occasionally suppressed; the recording's
+Detection Log shows such drops as *Not confirmed yet (… in the same place or as
+the same tracked object)*.
 
 Default: `0` (off)
 
