@@ -574,6 +574,14 @@ def confirm_object_detections(
         # Confidence threshold, per-rule minimums, cooldowns, one-alert-per-track).
         if label == 'face':
             return True
+        # The tracker has already seen this object on ``required`` cycles.
+        # Its earlier sightings may never have reached this gate - a fast
+        # car's first box judged still and dropped by the Moving Only filter
+        # (recording 24085) - but they prove it is really there just the same.
+        # Noise does not hold a tracker identity across cycles.
+        track_age = detection.get('track_age')
+        if isinstance(track_age, int) and track_age >= required and isinstance(detection.get('track_id'), int):
+            return True
         if label not in confirmed:
             return False
         if loc_iou <= 0.0:

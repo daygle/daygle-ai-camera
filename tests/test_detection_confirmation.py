@@ -208,3 +208,16 @@ def test_location_iou_still_suppresses_untracked_jumping_noise(ds):
     for i, x in enumerate((0.1, 0.5, 0.8)):
         ghost = {**_det_at('cat', x, 0.4), 'track_id': 500 + i}
         assert ds.confirm_object_detections('cam', [ghost], **kwargs) == []
+
+
+def test_a_tracked_object_confirms_on_sightings_the_gate_never_saw(ds):
+    """Recording 24085: a fast car's first box was judged still and dropped
+    before this gate, so the gate saw it once - but the tracker had seen it
+    twice, which is the persistence the gate asks for."""
+    kwargs = dict(required_frames=2, window_frames=3, location_iou=0.2)
+    car = {**_det_at('car', 0.40, 0.2, w=0.3, h=0.1), 'track_id': 401, 'track_age': 2}
+    assert len(ds.confirm_object_detections('cam', [car], **kwargs)) == 1
+    # A first sighting is still held, with or without a tracker id.
+    first = {**_det_at('car', 0.10, 0.6), 'track_id': 402, 'track_age': 1}
+    assert ds.confirm_object_detections('cam2', [first], **kwargs) == []
+    assert ds.confirm_object_detections('cam3', [{**_det_at('car', 0.1, 0.6), 'track_age': 5}], **kwargs) == []
