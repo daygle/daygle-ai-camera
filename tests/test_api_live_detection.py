@@ -597,6 +597,49 @@ def test_one_cat_event_per_recording_and_a_person_still_fires(tmp_path, monkeypa
         main._state._object_tracks.pop(camera, None)
 
 
+def test_dropped_detections_are_kept_with_their_reason_for_the_detection_log(tmp_path, monkeypatch):
+    """A recording's track also says what each cycle threw away and why, so a
+    missed object can be explained from the recording (the person behind the
+    bush: a rule minimum of 0.65 against a 0.55 detection)."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes, confidence=None):
+            return [
+                {'label': 'person', 'confidence': 0.55, 'box': {'x': 0.70, 'y': 0.30, 'width': 0.05, 'height': 0.20}},
+                {'label': 'car', 'confidence': 0.90, 'box': {'x': 0.10, 'y': 0.40, 'width': 0.20, 'height': 0.15}},
+            ]
+
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
+    main._state.live_detection_last_checked.clear()
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx'}, main.utc_now())
+    # JPEG-byte frames carry no diff mask, so every detection reads still.
+    main.database.set_setting('objects', {'default_mode': 'moving', 'labels': {'person': 'any'}}, main.utc_now())
+    settings = _zone_camera_settings([
+        {'label': 'person', 'enabled': True, 'push_enabled': True, 'min_confidence': 0.65},
+        {'label': 'car', 'enabled': True, 'push_enabled': True, 'min_confidence': 0.5},
+    ])
+    main._state.live_detection_history.pop('camera-1', None)
+    before = time.time() - 1
+    mods.live_monitor.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    track = mods.detection_state.build_track_from_live_history('camera-1', before, time.time() + 1)
+    assert track is not None
+    sample = track[-1]
+    assert sample['detections'] == []
+    reasons = {item['label']: item['reason'] for item in sample['dropped']}
+    assert reasons == {
+        'person': 'Below the person rule minimum (0.65)',
+        'car': 'Judged still (no mask); car is set to Moving Only',
+    }
+    assert {item['label']: item['confidence'] for item in sample['dropped']} == {'person': 0.55, 'car': 0.9}
+
+
 def test_live_stream_default_any_mode_annotates_motion_state(tmp_path, monkeypatch):
     """Even with no restricted labels, detections carry a moving/still tag."""
     event_id, status = _detect_frame_with_objects_setting(

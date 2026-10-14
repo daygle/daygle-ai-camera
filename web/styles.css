@@ -7876,3 +7876,21 @@ label.field-inactive > :not(.field-inactive-note) { opacity: .55; }
 }
 .cam-edit-section-link { margin-left: 8px; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
 .profile-link-grid { align-items: start; }
+
+/* Recording Detection Log (web/detection_log.js): every detection check during
+   a clip, with what it kept and what it dropped and why. */
+.detection-log { margin: 14px 0 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.detection-log > summary { cursor: pointer; padding: 12px 14px; font-weight: 800; list-style-position: inside; }
+.detection-log > summary .muted { font-weight: 600; font-size: 13px; }
+.detection-log > .form-help, .detection-log > .toggle-control { margin: 0 14px 10px; }
+.detection-log-body { max-height: 420px; overflow-y: auto; border-top: 1px solid var(--border); }
+.detection-log-row { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.detection-log-row:last-child { border-bottom: 0; }
+.detection-log-row.is-gap { align-items: center; padding-top: 6px; padding-bottom: 6px; font-size: 13px; }
+.detection-log-time { padding: 2px 6px; font-size: 12px; font-variant-numeric: tabular-nums; min-height: 0; }
+.detection-log-entries { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.detection-log-entry { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; font-size: 13px; overflow-wrap: anywhere; }
+.detection-log-status { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 6px; }
+.detection-log-entry.is-kept .detection-log-status { color: var(--accent); border: 1px solid var(--accent); }
+.detection-log-entry.is-dropped .detection-log-status { color: var(--danger); border: 1px solid var(--danger); }
+.detection-log-detail { color: var(--muted); }

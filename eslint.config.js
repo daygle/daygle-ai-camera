@@ -157,6 +157,13 @@ const WEB_SHARED_GLOBALS = {
   createLibraryFilters: 'readonly',
   libraryDefaultQuery: 'readonly',
 
+  // web/detection_log.js - the recording detection log (kept + dropped
+  // detections per check) and its dropped-box overlay, used by recordings.js.
+  detectionLogHtml: 'readonly',
+  detectionLogSummary: 'readonly',
+  drawDroppedBoxesOnCanvas: 'readonly',
+  droppedDetectionsAtTime: 'readonly',
+
   // web/clip_timeline.js - clip segment timeline shared by the recordings and
   // timeline playback pages (loaded after overlay.js, before the page script).
   nudgeClipTime: 'readonly',

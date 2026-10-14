@@ -8,6 +8,10 @@ const els = {
   deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
   clipOverlay: document.getElementById('clipOverlay'),
   clipOverlayToggle: document.getElementById('clipOverlayToggle'),
+  detectionLog: document.getElementById('detectionLog'),
+  detectionLogSummary: document.getElementById('detectionLogSummary'),
+  detectionLogBody: document.getElementById('detectionLogBody'),
+  showDroppedToggle: document.getElementById('showDroppedToggle'),
   clipPlayerCard: document.getElementById('clipPlayerCard'),
   clipPlayerTitle: document.getElementById('clipPlayerTitle'),
   clipPlayerClose: document.getElementById('clipPlayerClose'),
@@ -43,6 +47,8 @@ let overlayResizeObserver;
 // bare name here so call sites read the same way as before.
 // On by default; users can turn it off per-browser via the toggle.
 let overlayEnabled = true;
+// Draw the boxes the detection checks dropped (Detection Log toggle).
+let showDroppedBoxes = false;
 // GENERIC_TRIGGER_LABELS lives in web/utils.js (loaded before this script);
 // the bare name resolves via the shared realm so recordings.js, the timeline
 // and the dashboard activity feed all agree on what counts as a non-concrete
@@ -617,6 +623,26 @@ function renderRecordingDetails(recording) {
   );
 }
 
+// The Detection Log under the player (web/detection_log.js): every check the
+// live monitor ran during the clip, with what it kept and what it dropped.
+function renderDetectionLog(recording) {
+  if (!els.detectionLog || !els.detectionLogBody) return;
+  const track = Array.isArray(recording?.track) ? recording.track : [];
+  if (!track.length) {
+    els.detectionLog.hidden = true;
+    els.detectionLogBody.innerHTML = '';
+    if (els.detectionLogSummary) els.detectionLogSummary.textContent = '';
+    return;
+  }
+  const summary = detectionLogSummary(track);
+  if (els.detectionLogSummary) {
+    els.detectionLogSummary.textContent = `· ${summary.checks} checks · ${summary.kept} kept · ${summary.dropped} dropped`;
+  }
+  // detectionLogHtml escapes every server-supplied value (labels, reasons).
+  els.detectionLogBody.innerHTML = detectionLogHtml(track);
+  els.detectionLog.hidden = false;
+}
+
 function detectionAnchorSeconds(recording) {
   const startedAt = Date.parse(recording?.started_at || '');
   const eventAt = Date.parse(recording?.event?.created_at || '');
@@ -645,7 +671,7 @@ function recordingTrack() {
 }
 
 function overlayShouldAnimate() {
-  return overlayEnabled;
+  return overlayEnabled || showDroppedBoxes;
 }
 
 function startOverlayRaf() {
@@ -701,7 +727,7 @@ function stopOverlayRaf() {
 
 function drawClipOverlay(vfcMediaTime) {
   if (!els.clipOverlay || !els.clipPlayer) return;
-  if (!overlayEnabled) {
+  if (!overlayEnabled && !showDroppedBoxes) {
     clearClipOverlay();
     return;
   }
@@ -723,12 +749,18 @@ function drawClipOverlay(vfcMediaTime) {
   // a track fall back to the event's static boxes.
   const track = recordingTrack();
   if (track) {
-    const tracked = filterObjectPriorityDetections(
-      filterByConfiguredLabels(sampleTrackAtTime(track, playerTime)),
-    );
-    if (tracked.length) drawDetectionBoxesOnCanvas(els.clipOverlay, tracked, els.clipPlayer);
+    if (overlayEnabled) {
+      const tracked = filterObjectPriorityDetections(
+        filterByConfiguredLabels(sampleTrackAtTime(track, playerTime)),
+      );
+      if (tracked.length) drawDetectionBoxesOnCanvas(els.clipOverlay, tracked, els.clipPlayer);
+    }
+    if (showDroppedBoxes) {
+      drawDroppedBoxesOnCanvas(els.clipOverlay, droppedDetectionsAtTime(track, playerTime), els.clipPlayer);
+    }
     return;
   }
+  if (!overlayEnabled) return;
 
   // Static event boxes describe the trigger moment, which sits after the
   // clip's pre-roll; drawing them from time 0 puts a frozen box over footage
@@ -766,6 +798,7 @@ function hideInlinePlayer() {
   resetClipTimeline();
   activeRecording = null;
   if (els.recordingDetails) els.recordingDetails.innerHTML = '';
+  renderDetectionLog(null);
   if (els.clipPlayerTitle) els.clipPlayerTitle.textContent = 'Recording';
   if (els.videoModalSubtitle) {
     els.videoModalSubtitle.textContent = 'Watch a recording and review its detection details.';
@@ -776,6 +809,7 @@ async function playRecording(id) {
   const recording = await api(`/api/recordings/${id}`);
   activeRecording = recording;
   renderRecordingDetails(recording);
+  renderDetectionLog(recording);
   if (els.videoModalSubtitle) {
     const started = formatDateTime(recording.started_at);
     const camera = recordingCameraName(recording);
@@ -1047,7 +1081,7 @@ if (els.clipOverlayToggle) {
     try { localStorage.setItem(RECORDINGS_OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0'); } catch (_err) { /* storage disabled / quota - silently no-op */ }
     if (els.clipPlayer && !els.clipPlayer.paused && overlayShouldAnimate()) {
       startOverlayRaf();
-    } else if (!overlayEnabled) {
+    } else if (!overlayShouldAnimate()) {
       stopOverlayRaf();
     }
     drawClipOverlay();
@@ -1056,6 +1090,27 @@ if (els.clipOverlayToggle) {
 } // end if (els.clipPlayer)
 
 els.clipPlayerClose?.addEventListener('click', () => hideInlinePlayer());
+
+els.detectionLogBody?.addEventListener('click', (event) => {
+  const button = event.target.closest?.('[data-seek]');
+  if (!button || !els.clipPlayer) return;
+  const seconds = Number(button.dataset.seek);
+  if (!Number.isFinite(seconds)) return;
+  els.clipPlayer.currentTime = seconds;
+  drawClipOverlay();
+});
+
+if (els.showDroppedToggle) {
+  els.showDroppedToggle.addEventListener('change', () => {
+    showDroppedBoxes = Boolean(els.showDroppedToggle.checked);
+    if (els.clipPlayer && !els.clipPlayer.paused && overlayShouldAnimate()) {
+      startOverlayRaf();
+    } else if (!overlayShouldAnimate()) {
+      stopOverlayRaf();
+    }
+    drawClipOverlay();
+  });
+}
 
 
 document.addEventListener('keydown', (event) => {

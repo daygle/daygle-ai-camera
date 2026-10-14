@@ -74,6 +74,15 @@
         <div id="clipTimelineLegend" class="clip-timeline-legend"></div>
       </div>
       <div id="recordingDetails" class="status-panel"></div>
+      <details id="detectionLog" class="detection-log" hidden>
+        <summary><span>Detection Log</span> <span id="detectionLogSummary" class="muted"></span></summary>
+        <p class="form-help muted">Every detection check during this clip: what counted, and what was dropped and why. Tap a time to jump there.</p>
+        <label class="toggle-control" for="showDroppedToggle">
+          <input id="showDroppedToggle" type="checkbox" />
+          <span>Show dropped boxes on the video</span>
+        </label>
+        <div id="detectionLogBody" class="detection-log-body"></div>
+      </details>
     </section>
 
     <section class="card recordings-list-card">
@@ -103,6 +112,7 @@
   <script src="/static/library_filters.js"></script>
   <script src="/static/overlay.js"></script>
   <script src="/static/clip_timeline.js"></script>
+  <script src="/static/detection_log.js"></script>
   <script src="/static/recordings.js"></script>
 </body>
 </html>

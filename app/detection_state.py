@@ -113,7 +113,31 @@ def clear_motion_log_throttle(camera_ids: set[str]) -> None:
         _motion_log_last_at.pop(camera_id, None)
 
 
-def record_live_detection_history(camera_id: str, detections: list[dict[str, Any]], sample_ts: float | None=None, *, live_config: dict[str, Any] | None=None) -> None:
+def _history_entry(detection: dict[str, Any]) -> dict[str, Any]:
+    """The compact box record one detection keeps in the history."""
+    return {
+        'label': detection.get('label'),
+        'confidence': detection.get('confidence'),
+        'box': detection.get('box'),
+        **({'motion_state': detection['motion_state']} if detection.get('motion_state') in ('moving', 'still') else {}),
+        **({'track_id': detection['track_id']} if isinstance(detection.get('track_id'), int) and detection['track_id'] > 0 else {}),
+        **({'motion_fraction': detection['motion_fraction']} if isinstance(detection.get('motion_fraction'), (int, float)) else {}),
+        # Why it was judged moving/still, and the tracker evidence behind
+        # it, so a wrong verdict in a recording can be traced afterwards.
+        **({'motion_basis': detection['motion_basis']} if isinstance(detection.get('motion_basis'), str) else {}),
+        **({'track_age': detection['track_age']} if isinstance(detection.get('track_age'), int) else {}),
+        **({'track_displacement': round(float(detection['track_displacement']), 4)} if isinstance(detection.get('track_displacement'), (int, float)) else {}),
+    }
+
+
+def record_live_detection_history(
+    camera_id: str,
+    detections: list[dict[str, Any]],
+    sample_ts: float | None = None,
+    *,
+    live_config: dict[str, Any] | None = None,
+    dropped: list[dict[str, Any]] | None = None,
+) -> None:
     """Append one monitor cycle's detections to the camera's rolling history.
 
     ``sample_ts`` must be when the analyzed frame was CAPTURED, not when
@@ -134,23 +158,17 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
     so playback reports it instead of the capped motion confidence.
     ``motion_basis``, ``track_age`` and ``track_displacement`` ride along as
     diagnostics: which evidence decided moving/still, and what it read.
+
+    ``dropped`` are the detections this cycle's checks threw away, each with a
+    ``reason``. They are kept apart from ``detections`` so playback overlays
+    and every other consumer see exactly what they did before; the recording's
+    detection log shows them, so a missed object can be explained.
     Everything else is intentionally dropped -- the history is a compact box
     record, not a full detection dict."""
-    sample = [
-        {
-            'label': detection.get('label'),
-            'confidence': detection.get('confidence'),
-            'box': detection.get('box'),
-            **({'motion_state': detection['motion_state']} if detection.get('motion_state') in ('moving', 'still') else {}),
-            **({'track_id': detection['track_id']} if isinstance(detection.get('track_id'), int) and detection['track_id'] > 0 else {}),
-            **({'motion_fraction': detection['motion_fraction']} if isinstance(detection.get('motion_fraction'), (int, float)) else {}),
-            # Why it was judged moving/still, and the tracker evidence behind
-            # it, so a wrong verdict in a recording can be traced afterwards.
-            **({'motion_basis': detection['motion_basis']} if isinstance(detection.get('motion_basis'), str) else {}),
-            **({'track_age': detection['track_age']} if isinstance(detection.get('track_age'), int) else {}),
-            **({'track_displacement': round(float(detection['track_displacement']), 4)} if isinstance(detection.get('track_displacement'), (int, float)) else {}),
-        }
-        for detection in detections
+    sample = [_history_entry(detection) for detection in detections if isinstance(detection.get('box'), dict)]
+    dropped_sample = [
+        {**_history_entry(detection), 'reason': str(detection.get('reason') or 'Dropped')}
+        for detection in dropped or []
         if isinstance(detection.get('box'), dict)
     ]
     if sample_ts is None:
@@ -162,7 +180,7 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
         if history is None or history.maxlen != history_maxlen:
             history = deque(history or [], maxlen=history_maxlen)
             _state.live_detection_history[camera_id] = history
-        history.append((sample_ts, sample))
+        history.append((sample_ts, sample, dropped_sample) if dropped_sample else (sample_ts, sample))
 
 
 def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts: float) -> list[dict[str, Any]] | None:
@@ -170,7 +188,9 @@ def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts
 
     Returns ``[{"t": seconds_from_start, "detections": [...]}]`` or ``None``
     when the history has no samples inside the window (camera idle, monitor
-    disabled, or the clip predates the in-memory history).
+    disabled, or the clip predates the in-memory history). A sample whose cycle
+    threw detections away also carries ``"dropped": [...]`` (each with a
+    ``reason``) for the recording's detection log.
 
     The history is append-ordered by capture timestamp, so the window is found
     with a bisect and only the matching slice is walked. The previous version
@@ -190,8 +210,12 @@ def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts
         first = bisect_left(history, start_ts, key=_history_sample_ts)
         last = bisect_right(history, end_ts, key=_history_sample_ts)
         track = [
-            {'t': round(sample_ts - start_ts, 3), 'detections': sample_detections}
-            for sample_ts, sample_detections in islice(history, first, last)
+            {
+                't': round(item[0] - start_ts, 3),
+                'detections': item[1],
+                **({'dropped': item[2]} if len(item) > 2 and item[2] else {}),
+            }
+            for item in islice(history, first, last)
         ]
     return track or None
 
