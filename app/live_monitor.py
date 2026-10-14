@@ -1565,6 +1565,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _telemetry_rejected[REJECT_CONFIRMATION] = max(
         0, _confirm_input - len(object_detections),
     )
+    _ptz_tracking_status = None
     # PTZ auto-tracking (opt-in per camera): start following only an object
     # that passed the zone + confirmation gates above, but keep following it
     # through every tracked detection, since zones stop lining up with the
@@ -1575,6 +1576,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             camera_id, settings,
             candidates=object_detections,
             visible=_annotated_detections,
+            image=image if frame_is_numpy else None,
         )
         update_live_detection_status(camera_id, ptz_tracking=_ptz_tracking_status)
     except Exception as exc:  # noqa: BLE001
@@ -1801,6 +1803,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             det for det in _early_dropped + list(_dropped.values())
             if camera_watches_label(settings, det.get('label'))
         ],
+        ptz=_ptz_tracking_status,
     )
     # An active clip continues on what follows its object: a still object it
     # already follows, or motion (see continue_active_recording). Only on cycles

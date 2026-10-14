@@ -65,3 +65,16 @@ def test_live_history_track_keeps_the_motion_diagnostics():
     assert track is not None
     sample = track[0]['detections'][0]
     assert (sample['motion_basis'], sample['track_age'], sample['track_displacement']) == ('mask', 7, 0.0123)
+
+
+def test_live_history_track_keeps_the_auto_tracking_decision():
+    car = {'label': 'car', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}
+    ptz = {'state': 'tracking', 'event': 'move', 'label': 'car', 'track_id': 4, 'error': [0.22, -0.03],
+           'move': {'pan': 0.5, 'tilt': 0.0, 'zoom': 0.0, 'seconds': 0.8}, 'resumes_in': None}
+    record_live_detection_history('cam-ptz', [car], sample_ts=1000.0, ptz=ptz)
+    record_live_detection_history('cam-ptz', [], sample_ts=1000.5, ptz={'state': 'idle'})
+    record_live_detection_history('cam-ptz', [], sample_ts=1001.0, ptz={'state': 'idle', 'event': 'lost', 'lost_label': 'car'})
+    track = build_track_from_live_history('cam-ptz', 999.0, 1002.0)
+    assert track[0]['ptz'] == {k: v for k, v in ptz.items() if v is not None}
+    assert 'ptz' not in track[1]
+    assert track[2]['ptz'] == {'state': 'idle', 'event': 'lost', 'lost_label': 'car'}

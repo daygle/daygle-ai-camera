@@ -96,3 +96,21 @@ test('dropped entries lead with their tracker id so a parked car reads as itself
   assert.equal(log.describeDroppedDetection({ label: 'car', reason: 'Below the detection minimum (0.32 < 0.50)' }), 'Below the detection minimum (0.32 < 0.50)');
   assert.match(log.detectionLogHtml([{ t: 1, detections: [], dropped: [{ label: 'car', confidence: 0.88, track_id: 176, track_age: 2, reason: 'x' }] }]), /#176 · seen 2x · x/);
 });
+
+test('auto-tracking decisions read as a PTZ line on their check', () => {
+  const log = load();
+  assert.equal(
+    log.describePtzDecision({ state: 'tracking', event: 'move', label: 'person', track_id: 12, error: [0.22, -0.03], move: { pan: 0.5, tilt: 0, zoom: 0, seconds: 0.8 } }),
+    'Following Person #12 · off centre x +0.22 y −0.03 · moved right for 0.8s',
+  );
+  assert.equal(
+    log.describePtzDecision({ state: 'tracking', event: 'wait_picture', label: 'person', track_id: 9, switched_from: 12, error: [0.3, 0] }),
+    'Following Person #9 (was #12) · off centre x +0.30 y +0.00 · waiting for the picture to settle after the last move',
+  );
+  assert.equal(log.describePtzDecision({ state: 'idle', event: 'lost', lost_label: 'cat', lost_track_id: 3 }), 'Lost the Cat #3');
+  assert.equal(log.describePtzDecision({ state: 'paused' }), 'Paused for manual control');
+  // A check where only auto-tracking acted still gets its own row.
+  const rows = log.detectionLogRows([{ t: 1, detections: [], ptz: { state: 'tracking', event: 'holding', label: 'cat' } }]);
+  assert.equal(rows[0].kind, 'sample');
+  assert.match(log.detectionLogHtml([{ t: 1, detections: [], ptz: { state: 'tracking', event: 'holding', label: 'cat' } }]), /PTZ<\/span>.*holding still/);
+});

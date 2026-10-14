@@ -16,9 +16,13 @@ detections. On a camera with auto-tracking on, it:
    is longer the further off centre the target is (``pulse_seconds``): short
    nudges for small corrections, up to ``MAX_PULSE_SECONDS`` for a target near
    the edge, so a person walking across the frame is not outrun. The next
-   pulse waits ``SETTLE_SECONDS`` after the last one ends, because the video
-   lags the motor: steering on frames that predate the last pulse is what
-   makes trackers overshoot and hunt back and forth.
+   pulse waits for the picture itself: the video lags the motor, and steering
+   on frames that predate the last pulse is what makes trackers overshoot and
+   hunt back and forth. A fixed wait was shorter than many streams' delay, so
+   after a pulse the tracker compares consecutive frames (a tiny grey
+   thumbnail, ``picture_change``) and steers again only once the picture has
+   moved and then held still (``_picture_settled``). Waits are capped, and
+   without frames to compare it falls back to ``SETTLE_SECONDS``.
    A target that keeps walking away is chased harder: when a pan pulse did
    not gain on it (it is still as far off centre, on the same side), the next
    pulse is faster and longer (``BOOST_STEP`` up to
@@ -68,6 +72,19 @@ PULSE_SECONDS = 0.4
 MIN_PULSE_SECONDS = 0.3
 MAX_PULSE_SECONDS = 1.5
 SETTLE_SECONDS = 0.5
+
+# Waiting for the picture after a pulse (see module docstring, step 3). The
+# change is the mean grey-level difference (0-255) between the thumbnails of
+# two consecutive analysed frames: a pan shifts the whole scene and reads far
+# above PICTURE_MOVING_DIFF, a still scene with a person walking in it stays
+# under PICTURE_STILL_DIFF. A picture that never showed the move (a nudge too
+# small to register) stops being waited for PICTURE_NO_MOVE_WAIT after the
+# pulse ends; nothing waits longer than PICTURE_MAX_WAIT.
+PICTURE_MOVING_DIFF = 8.0
+PICTURE_STILL_DIFF = 4.0
+PICTURE_NO_MOVE_WAIT = 1.5
+PICTURE_MAX_WAIT = 4.0
+THUMBNAIL_SHAPE = (36, 64)
 
 # Tilt is scaled to the picture's shape: a 16:9 frame is far shorter than it
 # is wide, so the same motor turn moves the picture about 16/9 times as far
@@ -222,6 +239,46 @@ def zoom_amount(zoom: float, duration: float) -> float:
     return zoom * duration / ZOOM_VELOCITY if zoom else 0.0
 
 
+def picture_thumbnail(image: Any) -> Any:
+    """A small grey thumbnail of a decoded frame (``THUMBNAIL_SHAPE``), or None.
+
+    Block means over a strided sample: cheap on a full HD frame, and averaged
+    enough that sensor noise does not read as the picture moving.
+    """
+    try:
+        import numpy as np
+
+        if not hasattr(image, 'shape') or len(image.shape) < 2:
+            return None
+        rows, cols = THUMBNAIL_SHAPE
+        height, width = int(image.shape[0]), int(image.shape[1])
+        if height < rows or width < cols:
+            return None
+        step = max(1, min(height // (rows * 4), width // (cols * 4)))
+        sample = np.asarray(image[::step, ::step], dtype=np.float32)
+        if sample.ndim == 3:
+            sample = sample.mean(axis=2)
+        block_r, block_c = sample.shape[0] // rows, sample.shape[1] // cols
+        if block_r < 1 or block_c < 1:
+            return None
+        sample = sample[:rows * block_r, :cols * block_c]
+        return sample.reshape(rows, block_r, cols, block_c).mean(axis=(1, 3))
+    except Exception:  # noqa: BLE001 - a bad frame just means no picture signal
+        return None
+
+
+def picture_change(previous: Any, current: Any) -> float | None:
+    """Mean grey-level difference between two thumbnails, or None."""
+    if previous is None or current is None:
+        return None
+    try:
+        if previous.shape != current.shape:
+            return None
+        return float(abs(current - previous).mean())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _center(detection: dict[str, Any]) -> tuple[float, float] | None:
     box = detection.get('box')
     if not isinstance(box, dict):
@@ -248,7 +305,7 @@ class _CameraState:
         'target_label', 'target_track_id', 'last_center', 'last_seen',
         'next_command_at', 'paused_until', 'moved_since_home', 'busy', 'state',
         'zoom_in_seconds', 'boost', 'last_error', 'edge_pushes', 'last_steer_at',
-        'frame_aspect',
+        'frame_aspect', 'thumbnail', 'settle',
     )
 
     def __init__(self) -> None:
@@ -269,6 +326,10 @@ class _CameraState:
         self.last_steer_at = 0.0
         # Frame width / height from the last sighting (tilt scaling).
         self.frame_aspect: float | None = None
+        # Thumbnail of the last analysed frame, and the wait after the last
+        # pulse: {'pulse_end', 'seen_moving'} until the picture settles.
+        self.thumbnail: Any = None
+        self.settle: dict[str, Any] | None = None
         self.reset_steering()
 
     def reset_steering(self) -> None:
@@ -381,6 +442,40 @@ def _update_boost(state: _CameraState, axis: int, error: float, dead_zone: float
     return state.boost[axis]
 
 
+def _begin_settle(state: _CameraState, now: float, duration: float) -> None:
+    """A pulse went out: wait for the picture to show it before steering again."""
+    state.settle = {'pulse_end': now + duration, 'seen_moving': False}
+
+
+def _picture_settled(state: _CameraState, now: float, change: float | None) -> bool:
+    """Whether the picture has caught up with the last pulse.
+
+    Settled once a frame showed the move (``PICTURE_MOVING_DIFF``) and a later
+    pair of frames after the pulse ended agree (``PICTURE_STILL_DIFF``). With
+    no picture signal this cycle, the fixed ``next_command_at`` wait decides.
+    """
+    wait = state.settle
+    if wait is None:
+        return True
+    if change is None:
+        state.settle = None
+        return True
+    elapsed = now - wait['pulse_end']
+    if change >= PICTURE_MOVING_DIFF:
+        wait['seen_moving'] = True
+    elif wait['seen_moving'] and change < PICTURE_STILL_DIFF and elapsed >= 0:
+        state.settle = None
+        return True
+    if elapsed >= PICTURE_MAX_WAIT or (not wait['seen_moving'] and elapsed >= PICTURE_NO_MOVE_WAIT):
+        state.settle = None
+        return True
+    return False
+
+
+def _move_note(pan: float, tilt: float, zoom: float, duration: float) -> dict[str, Any]:
+    return {'pan': round(pan, 3), 'tilt': round(tilt, 3), 'zoom': round(zoom, 3), 'seconds': round(duration, 2)}
+
+
 def _follow(state: _CameraState, visible: list[dict[str, Any]], *, max_jump: float = MAX_FOLLOW_JUMP) -> dict[str, Any] | None:
     from app.zone_schema import canonical_label
 
@@ -412,6 +507,7 @@ def update_auto_tracking(
     *,
     candidates: list[dict[str, Any]],
     visible: list[dict[str, Any]],
+    image: Any = None,
     now: float | None = None,
     mover: Callable[..., None] | None = None,
 ) -> dict[str, Any] | None:
@@ -419,8 +515,17 @@ def update_auto_tracking(
 
     ``candidates`` are this cycle's confirmed, zone-scoped object detections
     (eligible to start a track); ``visible`` is every tracked detection this
-    cycle (used to keep following once the camera has moved). ``mover`` is a
-    test seam; by default commands go to the camera through ``app.ptz``.
+    cycle (used to keep following once the camera has moved). ``image`` is the
+    decoded frame, used only to tell when the picture has settled after a
+    pulse. ``mover`` is a test seam; by default commands go to the camera
+    through ``app.ptz``.
+
+    The status says what this step decided, for the live page and the
+    recording's detection log: ``event`` is ``move`` (a pulse went out, see
+    ``move``), ``edge_push``, ``wait_picture`` (waiting for the picture to
+    settle), ``wait_move`` (the last command is still running), ``centred``,
+    ``holding`` (target not seen), ``lost``, ``zoom_out`` or ``home``.
+    ``error`` is the target's offset from centre (x right, y down).
     """
     from app.ptz import ptz_connection
 
@@ -436,12 +541,17 @@ def update_auto_tracking(
         return None
     now = time.monotonic() if now is None else now
     mover = mover or _default_mover
+    thumbnail = picture_thumbnail(image) if image is not None else None
 
     with _lock:
         state = _state_for(camera_id)
+        change = picture_change(state.thumbnail, thumbnail)
+        state.thumbnail = thumbnail
+        settled = _picture_settled(state, now, change)
         if now < state.paused_until:
             state.state = 'paused'
             return _status(state, now)
+        note: dict[str, Any] = {}
 
         # After pushing the camera off the edge after a lost target, the
         # target reappears somewhere else in the frame: accept the nearest
@@ -450,21 +560,28 @@ def update_auto_tracking(
         target = _follow(state, visible, max_jump=max_jump) if state.target_label else None
         if target is None and state.target_label and now - state.last_seen > settings['lost_seconds']:
             logger.info('PTZ auto-track on %s lost the %s', camera_id, state.target_label)
+            note.update(event='lost', lost_label=state.target_label, lost_track_id=state.target_track_id)
             state.drop_target()
         if target is None and state.target_label is None:
             target = _pick_new_target(candidates, settings['labels'])
             if target is not None:
                 from app.zone_schema import canonical_label
                 state.target_label = canonical_label(target.get('label'))
+                note['acquired'] = True
                 logger.info('PTZ auto-track on %s following %s (track %s)', camera_id, state.target_label, target.get('track_id'))
 
         if target is not None:
+            if state.target_track_id is not None and target.get('track_id') != state.target_track_id:
+                # Followed by position, not identity: a different track id
+                # (the same object re-identified, or another one nearby).
+                note['switched_from'] = state.target_track_id
             state.target_track_id = target.get('track_id')
             state.last_center = _center(target)
             state.last_seen = now
             state.state = 'tracking'
             state.edge_pushes = 0
             cx, cy = state.last_center  # type: ignore[misc]
+            note['error'] = [round(cx - 0.5, 3), round(cy - 0.5, 3)]
             pan = axis_velocity(cx - 0.5, settings['dead_zone'], settings['speed'])
             # Image y grows downwards; ONVIF/Pelco-D tilt is positive upwards.
             tilt = -axis_velocity(cy - 0.5, settings['dead_zone'], settings['speed'])
@@ -485,7 +602,7 @@ def update_auto_tracking(
                     # An edge zoom-out only undoes our own zoom-in; it never
                     # widens past where tracking started.
                     zoom = 0.0
-            ready = now >= state.next_command_at and not state.busy
+            ready = now >= state.next_command_at and not state.busy and settled
             zoomed_in = state.zoom_in_seconds > 0
             if ready and (pan or tilt) and zoomed_in:
                 # Zoomed in, a pulse moves the picture further: no catch-up
@@ -516,26 +633,37 @@ def update_auto_tracking(
                 # Pelco-D zoom has no speed byte, so it cannot be slowed to fit
                 # a long pan pulse: zoom only in its own short pulses there.
                 zoom = 0.0
-            if (pan or tilt or zoom) and ready:
-                if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, pan, tilt, zoom, duration), 'move'):
-                    if pan:
-                        state.last_error[0] = cx - 0.5
-                    if tilt:
-                        state.last_error[1] = cy - 0.5
-                    if pan or tilt:
-                        state.last_steer_at = now
-                    state.next_command_at = now + duration + SETTLE_SECONDS
-                    state.moved_since_home = True
-                    state.zoom_in_seconds += zoom_amount(zoom, duration)
-            return _status(state, now)
+            if not (pan or tilt or zoom):
+                note['event'] = 'centred'
+            elif not ready:
+                note['event'] = 'wait_move' if state.busy or now < state.next_command_at else 'wait_picture'
+            elif _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, pan, tilt, zoom, duration), 'move'):
+                if pan:
+                    state.last_error[0] = cx - 0.5
+                if tilt:
+                    state.last_error[1] = cy - 0.5
+                if pan or tilt:
+                    state.last_steer_at = now
+                state.next_command_at = now + duration + SETTLE_SECONDS
+                _begin_settle(state, now, duration)
+                state.moved_since_home = True
+                state.zoom_in_seconds += zoom_amount(zoom, duration)
+                note.update(event='move', move=_move_note(pan, tilt, zoom, duration))
+                if boost > 1.0:
+                    note['boost'] = round(boost, 2)
+            else:
+                note['event'] = 'wait_move'
+            return _status(state, now, note)
 
         if state.target_label is not None:
             state.state = 'tracking'
+            note['event'] = 'holding'
             lx, ly = state.last_center or (0.5, 0.5)
             if (
                 max(abs(lx - 0.5), abs(ly - 0.5)) >= EDGE_ERROR
                 and state.edge_pushes < MAX_EDGE_PUSHES
                 and now >= state.next_command_at
+                and settled
             ):
                 # Last seen at the edge: it has most likely walked out of the
                 # picture (half out, so the detector misses it). Keep turning
@@ -558,14 +686,17 @@ def update_auto_tracking(
                     state.last_steer_at = now
                     state.zoom_in_seconds = max(0.0, state.zoom_in_seconds + zoom_amount(zoom, duration))
                     state.next_command_at = now + duration + SETTLE_SECONDS
+                    _begin_settle(state, now, duration)
+                    note.update(event='edge_push', move=_move_note(pan, tilt, zoom, duration))
             # Otherwise briefly out of view (a missed detection, behind a
             # bush): hold still and keep the target until ``lost_seconds``.
-            return _status(state, now)
+            return _status(state, now, note)
 
         state.state = 'idle'
         if (
             state.zoom_in_seconds > 0
             and now >= state.next_command_at
+            and settled
         ):
             # Lost the target while zoomed in: widen back out, one pulse a
             # cycle, so the next subject can be found without waiting for the
@@ -573,7 +704,9 @@ def update_auto_tracking(
             if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, 0.0, 0.0, -ZOOM_VELOCITY, PULSE_SECONDS), 'zoom out'):
                 state.zoom_in_seconds = max(0.0, state.zoom_in_seconds - PULSE_SECONDS)
                 state.next_command_at = now + PULSE_SECONDS + SETTLE_SECONDS
-            return _status(state, now)
+                _begin_settle(state, now, PULSE_SECONDS)
+                note.setdefault('event', 'zoom_out')
+            return _status(state, now, note)
         if (
             state.moved_since_home
             and settings['return_home_seconds'] > 0
@@ -585,8 +718,10 @@ def update_auto_tracking(
                 state.moved_since_home = False
                 state.zoom_in_seconds = 0.0
                 state.next_command_at = now + HOME_MOVE_SECONDS
+                state.settle = None
                 state.state = 'returning'
-        return _status(state, now)
+                note.setdefault('event', 'home')
+        return _status(state, now, note)
 
 
 def _default_mover(action: str, camera_id: str, conn: Any, *args: Any) -> None:
@@ -604,8 +739,8 @@ def _default_mover(action: str, camera_id: str, conn: Any, *args: Any) -> None:
             logger.info('PTZ auto-track on %s: no home preset set for this protocol; staying put', camera_id)
 
 
-def _status(state: _CameraState, now: float) -> dict[str, Any]:
-    status: dict[str, Any] = {'state': state.state}
+def _status(state: _CameraState, now: float, note: dict[str, Any] | None = None) -> dict[str, Any]:
+    status: dict[str, Any] = {'state': state.state, **(note or {})}
     if state.state == 'tracking':
         status['label'] = state.target_label
         status['track_id'] = state.target_track_id

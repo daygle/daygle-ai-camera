@@ -137,6 +137,7 @@ def record_live_detection_history(
     *,
     live_config: dict[str, Any] | None = None,
     dropped: list[dict[str, Any]] | None = None,
+    ptz: dict[str, Any] | None = None,
 ) -> None:
     """Append one monitor cycle's detections to the camera's rolling history.
 
@@ -163,6 +164,10 @@ def record_live_detection_history(
     ``reason``. They are kept apart from ``detections`` so playback overlays
     and every other consumer see exactly what they did before; the recording's
     detection log shows them, so a missed object can be explained.
+
+    ``ptz`` is what PTZ auto-tracking decided this cycle (the status from
+    ``app.ptz_tracking.update_auto_tracking``); the detection log shows it so
+    an object left off centre can be explained too. Idle steps are not kept.
     Everything else is intentionally dropped -- the history is a compact box
     record, not a full detection dict."""
     sample = [_history_entry(detection) for detection in detections if isinstance(detection.get('box'), dict)]
@@ -180,7 +185,28 @@ def record_live_detection_history(
         if history is None or history.maxlen != history_maxlen:
             history = deque(history or [], maxlen=history_maxlen)
             _state.live_detection_history[camera_id] = history
-        history.append((sample_ts, sample, dropped_sample) if dropped_sample else (sample_ts, sample))
+        ptz_note = _ptz_history_entry(ptz)
+        if ptz_note:
+            history.append((sample_ts, sample, dropped_sample, ptz_note))
+        elif dropped_sample:
+            history.append((sample_ts, sample, dropped_sample))
+        else:
+            history.append((sample_ts, sample))
+
+
+_PTZ_HISTORY_KEYS = (
+    'state', 'event', 'label', 'track_id', 'error', 'move', 'boost',
+    'acquired', 'switched_from', 'lost_label', 'lost_track_id',
+)
+
+
+def _ptz_history_entry(status: Any) -> dict[str, Any] | None:
+    """The compact auto-tracking record one cycle keeps, or None when idle."""
+    if not isinstance(status, dict):
+        return None
+    if status.get('state') in (None, 'idle') and not status.get('event'):
+        return None
+    return {key: status[key] for key in _PTZ_HISTORY_KEYS if status.get(key) is not None}
 
 
 def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts: float) -> list[dict[str, Any]] | None:
@@ -190,7 +216,8 @@ def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts
     when the history has no samples inside the window (camera idle, monitor
     disabled, or the clip predates the in-memory history). A sample whose cycle
     threw detections away also carries ``"dropped": [...]`` (each with a
-    ``reason``) for the recording's detection log.
+    ``reason``) for the recording's detection log, and one where PTZ
+    auto-tracking was active carries ``"ptz": {...}`` (its decision).
 
     The history is append-ordered by capture timestamp, so the window is found
     with a bisect and only the matching slice is walked. The previous version
@@ -214,6 +241,7 @@ def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts
                 't': round(item[0] - start_ts, 3),
                 'detections': item[1],
                 **({'dropped': item[2]} if len(item) > 2 and item[2] else {}),
+                **({'ptz': item[3]} if len(item) > 3 and item[3] else {}),
             }
             for item in islice(history, first, last)
         ]
