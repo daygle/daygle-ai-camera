@@ -64,8 +64,12 @@ How it behaves:
 
 - **Starting.** Tracking only starts on an object that has passed this camera's
   zones and confirmation settings and has been seen on at least two detection
-  cycles, so a one-frame false detection never swings the camera. When several
-  match, the largest (usually the closest) is chosen.
+  cycles, so a one-frame false detection never swings the camera. Only a
+  moving object is taken on: a parked car (or anything judged while the camera
+  itself is turning) is never picked, however big it is. When several match,
+  the largest (usually the closest) is chosen. If the object being followed
+  comes to a stop while another one of the chosen kinds is moving, the camera
+  switches to the moving one.
 - **Following.** It sticks with the same object (its track id, or the same
   label nearest to where it was last seen). A pan shifts the whole picture, so
   right after one the object is looked for where the pan should have put it

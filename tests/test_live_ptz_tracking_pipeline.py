@@ -47,6 +47,8 @@ def test_cycle_hands_detections_to_the_tracker_and_publishes_status(tmp_path, mo
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
     monkeypatch.setattr(_lm, 'detect_frame_motion', lambda *a, **k: (False, 0.0, None, 0.0))
     monkeypatch.setattr(_lm, 'filter_detections_by_motion_mode', lambda detections, *a, **k: detections)
+    # The tracker only takes on a moving object; this cat walks.
+    monkeypatch.setattr(_lm, 'annotate_motion_states', lambda detections, *a, **k: [{**d, 'motion_state': 'moving'} for d in detections])
 
     moves = []
 
