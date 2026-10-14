@@ -74,8 +74,13 @@ How it behaves:
   how far off centre the object is: a 0.3 s nudge just outside the dead zone,
   up to 1.5 s when the object is at the edge of the frame, so someone walking
   across the picture is not outrun. After each pulse the camera stops and
-  waits 0.5 s, because the video arrives a little after the motor moves, and
-  steering on old frames makes a camera overshoot and hunt back and forth.
+  waits for the picture to catch up: the video arrives a little after the
+  motor moves, and steering on old frames makes a camera overshoot and hunt
+  back and forth. Rather than a fixed delay (which was shorter than many
+  streams' lag), it compares each analysed frame with the one before and
+  steers again only once the picture has shown the move and then held still.
+  If a small nudge never shows up in the picture, it stops waiting 1.5 s after
+  the pulse; it never waits more than 4 s.
 - **Tilt matches the picture's shape.** The picture is wider than it is tall,
   so the same camera turn shifts the view further up/down than left/right.
   Tilt moves are scaled down to match (about 0.56x on a 16:9 camera), so a
@@ -100,6 +105,11 @@ How it behaves:
   makes the tracker forget its own zoom, so it never "undoes" yours.
   Pelco-D zoom has no speed control, so on Pelco-D the tracker only zooms in
   its own short steps, never during a pan.
+- **Seeing what it did.** A recording's **Detection Log** shows a *PTZ* line
+  for every check while auto-tracking is active: the object it is following,
+  how far off centre it was, and whether it moved, waited for the picture, or
+  held still. If an object is often left off centre, a smaller **Dead Zone**
+  (for example 0.10) keeps it closer to the middle.
 - **Manual control wins.** Using the PTZ pad pauses auto-tracking for 30
   seconds and drops the current target.
 - **Safety.** Every pulse is short and ends with an explicit Stop (retried

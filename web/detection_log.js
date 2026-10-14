@@ -2,7 +2,8 @@
 // clip, what it kept, and what it dropped and why. Built from the recording's
 // saved detection track (``recording.track``): each sample is one detection
 // cycle, ``detections`` are the boxes that counted and ``dropped`` the ones a
-// check threw away, each with its ``reason`` (app/live_monitor.py). Loaded
+// check threw away, each with its ``reason`` (app/live_monitor.py), and
+// ``ptz`` what PTZ auto-tracking decided on that check (app/ptz_tracking.py). Loaded
 // after utils.js / overlay.js and before the playback page script.
 
 // A dropped box is drawn while playback is within this many seconds after its
@@ -27,16 +28,18 @@ function formatLogTime(seconds) {
   return `${minutes}:${rest}`;
 }
 
-// Rows for the log: one per check that saw something (kept or dropped), and one
-// "nothing seen" row per run of empty checks between them.
+// Rows for the log: one per check that saw something (kept or dropped) or
+// where auto-tracking acted, and one "nothing seen" row per run of empty
+// checks between them.
 function detectionLogRows(track) {
   const rows = [];
   let gap = null;
   for (const sample of Array.isArray(track) ? track : []) {
     const kept = Array.isArray(sample?.detections) ? sample.detections : [];
     const dropped = Array.isArray(sample?.dropped) ? sample.dropped : [];
+    const ptz = sample?.ptz && typeof sample.ptz === 'object' ? sample.ptz : null;
     const t = Number(sample?.t) || 0;
-    if (!kept.length && !dropped.length) {
+    if (!kept.length && !dropped.length && !ptz) {
       if (gap) {
         gap.to = t;
         gap.count += 1;
@@ -47,7 +50,7 @@ function detectionLogRows(track) {
       continue;
     }
     gap = null;
-    rows.push({ kind: 'sample', t, kept, dropped });
+    rows.push({ kind: 'sample', t, kept, dropped, ptz });
   }
   return rows;
 }
@@ -93,6 +96,71 @@ function describeDroppedDetection(detection) {
   return parts.join(' · ');
 }
 
+function _signed(value) {
+  const number = Number(value) || 0;
+  return `${number >= 0 ? '+' : '−'}${Math.abs(number).toFixed(2)}`;
+}
+
+// "right + up for 0.8s" from a pulse's pan/tilt/zoom velocities.
+function _ptzMoveText(move) {
+  const parts = [];
+  const pan = Number(move?.pan) || 0;
+  const tilt = Number(move?.tilt) || 0;
+  const zoom = Number(move?.zoom) || 0;
+  if (pan) parts.push(pan > 0 ? 'right' : 'left');
+  if (tilt) parts.push(tilt > 0 ? 'up' : 'down');
+  if (zoom) parts.push(zoom > 0 ? 'zoom in' : 'zoom out');
+  const seconds = Number(move?.seconds);
+  return `${parts.join(' + ') || 'move'}${Number.isFinite(seconds) ? ` for ${seconds.toFixed(1)}s` : ''}`;
+}
+
+const PTZ_EVENT_TEXT = {
+  centred: 'centred (inside the dead zone)',
+  wait_picture: 'waiting for the picture to settle after the last move',
+  wait_move: 'waiting for the last move to finish',
+  holding: 'target not seen this check; holding still',
+};
+
+// What auto-tracking decided on one check, in words:
+// "Following Person #12 · off centre x +0.22 y −0.03 · moved right for 0.8s".
+function describePtzDecision(ptz) {
+  if (!ptz || typeof ptz !== 'object') return '';
+  if (ptz.state === 'paused') return 'Paused for manual control';
+  if (ptz.event === 'home' || ptz.state === 'returning') return 'Nothing to follow; returning home';
+  const parts = [];
+  if (ptz.event === 'lost') {
+    const id = Number.isInteger(ptz.lost_track_id) ? ` #${ptz.lost_track_id}` : '';
+    parts.push(`Lost the ${_logTitle(ptz.lost_label)}${id}`);
+  }
+  if (ptz.state === 'tracking') {
+    const id = Number.isInteger(ptz.track_id) ? ` #${ptz.track_id}` : '';
+    let following = `${ptz.acquired ? 'Started following' : 'Following'} ${_logTitle(ptz.label)}${id}`;
+    if (ptz.switched_from !== undefined && ptz.switched_from !== null) following += ` (was #${ptz.switched_from})`;
+    parts.push(following);
+  }
+  if (Array.isArray(ptz.error) && ptz.error.length === 2) {
+    parts.push(`off centre x ${_signed(ptz.error[0])} y ${_signed(ptz.error[1])}`);
+  }
+  if (ptz.event === 'move') {
+    parts.push(`moved ${_ptzMoveText(ptz.move)}${Number(ptz.boost) > 1 ? ` (catch-up ${Number(ptz.boost).toFixed(1)}x)` : ''}`);
+  } else if (ptz.event === 'edge_push') {
+    parts.push(`last seen at the edge; turned ${_ptzMoveText(ptz.move)} after it`);
+  } else if (ptz.event === 'zoom_out') {
+    parts.push('zooming back out');
+  } else if (PTZ_EVENT_TEXT[ptz.event]) {
+    parts.push(PTZ_EVENT_TEXT[ptz.event]);
+  }
+  return parts.join(' · ');
+}
+
+function _ptzEntryHtml(ptz) {
+  const detail = describePtzDecision(ptz);
+  if (!detail) return '';
+  return '<li class="detection-log-entry is-ptz">'
+    + '<span class="detection-log-status">PTZ</span>'
+    + `<span class="detection-log-detail">${_logEscape(detail)}</span></li>`;
+}
+
 function _logEntryHtml(detection, droppedEntry) {
   const confidence = Math.round(Number(detection?.confidence || 0) * 100);
   const name = `${_logTitle(detection?.label)} ${confidence}%`;
@@ -117,6 +185,7 @@ function detectionLogHtml(track) {
         + `<span class="muted">Nothing seen · ${_logEscape(span)}</span></div>`;
     }
     const entries = row.kept.map((d) => _logEntryHtml(d, false)).concat(row.dropped.map((d) => _logEntryHtml(d, true)));
+    if (row.ptz) entries.push(_ptzEntryHtml(row.ptz));
     return `<div class="detection-log-row"><button type="button" class="detection-log-time" data-seek="${row.t}">${_logEscape(formatLogTime(row.t))}</button>`
       + `<ul class="detection-log-entries">${entries.join('')}</ul></div>`;
   }).join('');

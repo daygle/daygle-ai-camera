@@ -390,3 +390,74 @@ def test_tilt_is_never_boosted():
         _step(camera, now, candidates=[_det('person', 0.5, 0.1)], mover=mover)
     assert mover.calls[-1][2] == pytest.approx(first_tilt)
     assert mover.calls[-1][-1] == pytest.approx(first_duration)
+
+
+def _frame(*, shift=0):
+    """A 360x640 grey frame with a gradient; ``shift`` pans the scene."""
+    import numpy as np
+
+    cols = (np.arange(640) + shift) % 640
+    row = (cols * 255 // 639).astype(np.uint8)
+    frame = np.tile(row, (360, 1))
+    return np.stack([frame] * 3, axis=2)
+
+
+def test_picture_change_tells_a_pan_from_a_still_picture():
+    still = pt.picture_change(pt.picture_thumbnail(_frame()), pt.picture_thumbnail(_frame()))
+    panned = pt.picture_change(pt.picture_thumbnail(_frame()), pt.picture_thumbnail(_frame(shift=120)))
+    assert still is not None and still < pt.PICTURE_STILL_DIFF
+    assert panned is not None and panned >= pt.PICTURE_MOVING_DIFF
+    assert pt.picture_thumbnail(None) is None
+    assert pt.picture_change(None, pt.picture_thumbnail(_frame())) is None
+
+
+def _step_image(camera, now, image, *, candidates=(), mover=None):
+    return pt.update_auto_tracking(
+        'cam', camera, candidates=list(candidates), visible=list(candidates), image=image, now=now, mover=mover,
+    )
+
+
+def test_next_pulse_waits_until_the_picture_has_moved_and_settled():
+    mover = _Mover()
+    camera = _camera()
+    target = _det('cat', 0.9, 0.5)
+    status = _step_image(camera, 10.0, _frame(), candidates=[target], mover=mover)
+    assert status['event'] == 'move' and status['move']['pan'] > 0
+    duration = mover.calls[0][4]
+    after = 10.0 + duration + pt.SETTLE_SECONDS + 0.1
+    # The stream lags: past the fixed settle the picture has not moved yet.
+    status = _step_image(camera, after, _frame(), candidates=[target], mover=mover)
+    assert status['event'] == 'wait_picture' and len(mover.calls) == 1
+    # The pan reaches the picture...
+    status = _step_image(camera, after + 0.3, _frame(shift=120), candidates=[target], mover=mover)
+    assert status['event'] == 'wait_picture' and len(mover.calls) == 1
+    # ...and once two frames agree, steering resumes on the new view.
+    status = _step_image(camera, after + 0.6, _frame(shift=120), candidates=[target], mover=mover)
+    assert status['event'] == 'move' and len(mover.calls) == 2
+
+
+def test_a_move_the_picture_never_shows_stops_being_waited_for():
+    mover = _Mover()
+    camera = _camera()
+    target = _det('cat', 0.9, 0.5)
+    _step_image(camera, 10.0, _frame(), candidates=[target], mover=mover)
+    pulse_end = 10.0 + mover.calls[0][4]
+    status = _step_image(camera, pulse_end + 1.0, _frame(), candidates=[target], mover=mover)
+    assert status['event'] == 'wait_picture'
+    status = _step_image(camera, pulse_end + pt.PICTURE_NO_MOVE_WAIT + 0.1, _frame(), candidates=[target], mover=mover)
+    assert status['event'] == 'move' and len(mover.calls) == 2
+
+
+def test_status_reports_each_decision():
+    mover = _Mover()
+    camera = _camera(dead_zone=0.1)
+    status = _step(camera, 10.0, candidates=[_det('cat', 0.52, 0.5, track_id=7)], mover=mover)
+    assert status['acquired'] is True and status['event'] == 'centred'
+    assert status['track_id'] == 7 and status['error'] == [0.02, 0.0]
+    # Followed by position onto a different track id: reported as a switch.
+    status = _step(camera, 11.0, candidates=[], visible=[_det('cat', 0.55, 0.5, track_id=9)], mover=mover)
+    assert status['switched_from'] == 7 and status['track_id'] == 9
+    status = _step(camera, 12.0, candidates=[], visible=[], mover=mover)
+    assert status['event'] == 'holding'
+    status = _step(camera, 20.0, candidates=[], visible=[], mover=mover)
+    assert status['event'] == 'lost' and status['lost_label'] == 'cat' and status['lost_track_id'] == 9
