@@ -74,14 +74,16 @@ MAX_PULSE_SECONDS = 1.5
 SETTLE_SECONDS = 0.5
 
 # Waiting for the picture after a pulse (see module docstring, step 3). The
-# change is the mean grey-level difference (0-255) between the thumbnails of
-# two consecutive analysed frames: a pan shifts the whole scene and reads far
-# above PICTURE_MOVING_DIFF, a still scene with a person walking in it stays
-# under PICTURE_STILL_DIFF. A picture that never showed the move (a nudge too
+# change is the median grey-level difference (0-255) across the blocks of the
+# thumbnails of two consecutive analysed frames: a pan shifts the whole scene
+# and reads far above PICTURE_MOVING_DIFF (9-25 on a real pan), while a still
+# scene stays under PICTURE_STILL_DIFF even with a person walking close to the
+# camera - the median ignores the part of the picture they cover, where the
+# mean read up to 4.4 and kept the tracker waiting. A picture that never showed the move (a nudge too
 # small to register) stops being waited for PICTURE_NO_MOVE_WAIT after the
 # pulse ends; nothing waits longer than PICTURE_MAX_WAIT.
-PICTURE_MOVING_DIFF = 8.0
-PICTURE_STILL_DIFF = 4.0
+PICTURE_MOVING_DIFF = 6.0
+PICTURE_STILL_DIFF = 3.0
 PICTURE_NO_MOVE_WAIT = 1.5
 PICTURE_MAX_WAIT = 4.0
 THUMBNAIL_SHAPE = (36, 64)
@@ -136,6 +138,14 @@ ACQUIRE_MIN_AGE = 2
 # Without a matching track id, the target is the same label nearest its last
 # position, but only within this distance (fraction of the frame).
 MAX_FOLLOW_JUMP = 0.35
+# After a pan/tilt pulse the whole picture shifts (0.3-0.45 of the frame on a
+# fast camera), so the target comes back under a new track id far from where
+# it was. Until it is seen again it is looked for around where the pulse
+# should have put it - REFIND_TOWARD_CENTRE of the way from its last position
+# to the centre - within REFIND_MAX_JUMP. Losing it here meant holding still
+# for ``lost_seconds`` and re-acquiring from scratch after every pulse.
+REFIND_TOWARD_CENTRE = 0.75
+REFIND_MAX_JUMP = 0.6
 # Zoom: zoom in below ZOOM_IN_RATIO * target_size, out above ZOOM_OUT_RATIO *
 # target_size, and always out when the target is this far from centre.
 ZOOM_IN_RATIO = 0.7
@@ -268,13 +278,15 @@ def picture_thumbnail(image: Any) -> Any:
 
 
 def picture_change(previous: Any, current: Any) -> float | None:
-    """Mean grey-level difference between two thumbnails, or None."""
+    """Median per-block grey-level difference between two thumbnails, or None."""
     if previous is None or current is None:
         return None
     try:
         if previous.shape != current.shape:
             return None
-        return float(abs(current - previous).mean())
+        import numpy as np
+
+        return float(np.median(abs(current - previous)))
     except Exception:  # noqa: BLE001
         return None
 
@@ -305,7 +317,7 @@ class _CameraState:
         'target_label', 'target_track_id', 'last_center', 'last_seen',
         'next_command_at', 'paused_until', 'moved_since_home', 'busy', 'state',
         'zoom_in_seconds', 'boost', 'last_error', 'edge_pushes', 'last_steer_at',
-        'frame_aspect', 'thumbnail', 'settle',
+        'frame_aspect', 'thumbnail', 'settle', 'steered_since_seen',
     )
 
     def __init__(self) -> None:
@@ -330,6 +342,8 @@ class _CameraState:
         # pulse: {'pulse_end', 'seen_moving'} until the picture settles.
         self.thumbnail: Any = None
         self.settle: dict[str, Any] | None = None
+        # A pan/tilt pulse went out since the target was last seen.
+        self.steered_since_seen = False
         self.reset_steering()
 
     def reset_steering(self) -> None:
@@ -343,6 +357,7 @@ class _CameraState:
         self.target_label = None
         self.target_track_id = None
         self.last_center = None
+        self.steered_since_seen = False
         self.reset_steering()
 
 
@@ -492,6 +507,11 @@ def _follow(state: _CameraState, visible: list[dict[str, Any]], *, max_jump: flo
     if state.last_center is None or not same_label:
         return None
     lx, ly = state.last_center
+    if state.steered_since_seen and not state.edge_pushes:
+        # The camera turned towards the target: look where that put it.
+        lx += (0.5 - lx) * REFIND_TOWARD_CENTRE
+        ly += (0.5 - ly) * REFIND_TOWARD_CENTRE
+        max_jump = max(max_jump, REFIND_MAX_JUMP)
 
     def _distance(det: dict[str, Any]) -> float:
         cx, cy = _center(det)  # type: ignore[misc]
@@ -580,6 +600,7 @@ def update_auto_tracking(
             state.last_seen = now
             state.state = 'tracking'
             state.edge_pushes = 0
+            state.steered_since_seen = False
             cx, cy = state.last_center  # type: ignore[misc]
             note['error'] = [round(cx - 0.5, 3), round(cy - 0.5, 3)]
             pan = axis_velocity(cx - 0.5, settings['dead_zone'], settings['speed'])
@@ -644,6 +665,7 @@ def update_auto_tracking(
                     state.last_error[1] = cy - 0.5
                 if pan or tilt:
                     state.last_steer_at = now
+                    state.steered_since_seen = True
                 state.next_command_at = now + duration + SETTLE_SECONDS
                 _begin_settle(state, now, duration)
                 state.moved_since_home = True

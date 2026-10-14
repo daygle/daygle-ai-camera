@@ -461,3 +461,25 @@ def test_status_reports_each_decision():
     assert status['event'] == 'holding'
     status = _step(camera, 20.0, candidates=[], visible=[], mover=mover)
     assert status['event'] == 'lost' and status['lost_label'] == 'cat' and status['lost_track_id'] == 9
+
+
+def test_a_person_walking_close_to_the_camera_does_not_read_as_the_picture_moving():
+    still = _frame()
+    walking = still.copy()
+    walking[100:360, 400:560] = 255 - walking[100:360, 400:560]  # a big subject, a fifth of the frame
+    change = pt.picture_change(pt.picture_thumbnail(still), pt.picture_thumbnail(walking))
+    assert change is not None and change < pt.PICTURE_STILL_DIFF
+
+
+def test_target_is_found_again_where_the_pulse_put_it():
+    mover = _Mover()
+    camera = _camera()
+    status = _step(camera, 10.0, candidates=[_det('cat', 0.85, 0.5, track_id=1)], mover=mover)
+    assert status['event'] == 'move'
+    # The pan shifted the picture: the same cat is 0.4 away under a new track
+    # id, beyond the normal follow distance, next to another cat at the edge.
+    later = 10.0 + mover.calls[0][4] + pt.SETTLE_SECONDS + 0.1
+    visible = [_det('cat', 0.45, 0.5, track_id=2, age=1), _det('cat', 0.97, 0.5, track_id=3, age=1)]
+    status = _step(camera, later, candidates=[], visible=visible, mover=mover)
+    assert status['state'] == 'tracking' and status['track_id'] == 2 and status['switched_from'] == 1
+    assert status['event'] != 'holding'

@@ -67,7 +67,11 @@ How it behaves:
   cycles, so a one-frame false detection never swings the camera. When several
   match, the largest (usually the closest) is chosen.
 - **Following.** It sticks with the same object (its track id, or the same
-  label nearest to where it was last seen). Zones are ignored while following,
+  label nearest to where it was last seen). A pan shifts the whole picture, so
+  right after one the object is looked for where the pan should have put it
+  (most of the way to the centre), further afield than usual; otherwise a fast
+  camera lost it after every pan and sat still until it was found again.
+  Zones are ignored while following,
   because they stop lining up with the scene once the camera has moved.
 - **Steering.** When the object is outside the dead zone, the camera moves
   towards it in a pulse. Both the speed and the length of the pulse grow with
@@ -79,6 +83,8 @@ How it behaves:
   back and forth. Rather than a fixed delay (which was shorter than many
   streams' lag), it compares each analysed frame with the one before and
   steers again only once the picture has shown the move and then held still.
+  It judges the typical part of the picture, so a person walking close to the
+  camera does not make it look as if the picture is still moving.
   If a small nudge never shows up in the picture, it stops waiting 1.5 s after
   the pulse; it never waits more than 4 s.
 - **Tilt matches the picture's shape.** The picture is wider than it is tall,
