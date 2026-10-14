@@ -272,6 +272,9 @@ function projectDetections(prevDetections, curDetections, prevTime, curTime, tar
 // back to clearing the box rather than gliding it across a long blind gap.
 const TRACK_MAX_HOLD_CAP_SECONDS = 3;
 const TRACK_BRIDGE_CAP_SECONDS = 4;
+// How long a box the next sample does not continue stays up (at most until
+// that next sample).
+const TRACK_LONE_HOLD_SECONDS = 1;
 
 function trackHoldWindow(localSpacing) {
   return Math.min(TRACK_MAX_HOLD_CAP_SECONDS, Math.max(1, localSpacing * 3));
@@ -349,11 +352,13 @@ function sampleTrackAtTime(track, t) {
   const factor = (time - prev.t) / span;
   if (factor <= 0) return prev.detections || [];
   if (factor >= 1) return next.detections || [];
-  return (next.detections || []).flatMap((nextDet) => {
+  const matchedPrev = new Set();
+  const interpolated = (next.detections || []).flatMap((nextDet) => {
     const prevDet = matchDetection(prev.detections || [], nextDet);
     // Interpolate only observed pairs. A new object must wait for its own
     // sample rather than snap to a future position throughout the interval.
     if (!prevDet) return [];
+    matchedPrev.add(prevDet);
     if (!prevDet.box || !nextDet?.box) return [prevDet];
     const lerp = (a, b) => Math.max(0, Math.min(1, a + (b - a) * factor));
     return [{
@@ -366,6 +371,12 @@ function sampleTrackAtTime(track, t) {
       },
     }];
   });
+  // A box the next sample does not continue (a fast car seen on a single
+  // check, then gone) still describes the frames up to that next check: hold
+  // it there, briefly. Dropping it the instant its sample passed drew it on
+  // no frame at all (recording 24085).
+  if (time - prev.t > Math.min(span, TRACK_LONE_HOLD_SECONDS)) return interpolated;
+  return interpolated.concat((prev.detections || []).filter((det) => !matchedPrev.has(det)));
 }
 
 // Dimensions are read once per frame by resizeOverlayCanvas and reused by

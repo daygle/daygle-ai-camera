@@ -131,6 +131,8 @@ Under a recording's details, **Detection Log** lists every detection check the l
 
 Only objects the camera watches are listed (a label with an enabled zone rule, or in the camera's or a zone's label list; a camera with none of these watches everything). The detector also recognises things like benches, potted plants and chairs; those never appear in the log.
 
+On playback, a box seen on only one check (a fast car crossing the frame) stays up until the next check, at most a second, so it is visible rather than drawn on no frame at all.
+
 Tap a time to jump the video there. **Show dropped boxes on the video** draws the dropped detections as dashed red boxes, so you can see where a missed object was. Use it when an object you can see in the footage got no box: the log says whether the detector never saw it, or saw it and which setting removed it. Faint detections are logged too: the detector is asked down to 20% confidence, and anything under the camera's real minimum (its lowest rule minimum, or Second Look's floor when that is on) is split off before any alert or recording logic and logged as *Below the detection minimum (0.32 < 0.50)*. Only labels and zones the camera watches are logged, at most the 5 strongest per check, so foliage does not flood the log. *Nothing seen* therefore means the detector found nothing above 20%.
 
 ## Recordings timeline

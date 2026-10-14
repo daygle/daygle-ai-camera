@@ -528,6 +528,12 @@ It runs *after* zone/label filtering, so the window only tracks objects the
 camera is configured to care about. Motion rules are gated separately and are
 unaffected.
 
+An object the tracker has already seen on Confirm Frames checks is confirmed
+straight away, even when some of those sightings never reached the gate (for
+example a fast car whose first box was judged still and dropped by Moving
+Only). A car that crosses the frame in three checks would otherwise lose one
+of them and could go unconfirmed.
+
 **Default: `1` / `1`** (single-frame response). This minimizes first-alert latency
 for people entering view. Set Confirm Frames to `2` and Confirm Window to `3` to
 filter one-frame false positives; that adds roughly 0.5-1s at the default

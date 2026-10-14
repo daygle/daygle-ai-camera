@@ -244,3 +244,23 @@ test('normalizeDetectionBox maps pixel boxes into normalized coordinates', () =>
     { x: 0.25, y: 0.25, width: 0.125, height: 0.125 },
   );
 });
+
+
+test('sampleTrackAtTime shows a box seen on a single check until the next check', () => {
+  // Recording 24085: a fast car seen on one check each time, then gone.
+  const car = (id, x) => ({ label: 'car', confidence: 0.85, track_id: id, box: box(x) });
+  const passing = [
+    { t: 13.2, detections: [] },
+    { t: 13.7, detections: [car(402, 0.1)] },
+    { t: 14.4, detections: [{ ...car(401, 0.6), box: { x: 0.6, y: 0.7, width: 0.1, height: 0.1 } }] },
+    { t: 15.3, detections: [] },
+    { t: 17.5, detections: [] },
+  ];
+  assert.equal(sandbox.sampleTrackAtTime(passing, 14.0)[0]?.track_id, 402);
+  assert.equal(sandbox.sampleTrackAtTime(passing, 15.0)[0]?.track_id, 401);
+  // Held until the next check at most, and never more than a second.
+  assert.equal(sandbox.sampleTrackAtTime(passing, 15.4).length, 0);
+  const slow = [{ t: 0, detections: [detection(0.1)] }, { t: 3, detections: [] }, { t: 6, detections: [] }];
+  assert.equal(sandbox.sampleTrackAtTime(slow, 0.9).length, 1);
+  assert.equal(sandbox.sampleTrackAtTime(slow, 1.1).length, 0);
+});
