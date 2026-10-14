@@ -1448,3 +1448,24 @@ def test_detection_has_matching_record_rule_group_rule(zd):
     assert zd.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.8}, rules) is True
     # horse is an animal but not a 'pet'
     assert zd.detection_has_matching_record_rule({'label': 'horse', 'confidence': 0.8}, rules) is False
+
+
+def test_rule_rejection_reason_names_the_failed_check():
+    """Diagnostics for the recording detection log: say which rule check a
+    detection failed rather than just "dropped"."""
+    from app import zone_detection as zd
+    settings = _one_person_zone_settings()
+    rule = settings['detection']['zones'][0]['object_rules'][0]
+    rule['min_confidence'] = 0.65
+    person = {'label': 'person', 'confidence': 0.55, 'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.2}}
+    assert zd.rule_rejection_reason(settings, person) == 'Below the person rule minimum (0.65)'
+    rule['min_confidence'] = 0.5
+    rule['max_confidence'] = 0.5
+    assert zd.rule_rejection_reason(settings, person) == 'Above the person rule maximum (0.50)'
+    rule['max_confidence'] = 1.0
+    rule['min_box_area'] = 0.5
+    assert zd.rule_rejection_reason(settings, person) == 'Outside the person rule size/shape limits'
+    cat = {'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}}
+    assert zd.rule_rejection_reason(settings, cat) == 'No enabled cat rule in this zone'
+    settings['detection']['zones'][0].update({'width': 0.3, 'height': 0.3})
+    assert zd.rule_rejection_reason(settings, person) == 'Outside every zone'

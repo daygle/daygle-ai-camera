@@ -169,3 +169,29 @@ def test_detector_failure_drops_candidate_without_raising():
 def test_enabled_flag():
     assert sl.second_look_enabled({}) is False
     assert sl.second_look_enabled({'object_detection_second_look': 'true'}) is True
+
+
+def test_rejections_are_reported_with_their_reason():
+    """Diagnostics: every dropped near-miss says why, with its scores."""
+    rejected = []
+    detector = _CropDetector([_centre(confidence=0.6)], [])  # zoomed views average 0.30
+    out = sl.confirm_borderline_detections(
+        detector, _frame(), [_candidate(0.45), _candidate(0.4), _candidate(0.35)],
+        threshold=0.5, max_candidates=1, rejected=rejected,
+    )
+    assert out == []
+    reasons = sorted(item['reason'] for item in rejected)
+    assert reasons == [
+        'Below threshold (0.35 < 0.50); Second Look re-checks only the 1 strongest',
+        'Below threshold (0.40 < 0.50); Second Look re-checks only the 1 strongest',
+        'Below threshold (0.45 < 0.50); Second Look zoomed in and scored 0.30',
+    ]
+
+
+def test_rejections_skip_unwatched_noise():
+    rejected = []
+    sl.confirm_borderline_detections(
+        _CropDetector([], []), _frame(), [_candidate()], threshold=0.5,
+        is_relevant=lambda _c: [], rejected=rejected,
+    )
+    assert rejected == []

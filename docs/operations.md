@@ -120,6 +120,16 @@ Use **Events** (`/events`) as the single activity feed for object, motion, and s
 
 A single scene can produce multiple event rows in one recording. Use **Recordings** (`/recordings`) for clip search, playback, download, and deletion, or **Recordings Timeline** (`/recordings/timeline`) to view clips across a day. The inline player can show object overlays and detection details.
 
+### Detection Log
+
+Under a recording's details, **Detection Log** lists every detection check the live monitor ran during the clip (about two per second while something is happening):
+
+- **Kept**: a detection that counted, with how it was classified, for example *moving (mask)*, *still (displacement 0.004)* or *camera moving* (a PTZ camera panning), plus its tracker id and how many checks it has been seen for.
+- **Dropped**: a detection a check threw away, with its score and the reason, for example *Below the person rule minimum (0.65)*, *Judged still (displacement); car is set to Moving Only*, *Below threshold (0.42 < 0.50); Second Look zoomed in and scored 0.47*, *Camera moving: only objects set to Moving & Still count*, *Outside every zone*, *Not confirmed yet*.
+- **Nothing seen**: runs of checks where the detector found nothing at all.
+
+Tap a time to jump the video there. **Show dropped boxes on the video** draws the dropped detections as dashed red boxes, so you can see where a missed object was. Use it when an object you can see in the footage got no box: the log says whether the detector never saw it, or saw it and which setting removed it. Faint detections are logged too: the detector is asked down to 20% confidence, and anything under the camera's real minimum (its lowest rule minimum, or Second Look's floor when that is on) is split off before any alert or recording logic and logged as *Below the detection minimum (0.32 < 0.50)*. Only labels and zones the camera watches are logged, at most the 5 strongest per check, so foliage does not flood the log. *Nothing seen* therefore means the detector found nothing above 20%.
+
 ## Recordings timeline
 
 Use **Recordings Timeline** (`/recordings/timeline`) to view clip segments in a day-style timeline. Click a segment to play the associated recording directly from the dashboard.

@@ -150,6 +150,7 @@ def confirm_borderline_detections(
     threshold: float,
     is_relevant: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
     max_candidates: int = MAX_CANDIDATES,
+    rejected: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Re-check detections scoring below ``threshold`` and keep the confirmed.
 
@@ -159,6 +160,9 @@ def confirm_borderline_detections(
     watched zone, with a watched label) get the crop + mirror re-check; all
     other sub-threshold detections are dropped. Never raises: a failed re-check
     simply drops that candidate.
+
+    ``rejected``, when given, receives every dropped sub-threshold detection
+    with a ``reason`` (diagnostics for the recording's detection log).
     """
     threshold = float(threshold)
     kept: list[dict[str, Any]] = []
@@ -171,17 +175,31 @@ def confirm_borderline_detections(
         except (TypeError, ValueError):
             continue
         (kept if confidence >= threshold else borderline).append(det)
+    def _reject(det: dict[str, Any], why: str) -> None:
+        if rejected is not None:
+            rejected.append({
+                **det,
+                'reason': f"Below threshold ({float(det.get('confidence') or 0):.2f} < {threshold:.2f}); {why}",
+            })
+
     if not borderline or max_candidates <= 0:
         return kept
     if not (hasattr(frame, 'shape') and getattr(frame, 'ndim', 0) == 3) or not hasattr(detector, 'detect_frame'):
+        for det in borderline:
+            _reject(det, 'Second Look could not re-check')
         return kept
     if is_relevant is not None:
         try:
-            borderline = is_relevant(borderline)
+            relevant = is_relevant(borderline)
         except Exception:  # noqa: BLE001 - relevance filtering is best-effort
             logger.debug('Second-look relevance filter failed', exc_info=True)
             return kept
+        # Not a watched label in a watched zone: never worth a re-check, and not
+        # worth logging either (it is noise this camera does not care about).
+        borderline = relevant
     borderline.sort(key=lambda det: float(det.get('confidence') or 0), reverse=True)
+    for det in borderline[max_candidates:]:
+        _reject(det, f'Second Look re-checks only the {max_candidates} strongest')
 
     import numpy as np
 
@@ -197,6 +215,7 @@ def confirm_borderline_detections(
         x1, y1 = int(rx * frame_w), int(ry * frame_h)
         x2, y2 = int((rx + rw) * frame_w), int((ry + rh) * frame_h)
         if x2 - x1 < 8 or y2 - y1 < 8:
+            _reject(det, 'too small for Second Look')
             continue
         crop = frame[y1:y2, x1:x2]
         # The crop's own pixel bounds, so mapped boxes line up exactly.
@@ -211,6 +230,7 @@ def confirm_borderline_detections(
             )
         except Exception:  # noqa: BLE001 - a failed re-check drops the candidate
             logger.debug('Second-look re-check failed for %s', label, exc_info=True)
+            _reject(det, 'Second Look re-check failed')
             continue
         combined = (crop_confidence + mirror_confidence) / 2.0
         logger.debug(
@@ -219,6 +239,7 @@ def confirm_borderline_detections(
             combined, threshold, 'kept' if combined >= threshold else 'dropped',
         )
         if combined < threshold or crop_box is None:
+            _reject(det, f'Second Look zoomed in and scored {combined:.2f}')
             continue
         kept.append({
             **det,

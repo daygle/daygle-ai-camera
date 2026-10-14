@@ -72,6 +72,8 @@ from app.object_settings import (
     annotate_motion_states,
     effective_object_settings,
     filter_detections_by_motion_mode,
+    motion_mode_for_label,
+    motion_mode_label,
     object_detection_allowed_during_camera_motion,
     still_alert_thresholds,
     still_dwell_candidates,
@@ -134,6 +136,7 @@ from app.zone_detection import (
     filter_motion_detections_by_objects,
     motion_zone_confirm_cycles,
     normalize_detection_boxes_for_frame,
+    rule_rejection_reason,
     stamp_frame_aspect,
     zone_alert_detections,
     zone_detection_alert_rule_names,
@@ -215,6 +218,64 @@ def _below_threshold_object_reason(
     if not candidates:
         return None
     return max(candidates, key=lambda item: item['confidence'])
+
+
+# Faint detections for the recording detection log: the detector is asked down
+# to this confidence, and whatever lands under the real floor is logged as
+# dropped ("Below the detection minimum") instead of silently never existing.
+# Only watched labels in watched zones are logged, at most FAINT_LOG_MAX per
+# cycle, strongest first, so a bush that looks 20% like a person does not
+# flood the log.
+FAINT_LOG_FLOOR = 0.20
+FAINT_LOG_MAX = 5
+
+
+def _faint_log_floor(detect_floor: float | None) -> float | None:
+    """Confidence to ask the detector for: the log floor, unless the real one is lower."""
+    if detect_floor is None:
+        return None
+    return min(float(detect_floor), FAINT_LOG_FLOOR)
+
+
+def _split_faint_detections(
+    detections: list[dict[str, Any]], detect_floor: float | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """``(kept, faint)``: faint detections scored under ``detect_floor``.
+
+    Kept detections are exactly what a detector asked at ``detect_floor``
+    returns, so everything downstream behaves as before.
+    """
+    if detect_floor is None:
+        return detections, []
+    floor = float(detect_floor)
+    kept: list[dict[str, Any]] = []
+    faint: list[dict[str, Any]] = []
+    for det in detections:
+        try:
+            confidence = float(det.get('confidence') or 0)
+        except (AttributeError, TypeError, ValueError):
+            kept.append(det)
+            continue
+        if confidence < floor:
+            faint.append({
+                **det,
+                'reason': f'Below the detection minimum ({confidence:.2f} < {floor:.2f})',
+            })
+        else:
+            kept.append(det)
+    return kept, faint
+
+
+def _faint_log_entries(early_dropped: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Keep only the faint detections worth logging (see FAINT_LOG_FLOOR);
+    Second Look rejections pass through untouched."""
+    faint = [det for det in early_dropped if str(det.get('reason') or '').startswith('Below the detection minimum')]
+    if not faint:
+        return early_dropped
+    others = [det for det in early_dropped if det not in faint]
+    watched = filter_detections_for_camera(faint, settings)
+    watched.sort(key=lambda det: float(det.get('confidence') or 0), reverse=True)
+    return others + watched[:FAINT_LOG_MAX]
 
 
 def _new_known_face_alerts(
@@ -1216,6 +1277,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # and ``account_for`` replaces (not adds) the inference stage, so the
     # base cost would silently vanish from the breakdown.
     _base_inference_timing: Any = None
+    # Detections thrown away this cycle, with why (faint detections and Second
+    # Look rejections here, pipeline drops below). Diagnostics only: they go to
+    # the history's ``dropped`` list for the recording's detection log, never
+    # downstream.
+    _early_dropped: list[dict[str, Any]] = []
     try:
         if detector_ready and frame_is_numpy and hasattr(detector, 'detect_frame'):
             # Low-light / IR enhancement (opt-in): the detector, and the crop
@@ -1232,10 +1298,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             # resolution below; anything still unconfirmed is dropped there.
             _second_look = min_conf is not None and second_look_enabled(live_settings)
             _inference_started = time.perf_counter()
+            _detect_floor = second_look_floor(min_conf) if _second_look else min_conf
+            # Ask down to the detection-log floor, then split anything under the
+            # real floor straight off: only the log ever sees it.
             detections = detector.detect_frame(
-                detector_frame,
-                confidence=second_look_floor(min_conf) if _second_look else min_conf,
+                detector_frame, confidence=_faint_log_floor(_detect_floor),
             )
+            detections, _faint = _split_faint_detections(detections, _detect_floor)
+            _early_dropped.extend(_faint)
             _base_inference_timing = getattr(detector, 'last_timing', None)
             _cycle_timer.add(STAGE_INFERENCE, (time.perf_counter() - _inference_started) * 1000.0)
             if _second_look:
@@ -1248,6 +1318,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
                     is_relevant=lambda candidates: filter_detections_for_camera(
                         normalize_detection_boxes_for_frame(candidates, frame), settings,
                     ),
+                    rejected=_early_dropped,
                 )
                 _cycle_timer.add(STAGE_SECOND_LOOK, (time.perf_counter() - _second_look_started) * 1000.0)
             # Motion-region high-res boost (opt-in): re-run the detector zoomed
@@ -1275,7 +1346,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
                 )
                 _cycle_timer.add(STAGE_TILING, (time.perf_counter() - _tiling_started) * 1000.0)
         elif detector_ready:
-            detections = detector.detect_image(image, confidence=min_conf)
+            detections = detector.detect_image(image, confidence=_faint_log_floor(min_conf))
+            detections, _faint = _split_faint_detections(detections, min_conf)
+            _early_dropped.extend(_faint)
             _base_inference_timing = getattr(detector, 'last_timing', None)
             _cycle_timer.add(STAGE_INFERENCE, (time.perf_counter() - _inference_started) * 1000.0)
         else:
@@ -1314,6 +1387,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _face_pass_ran = _state.face_detection_last_checked.get(camera_id) != _face_pass_stamp
     _cycle_timer.add(STAGE_FACE_PASS, (time.perf_counter() - _face_started) * 1000.0)
     detections = normalize_detection_boxes_for_frame(detections, frame)
+    _early_dropped = _faint_log_entries(
+        normalize_detection_boxes_for_frame(_early_dropped, frame), settings,
+    )
     stamp_frame_aspect(detections, frame)
     _telemetry_candidates['detected'] = len(detections)
     # Stamp stable track ids on EVERY detection BEFORE the moving/still filter so
@@ -1335,6 +1411,19 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         camera_id, detections,
         hold_labels=frozenset() if _face_pass_ran else frozenset({'face'}),
     )
+    # Tag each detection so the checks below can record which ones they drop
+    # and why (``_``-prefixed: internal, stripped from every serialised copy).
+    _dropped: dict[int, dict[str, Any]] = {}
+    for _diag_index, _diag_det in enumerate(detections):
+        _diag_det['_diag_id'] = _diag_index
+
+    def _note_dropped(before: list[dict[str, Any]], after: list[dict[str, Any]], reason: Any) -> None:
+        kept = {det.get('_diag_id') for det in after}
+        for det in before:
+            diag_id = det.get('_diag_id')
+            if diag_id is None or diag_id in kept or diag_id in _dropped:
+                continue
+            _dropped[diag_id] = {**det, 'reason': reason(det) if callable(reason) else reason}
     _cycle_timer.add(STAGE_TRACKING, (time.perf_counter() - _tracking_started) * 1000.0)
     _behaviour_started = time.perf_counter()
     # Behavioural engines consume tracked geometry, so pause them while the
@@ -1408,10 +1497,16 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # detections carry a ``motion_state`` annotation for overlays/status.
     _filtering_started = time.perf_counter()
     _detected_count = len(detections)
+    _before_motion_mode = detections
     detections = filter_detections_by_motion_mode(
         detections, diff_mask, object_settings,
         camera_motion=camera_motion['active'],
     )
+    _note_dropped(_before_motion_mode, detections, lambda det: (
+        f"Judged {det.get('motion_state') or 'unknown'}"
+        + (f" ({str(det['motion_basis']).replace('_', ' ')})" if det.get('motion_basis') else '')
+        + f"; {det.get('label')} is set to {motion_mode_label(motion_mode_for_label(det.get('label'), object_settings))}"
+    ))
     _telemetry_candidates['after_motion_mode'] = len(detections)
     _telemetry_rejected[REJECT_MOTION_MODE] = max(
         0, _detected_count - len(detections),
@@ -1420,6 +1515,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     _camera_scope_input = len(detections)
     object_detections = filter_detections_for_camera(detections, settings)
+    _note_dropped(detections, object_detections, 'Not watched by this camera (label or zone)')
     _telemetry_candidates['after_camera_filter'] = len(object_detections)
     _telemetry_rejected[REJECT_CAMERA_SCOPE] = max(
         0, _camera_scope_input - len(object_detections),
@@ -1446,10 +1542,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _confirm_iou = live_settings.get('detection_confirm_iou', 0.0)
     _confirm_input = len(object_detections)
     _confirm_started = time.perf_counter()
+    _before_confirmation = object_detections
     object_detections = confirm_object_detections(
         camera_id, object_detections,
         required_frames=_confirm_frames, window_frames=_confirm_window,
         location_iou=_confirm_iou,
+    )
+    _note_dropped(
+        _before_confirmation, object_detections,
+        f'Not confirmed yet (needs {_confirm_frames} of {_confirm_window} cycles)',
     )
     _cycle_timer.add(STAGE_CONFIRMATION, (time.perf_counter() - _confirm_started) * 1000.0)
     _telemetry_candidates['after_confirmation'] = len(object_detections)
@@ -1636,6 +1737,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             0, len(alertable_object_detections) - len(object_alert_detections),
         )
     record_only_detections = [d for d in alertable_object_detections if zone_record_on_detect(d, settings) and (not zone_object_rule_matches(settings, d, action='alert'))] if _zone_match_needed else []
+    _note_dropped(
+        object_detections, alertable_object_detections,
+        'Camera moving: only objects set to Moving & Still count',
+    )
+    if _zone_match_needed:
+        _note_dropped(
+            alertable_object_detections, list(object_alert_detections) + record_only_detections,
+            lambda det: rule_rejection_reason(settings, det),
+        )
     # Object priority over motion across cycles (see app.motion_object_priority):
     # motion in a zone an alertable object occupied within the grace window is
     # the object's, and motion-only is held that long for an object to appear.
@@ -1679,6 +1789,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         list(object_alert_detections) + record_only_detections + motion_history_detections + dwell_detections,
         sample_ts=frame_capture_ts,
         live_config=live_settings,
+        dropped=_early_dropped + list(_dropped.values()),
     )
     # An active clip continues on what follows its object: a still object it
     # already follows, or motion (see continue_active_recording). Only on cycles

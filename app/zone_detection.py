@@ -840,6 +840,42 @@ def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict
     return matches
 
 
+def rule_rejection_reason(settings: dict[str, Any], detection: dict[str, Any]) -> str:
+    """Plain-language reason no zone rule accepted ``detection`` (alert or record).
+
+    Diagnostic only: it mirrors the checks in ``_zone_object_rule_matches_uncached``
+    in order and names the first one every candidate rule failed, so a recording's
+    detection log can say "below the person rule's minimum (0.65)" rather than
+    just "dropped".
+    """
+    label = canonical_label(detection.get('label'))
+    if not label:
+        return 'No label'
+    compiled_zones = [
+        compiled_zone for compiled_zone in camera_policy(settings).zones
+        if compiled_zone.zone.get('monitor_objects', True) or _has_enabled_face_rule(compiled_zone.zone)
+    ]
+    containing = [cz for cz in compiled_zones if _detection_matches_compiled_zone(detection, cz)]
+    if not containing:
+        return 'Outside every zone'
+    rules = [
+        rule for cz in containing for rule in cz.rules
+        if rule.get('enabled', True) and label_matches(label, rule.get('label'))
+    ]
+    if not rules:
+        return f'No enabled {label} rule in this zone'
+    confidence = float(detection.get('confidence') or 0)
+    minimums = [float(rule.get('min_confidence', 0.5)) for rule in rules]
+    if all(confidence < minimum for minimum in minimums):
+        return f'Below the {label} rule minimum ({min(minimums):.2f})'
+    maximums = [float(rule.get('max_confidence', 1.0)) for rule in rules]
+    if all(confidence > maximum for maximum in maximums):
+        return f'Above the {label} rule maximum ({max(maximums):.2f})'
+    if not any(detection_within_box_limits(detection, rule) for rule in rules):
+        return f'Outside the {label} rule size/shape limits'
+    return f'The {label} rule neither alerts nor records'
+
+
 def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
     # A zone that monitors ONLY motion (``monitor_objects=False`` but

@@ -270,6 +270,14 @@ def _build_effective_object_settings() -> dict[str, Any]:
     return normalize_object_settings(raw)
 
 
+_MODE_LABELS = {MODE_ANY: 'Moving & Still', MODE_MOVING: 'Moving Only', MODE_STILL: 'Still Only'}
+
+
+def motion_mode_label(mode: str) -> str:
+    """The Objects page's name for a detection mode (for diagnostics text)."""
+    return _MODE_LABELS.get(mode, str(mode))
+
+
 def motion_mode_for_label(
     label: Any,
     settings: dict[str, Any] | None = None,
