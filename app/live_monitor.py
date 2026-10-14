@@ -1551,9 +1551,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         required_frames=_confirm_frames, window_frames=_confirm_window,
         location_iou=_confirm_iou,
     )
+    try:
+        _confirm_spatial = float(_confirm_iou or 0) > 0
+    except (TypeError, ValueError):
+        _confirm_spatial = False
     _note_dropped(
         _before_confirmation, object_detections,
-        f'Not confirmed yet (needs {_confirm_frames} of {_confirm_window} cycles)',
+        f'Not confirmed yet (needs {_confirm_frames} of {_confirm_window} cycles'
+        + (', in the same place or as the same tracked object)' if _confirm_spatial else ')'),
     )
     _cycle_timer.add(STAGE_CONFIRMATION, (time.perf_counter() - _confirm_started) * 1000.0)
     _telemetry_candidates['after_confirmation'] = len(object_detections)

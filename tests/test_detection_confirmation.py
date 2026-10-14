@@ -184,3 +184,27 @@ def test_location_iou_exempts_boxless_and_face(ds):
         'cam-2', [_det_at('face', 0.1, 0.1)], **kwargs,
     )
     assert [d['label'] for d in out_face] == ['face']
+
+
+def test_location_iou_confirms_a_tracked_object_crossing_the_frame(ds):
+    """Recordings 23753 / 23755: a person or car moves further than its own
+    width between checks ~2s apart, so its boxes never overlap. The tracker
+    kept the same id, and that confirms it."""
+    kwargs = dict(required_frames=2, window_frames=3, location_iou=0.2)
+
+    def walker(x, track_id):
+        return {**_det_at('person', x, 0.05, w=0.012, h=0.06), 'track_id': track_id}
+
+    assert ds.confirm_object_detections('cam', [walker(0.30, 368)], **kwargs) == []
+    assert len(ds.confirm_object_detections('cam', [walker(0.35, 368)], **kwargs)) == 1
+    # A different tracked object in a new place is still not confirmed by it.
+    assert ds.confirm_object_detections('cam', [walker(0.80, 999)], **kwargs) == []
+
+
+def test_location_iou_still_suppresses_untracked_jumping_noise(ds):
+    """Rain/snow ghosts keep no tracker identity: a new id in a new place each
+    cycle never confirms."""
+    kwargs = dict(required_frames=2, window_frames=3, location_iou=0.2)
+    for i, x in enumerate((0.1, 0.5, 0.8)):
+        ghost = {**_det_at('cat', x, 0.4), 'track_id': 500 + i}
+        assert ds.confirm_object_detections('cam', [ghost], **kwargs) == []

@@ -86,3 +86,13 @@ test('log times read as minutes:seconds', () => {
   assert.equal(log.formatLogTime(0), '0:00.0');
   assert.equal(log.formatLogTime(75.25), '1:15.3');
 });
+
+test('dropped entries lead with their tracker id so a parked car reads as itself', () => {
+  const log = load();
+  assert.equal(
+    log.describeDroppedDetection({ label: 'car', track_id: 176, track_age: 886, reason: 'Judged still (displacement); car is set to Moving Only' }),
+    '#176 · seen 886x · Judged still (displacement); car is set to Moving Only',
+  );
+  assert.equal(log.describeDroppedDetection({ label: 'car', reason: 'Below the detection minimum (0.32 < 0.50)' }), 'Below the detection minimum (0.32 < 0.50)');
+  assert.match(log.detectionLogHtml([{ t: 1, detections: [], dropped: [{ label: 'car', confidence: 0.88, track_id: 176, track_age: 2, reason: 'x' }] }]), /#176 · seen 2x · x/);
+});

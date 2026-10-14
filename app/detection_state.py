@@ -470,7 +470,10 @@ def confirm_object_detections(
         boxes = cycle_boxes.setdefault(label, [])
         box = detection.get('box')
         if isinstance(box, dict):
-            boxes.append(box)
+            # The tracker id rides along so a moving object can confirm on
+            # identity rather than overlap (see ``_spatially_confirmed``).
+            track_id = detection.get('track_id')
+            boxes.append({**box, '_track_id': track_id} if isinstance(track_id, int) and track_id > 0 else box)
     labels_now = set(cycle_boxes.keys())
     with _state.live_detection_confirm_lock:
         history = _state.live_detection_confirm_history.get(camera_id)
@@ -493,21 +496,32 @@ def confirm_object_detections(
             camera_id, len(detections), required, window, sorted(labels_now),
         )
 
-    def _spatially_confirmed(label: str, box: Any) -> bool:
+    def _spatially_confirmed(label: str, box: Any, track_id: Any = None) -> bool:
         """How many recent cycles hold a same-label box overlapping ``box``.
 
         A cycle also counts when its box is the same object drawn at a
         different EXTENT -- a roof-only box nested inside a whole-vehicle box
         scores IoU 0.163 even though nothing moved, so a spatial gate would
         reject the object every cycle and it would never confirm at all.
+
+        It also counts when the tracker matched the same object there (same
+        ``track_id``): a person or car crossing the frame moves further than
+        its own width between cycles a couple of seconds apart, so its boxes
+        never overlap and it could never confirm (recordings 23753 / 23755).
+        Noise the spatial gate exists for (rain, snow, IR speckle) does not
+        keep a tracker identity, so this does not let it through.
         """
         current = box_tuple(box)
+        tracked = track_id if isinstance(track_id, int) and track_id > 0 else None
         streak = 0
         for cycle_labels in history_cycles:
             cycle_label_boxes = cycle_labels.get(label)
             if not cycle_label_boxes:
                 continue
             for prior in cycle_label_boxes:
+                if tracked is not None and prior.get('_track_id') == tracked:
+                    streak += 1
+                    break
                 if _box_iou(box, prior) >= loc_iou:
                     streak += 1
                     break
@@ -541,7 +555,7 @@ def confirm_object_detections(
             # No usable geometry to evaluate spatially: fall back to the
             # label-only confirmation already satisfied above.
             return True
-        return _spatially_confirmed(label, box)
+        return _spatially_confirmed(label, box, detection.get('track_id'))
 
     return [detection for detection in detections if _keep(detection)]
 
