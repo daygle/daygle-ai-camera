@@ -1469,3 +1469,16 @@ def test_rule_rejection_reason_names_the_failed_check():
     assert zd.rule_rejection_reason(settings, cat) == 'No enabled cat rule in this zone'
     settings['detection']['zones'][0].update({'width': 0.3, 'height': 0.3})
     assert zd.rule_rejection_reason(settings, person) == 'Outside every zone'
+
+
+def test_camera_watches_label_follows_rules_and_label_lists():
+    from app import zone_detection as zd
+    settings = _one_person_zone_settings()
+    assert zd.camera_watches_label(settings, 'person')
+    assert zd.camera_watches_label(settings, 'human')  # alias of person
+    assert not zd.camera_watches_label(settings, 'potted plant')
+    with_labels = _one_person_zone_settings()
+    with_labels['detection']['zones'][0]['object_labels'] = ['car']
+    assert zd.camera_watches_label(with_labels, 'car')
+    # A camera with nothing configured accepts every label.
+    assert zd.camera_watches_label({'id': 'bare', 'detection': {'zones': []}}, 'bench')
