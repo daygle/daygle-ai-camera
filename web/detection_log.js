@@ -212,6 +212,15 @@ function droppedDetectionsAtTime(track, t) {
   return Array.isArray(sample?.dropped) ? sample.dropped : [];
 }
 
+// "Car 77% · #176 · Dropped": the tracker id ties the box to its Detection
+// Log rows (and to the same object's kept box, when it has one).
+function droppedBoxLabel(detection) {
+  const parts = [`${_logTitle(detection?.label)} ${Math.round(Number(detection?.confidence || 0) * 100)}%`];
+  if (Number.isInteger(detection?.track_id) && detection.track_id > 0) parts.push(`#${detection.track_id}`);
+  parts.push('Dropped');
+  return parts.join(' · ');
+}
+
 // Dashed red boxes for dropped detections, labelled with their score, drawn on
 // the same letterboxed geometry as the regular overlay.
 // eslint-disable-next-line no-unused-vars -- ESLint: exported for recordings.js
@@ -248,7 +257,7 @@ function drawDroppedBoxesOnCanvas(canvas, dropped, referenceEl) {
     const dh = h * renderHeight;
     ctx.strokeStyle = DROPPED_BOX_COLOR;
     ctx.strokeRect(dx, dy, dw, dh);
-    const label = `${_logTitle(detection.label)} ${Math.round(Number(detection.confidence || 0) * 100)}% · dropped`;
+    const label = droppedBoxLabel(detection);
     const labelWidth = ctx.measureText(label).width + 12;
     const labelY = dy + dh + 4;
     ctx.fillStyle = 'rgba(7, 11, 19, 0.7)';

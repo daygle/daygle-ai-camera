@@ -114,3 +114,9 @@ test('auto-tracking decisions read as a PTZ line on their check', () => {
   assert.equal(rows[0].kind, 'sample');
   assert.match(log.detectionLogHtml([{ t: 1, detections: [], ptz: { state: 'tracking', event: 'holding', label: 'cat' } }]), /PTZ<\/span>.*holding still/);
 });
+
+test('dropped boxes on the video carry their tracker id and a title-case tag', () => {
+  const log = load();
+  assert.equal(log.droppedBoxLabel({ label: 'car', confidence: 0.77, track_id: 176 }), 'Car 77% · #176 · Dropped');
+  assert.equal(log.droppedBoxLabel({ label: 'car', confidence: 0.4 }), 'Car 40% · Dropped');
+});
