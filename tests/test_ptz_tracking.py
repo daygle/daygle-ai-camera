@@ -483,3 +483,26 @@ def test_target_is_found_again_where_the_pulse_put_it():
     status = _step(camera, later, candidates=[], visible=visible, mover=mover)
     assert status['state'] == 'tracking' and status['track_id'] == 2 and status['switched_from'] == 1
     assert status['event'] != 'holding'
+
+
+def test_a_parked_car_is_never_taken_on_over_a_walking_person():
+    mover = _Mover()
+    camera = _camera(labels=['person', 'car'])
+    parked = {**_det('car', 0.3, 0.6, track_id=1, size=0.4), 'motion_state': 'still'}
+    walker = {**_det('person', 0.8, 0.5, track_id=2), 'motion_state': 'moving'}
+    status = _step(camera, 10.0, candidates=[parked, walker], mover=mover)
+    assert status['label'] == 'person' and status['track_id'] == 2
+    # Alone, the parked car is not followed; nor is anything judged while the camera moves.
+    pt.reset_auto_tracking()
+    assert _step(camera, 20.0, candidates=[parked], mover=mover)['state'] == 'idle'
+    assert _step(camera, 21.0, candidates=[{**walker, 'motion_state': 'unknown'}], mover=mover)['state'] == 'idle'
+
+
+def test_a_target_that_turns_out_still_is_dropped_for_one_that_moves():
+    mover = _Mover()
+    camera = _camera(labels=['person', 'car'])
+    car = {**_det('car', 0.5, 0.5, track_id=1, size=0.4), 'motion_state': 'moving'}
+    assert _step(camera, 10.0, candidates=[car], mover=mover)['label'] == 'car'
+    walker = {**_det('person', 0.8, 0.5, track_id=2), 'motion_state': 'moving'}
+    status = _step(camera, 11.0, candidates=[{**car, 'motion_state': 'still'}, walker], mover=mover)
+    assert status['label'] == 'person' and status['track_id'] == 2 and status['switched_from'] == 1

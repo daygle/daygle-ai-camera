@@ -429,11 +429,18 @@ def _pick_new_target(
 ) -> dict[str, Any] | None:
     from app.zone_schema import label_matches
 
+    # Only something moving is worth following. Picking the largest box let a
+    # parked car - always bigger than a person - win, and a parked car never
+    # leaves, so the camera stayed on it. ``still`` objects are never picked,
+    # nor ``unknown`` ones (judged while the camera itself moves, when a parked
+    # car cannot be told from a walking person). A detection with no motion
+    # state at all (no motion classifier ran) stays eligible.
     eligible = [
         det for det in candidates
         if isinstance(det, dict)
         and int(det.get('track_age') or 0) >= ACQUIRE_MIN_AGE
         and _center(det) is not None
+        and det.get('motion_state', 'moving') == 'moving'
         and any(label_matches(det.get('label'), label) for label in labels)
     ]
     # The largest box is usually the closest subject - the one worth following.
@@ -589,6 +596,21 @@ def update_auto_tracking(
                 state.target_label = canonical_label(target.get('label'))
                 note['acquired'] = True
                 logger.info('PTZ auto-track on %s following %s (track %s)', camera_id, state.target_label, target.get('track_id'))
+        elif target is not None and target.get('motion_state') == 'still':
+            # The target has stopped (or was a parked object all along) and
+            # something else worth following is moving: follow that instead.
+            mover_target = _pick_new_target(
+                [det for det in candidates if det.get('track_id') != target.get('track_id')],
+                settings['labels'],
+            )
+            if mover_target is not None:
+                from app.zone_schema import canonical_label
+                state.target_label = canonical_label(mover_target.get('label'))
+                state.reset_steering()
+                note['acquired'] = True
+                logger.info('PTZ auto-track on %s switched from a still %s to a moving %s (track %s)',
+                            camera_id, target.get('label'), state.target_label, mover_target.get('track_id'))
+                target = mover_target
 
         if target is not None:
             if state.target_track_id is not None and target.get('track_id') != state.target_track_id:
