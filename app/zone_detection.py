@@ -840,6 +840,30 @@ def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict
     return matches
 
 
+def camera_watches_label(settings: dict[str, Any], label: Any) -> bool:
+    """Whether this camera cares about ``label`` at all (diagnostics).
+
+    True when an enabled zone rule matches it, or a camera / zone label list
+    allows it; a camera with no rules and no label lists accepts everything.
+    The recording detection log uses this so it only explains drops of
+    objects the camera watches, not every bench and potted plant the
+    detector also recognises.
+    """
+    if not canonical_label(label):
+        return False
+    policy = camera_policy(settings)
+    rule_labels = [
+        rule.get('label') for zone in policy.zones for rule in zone.rules
+        if rule.get('enabled', True) and str(rule.get('label') or '').strip()
+    ]
+    if any(label_matches(label, rule_label) for rule_label in rule_labels):
+        return True
+    allowed = set(policy.camera_labels).union(*(zone.object_labels for zone in policy.zones))
+    if allowed:
+        return detection_label_in_allowed(label, allowed)
+    return not rule_labels
+
+
 def rule_rejection_reason(settings: dict[str, Any], detection: dict[str, Any]) -> str:
     """Plain-language reason no zone rule accepted ``detection`` (alert or record).
 

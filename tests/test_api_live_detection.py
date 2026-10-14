@@ -614,6 +614,8 @@ def test_dropped_detections_are_kept_with_their_reason_for_the_detection_log(tmp
             return [
                 {'label': 'person', 'confidence': 0.55, 'box': {'x': 0.70, 'y': 0.30, 'width': 0.05, 'height': 0.20}},
                 {'label': 'car', 'confidence': 0.90, 'box': {'x': 0.10, 'y': 0.40, 'width': 0.20, 'height': 0.15}},
+                # Not watched by this camera: never logged, however it is dropped.
+                {'label': 'potted plant', 'confidence': 0.80, 'box': {'x': 0.50, 'y': 0.60, 'width': 0.10, 'height': 0.10}},
             ]
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())

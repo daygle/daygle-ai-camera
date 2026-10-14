@@ -135,6 +135,7 @@ from app.zone_detection import (
     filter_detections_for_camera,
     filter_motion_detections_by_objects,
     motion_zone_confirm_cycles,
+    camera_watches_label,
     normalize_detection_boxes_for_frame,
     rule_rejection_reason,
     stamp_frame_aspect,
@@ -1515,7 +1516,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     _camera_scope_input = len(detections)
     object_detections = filter_detections_for_camera(detections, settings)
-    _note_dropped(detections, object_detections, 'Not watched by this camera (label or zone)')
+    # Unwatched labels are filtered out of the log below, so a drop here that
+    # reaches the log is a watched object outside the zones watching it.
+    _note_dropped(detections, object_detections, lambda det: f"Outside the zones watching {det.get('label')}")
     _telemetry_candidates['after_camera_filter'] = len(object_detections)
     _telemetry_rejected[REJECT_CAMERA_SCOPE] = max(
         0, _camera_scope_input - len(object_detections),
@@ -1789,7 +1792,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         list(object_alert_detections) + record_only_detections + motion_history_detections + dwell_detections,
         sample_ts=frame_capture_ts,
         live_config=live_settings,
-        dropped=_early_dropped + list(_dropped.values()),
+        dropped=[
+            det for det in _early_dropped + list(_dropped.values())
+            if camera_watches_label(settings, det.get('label'))
+        ],
     )
     # An active clip continues on what follows its object: a still object it
     # already follows, or motion (see continue_active_recording). Only on cycles
