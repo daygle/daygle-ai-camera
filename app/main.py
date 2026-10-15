@@ -198,15 +198,15 @@ async def app_lifespan(_app: FastAPI):
     start_profile_monitor()
 
     def _run_periodic_retention() -> None:
-        from app.backup import purge_camera_diagnostics_by_policy, purge_recordings_by_policy
+        from app.backup import purge_recordings_by_policy
         try:
             purge_recordings_by_policy()
         except Exception:
             _logger.warning('Periodic recording retention failed', exc_info=True)
-        try:
-            purge_camera_diagnostics_by_policy()
-        except Exception:
-            _logger.warning('Periodic camera-log retention failed', exc_info=True)
+        # Expired sessions, old login attempts, camera-log rows and the
+        # face-recognition retention purges. Each step is best effort.
+        if _state.auth is not None:
+            _state.auth.cleanup_expired_sessions()
 
     _state.database.start_maintenance(callback=_run_periodic_retention)
     apply_sound_settings()

@@ -426,9 +426,6 @@ def custom_presets(raw: Any) -> list[dict[str, Any]]:
 # keeps its own values ("Custom"), which only an older install or a direct API
 # write produces; the start-up migration turns those into named profiles.
 
-GLOBAL_DEFAULT_PROFILE_NAME = 'Global Default'
-
-
 def global_default_profile_id(mode: str) -> str:
     return f'global-default-{mode}'
 

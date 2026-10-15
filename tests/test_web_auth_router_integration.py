@@ -21,16 +21,13 @@ These tests defend that public-surface contract:
    ``app.api.web_router.login_page`` -- the back-compat alias is wired.
 2. ``main.setup_page`` is the SAME function object as
    ``app.api.web_router.setup_page`` -- the back-compat alias is wired.
-3. ``web_router`` registers the expected 24 unique page-handler paths
-   (23 functions × 1 decorator + 1 function ``dashboard_aliases`` ×
-   1 decorator).
-4. ``dashboard_aliases`` is the route handler for ``/alerts``,
-   ``/events``, ``/search`` (one function, three decorator paths).
+3. ``web_router`` registers exactly the expected page paths (one handler
+   per page, no redirect-only aliases).
+4. ``/events`` is served by its own ``events_page`` handler.
 5. ``auth_router`` registers exactly the four auth-cycle endpoints
    (POST ``/login``, POST ``/setup``, GET ``/logout``, POST ``/logout``).
-6. **HTTP-level**: ``GET /alerts``, ``GET /events``, ``GET /search``
-   all serve the SAME response (status, Content-Type, body bytes) as
-   ``GET /`` after a successful login -- the marquee delegation proof.
+6. **HTTP-level**: ``GET /``, ``GET /events`` and ``GET /system`` serve
+   their pages after a successful login.
 
 Why this matters
 ----------------
@@ -128,41 +125,21 @@ def app_modules():
 def test_web_router_registers_expected_page_paths(app_modules):
     """web_router should expose exactly 25 unique page-handler paths.
 
-    Path count comes from 24 functions × 1 decorator each + 1 function
-    (``dashboard_aliases``) × 1 decorator (``/search``).
-    Total = 23 routes + 23 unique paths (every path is distinct). ``/events``
-    is served by its own ``events_page`` function (the single activity feed).
-    ``/snapshots`` is the captured-frame library under the Clips menu.
-    There is no separate ``/alerts`` page: an alert is a property of an event,
-    surfaced as an indicator on the Events row.
-
-    The 24 paths are: ``/``, ``/favicon.ico``, ``/login``, ``/setup``,
-    ``/live``, ``/system``, ``/zones``, ``/alerts``, ``/sounds``, ``/objects``, ``/cameras``,
-    ``/events``, ``/search``, ``/recordings``, ``/snapshots``,
-    ``/recordings/timeline``,
-    ``/detection``, ``/detection/sounds``, ``/detection/faces``,
-    ``/models``, ``/models/faces``, ``/models/cameras``, ``/models/sound``,
-    ``/models/settings`` (the old ``/objects``, ``/face-recognition``,
-    ``/onnx``, ``/camera-models``, ``/arcface``, ``/yamnet-tflite`` redirect),
-    ``/ai``,
-    ``/yamnet``, ``/profile``,
-    ``/settings``, ``/users``, ``/audit``, ``/camera-log``,
-    ``/application-log``.
+    One function and one decorator per page; there are no redirect-only
+    aliases. ``/events`` is the single activity feed and ``/snapshots`` the
+    captured-frame library; an alert is a property of an event, so there is
+    no separate alerts-feed page.
     """
     expected_paths = {
         "/",
         "/favicon.ico",
         "/login",
         "/setup",
-        "/live",
         "/system",
         "/zones",
         "/alerts",
-        "/sounds",
-        "/objects",
         "/cameras",
         "/events",
-        "/search",
         "/recordings",
         "/snapshots",
         "/recordings/timeline",
@@ -175,14 +152,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
         "/models/cameras",
         "/models/sound",
         "/models/settings",
-        "/onnx",
-        "/camera-models",
         "/ai",
-        "/arcface",
-        "/face-recognition",
-        "/people",
-        "/yamnet-tflite",
-        "/yamnet",
         "/profile",
         "/settings",
         "/users",
@@ -200,28 +170,9 @@ def test_web_router_registers_expected_page_paths(app_modules):
     )
 
 
-def test_web_router_dashboard_aliases_function_serves_search(app_modules):
-    """``dashboard_aliases`` must be the route function for exactly
-    ``/search``.
-
-    ``/events`` is now a dedicated page served by its own ``events_page``
-    function (the single activity feed; there is no separate alerts page), so
-    ``dashboard_aliases`` is left aliasing only ``/search`` onto the dashboard
-    shell. This test catches the regression mode where a future refactor
-    re-folds ``/events`` back into the alias, or renames the function.
-    """
+def test_web_router_events_is_its_own_page(app_modules):
+    """``/events`` is served by its own ``events_page`` function."""
     web_router = app_modules.web_router
-    alias_handlers = [
-        route
-        for route in web_router.router.routes
-        if getattr(route, "endpoint", None) is web_router.dashboard_aliases
-    ]
-    served_paths = {route.path for route in alias_handlers}
-    assert served_paths == {"/search"}, (
-        f"dashboard_aliases expected to serve {{'/search'}} "
-        f"but actually serves {served_paths}"
-    )
-    # /events must be its own function, not an alias of the dashboard shell.
     events_paths = {
         route.path
         for route in web_router.router.routes
@@ -275,20 +226,13 @@ def test_auth_router_registers_expected_auth_endpoints(app_modules):
 
 
 # ---------------------------------------------------------------------------
-# 4. HTTP-level: dashboard_aliases delegation end-to-end.
+# 4. HTTP-level: home, events and system pages.
 # ---------------------------------------------------------------------------
 
 
-def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
-    tmp_path, monkeypatch
-):
-    """Live is the home page; the old dashboard paths redirect.
-
-    ``GET /`` serves the Live page. ``/live`` (its old address) and
-    ``/search`` (served by ``dashboard_aliases``; footage search now lives
-    on Events) are permanent redirects, so old bookmarks keep working.
-    ``/events`` is its own page.
-    """
+def test_home_events_and_system_pages_over_http(tmp_path, monkeypatch):
+    """``GET /`` serves the Live page; ``/events`` and ``/system`` are their
+    own pages."""
     app, _database_path = _load_app(tmp_path, monkeypatch)
     _server_obj, _thread, base_url = _server(app)
     client = LocalClient(base_url)
@@ -299,11 +243,6 @@ def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
         root_status, _root_headers, root_body = client.request("/")
         assert root_status == 200
         assert "Live Footage" in root_body
-
-        for path, target in (("/live", "/"), ("/search", "/events")):
-            status, headers, _body = client.request(path, follow_redirects=False)
-            assert status == 308, f"GET {path} should redirect, got {status}"
-            assert LocalClient.header(headers, "Location") == target
 
         events_status, _events_headers, _events_body = client.request("/events")
         assert events_status == 200

@@ -447,7 +447,7 @@ def test_face_recognition_page_served_to_admin(tmp_path, monkeypatch):
     try:
         _setup_admin(client)
         _login(client)
-        status, _h, page = client.request('/face-recognition')
+        status, _h, page = client.request('/detection/faces')
         assert status == 200
         assert '<title>Face Recognition - Daygle AI Camera</title>' in page
     finally:
@@ -461,7 +461,7 @@ def test_face_recognition_page_requires_admin(tmp_path, monkeypatch):
     client = LocalClient(base_url)
     try:
         _setup_admin(client)  # not logged in
-        status, _h, _b = client.request('/face-recognition', follow_redirects=False)
+        status, _h, _b = client.request('/detection/faces', follow_redirects=False)
         assert status in (302, 303, 401, 403)
     finally:
         server.should_exit = True

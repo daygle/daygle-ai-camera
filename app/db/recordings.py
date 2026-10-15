@@ -257,32 +257,6 @@ class RecordingsMixin:
                 total += len(labels)
         return total
 
-    def list_recordings(
-        self,
-        label: str | None = None,
-        labels: list[str] | None = None,
-        camera_id: str | None = None,
-        limit: int = 50,
-        alerted_only: bool = False,
-        started_after: str | None = None,
-        started_before: str | None = None,
-        sort: str = 'newest',
-        source_type: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Return one recording page using the historical list-only contract."""
-        items, _next = self.list_recordings_page(
-            label=label,
-            labels=labels,
-            camera_id=camera_id,
-            limit=limit,
-            alerted_only=alerted_only,
-            started_after=started_after,
-            started_before=started_before,
-            sort=sort,
-            source_type=source_type,
-        )
-        return items
-
     def list_recordings_page(
         self,
         label: str | None = None,

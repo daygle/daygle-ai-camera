@@ -267,6 +267,9 @@ def test_always_run_object_detection_bypasses_motion_gate(monkeypatch):
     monkeypatch.setattr(live_monitor, 'update_live_detection_status',
                         lambda camera_id, **kwargs: None)
     monkeypatch.setattr(_state, 'detector', det)
+    # Normally installed at app startup; stub it so the test does not depend
+    # on an earlier test having booted the app.
+    monkeypatch.setattr(_state, 'camera_event_recording_config', lambda _settings: {})
 
     img = np.zeros((10, 10, 3), dtype=np.uint8)
     frame = {'timestamp': time.time(), 'width': 10, 'height': 10}

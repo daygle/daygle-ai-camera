@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from fastapi import HTTPException
 
-from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
+from tests.support import add_event, _load_app, LocalClient, _login, _server, _setup_admin
 
 
 @pytest.fixture
@@ -511,7 +511,7 @@ def test_merge_event_metadata_keeps_existing_keys(tmp_path):
     from app.database import EventDatabase
 
     db = EventDatabase(str(tmp_path / 'm.sqlite3'))
-    event_id = db.add_event(created_at='2026-09-28T00:00:00+00:00', source='rtsp', snapshot_path=None,
+    event_id = add_event(db, created_at='2026-09-28T00:00:00+00:00', source='rtsp', snapshot_path=None,
                             detections=[], metadata={'camera_id': 'cam'})
     assert db.merge_event_metadata(event_id, {'ai_verification': {'status': 'filtered'}}) is True
     metadata = db.get_event(event_id)['metadata']

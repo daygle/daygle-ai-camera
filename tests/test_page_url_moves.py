@@ -1,21 +1,14 @@
-"""Models and Detection pages live under /models and /detection; the old
-page URLs redirect so bookmarks keep working."""
+"""Models and Detection pages live under /models and /detection."""
 from __future__ import annotations
 
 import pytest
 
 from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
 
-REDIRECTS = {
-    '/onnx': '/models',
-    '/arcface': '/models/faces',
-    '/camera-models': '/models/cameras',
-    '/yamnet-tflite': '/models/sound',
-    '/yamnet': '/models/sound',
-    '/objects': '/detection',
-    '/sounds': '/detection/sounds',
-    '/face-recognition': '/detection/faces',
-}
+OLD_URLS = (
+    '/onnx', '/arcface', '/camera-models', '/yamnet-tflite', '/yamnet',
+    '/objects', '/sounds', '/face-recognition', '/people', '/live', '/search',
+)
 
 PAGES = {
     '/models': '<title>Object Models - Daygle AI Camera</title>',
@@ -41,11 +34,10 @@ def admin_client(tmp_path, monkeypatch):
     thread.join(timeout=5)
 
 
-def test_old_page_urls_redirect(admin_client):
-    for old, new in REDIRECTS.items():
-        status, headers, _body = admin_client.request(old, follow_redirects=False)
-        assert status == 308, old
-        assert LocalClient.header(headers, 'location') == new, old
+def test_old_page_urls_are_gone(admin_client):
+    for old in OLD_URLS:
+        status, _headers, _body = admin_client.request(old, follow_redirects=False)
+        assert status == 404, old
 
 
 def test_new_pages_are_served(admin_client):

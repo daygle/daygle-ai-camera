@@ -27,7 +27,7 @@ def test_objects_settings_defaults_and_page_route(tmp_path, monkeypatch):
         assert "available_labels" in payload
 
         # The dedicated page is served to admins.
-        status, _headers, page = client.request("/objects")
+        status, _headers, page = client.request("/detection")
         assert status == 200
         assert "<title>Objects - Daygle AI Camera</title>" in page
         assert "Per-Object Overrides" in page
@@ -226,7 +226,7 @@ def test_objects_settings_viewer_denied(tmp_path, monkeypatch):
         assert body["detail"] == "Admin access required"
 
         # The page itself is admin-gated too.
-        status, _headers, _page = viewer_client.request("/objects", follow_redirects=False)
+        status, _headers, _page = viewer_client.request("/detection", follow_redirects=False)
         assert status == 403
     finally:
         server.should_exit = True

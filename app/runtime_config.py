@@ -46,6 +46,7 @@ def cached_snapshot(database: Any, name: str, builder: Callable[[], Any]) -> Any
 
 
 def clear_runtime_config_cache() -> None:
+    """Drop every cached snapshot (test isolation hook)."""
     with _lock:
         _canonical.clear()
         _owners.clear()

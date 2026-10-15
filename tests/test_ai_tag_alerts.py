@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.support import _load_app
+from tests.support import add_event, _load_app
 
 from app.database import EventDatabase
 
@@ -258,7 +258,7 @@ def test_end_to_end_alert_on_a_described_event(tmp_path, monkeypatch):
     db = state.database
     db.set_setting('cameras', [{'id': 'cam', 'name': 'Front', 'stream_url': 'rtsp://x/s', 'enabled': False,
                                 'detection': {'zones': [_zone()]}}], '2026-09-28T00:00:00+00:00')
-    event_id = db.add_event(created_at='2026-09-28T01:00:00+00:00', source='rtsp', snapshot_path='s.jpg',
+    event_id = add_event(db, created_at='2026-09-28T01:00:00+00:00', source='rtsp', snapshot_path='s.jpg',
                             detections=[{'label': 'person', 'confidence': 0.9, 'x': 0.6, 'y': 0.6,
                                          'width': 0.1, 'height': 0.2, 'zone_name': 'Gate'}],
                             metadata={'camera_id': 'cam', 'camera_name': 'Front'})
@@ -296,7 +296,7 @@ def test_end_to_end_alert_on_a_described_event(tmp_path, monkeypatch):
     assert asked == [('ladder', 'An automatic caption')]   # the term was confirmed first
 
     # A backfill of the same kind of event never alerts.
-    second = db.add_event(created_at='2026-09-28T01:05:00+00:00', source='rtsp', snapshot_path='s.jpg',
+    second = add_event(db, created_at='2026-09-28T01:05:00+00:00', source='rtsp', snapshot_path='s.jpg',
                           detections=[{'label': 'person', 'confidence': 0.9, 'x': 0.6, 'y': 0.6,
                                        'width': 0.1, 'height': 0.2, 'zone_name': 'Gate'}],
                           metadata={'camera_id': 'cam', 'camera_name': 'Front'})
@@ -309,7 +309,7 @@ def test_end_to_end_alert_on_a_described_event(tmp_path, monkeypatch):
 
 def test_mark_event_alert_triggered(tmp_path):
     db = EventDatabase(str(tmp_path / 'flag.sqlite3'))
-    event_id = db.add_event(created_at='2026-09-28T01:00:00+00:00', source='rtsp', snapshot_path=None, detections=[])
+    event_id = add_event(db, created_at='2026-09-28T01:00:00+00:00', source='rtsp', snapshot_path=None, detections=[])
     assert db.mark_event_alert_triggered(event_id) is True
     assert db.get_event(event_id)['alert_triggered'] == 1
     assert db.mark_event_alert_triggered(event_id + 50) is False

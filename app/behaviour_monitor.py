@@ -204,64 +204,24 @@ def emit_tripwire_crossings(camera_id: str, settings: dict[str, Any], detections
 
 
 def _emit_one(camera_id: str, settings: dict[str, Any], crossing: dict[str, Any], wire: dict[str, Any]) -> None:
-    from app.alert_dispatch import _rule_notify_active_now, deliver_alert_notifications
-    from app.utils import normalize_bool_setting, normalize_email_recipients
-
     now_iso = datetime.now(timezone.utc).isoformat()
     zone_name = crossing.get('zone_name') or 'zone'
     wire_name = crossing.get('tripwire_name') or 'Tripwire'
     direction = crossing['direction']
     label = crossing.get('label') or 'object'
-    try:
-        confidence = float(crossing.get('confidence') or 0.0)
-    except (TypeError, ValueError):
-        confidence = 0.0
-
-    email_enabled = normalize_bool_setting(wire.get('email_enabled'), False)
-    push_enabled = normalize_bool_setting(wire.get('push_enabled'), False)
-    email_recipients = normalize_email_recipients(wire.get('email_recipients') or [])
-    notify_enabled = email_enabled or push_enabled
-    camera_name = str((settings or {}).get('name') or '').strip() or None
-
-    metadata = {
-        'source': 'line-crossing',
-        'camera_id': camera_id,
-        'camera_name': camera_name,
-        'zone_id': crossing.get('zone_id'),
-        'zone_name': crossing.get('zone_name'),
-        'tripwire_name': wire_name,
-        'direction': direction,
-        'label': label,
-        'track_id': crossing.get('track_id'),
-        'confidence': round(confidence, 3),
-    }
-    rule_name = f'{zone_name} · {wire_name}'
-    message = f'{str(label).title()} crossed {wire_name} ({direction}) in {zone_name}'
-    notify_rule = {
-        'name': rule_name,
-        'email_enabled': email_enabled,
-        'push_enabled': push_enabled,
-        'email_recipients': email_recipients,
-        'notify_start': str(wire.get('notify_start') or '').strip() or None,
-        'notify_end': str(wire.get('notify_end') or '').strip() or None,
-    }
-    alert_active = notify_enabled and _rule_notify_active_now(notify_rule)
-    alerts = [{
-        'created_at': now_iso, 'rule_name': rule_name, 'label': label,
-        'confidence': confidence, 'message': message,
-    }] if alert_active else []
-    event_id = _state.database.add_event_with_alerts(
-        created_at=now_iso, source='behaviour', snapshot_path=None,
-        detections=[], alerts=alerts, alert_triggered=alert_active,
-        metadata=metadata,
+    confidence = _as_float(crossing.get('confidence'))
+    event_id = _emit_behaviour_event(
+        camera_id, settings, wire, now_iso,
+        source='line-crossing', fire=crossing, label=label, confidence=confidence,
+        rule_name=f'{zone_name} · {wire_name}',
+        message=f'{str(label).title()} crossed {wire_name} ({direction}) in {zone_name}',
+        details={
+            'tripwire_name': wire_name,
+            'direction': direction,
+            'label': label,
+            'track_id': crossing.get('track_id'),
+        },
     )
-
-    if normalize_bool_setting(wire.get('record_on_detect'), True):
-        _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
-
-    if alert_active:
-        alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
-        submit_alert_notification(deliver_alert_notifications, [alert_payload], event_id, [notify_rule])
     logger.info('Tripwire crossing on %s: %s %s -> %s (event %s)', camera_id, label, wire_name, direction, event_id)
 
 
@@ -409,70 +369,21 @@ def emit_loiter_anomalies(camera_id: str, settings: dict[str, Any], detections: 
 
 
 def _emit_loiter(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], rule: dict[str, Any], now_iso: str) -> None:
-    from app.alert_dispatch import _rule_notify_active_now, deliver_alert_notifications
-    from app.utils import normalize_bool_setting, normalize_email_recipients
-
     zone_name = fire.get('zone_name') or 'zone'
     label = fire.get('label') or 'object'
-    try:
-        dwell = float(fire.get('dwell') or 0.0)
-    except (TypeError, ValueError):
-        dwell = 0.0
-    try:
-        threshold = float(fire.get('threshold') or 0.0)
-    except (TypeError, ValueError):
-        threshold = 0.0
-    try:
-        confidence = float(fire.get('confidence') or 0.0)
-    except (TypeError, ValueError):
-        confidence = 0.0
-
-    email_enabled = normalize_bool_setting(rule.get('email_enabled'), False)
-    push_enabled = normalize_bool_setting(rule.get('push_enabled'), False)
-    email_recipients = normalize_email_recipients(rule.get('email_recipients') or [])
-    notify_enabled = email_enabled or push_enabled
-    camera_name = str((settings or {}).get('name') or '').strip() or None
-    rule_display = str(rule.get('name') or 'Loitering').strip() or 'Loitering'
-
-    metadata = {
-        'source': 'loiter',
-        'camera_id': camera_id,
-        'camera_name': camera_name,
-        'zone_id': fire.get('zone_id'),
-        'zone_name': fire.get('zone_name'),
-        'label': label,
-        'track_id': fire.get('track_id'),
-        'dwell_seconds': round(dwell, 1),
-        'threshold_seconds': round(threshold, 1),
-        'confidence': round(confidence, 3),
-    }
-    rule_name = f'{zone_name} · {rule_display}'
-    message = f'{str(label).title()} loitering in {zone_name} ({int(round(dwell))}s)'
-    notify_rule = {
-        'name': rule_name,
-        'email_enabled': email_enabled,
-        'push_enabled': push_enabled,
-        'email_recipients': email_recipients,
-        'notify_start': str(rule.get('notify_start') or '').strip() or None,
-        'notify_end': str(rule.get('notify_end') or '').strip() or None,
-    }
-    alert_active = notify_enabled and _rule_notify_active_now(notify_rule)
-    alerts = [{
-        'created_at': now_iso, 'rule_name': rule_name, 'label': label,
-        'confidence': confidence, 'message': message,
-    }] if alert_active else []
-    event_id = _state.database.add_event_with_alerts(
-        created_at=now_iso, source='behaviour', snapshot_path=None,
-        detections=[], alerts=alerts, alert_triggered=alert_active,
-        metadata=metadata,
+    dwell = _as_float(fire.get('dwell'))
+    event_id = _emit_behaviour_event(
+        camera_id, settings, rule, now_iso,
+        source='loiter', fire=fire, label=label, confidence=_as_float(fire.get('confidence')),
+        rule_name=f'{zone_name} · {_rule_display(rule, "Loitering")}',
+        message=f'{str(label).title()} loitering in {zone_name} ({int(round(dwell))}s)',
+        details={
+            'label': label,
+            'track_id': fire.get('track_id'),
+            'dwell_seconds': round(dwell, 1),
+            'threshold_seconds': round(_as_float(fire.get('threshold')), 1),
+        },
     )
-
-    if normalize_bool_setting(rule.get('record_on_detect'), True):
-        _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
-
-    if alert_active:
-        alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
-        submit_alert_notification(deliver_alert_notifications, [alert_payload], event_id, [notify_rule])
     logger.info('Loiter on %s: %s in %s (%.0fs, event %s)', camera_id, label, zone_name, dwell, event_id)
 
 
@@ -614,67 +525,25 @@ def emit_time_of_day_anomalies(camera_id: str, settings: dict[str, Any], detecti
 
 
 def _emit_time(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], rule: dict[str, Any], now_iso: str) -> None:
-    from app.alert_dispatch import _rule_notify_active_now, deliver_alert_notifications
-    from app.utils import normalize_bool_setting, normalize_email_recipients
-
     zone_name = fire.get('zone_name') or 'zone'
     label = fire.get('label') or 'object'
     try:
         hour = int(fire.get('hour'))
     except (TypeError, ValueError):
         hour = 0
-    try:
-        confidence = float(fire.get('confidence') or 0.0)
-    except (TypeError, ValueError):
-        confidence = 0.0
-
-    email_enabled = normalize_bool_setting(rule.get('email_enabled'), False)
-    push_enabled = normalize_bool_setting(rule.get('push_enabled'), False)
-    email_recipients = normalize_email_recipients(rule.get('email_recipients') or [])
-    notify_enabled = email_enabled or push_enabled
-    camera_name = str((settings or {}).get('name') or '').strip() or None
-    rule_display = str(rule.get('name') or 'Unusual Time').strip() or 'Unusual Time'
-
-    metadata = {
-        'source': 'time_of_day',
-        'camera_id': camera_id,
-        'camera_name': camera_name,
-        'zone_id': fire.get('zone_id'),
-        'zone_name': fire.get('zone_name'),
-        'label': label,
-        'track_id': fire.get('track_id'),
-        'hour': hour,
-        'probability': fire.get('probability'),
-        'days_learned': fire.get('days'),
-        'confidence': round(confidence, 3),
-    }
-    rule_name = f'{zone_name} · {rule_display}'
-    message = f'{str(label).title()} in {zone_name} at an unusual time ({hour:02d}:00)'
-    notify_rule = {
-        'name': rule_name,
-        'email_enabled': email_enabled,
-        'push_enabled': push_enabled,
-        'email_recipients': email_recipients,
-        'notify_start': str(rule.get('notify_start') or '').strip() or None,
-        'notify_end': str(rule.get('notify_end') or '').strip() or None,
-    }
-    alert_active = notify_enabled and _rule_notify_active_now(notify_rule)
-    alerts = [{
-        'created_at': now_iso, 'rule_name': rule_name, 'label': label,
-        'confidence': confidence, 'message': message,
-    }] if alert_active else []
-    event_id = _state.database.add_event_with_alerts(
-        created_at=now_iso, source='behaviour', snapshot_path=None,
-        detections=[], alerts=alerts, alert_triggered=alert_active,
-        metadata=metadata,
+    event_id = _emit_behaviour_event(
+        camera_id, settings, rule, now_iso,
+        source='time_of_day', fire=fire, label=label, confidence=_as_float(fire.get('confidence')),
+        rule_name=f'{zone_name} · {_rule_display(rule, "Unusual Time")}',
+        message=f'{str(label).title()} in {zone_name} at an unusual time ({hour:02d}:00)',
+        details={
+            'label': label,
+            'track_id': fire.get('track_id'),
+            'hour': hour,
+            'probability': fire.get('probability'),
+            'days_learned': fire.get('days'),
+        },
     )
-
-    if normalize_bool_setting(rule.get('record_on_detect'), True):
-        _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
-
-    if alert_active:
-        alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
-        submit_alert_notification(deliver_alert_notifications, [alert_payload], event_id, [notify_rule])
     logger.info('Unusual time on %s: %s in %s at %02d:00 (event %s)', camera_id, label, zone_name, hour, event_id)
 
 
@@ -819,56 +688,83 @@ def emit_activity_spike_anomalies(camera_id: str, settings: dict[str, Any], dete
 
 
 def _emit_activity(camera_id: str, settings: dict[str, Any], fire: dict[str, Any], rule: dict[str, Any], now_iso: str) -> None:
-    from app.alert_dispatch import _rule_notify_active_now, deliver_alert_notifications
-    from app.utils import normalize_bool_setting, normalize_email_recipients
-
     zone_name = fire.get('zone_name') or 'zone'
     label = fire.get('label') or 'object'
     try:
         count = int(fire.get('count') or 0)
     except (TypeError, ValueError):
         count = 0
+    plural = 's' if label and not label.endswith('s') else ''
+    event_id = _emit_behaviour_event(
+        camera_id, settings, rule, now_iso,
+        source='activity_spike', fire=fire, label=label, confidence=_as_float(fire.get('confidence')),
+        rule_name=f'{zone_name} · {_rule_display(rule, "Activity Spike")}',
+        message=f'Unusual activity in {zone_name}: {count} {str(label).title()}{plural} (normally ~{fire.get("mean")})',
+        details={
+            'label': label,
+            'count': count,
+            'threshold': round(_as_float(fire.get('threshold')), 2),
+            'mean': fire.get('mean'),
+            'hour': fire.get('hour'),
+        },
+    )
+    logger.info('Activity spike on %s: %d %s in %s (event %s)', camera_id, count, label, zone_name, event_id)
+
+
+def _as_float(value: Any) -> float:
     try:
-        threshold = float(fire.get('threshold') or 0.0)
+        return float(value or 0.0)
     except (TypeError, ValueError):
-        threshold = 0.0
-    try:
-        confidence = float(fire.get('confidence') or 0.0)
-    except (TypeError, ValueError):
-        confidence = 0.0
+        return 0.0
+
+
+def _rule_display(rule: dict[str, Any], default: str) -> str:
+    return str(rule.get('name') or default).strip() or default
+
+
+def _emit_behaviour_event(
+    camera_id: str,
+    settings: dict[str, Any],
+    rule: dict[str, Any],
+    now_iso: str,
+    *,
+    source: str,
+    fire: dict[str, Any],
+    label: str,
+    confidence: float,
+    rule_name: str,
+    message: str,
+    details: dict[str, Any],
+) -> int:
+    """Store one behaviour event, then record and notify per *rule*.
+
+    Shared by the tripwire, loiter, time-of-day and activity-spike monitors.
+    *details* is the monitor-specific metadata; *fire* supplies the zone.
+    """
+    from app.alert_dispatch import _rule_notify_active_now, deliver_alert_notifications
+    from app.utils import normalize_bool_setting, normalize_email_recipients
 
     email_enabled = normalize_bool_setting(rule.get('email_enabled'), False)
     push_enabled = normalize_bool_setting(rule.get('push_enabled'), False)
-    email_recipients = normalize_email_recipients(rule.get('email_recipients') or [])
-    notify_enabled = email_enabled or push_enabled
     camera_name = str((settings or {}).get('name') or '').strip() or None
-    rule_display = str(rule.get('name') or 'Activity Spike').strip() or 'Activity Spike'
-    plural = 's' if label and not label.endswith('s') else ''
-
     metadata = {
-        'source': 'activity_spike',
+        'source': source,
         'camera_id': camera_id,
         'camera_name': camera_name,
         'zone_id': fire.get('zone_id'),
         'zone_name': fire.get('zone_name'),
-        'label': label,
-        'count': count,
-        'threshold': round(threshold, 2),
-        'mean': fire.get('mean'),
-        'hour': fire.get('hour'),
+        **details,
         'confidence': round(confidence, 3),
     }
-    rule_name = f'{zone_name} · {rule_display}'
-    message = f'Unusual activity in {zone_name}: {count} {str(label).title()}{plural} (normally ~{fire.get("mean")})'
     notify_rule = {
         'name': rule_name,
         'email_enabled': email_enabled,
         'push_enabled': push_enabled,
-        'email_recipients': email_recipients,
+        'email_recipients': normalize_email_recipients(rule.get('email_recipients') or []),
         'notify_start': str(rule.get('notify_start') or '').strip() or None,
         'notify_end': str(rule.get('notify_end') or '').strip() or None,
     }
-    alert_active = notify_enabled and _rule_notify_active_now(notify_rule)
+    alert_active = (email_enabled or push_enabled) and _rule_notify_active_now(notify_rule)
     alerts = [{
         'created_at': now_iso, 'rule_name': rule_name, 'label': label,
         'confidence': confidence, 'message': message,
@@ -885,7 +781,7 @@ def _emit_activity(camera_id: str, settings: dict[str, Any], fire: dict[str, Any
     if alert_active:
         alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
         submit_alert_notification(deliver_alert_notifications, [alert_payload], event_id, [notify_rule])
-    logger.info('Activity spike on %s: %d %s in %s (event %s)', camera_id, count, label, zone_name, event_id)
+    return event_id
 
 
 def _attach_recording(camera_id: str, settings: dict[str, Any], event_id: int, now_iso: str, label: str, confidence: float) -> int | None:
@@ -901,5 +797,5 @@ def _attach_recording(camera_id: str, settings: dict[str, Any], event_id: int, n
         detection = {'label': label, 'confidence': confidence, 'alert_triggered': True}
         return attach_event_recording(event_id, now_iso, 'rtsp', [detection], camera_id=camera_id, recording_config=rec_config)
     except Exception as exc:  # noqa: BLE001 - recording is best-effort
-        logger.warning('Tripwire recording attach failed on %s: %s', camera_id, exc)
+        logger.warning('Behaviour recording attach failed on %s: %s', camera_id, exc)
         return None

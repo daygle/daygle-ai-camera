@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
+from tests.support import add_event, list_recordings, _load_app, LocalClient, _login, _server, _setup_admin
 
 from app.database import EventDatabase
 
@@ -292,7 +292,7 @@ def test_tags_skip_detected_labels_and_reach_recordings(av, flow):
 # ---------------------------------------------------------------------------
 
 def _event(db, camera_id, created_at, text=None, name=None):
-    event_id = db.add_event(created_at=created_at, source='rtsp', snapshot_path='snap.jpg', detections=[],
+    event_id = add_event(db, created_at=created_at, source='rtsp', snapshot_path='snap.jpg', detections=[],
                             metadata={'camera_id': camera_id, 'camera_name': name or camera_id})
     if text is not None:
         db.set_event_description(event_id, {'text': text, 'model': 'm'})
@@ -524,7 +524,7 @@ def test_ai_tags_are_searchable_and_marked_on_recordings(tmp_path):
     recording = db.get_recording(recording_id)
     assert recording['labels'] == ['person']          # the detected label stays a detection
     assert recording['ai_labels'] == ['ladder']
-    listed = db.list_recordings(label='ladder')       # the label filter matches AI tags
+    listed = list_recordings(db, label='ladder')       # the label filter matches AI tags
     assert [r['id'] for r in listed] == [recording_id]
     assert listed[0]['ai_labels'] == ['ladder'] and listed[0]['labels'] == ['person']
     event = db.get_event(event_id)

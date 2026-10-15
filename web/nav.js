@@ -283,8 +283,8 @@ window.daygleAuthReady = (async () => {
         { href: '/zones', matches: ['/zones'], label: 'Zones', icon: 'zones' },
         { href: '/alerts', matches: ['/alerts'], label: 'Alerts', icon: 'alerts' },
         // People enrolment lives in the People card on the Face Recognition
-        // page (/detection/faces#people); /people redirects there.
-        { href: '/detection', matches: ['/detection', '/objects', '/sounds', '/face-recognition'], label: 'Detection', icon: 'detection' },
+        // page (/detection/faces#people).
+        { href: '/detection', matches: ['/detection'], label: 'Detection', icon: 'detection' },
       ],
     },
     {
@@ -293,7 +293,7 @@ window.daygleAuthReady = (async () => {
       admin: true,
       links: [
         { href: '/ai', matches: ['/ai'], label: 'AI', icon: 'ai' },
-        { href: '/models', matches: ['/models', '/onnx', '/camera-models', '/yamnet-tflite', '/arcface'], label: 'Models', icon: 'models' },
+        { href: '/models', matches: ['/models'], label: 'Models', icon: 'models' },
       ],
     },
     {

@@ -304,10 +304,6 @@ class SlidingWindowRateLimiter:
             dq.append(now)
             return len(dq)
 
-    def reset(self, key: str) -> None:
-        with self._lock:
-            self._hits.pop(key, None)
-
     def _maybe_evict_all(self, now: float) -> None:
         """Occasionally drop every key whose window has fully elapsed.
 
