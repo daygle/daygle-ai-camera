@@ -877,3 +877,41 @@ def test_revived_car_that_drives_off_still_reads_moving():
         states.append(os_.detection_motion_state(out, None, out.get('track_displacement')))
     assert states[0] == os_.MODE_STILL
     assert states[-1] == os_.MODE_MOVING
+
+
+def test_a_zoom_does_not_make_a_parked_car_read_as_moving():
+    """A zoom rescales every box: a parked car's box 'grows' across it. The
+    camera-motion rebase keeps the car's id but measures it afresh on the new
+    view, so it reads still again instead of moving for several cycles."""
+    cam = 'trk-zoom'
+    _reset(cam)
+    for _ in range(10):
+        before = ot.update_object_tracks(cam, [_det('car', 0.40, 0.40, 0.20, 0.12)])
+    tid = before[0]['track_id']
+    assert before[0]['track_displacement'] <= ot.TRACK_STILL_DISPLACEMENT
+
+    def zoomed(scale):
+        # Zooming about the frame centre scales the box and its offset from it.
+        w, h = 0.20 * scale, 0.12 * scale
+        cx, cy = 0.5 + (0.50 - 0.5) * scale, 0.5 + (0.46 - 0.5) * scale
+        return _det('car', cx - w / 2, cy - h / 2, w, h)
+
+    # Without the rebase, the same zoom reads as motion.
+    control = 'trk-zoom-control'
+    _reset(control)
+    for _ in range(10):
+        ot.update_object_tracks(control, [_det('car', 0.40, 0.40, 0.20, 0.12)])
+    for scale in (1.1, 1.2, 1.3):
+        ot.update_object_tracks(control, [zoomed(scale)])
+    after = None
+    for _ in range(3):
+        after = ot.update_object_tracks(control, [zoomed(1.3)])
+    assert after[0]['track_displacement'] > ot.TRACK_STILL_DISPLACEMENT
+
+    for scale in (1.1, 1.2, 1.3):  # the camera zooms in over three cycles
+        ot.rebase_object_tracks(cam)
+        out = ot.update_object_tracks(cam, [zoomed(scale)])
+        assert out[0]['track_id'] == tid
+    readings = [ot.update_object_tracks(cam, [zoomed(1.3)])[0]['track_displacement'] for _ in range(4)]
+    assert all(r is None or r <= ot.TRACK_STILL_DISPLACEMENT for r in readings), readings
+    assert readings[-1] is not None
