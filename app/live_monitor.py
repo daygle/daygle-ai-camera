@@ -79,7 +79,7 @@ from app.object_settings import (
     still_dwell_candidates,
     update_still_dwell_alerts,
 )
-from app.object_tracking import recent_track_boxes, update_object_tracks
+from app.object_tracking import rebase_object_tracks, recent_track_boxes, update_object_tracks
 from app.behaviour_monitor import (
     clear_behavioural_state,
     emit_activity_spike_anomalies,
@@ -1408,6 +1408,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # place -- it never adds or drops detections -- so it cannot change what any
     # downstream gate counts.
     _tracking_started = time.perf_counter()
+    if camera_motion['active']:
+        # The camera is panning, tilting or zooming: every box shifts or
+        # rescales with the view, so movement is measured afresh once it stops.
+        rebase_object_tracks(camera_id)
     detections = update_object_tracks(
         camera_id, detections,
         hold_labels=frozenset() if _face_pass_ran else frozenset({'face'}),
@@ -1550,6 +1554,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         camera_id, object_detections,
         required_frames=_confirm_frames, window_frames=_confirm_window,
         location_iou=_confirm_iou,
+        skip_confidence=live_settings.get('detection_confirm_skip_confidence', 0.0),
     )
     try:
         _confirm_spatial = float(_confirm_iou or 0) > 0

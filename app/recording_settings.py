@@ -70,6 +70,7 @@ CAMERA_MOTION_PROFILE_FIELDS = (
     'detection_confirm_frames',
     'detection_confirm_window',
     'detection_confirm_iou',
+    'detection_confirm_skip_confidence',
     'always_run_object_detection',
     'adaptive_detection_enabled',
     'object_detection_region_boost',
@@ -109,6 +110,8 @@ def _normalize_profile_value(key: str, value: Any) -> int | float | str | bool |
             return max(1, min(30, int(value)))
         if key == 'detection_confirm_iou':
             return round(max(0.0, min(0.9, float(value))), 4)
+        if key == 'detection_confirm_skip_confidence':
+            return round(max(0.0, min(1.0, float(value))), 4)
         if key == 'periodic_scan_interval_seconds':
             return max(0, min(3600, int(value)))
         if key == 'motion_frame_width':

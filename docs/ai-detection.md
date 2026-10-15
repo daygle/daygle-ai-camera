@@ -337,6 +337,11 @@ missing alert does not necessarily mean ONNX missed the object. The audit of
   the next frame (as after a reconnect). Without this, the background would
   still show the old view for several seconds and motion zones would fire on
   the changed picture.
+  The object tracker does the same: while the camera moves, every track keeps
+  its id but forgets its box history, so moving/still is measured afresh on the
+  new view. A zoom rescales every box, and without this a parked car's box
+  "growing" across the zoom read as moving for several checks after the
+  camera stopped.
 - **Temporal confirmation:** object confirmation defaults to 2 detections in a
   2-frame window (or the configured window), so an isolated valid detection is
   held until it persists. Optional spatial IoU confirmation is stricter.

@@ -727,6 +727,32 @@ def update_object_tracks(
     return detections
 
 
+def rebase_object_tracks(camera_id: str) -> None:
+    """Forget every track's box history because the camera itself moved.
+
+    A pan, tilt or zoom shifts and rescales every box in the picture, so a
+    parked car's box "grows" across a zoom. Its history then spans two views,
+    and the displacement and step measures read that change as motion for
+    several cycles after the camera stops - still objects counted as moving.
+    Called on every cycle while the camera moves (app-issued PTZ, auto-track,
+    detected global motion): track ids survive, but movement is measured
+    afresh from the new view. Parked-car anchors (and retired ones awaiting
+    revival) describe the old view, so they go too.
+    """
+    with _state._object_tracks_lock:
+        state = _state._object_tracks.get(camera_id)
+        if not state:
+            return
+        for track in state.get("tracks") or []:
+            track["centers"] = []
+            track["boxes"] = []
+            for key in ("velocity", "anchor", "departure"):
+                track.pop(key, None)
+            track["anchor_breaks"] = 0
+            track["still_streak"] = 0
+        state["retired"] = []
+
+
 def live_track_ids(camera_id: str, label: str) -> set[Any]:
     """Ids of the tracks with ``label`` the tracker still holds for a camera.
 

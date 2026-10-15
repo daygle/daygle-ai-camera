@@ -127,6 +127,7 @@ def _history_entry(detection: dict[str, Any]) -> dict[str, Any]:
         **({'motion_basis': detection['motion_basis']} if isinstance(detection.get('motion_basis'), str) else {}),
         **({'track_age': detection['track_age']} if isinstance(detection.get('track_age'), int) else {}),
         **({'track_displacement': round(float(detection['track_displacement']), 4)} if isinstance(detection.get('track_displacement'), (int, float)) else {}),
+        **({'confirmed_by': detection['confirmed_by']} if detection.get('confirmed_by') == 'confidence' else {}),
     }
 
 
@@ -430,6 +431,7 @@ def confirm_object_detections(
     required_frames: Any,
     window_frames: Any,
     location_iou: Any = 0.0,
+    skip_confidence: Any = 0.0,
 ) -> list[dict[str, Any]]:
     """Temporal N-of-M confirmation gate for object detections.
 
@@ -462,7 +464,18 @@ def confirm_object_detections(
     different spot each cycle never accrues the spatial streak. A detection with
     no usable box, and the ``face`` label, bypass the spatial test and fall back
     to label-only confirmation.
+
+    ``skip_confidence`` (0.0 = off, the default) lets a detection scoring at
+    least this confidence through on first sight: false detections are almost
+    always borderline, so a clear sighting need not wait a cycle (or be lost
+    when the object is only in view for one). It is still recorded in the
+    history, and borderline detections are gated as before. A detection let
+    through only by it is marked ``confirmed_by: 'confidence'`` for the log.
     """
+    try:
+        skip_at = float(skip_confidence or 0.0)
+    except (TypeError, ValueError):
+        skip_at = 0.0
     try:
         required = int(required_frames)
     except (TypeError, ValueError):
@@ -561,6 +574,19 @@ def confirm_object_detections(
         return streak >= required
 
     def _keep(detection: dict[str, Any]) -> bool:
+        if _gate(detection):
+            return True
+        if skip_at > 0.0:
+            try:
+                confidence = float(detection.get('confidence') or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if confidence >= skip_at:
+                detection['confirmed_by'] = 'confidence'
+                return True
+        return False
+
+    def _gate(detection: dict[str, Any]) -> bool:
         # Canonicalize the same way the ``cycle_boxes`` keys and ``confirmed``
         # set above do, so an aliased detector label (``human`` / ``people`` /
         # ``pedestrian`` -> ``person``) is looked up under the same key it was

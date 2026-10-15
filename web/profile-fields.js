@@ -28,6 +28,7 @@ const PROFILE_FIELD_GROUPS = [
       { key: 'detection_confirm_frames', label: 'Confirm Frames', kind: 'number', min: 1, max: 10, step: 1, placeholder: '1', tip: 'Require an object in this many recent cycles before it can alert or record. 1 = react on the first frame.' },
       { key: 'detection_confirm_window', label: 'Confirm Window', kind: 'number', min: 1, max: 30, step: 1, placeholder: '1', requires: 'confirm' },
       { key: 'detection_confirm_iou', label: 'Confirm Location (IoU)', kind: 'number', min: 0, max: 0.9, step: 0.05, placeholder: '0', requires: 'confirm' },
+      { key: 'detection_confirm_skip_confidence', label: 'Skip Confirmation Above', kind: 'number', min: 0, max: 1, step: 0.05, placeholder: '0', requires: 'confirm', tip: 'A detection at or above this confidence counts on first sight; borderline ones still need confirming. 0 = off. Try 0.80.' },
     ],
   },
   {
