@@ -23,12 +23,9 @@ import threading
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger('daygle.ai')
+import numpy as np
 
-try:
-    import numpy as np
-except ImportError:  # pragma: no cover - exercised only in minimal installs
-    np = None  # type: ignore[assignment]
+logger = logging.getLogger('daygle.ai')
 
 
 # ArcFace / InsightFace recognition models take a 112x112 aligned RGB crop and
@@ -65,14 +62,6 @@ class FaceEmbedderUnavailableError(RuntimeError):
     """Raised when the configured embedding model cannot run inference."""
 
 
-def _require_numpy():
-    if np is None:
-        raise FaceEmbedderUnavailableError(
-            "numpy is not installed. Install requirements.txt or run pip install numpy."
-        )
-    return np
-
-
 def _resolve_project_path(path: str | Path) -> Path:
     candidate = Path(path)
     return candidate if candidate.is_absolute() else _BASE_DIR / candidate
@@ -84,7 +73,6 @@ def decode_bgr_image(image_bytes: bytes) -> Any:
     Raises ``ValueError`` on empty input or an undecodable image so the caller
     can return a clean 400 rather than passing garbage to the embedder.
     """
-    npmod = _require_numpy()
     try:
         import cv2
     except ImportError as exc:  # pragma: no cover - exercised only in minimal installs
@@ -93,7 +81,7 @@ def decode_bgr_image(image_bytes: bytes) -> Any:
         ) from exc
     if not image_bytes:
         raise ValueError("image is empty")
-    array = npmod.frombuffer(image_bytes, dtype=npmod.uint8)
+    array = np.frombuffer(image_bytes, dtype=np.uint8)
     image = cv2.imdecode(array, cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("uploaded file is not a readable image")
@@ -158,12 +146,11 @@ def normalize_embedding(vector: Any) -> Any:
     stored and queried embedding is normalised once here. A zero (or numerically
     tiny) vector is returned unchanged rather than divided by ~0.
     """
-    npmod = _require_numpy()
-    vec = npmod.asarray(vector, dtype=npmod.float32).reshape(-1)
-    norm = float(npmod.linalg.norm(vec))
+    vec = np.asarray(vector, dtype=np.float32).reshape(-1)
+    norm = float(np.linalg.norm(vec))
     if norm <= 1e-10:
         return vec
-    return (vec / norm).astype(npmod.float32)
+    return (vec / norm).astype(np.float32)
 
 
 def embedding_to_bytes(vector: Any) -> bytes:
@@ -172,9 +159,8 @@ def embedding_to_bytes(vector: Any) -> bytes:
     The vector is L2-normalised first so every row in ``person_faces`` is stored
     ready-to-compare and the matcher never has to re-normalise enrolled data.
     """
-    npmod = _require_numpy()
     vec = normalize_embedding(vector)
-    return npmod.ascontiguousarray(vec, dtype='<f4').tobytes()
+    return np.ascontiguousarray(vec, dtype='<f4').tobytes()
 
 
 def embedding_from_bytes(data: bytes, dim: int) -> Any:
@@ -184,13 +170,12 @@ def embedding_from_bytes(data: bytes, dim: int) -> Any:
     a truncated/corrupt BLOB fails loudly instead of yielding a mis-shaped
     vector that would silently corrupt the match matrix.
     """
-    npmod = _require_numpy()
-    vec = npmod.frombuffer(data, dtype='<f4')
+    vec = np.frombuffer(data, dtype='<f4')
     if vec.shape[0] != int(dim):
         raise ValueError(
             f"embedding byte length {vec.shape[0]} does not match declared dim {dim}"
         )
-    return npmod.array(vec, dtype=npmod.float32)
+    return np.array(vec, dtype=np.float32)
 
 
 class MatchResult:
@@ -227,7 +212,6 @@ class FaceMatcher:
     """
 
     def __init__(self, rows: list[dict[str, Any]]):
-        npmod = _require_numpy()
         vectors: list[Any] = []
         self.person_ids: list[int] = []
         self.names: list[str] = []
@@ -254,13 +238,13 @@ class FaceMatcher:
             self.face_ids.append(int(row.get('face_id', -1)))
         self.dim = expected_dim or 0
         if vectors:
-            self.matrix = npmod.vstack(vectors).astype(npmod.float32)
+            self.matrix = np.vstack(vectors).astype(np.float32)
         else:
-            self.matrix = npmod.zeros((0, self.dim), dtype=npmod.float32)
+            self.matrix = np.zeros((0, self.dim), dtype=np.float32)
         # Precomputed once so the per-query runner-up masking in ``match`` does
         # not rebuild this array on every recognition (the hot path embeds and
         # matches each uncached face every cycle).
-        self._person_id_array = npmod.asarray(self.person_ids, dtype=npmod.int64)
+        self._person_id_array = np.asarray(self.person_ids, dtype=np.int64)
 
     def __len__(self) -> int:
         return int(self.matrix.shape[0])
@@ -277,14 +261,13 @@ class FaceMatcher:
         the query dimensionality does not match the enrolled vectors, or when
         the best cosine score is below ``threshold``.
         """
-        npmod = _require_numpy()
         if self.is_empty:
             return None
         vec = normalize_embedding(query)
         if vec.shape[0] != self.matrix.shape[1]:
             return None
         scores = self.matrix @ vec
-        best_index = int(npmod.argmax(scores))
+        best_index = int(np.argmax(scores))
         best_score = float(scores[best_index])
         if best_score < threshold:
             return None
@@ -305,14 +288,13 @@ class FaceMatcher:
 
 def _calibration_images(size: int) -> list[Any]:
     """Visibly different BGR test images for :func:`choose_input_scaling`."""
-    npmod = _require_numpy()
-    ramp = npmod.linspace(0, 255, size, dtype=npmod.float32)
-    horizontal = npmod.repeat(npmod.tile(ramp, (size, 1))[:, :, None], 3, axis=2)
-    vertical = npmod.transpose(horizontal, (1, 0, 2))
-    cells = (npmod.indices((size, size)) // max(1, size // 8)).sum(axis=0) % 2
-    checker = npmod.repeat((40 + 175 * cells)[:, :, None], 3, axis=2)
-    noise = npmod.random.default_rng(112).integers(0, 256, (size, size, 3))
-    return [image.astype(npmod.uint8) for image in (horizontal, vertical, checker, noise)]
+    ramp = np.linspace(0, 255, size, dtype=np.float32)
+    horizontal = np.repeat(np.tile(ramp, (size, 1))[:, :, None], 3, axis=2)
+    vertical = np.transpose(horizontal, (1, 0, 2))
+    cells = (np.indices((size, size)) // max(1, size // 8)).sum(axis=0) % 2
+    checker = np.repeat((40 + 175 * cells)[:, :, None], 3, axis=2)
+    noise = np.random.default_rng(112).integers(0, 256, (size, size, 3))
+    return [image.astype(np.uint8) for image in (horizontal, vertical, checker, noise)]
 
 
 def _mean_pairwise_similarity(vectors: list[Any]) -> float:
@@ -379,9 +361,6 @@ class FaceEmbedder:
         self._inference_semaphore = threading.Semaphore(max(1, int(max_concurrency)))
         self.input_scaling = INPUT_SCALING_NORMALIZED
 
-        if np is None:
-            self.unavailable_reason = "numpy is not installed. Install requirements.txt or run pip install numpy."
-            return
         if not self.model_path.exists():
             self.unavailable_reason = f"Face embedding model not found: {self.model_path}"
             return
@@ -448,17 +427,16 @@ class FaceEmbedder:
         normalises inside its graph, see ``input_scaling``), and returns an
         ``[1, 3, H, W]`` float32 tensor.
         """
-        npmod = _require_numpy()
         import cv2
 
         if face_bgr is None or getattr(face_bgr, 'size', 0) == 0:
             raise ValueError("face crop is empty")
         resized = cv2.resize(face_bgr, (self.input_size, self.input_size), interpolation=cv2.INTER_LINEAR)
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-        chw = npmod.transpose(rgb, (2, 0, 1)).astype(npmod.float32)
+        chw = np.transpose(rgb, (2, 0, 1)).astype(np.float32)
         if (scaling or self.input_scaling) != INPUT_SCALING_RAW:
             chw = (chw - _PIXEL_MEAN) / _PIXEL_SCALE
-        return npmod.ascontiguousarray(chw[None, ...], dtype=npmod.float32)
+        return np.ascontiguousarray(chw[None, ...], dtype=np.float32)
 
     def _embed_tensor(self, tensor: Any) -> Any:
         with self._inference_semaphore:

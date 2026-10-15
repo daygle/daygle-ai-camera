@@ -78,9 +78,7 @@ def test_detector_backend_selection(tmp_path):
     )
     assert isinstance(detector, OnnxYoloDetector)
     assert detector.available is False
-    assert "ONNX model not found" in (detector.unavailable_reason or "") or "numpy is not installed" in (
-        detector.unavailable_reason or ""
-    )
+    assert "ONNX model not found" in (detector.unavailable_reason or "")
 
 
 def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
@@ -134,7 +132,7 @@ def test_status_ai_reports_model_missing_for_missing_onnx(tmp_path, monkeypatch)
         assert payload['detector_loaded'] is False
         assert payload['active_config_source'] == 'config.yaml'
         assert str(tmp_path / 'missing.onnx') == payload['model_path']
-        assert 'ONNX model not found' in payload['error'] or 'numpy is not installed' in payload['error']
+        assert 'ONNX model not found' in payload['error']
     finally:
         server.should_exit = True
         thread.join(timeout=5)

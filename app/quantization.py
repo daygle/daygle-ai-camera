@@ -327,10 +327,7 @@ def _configured_camera_calibration_frames() -> tuple[list[Any], int]:
     number of enabled configured cameras, allowing the caller/reader to report
     synthetic fallback coverage accurately.
     """
-    try:
-        import numpy as np  # type: ignore[import-untyped]
-    except ImportError:
-        return [], 0
+    import numpy as np  # type: ignore[import-untyped]
 
     configs = [
         config for config in list(getattr(_state, 'cameras_config', []) or [])

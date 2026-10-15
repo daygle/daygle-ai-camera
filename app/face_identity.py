@@ -31,11 +31,6 @@ from app.face_detection_rules import (
 from app.face_recognition_service import get_face_recognition_service
 from app.object_tracking import live_track_ids
 
-try:
-    import numpy as np
-except ImportError:  # pragma: no cover - exercised only in minimal installs
-    np = None  # type: ignore[assignment]
-
 logger = logging.getLogger('daygle.ai')
 
 _FACE_LABEL = 'face'
@@ -343,7 +338,7 @@ def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], f
         with _lock:
             _clear_camera_identity_state(camera_id, clear_generation=True)
         return detections
-    if np is None or frame is None or not getattr(frame, 'shape', None):
+    if frame is None or not getattr(frame, 'shape', None):
         return detections
 
     # Matcher refreshes happen after enrolment/deletion and service replacement
