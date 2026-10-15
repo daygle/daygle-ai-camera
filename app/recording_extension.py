@@ -28,9 +28,7 @@ The two pieces of exclusive state live in ``app.state`` (accessed via
   guarding ``active_rtsp_recordings``.
 
 Mirrors the Phase-26 (``live_detection_history`` /
-``live_detection_history_lock``), Phase-27
-(``_notification_threads_lock`` / ``_notification_threads``), and
-Phase-29 (``live_detection_status_lock`` / ``live_detection_status``)
+``live_detection_history_lock``) and Phase-29 (``live_detection_status_lock`` / ``live_detection_status``)
 precedent for keeping state on ``app.main``.
 
 **Pool-A rebind (in ``app/main.py``):** all four helpers are re-bound

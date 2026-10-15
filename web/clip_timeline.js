@@ -212,28 +212,28 @@ function renderClipTimeline() {
   els.clipTimelineLegend.innerHTML = '';
   for (const seg of segments) {
     const text = seg.cls === 'event' && singleDetection
-      ? 'Event: Single Detection'
-      : `${seg.label} ${fmtClipSeconds(Math.max(0, seg.end - seg.start))}`;
+      ? titleCase('Event: Single Detection')
+      : `${titleCase(seg.label)} ${fmtClipSeconds(Math.max(0, seg.end - seg.start))}`;
     appendClipLegendItem(`clip-seg-${seg.cls}`, text, `${seg.label}: measured from ${seg.basis}`);
   }
   if (triggerAt !== null) {
     appendClipLegendItem(
       'clip-legend-swatch-trigger',
-      `Trigger ${fmtClipSeconds(triggerAt)}`,
+      `${titleCase('Trigger')} ${fmtClipSeconds(triggerAt)}`,
       'When the triggering event fired. Pre-Event covers clip start to here; Post-event runs from here.',
     );
   }
   if (extensions && extensions.runs.length) {
     appendClipLegendItem(
       'clip-legend-swatch-extension',
-      `Extended ×${extensions.runs.length}`,
+      `${titleCase('Extended')} ×${extensions.runs.length}`,
       extensions.runs.map(clipExtensionText).join('\n'),
     );
   }
   if (extensions && extensions.originalEnd !== null) {
     appendClipLegendItem(
       'clip-legend-swatch-original-end',
-      `Original end ${fmtClipSeconds(extensions.originalEnd)}`,
+      `${titleCase('Original end')} ${fmtClipSeconds(extensions.originalEnd)}`,
       'Where the clip would have ended (trigger + Post-event) without the extensions.',
     );
   }

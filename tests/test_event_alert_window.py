@@ -40,9 +40,7 @@ def _run(tmp_path, monkeypatch, *, now_hm, notify=('20:00', '06:00'), push=True)
     )
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx'}, main.utc_now())
     main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
-    rule = {'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 30,
-            'push_enabled': push, 'email_enabled': False,
-            'notify_start': notify[0], 'notify_end': notify[1]}
+    rule = {'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 30, 'alert_schedules': [{'push_enabled': push, 'email_enabled': False, 'notify_start': notify[0], 'notify_end': notify[1]}]}
     settings = {
         'id': 'driveway', 'name': 'Driveway',
         'detection': {'zones': [{'id': 'drive', 'name': 'Driveway', 'enabled': True,

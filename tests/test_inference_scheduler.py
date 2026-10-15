@@ -82,7 +82,7 @@ def test_newest_submission_replaces_the_queued_one():
 
         scheduler.submit('cam', {'tag': 'old'}, lambda: ('frame', {}))
         scheduler.submit('cam', {'tag': 'new'}, lambda: ('frame', {}))
-        assert scheduler.pending_cameras() == ['cam'], 'one job per camera, never a queue'
+        assert sorted(scheduler._pending) == ['cam'], 'one job per camera, never a queue'
 
         gate.release.set()
         assert _wait_for(lambda: 'new' in order)
@@ -306,7 +306,7 @@ def test_a_camera_with_no_frame_is_released_not_left_busy():
         scheduler.submit('cam', {}, lambda: None)
         assert _wait_for(lambda: released == ['cam'])
         assert scheduler.stats()['no_frame'] == 1
-        assert not scheduler.is_busy('cam')
+        assert 'cam' not in scheduler._pending and 'cam' not in scheduler._running
     finally:
         scheduler.stop()
 
@@ -336,7 +336,7 @@ def test_stop_releases_queued_cameras_and_refuses_new_work():
     scheduler.submit('blocker', {}, gate.read_frame)
     assert gate.started.wait(timeout=2)
     scheduler.submit('queued', {}, lambda: ('frame', {}))
-    assert scheduler.is_busy('queued')
+    assert 'queued' in scheduler._pending
 
     # Stop while the worker is still occupied: 'queued' cannot be served, so it
     # must be dropped (and its camera released) rather than silently stranded.

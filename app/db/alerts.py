@@ -30,7 +30,7 @@ class AlertsMixin:
         # ``Z`` (0x5A) sorts AFTER ``+`` (0x2B) and ``.`` (0x2E) sorts AFTER
         # ``+``, so a raw Z-form bound at the exact local-midnight boundary
         # would exclude the row that represents that same instant -- the same
-        # failure mode ``RecordingsMixin.list_recordings`` guards against.
+        # failure mode ``RecordingsMixin.list_recordings_page`` guards against.
         since = _normalize_iso_to_utc(since) if since else None
         with self.connect() as db:
             since_clause = "AND ah.created_at >= ?" if since else ""
@@ -52,54 +52,6 @@ class AlertsMixin:
                 params,
             ).fetchall()
             return [dict(row) for row in rows]
-
-    def dismiss_alert_group(self, group_key: str) -> int:
-        parts = group_key.split('-', 1)
-        if len(parts) != 2:
-            return 0
-        kind, raw_id = parts
-        try:
-            id_val = int(raw_id)
-        except ValueError:
-            return 0
-        with self.write_slot(), self.connect() as db:
-            if kind == 'recording':
-                # The alerts page groups object/motion alerts by recording_id (a
-                # continuous clip can span several events), so dismissing the group
-                # must clear every such alert tied to that recording, not just one
-                # event's. Sound alerts that share the recording are grouped and
-                # dismissed separately (by their own event), so exclude sound-source
-                # events here - otherwise dismissing the object row would silently
-                # clear the clip's still-visible sound alert too.
-                cursor = db.execute(
-                    """
-                    UPDATE alert_history SET dismissed = 1
-                    WHERE recording_id = ? AND dismissed = 0
-                      AND (
-                        event_id IS NULL
-                        OR event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
-                      )
-                    """,
-                    (id_val,),
-                )
-            elif kind == 'event':
-                cursor = db.execute(
-                    "UPDATE alert_history SET dismissed = 1 WHERE event_id = ? AND dismissed = 0",
-                    (id_val,),
-                )
-            elif kind == 'alert':
-                cursor = db.execute(
-                    "UPDATE alert_history SET dismissed = 1 WHERE id = ? AND dismissed = 0",
-                    (id_val,),
-                )
-            else:
-                return 0
-            return cursor.rowcount
-
-    def dismiss_all_alerts(self) -> int:
-        with self.write_slot(), self.connect() as db:
-            cursor = db.execute("UPDATE alert_history SET dismissed = 1 WHERE dismissed = 0")
-            return cursor.rowcount
 
     def delete_all_alerts(self) -> int:
         with self.write_slot(), self.connect() as db:

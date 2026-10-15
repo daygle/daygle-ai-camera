@@ -24,7 +24,6 @@ class CompiledZone:
 
 @dataclass(frozen=True)
 class CameraPolicy:
-    settings_id: int
     camera_labels: frozenset[str]
     zones: tuple[CompiledZone, ...]
     object_zones: tuple[CompiledZone, ...]
@@ -57,7 +56,7 @@ class CameraPolicy:
         object_zones = tuple(zone for zone in compiled if zone.zone.get("monitor_objects", True))
         face_zones = tuple(zone for zone in compiled if any(str(rule.get("label", "")).lower() == "face" for rule in zone.rules))
         motion_zones = tuple(zone for zone in compiled if zone.zone.get("monitor_motion", True))
-        return cls(id(settings), camera_labels, tuple(compiled), object_zones, face_zones, motion_zones)
+        return cls(camera_labels, tuple(compiled), object_zones, face_zones, motion_zones)
 
 
 _cache: dict[int, tuple[dict[str, Any], CameraPolicy]] = {}

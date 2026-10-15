@@ -1,7 +1,7 @@
 """Phase-21 integration tests for ``app/zone_schema.py``.
 
 Phase-21 extracted the 7 zone/schema normalizers (``normalize_label_list``,
-``normalize_zone_object_rules``, ``zone_motion_min_confidence``,
+``normalize_zone_object_rules``,
 ``normalize_zone_point``, ``rectangle_zone_points``, ``zone_bounds``,
 ``normalize_monitoring_zones``) PLUS the module-private
 ``_LABEL_ALIASES`` annotation assignment from ``app/main.py`` into
@@ -11,8 +11,7 @@ Phase-18 ``app/camera_config.py``, Phase-19 ``app/recording_settings.py``,
 Phase-20 ``app/ai_settings.py``).
 
 Internal ``main.py`` callers (``validate_camera_settings`` L2537-2538,
-``render_live_snapshot_svg`` L2025, ``detection_label_allowed_for_zone``
-L799, ``filter_detections_for_camera_zones`` L815 + L911 + L919)
+``filter_detections_for_camera_zones``)
 reference these as bare names inside function bodies; the top-of-file
 Pool A rebind wires ``main.<name>`` (and ``main._LABEL_ALIASES``)
 before any of those bodies evaluates.
@@ -36,8 +35,6 @@ Tests pin three contracts:
      ``min_confidence`` to [0.0, 1.0] (TypeError/ValueError -> 0.5);
      drops the retired ``cooldown_seconds`` (the presence gate replaced it);
      all bool/email/push/4 time-window fields normalized.
-   - ``zone_motion_min_confidence``: clamps min_confidence [0.0, 1.0],
-     defaults to 0.45 when no motion rule enabled.
    - ``normalize_zone_point``: non-dict -> None; clamps x/y to [0.0, 1.0];
      TypeError -> None.
    - ``rectangle_zone_points``: 4-corner dict list, rounded 4 dp.
@@ -45,8 +42,8 @@ Tests pin three contracts:
      minimum 0.01 width/height.
    - ``normalize_monitoring_zones``: orchestrator; clamps x/y/width/height
      to [0.0, 1.0]; uses ``zone.points`` (>=3 points) OR falls back to
-     ``rectangle_zone_points``; rebuilds ``object_rules``; folds legacy
-     ``monitor_motion`` into motion rule.
+     ``rectangle_zone_points``; rebuilds ``object_rules``; derives
+     ``monitor_motion`` / ``object_labels`` from the rules.
 3. **Top-level preload pattern.** ``import app.main`` BEFORE
    ``import app.zone_schema`` at module top. After Pool C elimination
    zone_schema.py no longer imports from app.main at the function level,
@@ -293,95 +290,17 @@ def test_zone_bounds_collapses_to_minimum_01_when_points_coincident(zs):
     assert out[3] == 0.01  # height
 
 
-# -- zone_motion_min_confidence ---------------------------------------------
+# -- motion rule shape -----------------------------------------------------
 
-def test_zone_motion_min_confidence_returns_default_when_no_motion_rule(zs):
-    """When no motion rule exists, returns 0.45 (the canonical default)."""
-    zone = {'object_rules': [{'label': 'person', 'min_confidence': 0.9, 'enabled': True}]}
-    assert zs.zone_motion_min_confidence(zone) == 0.45
-
-
-def test_zone_motion_min_confidence_returns_rule_value_when_motion_enabled(zs):
-    """When the motion rule IS in ``object_rules`` AND enabled, returns
-    its ``min_confidence`` (clamped to [0.0, 1.0])."""
-    zone = {
-        'object_rules': [
-            {'label': 'motion', 'min_confidence': 0.7, 'enabled': True},
-        ],
-    }
-    assert zs.zone_motion_min_confidence(zone) == 0.7
-
-
-def test_zone_motion_min_confidence_clamps_out_of_range_value(zs):
-    """Out-of-range ``min_confidence`` values clamp to [0.0, 1.0]."""
-    zone = {'object_rules': [{'label': 'motion', 'min_confidence': 1.5, 'enabled': True}]}
-    assert zs.zone_motion_min_confidence(zone) == 1.0
-
-
-def test_zone_motion_min_confidence_skips_disabled_motion_rule(zs):
-    """If the motion rule exists but is disabled, returns 0.45 (default)
-    -- the rule's enabled flag drives the return."""
-    zone = {'object_rules': [{'label': 'motion', 'min_confidence': 0.9, 'enabled': False}]}
-    assert zs.zone_motion_min_confidence(zone) == 0.45
-
-
-def test_zone_motion_min_confidence_handles_type_error_gracefully(zs):
-    """Non-numeric ``min_confidence`` -> 0.45 fallback."""
-    zone = {'object_rules': [{'label': 'motion', 'min_confidence': 'oops', 'enabled': True}]}
-    assert zs.zone_motion_min_confidence(zone) == 0.45
-
-
-def test_zone_motion_max_confidence_defaults_clamps_and_skips_disabled(zs):
-    """``zone_motion_max_confidence`` returns the enabled motion rule's upper
-    bound, defaulting to 1.0 (no cap) when absent/invalid/disabled/missing,
-    and clamps to [0.0, 1.0]."""
-    # No motion rule -> default no-cap.
-    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'person', 'max_confidence': 0.5, 'enabled': True}]}) == 1.0
-    # Enabled motion rule -> its value.
-    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'motion', 'max_confidence': 0.7, 'enabled': True}]}) == 0.7
-    # Absent max on the motion rule -> 1.0.
-    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'motion', 'min_confidence': 0.3, 'enabled': True}]}) == 1.0
-    # Out of range clamps.
-    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'motion', 'max_confidence': 5.0, 'enabled': True}]}) == 1.0
-    # Disabled motion rule -> default.
-    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'motion', 'max_confidence': 0.4, 'enabled': False}]}) == 1.0
-    # Non-numeric -> fallback.
-    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'motion', 'max_confidence': 'oops', 'enabled': True}]}) == 1.0
-
-
-def test_zone_motion_gate_and_scale_overrides(zs):
-    """Per-zone gate/scale overrides read the enabled motion rule, clamp to the
-    validated ranges, and return None (inherit) when absent/blank/disabled."""
-    # Inherit when the motion rule has no override.
-    assert zs.zone_motion_gate_fraction({'object_rules': [{'label': 'motion', 'enabled': True}]}) is None
-    assert zs.zone_motion_scale_fraction({'object_rules': [{'label': 'motion', 'enabled': True}]}) is None
-    # Present + in range -> used.
-    z = {'object_rules': [{'label': 'motion', 'enabled': True, 'gate_fraction': 0.02, 'scale_fraction': 0.1}]}
-    assert zs.zone_motion_gate_fraction(z) == 0.02
-    assert zs.zone_motion_scale_fraction(z) == 0.1
-    # Out of range clamps to the bounds.
-    hi = {'object_rules': [{'label': 'motion', 'enabled': True, 'gate_fraction': 9.0, 'scale_fraction': 9.0}]}
-    assert zs.zone_motion_gate_fraction(hi) == 0.5
-    assert zs.zone_motion_scale_fraction(hi) == 1.0
-    # Disabled motion rule -> inherit.
-    off = {'object_rules': [{'label': 'motion', 'enabled': False, 'gate_fraction': 0.02}]}
-    assert zs.zone_motion_gate_fraction(off) is None
-
-
-def test_normalize_zone_object_rules_carries_motion_gate_scale(monkeypatch, zs):
-    """normalize_zone_object_rules stores clamped gate/scale on a motion rule and
-    forces them to None on non-motion (object) rules."""
+def test_normalize_zone_object_rules_drops_motion_gate_scale(monkeypatch, zs):
+    """Per-zone gate/scale overrides are gone: motion fires on its trigger."""
     monkeypatch.setattr(zs, 'normalize_bool_setting', lambda value, default=False: default if value is None else bool(value))
     monkeypatch.setattr(zs, 'normalize_email_recipients', lambda value: [])
-    zone = {'object_rules': [
+    rules = zs.normalize_zone_object_rules({'object_rules': [
         {'label': 'motion', 'gate_fraction': 0.9, 'scale_fraction': 0.0005},
-        {'label': 'person', 'gate_fraction': 0.02, 'scale_fraction': 0.1},
-    ]}
-    rules = {r['label']: r for r in zs.normalize_zone_object_rules(zone)}
-    assert rules['motion']['gate_fraction'] == 0.5      # clamped from 0.9
-    assert rules['motion']['scale_fraction'] == 0.001   # clamped from 0.0005
-    assert rules['person']['gate_fraction'] is None     # object rules never carry it
-    assert rules['person']['scale_fraction'] is None
+    ]})
+    assert 'gate_fraction' not in rules[0] and 'scale_fraction' not in rules[0]
+    assert rules[0]['trigger_fraction'] == zs.DEFAULT_MOTION_TRIGGER
 
 
 # -- normalize_zone_object_rules -------------------------------------------
@@ -393,7 +312,7 @@ def test_normalize_zone_object_rules_seeds_from_object_rules_list(monkeypatch, z
     _install_zone_dependencies(monkeypatch)
     zone = {'object_rules': [
         {'label': 'person', 'min_confidence': 0.6, 'cooldown_seconds': 30,
-         'email_recipients': ['a@example.com']},
+         'alert_schedules': [{'email_recipients': ['a@example.com']}]},
     ]}
     rules = zs.normalize_zone_object_rules(zone)
     assert len(rules) == 1
@@ -401,25 +320,23 @@ def test_normalize_zone_object_rules_seeds_from_object_rules_list(monkeypatch, z
     assert rule['label'] == 'person'
     assert rule['min_confidence'] == 0.6
     assert 'cooldown_seconds' not in rule  # retired: presence gate, no cooldown
-    assert rule['email_recipients'] == ['a@example.com']
+    assert rule['alert_schedules'][0]['email_recipients'] == ['a@example.com']
+    assert 'email_recipients' not in rule  # delivery lives on the schedules only
 
 
-def test_normalize_zone_alert_schedules_upgrades_legacy_fields_and_keeps_multiple_entries(monkeypatch, zs):
+def test_normalize_zone_alert_schedules_ignores_rule_level_fields_and_keeps_multiple_entries(monkeypatch, zs):
     _install_zone_dependencies(monkeypatch)
-    legacy = zs.normalize_zone_object_rules({'object_rules': [{
-        'label': 'person', 'email_enabled': True, 'push_enabled': False,
-        'email_recipients': ['legacy@example.com'], 'active_start': '08:00',
-        'active_end': '18:00', 'notify_start': '09:00', 'notify_end': '17:00',
+    bare = zs.normalize_zone_object_rules({'object_rules': [{
+        'label': 'person', 'email_enabled': True, 'email_recipients': ['x@example.com'],
+        'active_start': '08:00',
     }]})[0]
-    assert legacy['alert_schedules'] == [{
-        'id': 'schedule-1', 'email_enabled': True, 'push_enabled': False,
-        'email_recipients': ['legacy@example.com'], 'active_start': '08:00',
-        'active_end': '18:00', 'notify_start': '09:00', 'notify_end': '17:00',
+    assert bare['alert_schedules'] == [{
+        'id': 'schedule-1', 'email_enabled': False, 'push_enabled': False,
+        'email_recipients': [], 'active_start': None, 'active_end': None,
+        'notify_start': None, 'notify_end': None,
     }]
-    assert legacy['email_enabled'] is True
-    assert legacy['push_enabled'] is False
-    assert legacy['email_recipients'] == ['legacy@example.com']
-    assert legacy['active_start'] == '08:00'
+    for key in ('email_enabled', 'push_enabled', 'email_recipients', 'active_start', 'notify_start'):
+        assert key not in bare
 
     multiple = zs.normalize_zone_object_rules({'object_rules': [{
         'id': 'person-main', 'label': 'person',
@@ -430,21 +347,16 @@ def test_normalize_zone_alert_schedules_upgrades_legacy_fields_and_keeps_multipl
     }]})[0]
     assert [schedule['id'] for schedule in multiple['alert_schedules']] == ['morning', 'evening']
     assert [schedule['active_start'] for schedule in multiple['alert_schedules']] == ['06:00', '18:00']
-    assert multiple['email_enabled'] is True
-    assert multiple['push_enabled'] is True
-    assert multiple['email_recipients'] == ['morning@example.com', 'evening@example.com']
+    assert [schedule['email_recipients'] for schedule in multiple['alert_schedules']] == [
+        ['morning@example.com'], ['evening@example.com'],
+    ]
 
 
-def test_normalize_zone_object_rules_synthesizes_from_object_labels_when_no_rules(monkeypatch, zs):
-    """If ``object_rules`` is missing, synthesize 1-row rules from
-    ``object_labels`` (the older UI-driven schema)."""
+def test_normalize_zone_object_rules_ignores_object_labels_without_rules(monkeypatch, zs):
+    """Rules come only from ``object_rules``; a bare ``object_labels`` list
+    (the pre-rules schema) no longer synthesizes any."""
     _install_zone_dependencies(monkeypatch)
-    zone = {'object_labels': ['human', 'car']}  # 'human' -> 'person' via alias
-    rules = zs.normalize_zone_object_rules(zone)
-    assert [r['label'] for r in rules] == ['person', 'car']
-    # All synthesized rules use defaults.
-    assert all(r['min_confidence'] == 0.5 for r in rules)
-    assert all('cooldown_seconds' not in r for r in rules)
+    assert zs.normalize_zone_object_rules({'object_labels': ['human', 'car']}) == []
 
 
 def test_normalize_zone_object_rules_clamps_min_confidence_and_drops_cooldown(monkeypatch, zs):
@@ -463,26 +375,19 @@ def test_normalize_zone_object_rules_clamps_min_confidence_and_drops_cooldown(mo
     assert 'cooldown_seconds' not in rules[1]
 
 
-def test_normalize_zone_object_rules_motion_defaults_to_045_not_05(monkeypatch, zs):
-    """A motion rule without ``min_confidence`` defaults to 0.45 (its
-    canonical pixel-diff threshold, matching ``zone_motion_min_confidence``
-    and the frontend default), while object classes keep the 0.5 default.
-    All three axes (detection / recording / alerting) must gate a motion
-    rule at the same number, so the schema default has to agree with the
-    runtime fallbacks."""
+def test_normalize_zone_object_rules_confidence_defaults(monkeypatch, zs):
+    """Motion rules gate on their trigger, so their confidence window is
+    fully open; faces default to 0.45 and object classes to 0.5."""
     _install_zone_dependencies(monkeypatch)
-    zone = {'object_rules': [
-        {'label': 'motion'},
+    rules = zs.normalize_zone_object_rules({'object_rules': [
+        {'label': 'motion', 'min_confidence': 0.7},
+        {'label': 'face'},
         {'label': 'person'},
-        {'label': 'motion', 'min_confidence': 'oops'},
-    ]}
-    rules = zs.normalize_zone_object_rules(zone)
+    ]})
     by_label = {rule['label']: rule for rule in rules}
-    assert by_label['motion']['min_confidence'] == 0.45
+    assert (by_label['motion']['min_confidence'], by_label['motion']['max_confidence']) == (0.0, 1.0)
+    assert by_label['face']['min_confidence'] == 0.45
     assert by_label['person']['min_confidence'] == 0.5
-    # 'motion' dedupes to a single rule, and its bad value still falls back
-    # to the motion default.
-    assert len([r for r in rules if r['label'] == 'motion']) == 1
 
 
 def test_normalize_zone_object_rules_max_confidence_defaults_and_clamps(monkeypatch, zs):
@@ -505,17 +410,15 @@ def test_normalize_zone_object_rules_max_confidence_defaults_and_clamps(monkeypa
     assert rules['bus']['max_confidence'] == 0.8  # never below min_confidence
 
 
-def test_normalize_zone_object_rules_dedupes_by_label(monkeypatch, zs):
-    """Duplicate labels (case-insensitive, after aliasing) collapse to
-    one rule -- the first occurrence wins."""
+def test_normalize_zone_object_rules_keeps_every_rule(monkeypatch, zs):
+    """Rules are kept as given (labels canonicalised); several rules for one
+    label are separate alert instances."""
     _install_zone_dependencies(monkeypatch)
-    zone = {'object_rules': [
-        {'label': 'PERSON', 'min_confidence': 0.6},
-        {'label': 'human', 'min_confidence': 0.9},  # dups w/ above via alias
-    ]}
-    rules = zs.normalize_zone_object_rules(zone)
-    labels = [r['label'] for r in rules]
-    assert labels == ['person']
+    rules = zs.normalize_zone_object_rules({'object_rules': [
+        {'id': 'a', 'label': 'PERSON', 'min_confidence': 0.6},
+        {'id': 'b', 'label': 'human', 'min_confidence': 0.9},
+    ]})
+    assert [(r['id'], r['label'], r['min_confidence']) for r in rules] == [('a', 'person', 0.6), ('b', 'person', 0.9)]
 
 
 def test_normalize_zone_object_rules_drops_non_dict_rules(monkeypatch, zs):
@@ -572,18 +475,15 @@ def test_normalize_monitoring_zones_falls_back_to_rectangle_when_lt3_points(monk
     assert len(zones[0]['points']) == 4
 
 
-def test_normalize_monitoring_zones_folds_legacy_monitor_motion_into_rule(monkeypatch, zs):
-    """When ``zone.monitor_motion`` is True but no motion rule exists
-    in ``object_rules``, a default motion rule is inserted at position 0.
-    """
+def test_normalize_monitoring_zones_ignores_input_monitor_motion(monkeypatch, zs):
+    """``monitor_motion`` is derived from the rules only: an input flag with no
+    motion rule neither inserts one nor survives normalization."""
     _install_zone_dependencies(monkeypatch)
     zones = zs.normalize_monitoring_zones([{
         'monitor_motion': True, 'object_rules': [{'label': 'person'}],
     }])
-    rules = zones[0]['object_rules']
-    assert rules[0]['label'] == 'motion'  # inserted
-    assert rules[0]['enabled'] is True
-    assert zones[0]['monitor_motion'] is True
+    assert [r['label'] for r in zones[0]['object_rules']] == ['person']
+    assert zones[0]['monitor_motion'] is False
 
 
 def test_normalize_monitoring_zones_does_not_insert_motion_when_already_present(monkeypatch, zs):
@@ -602,7 +502,7 @@ def test_normalize_monitoring_zones_does_not_insert_motion_when_already_present(
 
 def test_normalize_monitoring_zones_derives_monitor_motion_from_enabled_rule(monkeypatch, zs):
     """After the rebuild, ``monitor_motion`` reflects whether any motion
-    rule with ``enabled=True`` exists -- not just the legacy field."""
+    rule with ``enabled=True`` exists."""
     _install_zone_dependencies(monkeypatch)
     # Legacy monitor_motion=False (disabled by user) but a disabled motion
     # rule was added by migration -> final monitor_motion should be False.

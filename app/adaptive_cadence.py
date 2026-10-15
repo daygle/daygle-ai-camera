@@ -107,14 +107,8 @@ class AdaptiveCadenceTracker:
         self._last_sample: dict[str, float] = {}
         # camera_id -> monotonic ts of the last cycle that saw motion
         self._last_motion: dict[str, float] = {}
-        self._overrides: dict[str, float] = {}
 
-    # ── configuration ───────────────────────────────────────────────────
-
-    def set_max_stale_seconds(self, seconds: float) -> None:
-        """Bound the staleness guarantee (a settings write, not a hot path)."""
-        with self._lock:
-            self._max_stale = max(0.5, float(seconds))
+    # ── reset ───────────────────────────────────────────────────────────
 
     def clear_camera(self, camera_id: str) -> None:
         """Forget a camera's state. Called when it is removed or re-added, so a
@@ -123,13 +117,11 @@ class AdaptiveCadenceTracker:
         with self._lock:
             self._last_sample.pop(camera_id, None)
             self._last_motion.pop(camera_id, None)
-            self._overrides.pop(camera_id, None)
 
     def clear(self) -> None:
         with self._lock:
             self._last_sample.clear()
             self._last_motion.clear()
-            self._overrides.clear()
 
     # ── state updates ───────────────────────────────────────────────────
 
@@ -145,15 +137,6 @@ class AdaptiveCadenceTracker:
             self._last_sample[camera_id] = moment
             if had_motion:
                 self._last_motion[camera_id] = moment
-
-    def note_sample(self, camera_id: str) -> None:
-        """Record that inference actually ran, without a motion result.
-
-        For the motion-gated path, where a cycle that skipped inference is
-        still evidence the scene is quiet.
-        """
-        with self._lock:
-            self._last_sample[camera_id] = self._now()
 
     # ── decision ────────────────────────────────────────────────────────
 
@@ -172,19 +155,12 @@ class AdaptiveCadenceTracker:
         staleness budget allows. On the adaptive path the result is also
         floored at the configured base, so adapting can only ever slow a
         camera down from what the operator asked for - never speed it up past
-        it. A per-camera override is the one thing that may raise the rate.
+        it.
         """
         base = max(0.1, float(base_interval or 0.5))
-        # Two different ceilings, deliberately not the same number:
-        #   stretch_ceiling bounds how far AUTOMATIC adaptation may slow a
-        #     camera (a fraction of what the operator asked for, and never
-        #     past the staleness budget);
-        #   stale_ceiling is the staleness budget itself, the only limit that
-        #     applies to an explicit override. An operator pinning a camera to
-        #     3s is not "adaptation" and must not be clipped to base*4 when
-        #     base is 0.5s - that would silently ignore the setting.
+        # How far adaptation may slow a camera: a multiple of what the
+        # operator asked for, and never past the staleness budget.
         stretch_ceiling = min(base * MAX_STABILITY_STRETCH, self._max_stale)
-        stale_ceiling = self._max_stale
         if stretch_ceiling <= base:
             return base
 
@@ -192,7 +168,6 @@ class AdaptiveCadenceTracker:
         with self._lock:
             last_motion = self._last_motion.get(camera_id)
             last_sample = self._last_sample.get(camera_id)
-            override = self._overrides.get(camera_id)
 
         # A camera that has never seen motion is not "stable", it is unknown.
         # Treating it as stable would start a new camera on the slow cadence
@@ -209,13 +184,6 @@ class AdaptiveCadenceTracker:
         if since_sample >= self._max_stale:
             return base
 
-        if override is not None:
-            # An override is explicit intent and is honoured in BOTH
-            # directions - that is its whole purpose ("keep this camera at
-            # full rate"). Only the staleness budget still applies, so a pin
-            # can never breach the guarantee that a still subject is sampled.
-            return min(max(0.1, float(override)), stale_ceiling)
-
         # Linear ramp over the staleness budget: no stretching at all for the
         # first half, full stretch at the budget. The first half matters most
         # - it keeps a scene that just went quiet at full rate, which is
@@ -227,24 +195,6 @@ class AdaptiveCadenceTracker:
 
         stretch = 1.0 + ramp * (MAX_STABILITY_STRETCH - 1.0) * stretch_for_load(pending, max_workers)
         return min(base * stretch, stretch_ceiling)
-
-    def set_override(self, camera_id: str, interval: Optional[float]) -> None:
-        """Pin a camera to a fixed interval (or clear the pin with None).
-
-        Honoured in both directions - a pin may speed a camera back up to full
-        rate as well as hold it slow - but never beyond the staleness ceiling,
-        so pinning cannot reintroduce a missed-detection hole.
-
-        Not used by the live monitor today; it exists so an operator-facing
-        "always sample this camera fast" control has a home, and so a future
-        profile automation can force a camera back to full rate without
-        reaching into the monitor's internals.
-        """
-        with self._lock:
-            if interval is None:
-                self._overrides.pop(camera_id, None)
-            else:
-                self._overrides[camera_id] = max(0.1, float(interval))
 
     # ── introspection ───────────────────────────────────────────────────
 
@@ -260,7 +210,6 @@ class AdaptiveCadenceTracker:
                     'since_sample_seconds': (
                         round(max(0.0, moment - last_sample), 3) if last_sample is not None else None
                     ),
-                    'overridden': camera_id in self._overrides,
                 }
             return {
                 'max_stale_seconds': self._max_stale,

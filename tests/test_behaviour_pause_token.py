@@ -111,22 +111,22 @@ def test_reset_is_scoped_to_one_camera():
     assert bm._tripwire_last_fired['cam-b|zone|in|1'] == 12.0
 
 
-def test_behaviour_paused_reflects_state():
-    assert bm.behaviour_paused('cam-a') is False
+def test_pause_flag_reflects_state():
+    assert bm._behaviour_pause.get('cam-a', False) is False
     bm.sync_behaviour_pause('cam-a', True)
-    assert bm.behaviour_paused('cam-a') is True
+    assert bm._behaviour_pause.get('cam-a', False) is True
     bm.sync_behaviour_pause('cam-a', False)
-    assert bm.behaviour_paused('cam-a') is False
+    assert bm._behaviour_pause.get('cam-a', False) is False
 
 
 def test_clear_behavioural_state_drops_the_pause_flag_too():
     """A removed-and-re-added camera must not inherit a stale pause verdict."""
     bm.sync_behaviour_pause('cam-a', True)
-    assert bm.behaviour_paused('cam-a') is True
+    assert bm._behaviour_pause.get('cam-a', False) is True
 
     bm.clear_behavioural_state('cam-a')
 
-    assert bm.behaviour_paused('cam-a') is False
+    assert bm._behaviour_pause.get('cam-a', False) is False
     # And the next call reads as a fresh onset, not a no-op.
     assert bm.sync_behaviour_pause('cam-a', True) == bm.PAUSE_ONSET
 

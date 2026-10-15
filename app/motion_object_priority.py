@@ -126,7 +126,7 @@ class MotionObjectArbiter:
             for detection in motion_detections:
                 key = _zone_key(detection)
                 if not key:
-                    # Unattributable motion cannot be arbitrated; keep legacy.
+                    # Motion without a zone cannot be arbitrated; pass it through.
                     result.motion_detections.append(detection)
                     continue
                 if _object_near(key):

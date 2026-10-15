@@ -1,7 +1,7 @@
 // zones.js - Zone drawing, editing, and object detection rules.
 // Loaded after live.js on zones.html only. Accesses live.js globals:
 //   isZonesPage, selectedCamera, liveEls, availableLabels,
-//   clamp, normalizePoint, roundCoord, normalizeLabelList,
+//   clamp, normalizePoint, roundCoord,
 //   api, cameraDetection, refreshFrame, refreshDetectionStatus,
 //   CLOSE_DRAFT_DISTANCE_PX.
 
@@ -11,9 +11,6 @@ let draftPolygon = null;
 let zoneDrag = null;
 let expandedZoneRules = new Set();
 
-const DEFAULT_MOTION_GATE_FRACTION = 0.005;
-const DEFAULT_MOTION_SCALE_FRACTION = 0.03;
-
 // Coerce a per-zone motion override to a clamped number, or null ("inherit").
 // Blank/empty/non-numeric all become null so clearing the field drops the
 // override rather than sending 0. Mirrors the backend _optional_fraction.
@@ -22,18 +19,6 @@ function optionalFraction(value, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return null;
   return Math.round(Math.max(min, Math.min(max, number)) * 1e6) / 1e6;
-}
-
-function effectiveZoneMotionTuning() {
-  const live = window.daygleLiveConfig || {};
-  const numberOr = (value, fallback) => {
-    const number = Number(value);
-    return Number.isFinite(number) ? number : fallback;
-  };
-  return {
-    gateFraction: numberOr(selectedCamera?.motion_gate_fraction, numberOr(live.motion_gate_fraction, DEFAULT_MOTION_GATE_FRACTION)),
-    scaleFraction: numberOr(selectedCamera?.motion_scale_fraction, numberOr(live.motion_scale_fraction, DEFAULT_MOTION_SCALE_FRACTION)),
-  };
 }
 
 // "Trigger when X% of this zone moves" presets. Mirrors the backend bounds in
@@ -51,21 +36,9 @@ const MAX_MOTION_CONFIRM_CYCLES = 5;
 const DEFAULT_MOTION_CONFIRM_CYCLES = 2;
 
 // The share of the zone's pixels that must change for its motion to count.
-// A zone saved before the trigger existed still runs the old maths on the
-// backend -- max(gate, Sensitivity x scale), per-zone overrides first -- so
-// show (and on the next save, store) that same value.
+// A motion rule without one runs at the default (matches app/zone_schema.py).
 function effectiveMotionTrigger(rule) {
-  const stored = optionalFraction(rule?.trigger_fraction, MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX);
-  if (stored != null) return stored;
-  if (!rule) return DEFAULT_MOTION_TRIGGER;
-  const { gateFraction, scaleFraction } = effectiveZoneMotionTuning();
-  const ruleGate = optionalFraction(rule.gate_fraction, 0.0001, 0.5);
-  const ruleScale = optionalFraction(rule.scale_fraction, 0.001, 1.0);
-  const gate = ruleGate != null ? ruleGate : gateFraction;
-  const scale = ruleScale != null ? ruleScale : scaleFraction;
-  const sensitivity = clamp(Number(rule.min_confidence ?? 0.45), 0, 1);
-  const legacy = Math.max(gate, sensitivity * scale);
-  return Math.round(clamp(legacy, MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX) * 1e6) / 1e6;
+  return optionalFraction(rule?.trigger_fraction, MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX) ?? DEFAULT_MOTION_TRIGGER;
 }
 
 function motionTriggerPreset(trigger) {
@@ -78,15 +51,12 @@ function motionConfirmCycles(rule) {
   return Math.max(1, Math.min(MAX_MOTION_CONFIRM_CYCLES, cycles));
 }
 
-// Store a trigger on the rule. The trigger replaces the old gate / scale /
-// Sensitivity trio for this zone, so those stop being knobs: the backend
-// opens the confidence window to match (app/zone_schema.py).
+// Store a trigger on the rule. Motion fires on the trigger alone, so the
+// backend opens the confidence window to match (app/zone_schema.py).
 function setMotionTrigger(rule, trigger) {
   rule.trigger_fraction = optionalFraction(trigger, MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX) ?? DEFAULT_MOTION_TRIGGER;
   rule.min_confidence = 0;
   rule.max_confidence = 1;
-  rule.gate_fraction = null;
-  rule.scale_fraction = null;
 }
 
 // Update only the label text on the Draw polygon button so its icon (a sibling
@@ -234,10 +204,6 @@ function defaultObjectRule(label = '') {
     record_on_detect: true,
     min_confidence: baseConfidence,
     max_confidence: 1,
-    // Optional per-zone motion sensitivity overrides (motion rule only). null =
-    // inherit the camera/global gate/scale.
-    gate_fraction: null,
-    scale_fraction: null,
     // "Trigger when X% of this zone moves" and "Must last: N checks" (motion
     // rule only). A new motion rule starts on Normal.
     trigger_fraction: normalized === 'motion' ? DEFAULT_MOTION_TRIGGER : null,
@@ -518,7 +484,7 @@ function ensureActivity(zone) {
 function normalizeAlertSchedules(rule) {
   const source = Array.isArray(rule.alert_schedules) && rule.alert_schedules.length
     ? rule.alert_schedules
-    : [rule];
+    : [{ id: 'schedule-1' }];
   const schedules = source.filter((schedule) => schedule && typeof schedule === 'object').map((schedule, index) => ({
     ...schedule,
     id: String(schedule.id || `schedule-${index + 1}`),
@@ -574,9 +540,7 @@ const openObjectLimitPanels = new Set();
 
 function normalizeObjectRules(zone) {
   if (Array.isArray(zone.object_rules) && zone.object_rules.length) {
-    // trigger_fraction: null ahead of the saved rule so a motion rule saved
-    // before the trigger existed is converted below, not handed the default.
-    return zone.object_rules.map((rule, ruleIndex) => ({ ...defaultObjectRule(rule?.label), trigger_fraction: null, ...rule, id: rule?.id || `${String(rule?.label || 'rule').trim().toLowerCase()}-${ruleIndex + 1}` }))
+    return zone.object_rules.map((rule, ruleIndex) => ({ ...defaultObjectRule(rule?.label), ...rule, id: rule?.id || `${String(rule?.label || 'rule').trim().toLowerCase()}-${ruleIndex + 1}` }))
       .map((rule) => ({
         ...rule,
         label: String(rule.label || '').trim().toLowerCase(),
@@ -589,36 +553,21 @@ function normalizeObjectRules(zone) {
           clamp(Number(rule.min_confidence ?? baseConfidenceFor(rule.label)), 0, 1),
           clamp(Number(rule.max_confidence ?? 1), 0, 1),
         ),
-        // Per-zone motion gate/scale overrides: clamp to the backend ranges when
-        // set (motion rules only), else null so the zone inherits camera/global.
-        gate_fraction: String(rule.label || '').trim().toLowerCase() === 'motion'
-          ? optionalFraction(rule.gate_fraction, 0.0001, 0.5) : null,
-        scale_fraction: String(rule.label || '').trim().toLowerCase() === 'motion'
-          ? optionalFraction(rule.scale_fraction, 0.001, 1.0) : null,
         trigger_fraction: String(rule.label || '').trim().toLowerCase() === 'motion'
-          ? optionalFraction(rule.trigger_fraction, MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX) : null,
+          ? effectiveMotionTrigger(rule) : null,
         confirm_cycles: String(rule.label || '').trim().toLowerCase() === 'motion'
           ? motionConfirmCycles(rule) : null,
         ...objectBoxLimits(rule),
-        email_enabled: rule.email_enabled === true,
-        email_recipients: normalizeEmailList(rule.email_recipients),
-        push_enabled: rule.push_enabled === true,
-        active_start: rule.active_start || null,
-        active_end: rule.active_end || null,
-        notify_start: rule.notify_start || null,
-        notify_end: rule.notify_end || null,
-        alert_schedules: normalizeAlertSchedules(rule),
       }))
       .map((rule) => {
-        // Convert an older motion rule to the single trigger it effectively
-        // runs at today (gate / scale / Sensitivity folded together), so the
-        // editor shows one number and the next save stores it unchanged.
-        if (rule.label === 'motion' && rule.trigger_fraction == null) setMotionTrigger(rule, effectiveMotionTrigger(rule));
+        // Schedules are the source of truth; this also sets the rule-level
+        // email/push/window summary the editor shows.
+        normalizeAlertSchedules(rule);
         return rule;
       })
       .filter((rule) => Boolean(rule.label));
   }
-  return normalizeLabelList(zone.object_labels).map(defaultObjectRule);
+  return [];
 }
 
 function normalizeZone(zone) {
@@ -626,19 +575,14 @@ function normalizeZone(zone) {
   zone.points = sourcePoints.map(normalizePoint);
   zone.object_rules = normalizeObjectRules(zone);
   zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion' && r.label !== 'face').map((rule) => rule.label);
-  // Keep the legacy `monitor_motion` flag in sync with the actual rule list
-  // so a removed or disabled Motion rule stays gone after save. The backend's
-  // normalize_monitoring_zones() re-inserts Motion when it sees
-  // ``monitor_motion=true`` but no Motion rule in ``object_rules`` -- without
-  // this sync that legacy-migration path would resurrect the rule on every
-  // save round-trip, making the delete appear to be ignored.
+  // Derive the `monitor_motion` flag from the rule list, matching what the
+  // backend's normalize_monitoring_zones() stores, so the live page reads the
+  // same value before the next reload.
   zone.monitor_motion = zone.object_rules.some(
     (rule) => String(rule.label || '').trim().toLowerCase() === 'motion'
       && rule.enabled !== false
   );
-  // Same legacy-flag pattern for the Faces axis: derived from the enabled
-  // face rule so the backend's normalize_monitoring_zones never resurrects a
-  // deleted rule on save round-trips.
+  // Same derived flag for the Faces axis.
   zone.monitor_faces = zone.object_rules.some(
     (rule) => String(rule.label || '').trim().toLowerCase() === 'face'
       && rule.enabled !== false
@@ -1379,9 +1323,7 @@ function bindObjectRuleControls() {
       const removedLabel = String(removedRule.label || '').trim().toLowerCase();
       zones[zoneIndex].object_rules.splice(ruleIndex, 1);
       if (removedLabel === 'motion') {
-        // Belt-and-suspenders alongside the normalizeZone() sync above: clear
-        // the legacy flag immediately so the in-memory model is consistent
-        // even if the next save path bypasses a renderZones() re-render.
+        // Keep the derived flag consistent before the next renderZones().
         zones[zoneIndex].monitor_motion = false;
       }
       zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
@@ -1405,7 +1347,7 @@ function bindMotionControls() {
       const rule = motionRuleOf(zone);
       if (cb.checked) ensureMotionRule(zone).enabled = true;
       else if (rule) rule.enabled = false;
-      // Keep the legacy flag in sync immediately; normalizeZone() also
+      // Keep the derived flag in sync immediately; normalizeZone() also
       // derives it from the enabled motion rule on every render/save.
       zone.monitor_motion = cb.checked;
       zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);

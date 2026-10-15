@@ -244,14 +244,6 @@ class LiveInferenceScheduler:
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug('Scheduler release hook failed for %s: %s', camera_id, exc)
 
-    def pending_cameras(self) -> list[str]:
-        with self._condition:
-            return sorted(self._pending)
-
-    def is_busy(self, camera_id: str) -> bool:
-        with self._condition:
-            return camera_id in self._pending or camera_id in self._running
-
     def stats(self) -> dict[str, Any]:
         with self._condition:
             return {
@@ -265,10 +257,6 @@ class LiveInferenceScheduler:
         with self._condition:
             timing = self._timings.get(camera_id)
             return dict(timing) if timing else None
-
-    def timings(self) -> dict[str, dict[str, Any]]:
-        with self._condition:
-            return {key: dict(value) for key, value in self._timings.items()}
 
     # ─── Selection ────────────────────────────────────────────────────────
 

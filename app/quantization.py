@@ -327,10 +327,7 @@ def _configured_camera_calibration_frames() -> tuple[list[Any], int]:
     number of enabled configured cameras, allowing the caller/reader to report
     synthetic fallback coverage accurately.
     """
-    try:
-        import numpy as np  # type: ignore[import-untyped]
-    except ImportError:
-        return [], 0
+    import numpy as np  # type: ignore[import-untyped]
 
     configs = [
         config for config in list(getattr(_state, 'cameras_config', []) or [])
@@ -861,22 +858,6 @@ def invalidate_int8_cache(model_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Precision-dispatch for Ultralytics export
 # ---------------------------------------------------------------------------
-
-_VALID_PRECISION_VALUES = {'fp32', 'fp16', 'int8'}
-
-
-def normalize_precision(value: Any) -> str:
-    """Lower-case the precision value and validate it; fallback to ``fp32``.
-
-    Mirrors the lenient posture used elsewhere in the AI settings:
-    unknown values default to ``fp32`` rather than raising, so a stale
-    ``precision`` in saved config doesn't break detector loading.
-    """
-    text = str(value or 'fp32').strip().lower()
-    if text not in _VALID_PRECISION_VALUES:
-        return 'fp32'
-    return text
-
 
 def precision_export_kwargs(
     precision: str,

@@ -22,6 +22,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+import uuid
 from pathlib import Path
 
 from app.rate_limiter import (
@@ -233,10 +234,11 @@ class SetupLimiterTests(unittest.TestCase):
         self.assertEqual(setup_limiter._window, 300.0)
 
     def test_under_budget_still_passes(self):
-        setup_limiter.reset('probe-ip-a')
+        # A key no other test touches, so the window starts empty.
+        key = f'probe-ip-{uuid.uuid4().hex}'
         for _ in range(9):
-            setup_limiter.record('probe-ip-a')
-        self.assertFalse(setup_limiter.is_rate_limited('probe-ip-a'))
+            setup_limiter.record(key)
+        self.assertFalse(setup_limiter.is_rate_limited(key))
 
 
 # N3 ---------------------------------------------------------------------

@@ -93,7 +93,7 @@ def test_a_stationary_subject_is_never_missed_indefinitely(
     last = tracker._now()
     for _ in range(40):
         clock.advance(tracker.effective_interval('front', 0.5))
-        tracker.note_sample('front')
+        tracker.note_cycle('front', had_motion=False)
         now = tracker._now()
         max_gap = max(max_gap, now - last)
         last = now
@@ -215,59 +215,3 @@ def test_clearing_a_camera_drops_its_quiet_streak(tracker: AdaptiveCadenceTracke
 
     tracker.clear_camera('front')
     assert tracker.effective_interval('front', 0.5) == 0.5
-
-
-def test_an_override_pins_the_interval(tracker: AdaptiveCadenceTracker, clock: Clock) -> None:
-    tracker.note_cycle('front', had_motion=True)
-    clock.advance(8.0)
-    tracker.note_cycle('front', had_motion=False)
-
-    # An override may speed a camera back UP - forcing one to full rate is
-    # exactly what it is for - as well as hold it slow.
-    tracker.set_override('front', 0.25)
-    assert tracker.effective_interval('front', 0.5) == 0.25
-
-    tracker.set_override('front', 0.75)
-    assert tracker.effective_interval('front', 0.5) == 0.75
-
-    tracker.set_override('front', None)
-    assert tracker.effective_interval('front', 0.5) > 0.5
-
-
-def test_an_override_cannot_exceed_the_staleness_ceiling(
-    tracker: AdaptiveCadenceTracker,
-    clock: Clock,
-) -> None:
-    tracker.note_cycle('front', had_motion=True)
-    clock.advance(8.0)
-    tracker.note_cycle('front', had_motion=False)
-    # Asking for a 60s pinned interval on a still camera must not breach the
-    # guarantee, so the ceiling clamps it.
-    tracker.set_override('front', 60.0)
-    assert tracker.effective_interval('front', 0.5) == tracker._max_stale
-
-
-def test_stats_report_quiet_time_and_overrides(
-    tracker: AdaptiveCadenceTracker,
-    clock: Clock,
-) -> None:
-    tracker.note_cycle('front', had_motion=True)
-    clock.advance(3.0)
-    tracker.set_override('front', 1.0)
-    stats = tracker.stats()
-    assert stats['max_stale_seconds'] == 10.0
-    assert stats['cameras']['front']['quiet_for_seconds'] == pytest.approx(3.0)
-    assert stats['cameras']['front']['overridden'] is True
-
-
-def test_set_max_stale_seconds_tightens_the_guarantee(
-    tracker: AdaptiveCadenceTracker,
-    clock: Clock,
-) -> None:
-    tracker.set_max_stale_seconds(2.0)
-    tracker.note_cycle('front', had_motion=True)
-    clock.advance(1.8)
-    tracker.note_cycle('front', had_motion=False)
-    # With a 2s budget, a 1.8s quiet streak is already deep into the ramp.
-    assert tracker.effective_interval('front', 0.5) > 0.5
-    assert tracker.effective_interval('front', 0.5) <= 2.0

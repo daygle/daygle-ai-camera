@@ -97,8 +97,7 @@ def me(request: Request):
     # (the "partially logged out" state). The per-session token already has
     # strong protections around it: SameSite=lax + httponly cookies, the
     # same-origin Origin/Referer guard, constant-time comparison, and the
-    # admin mutation rate limiter. Rotation is still available explicitly
-    # via ``auth.rotate_csrf_token`` for flows that need it.
+    # admin mutation rate limiter.
     return {'user': session['user'], 'csrf_token': session['csrf_token'], 'expires_at': session['expires_at']}
 
 

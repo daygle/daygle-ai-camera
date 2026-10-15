@@ -2,7 +2,7 @@
 
 The 21 helpers shipped here cluster around the **zone detection pipeline
 that runs inside the live-stream alert monitor**: per-detection geometry
-(point-in-polygon + rectangle overlap), per-zone object/motion rule
+(box centre inside the zone polygon), per-zone object/motion rule
 matching, label aliasing through the per-zone ``object_labels`` allow-lists,
 recording-rule decisions, and the live-detection box normalization that
 threads detector output through the per-camera settings dict.
@@ -26,11 +26,6 @@ these are extracted using the **hybrid-pattern template**:
   (in the existing rebind section) so that the eager-evaluation
   order at module load has ``main.<name>`` wired correctly before
   any sibling body references it as a bare name.
-- Default-value expressions (``gate_fraction`` / ``scale_fraction``
-  in ``zone_motion_detections``) bind to ``main._MOTION_GATE_FRACTION``
-  / ``main._MOTION_SCALE_FRACTION`` at module-load time of this
-  module. Both constants are defined on ``app.main`` BEFORE the rebind
-  block executes, so they are populated when the function is defined.
 
 Cluster membership (21 helpers, 290 lines original):
 
@@ -51,14 +46,10 @@ Cluster membership (21 helpers, 290 lines original):
   when the zone has 3+ points, otherwise falls back to the rectangle
   containment test using ``zone['x']/['width']`` / ``zone['y']/['height']``.
 
-- ``detection_overlap_ratio_with_zone_rect`` -- rectangle intersection
-  ratio (intersection / detection_box_area) so a partially-occluded
-  detection can still match a rectangle zone via overlap, not center-only.
-
-- ``detection_matches_zone`` -- combines center-in + rectangle overlap
-  into a single ``min_overlap_ratio`` decision; polygon zones only
-  match by center (the partial-overlap heuristic makes no sense for
-  polygons).
+- ``detection_matches_zone`` -- memoised ``detection_center_in_zone``:
+  a detection belongs to a zone when its box centre is inside it.
+  ``normalize_monitoring_zones`` gives every saved zone polygon points,
+  so the rectangle branch only serves raw, un-normalised zone dicts.
 
 - ``_zone_pixel_motion_fraction`` -- numpy-based per-zone motion
   pixel fraction using the boolean ``diff_mask`` from
@@ -68,25 +59,17 @@ Cluster membership (21 helpers, 290 lines original):
   so polygon-only zones can still be measured.
 
 - ``zone_motion_detections`` -- per-camera motion-to-detection
-  converter. Reads each zone's motion rule (``zone_motion_min_confidence``
-  from Phase-21) and emits a pseudo-detection with the zone footprint
-  when motion clears the gate. Default values ``gate_fraction`` /
-  ``scale_fraction`` bind to ``main._MOTION_GATE_FRACTION`` /
-  ``main._MOTION_SCALE_FRACTION`` at module-load time.
+  converter. Emits a pseudo-detection for each zone whose changed-pixel
+  share clears its motion rule's trigger (``zone_motion_trigger_fraction``).
 
 - ``filter_detections_for_camera_zones`` -- the per-zone filter
-  combining ``detection_matches_zone`` + ``detection_label_allowed_for_zone``.
-  When no zones match the monitor key, falls back to the camera-level
+  combining ``detection_matches_zone`` with each zone's label allow-list
+  (its ``object_labels``, else the camera's). When no zones match the monitor key, falls back to the camera-level
   ``object_labels`` allow-list (so a camera with NO zones still filters
   by its labels) -- unless ``require_zones=True`` was requested.
 
 - ``filter_detections_for_camera`` -- thin wrapper that calls
   ``filter_detections_for_camera_zones`` with ``zone_monitor_key='monitor_objects'``.
-
-- ``detection_label_allowed_for_zone`` -- checks ``zone['object_labels']``
-  (call ``normalize_label_list`` from Phase-21 + ``_LABEL_ALIASES``)
-  against the detection label, falling back to the full camera label
-  set when the zone has no allow-list.
 
 - ``zone_object_rule_matches`` -- returns ``[(zone, rule)]`` pairs
   matching the detection label + confidence at or above the rule's
@@ -119,22 +102,15 @@ Cluster membership (21 helpers, 290 lines original):
 
 - ``zone_motion_record_on_detect`` -- the motion-axis counterpart:
   checks the ``monitor_motion=True`` zone(s) for a motion rule with
-  ``record_on_detect=True``. With the optional ``zone_id`` only that
-  zone is considered (per-zone recording: motion in a record-off zone
-  cannot piggyback on a record-on rule elsewhere); without it any
-  matching zone counts (legacy callers/tests). Intentionally separate
+  ``record_on_detect=True`` in the given zone only (per-zone recording:
+  motion in a record-off zone cannot piggyback on a record-on rule
+  elsewhere). Intentionally separate
   from ``zone_record_on_detect`` which filters on
   ``monitor_objects=True``.
 
 - ``zone_detection_alert_rule_names`` -- ``{zone_rule_name(...)}`` set
   of matched rule names so the renderer / status payload can show
   which rules fired for each detection.
-
-- ``detection_has_matching_record_rule`` -- similar to
-  ``zone_object_rule_matches`` but reads rules from a precomputed flat
-  AlertEngine rule list (received from ``zone_object_alert_rules``).
-  Ignores cooldown so a recording fires on every matching detection,
-  not only when a notification is emitted.
 
 - ``normalize_detection_boxes_for_frame`` -- converts pixel-coord
   boxes to normalised [0,1] coords using ``frame['width'] /
@@ -152,16 +128,13 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 - ``main.HTTPException`` (``get_camera_instance`` -- re-exported from
   ``fastapi`` at the top of main.py)
 - ``app.state._MOTION_FRAME_W`` / ``app.state._MOTION_FRAME_H`` remain only
-  as legacy defaults for standalone motion callers. Live camera profiles pass a
+  as defaults for standalone motion callers. Live camera profiles pass a
   local size to ``detect_frame_motion``; zone scoring uses the returned mask
   shape and does not read those globals.
-- ``main._MOTION_GATE_FRACTION`` / ``main._MOTION_SCALE_FRACTION``
-  (``zone_motion_detections`` -- bound to default-arg expressions at
-  module-load time of this module; both constants are populated on
-  ``app.main`` before this rebind block fires)
+- ``app.state._MOTION_SCALE_FRACTION`` (``zone_motion_detections``
+  default scale)
 - ``main.normalize_label_list`` (Phase-21 rebind, called 2x)
 - ``main._LABEL_ALIASES`` (Phase-21 dict rebind, used 3x)
-- ``main.zone_motion_min_confidence`` (Phase-21 rebind, called 1x)
 - ``main.normalize_email_recipients`` (still on main.py, called 1x)
 - ``main.normalize_bool_setting`` (still on main.py, called 2x)
 """
@@ -191,12 +164,7 @@ from app.zone_schema import (
     detection_label_in_allowed,
     detection_within_box_limits,
     label_matches,
-    normalize_label_list,
     zone_motion_confirm_cycles,
-    zone_motion_gate_fraction,
-    zone_motion_max_confidence,
-    zone_motion_min_confidence,
-    zone_motion_scale_fraction,
     zone_motion_trigger_fraction,
 )
 
@@ -251,35 +219,6 @@ def detection_center_in_zone(detection: dict[str, Any], zone: dict[str, Any]) ->
     return float(zone.get('x') or 0) <= center_x <= float(zone.get('x') or 0) + float(zone.get('width') or 0) and float(zone.get('y') or 0) <= center_y <= float(zone.get('y') or 0) + float(zone.get('height') or 0)
 
 
-def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict[str, Any]) -> float:
-    box = detection.get('box') or {}
-    x = float(box.get('x') or 0)
-    y = float(box.get('y') or 0)
-    width = max(0.0, float(box.get('width') or 0))
-    height = max(0.0, float(box.get('height') or 0))
-    if width <= 0 or height <= 0:
-        return 0.0
-    dx1 = x
-    dy1 = y
-    dx2 = x + width
-    dy2 = y + height
-    zx1 = float(zone.get('x') or 0)
-    zy1 = float(zone.get('y') or 0)
-    zw = max(0.0, float(zone.get('width') or 0))
-    zh = max(0.0, float(zone.get('height') or 0))
-    zx2 = zx1 + zw
-    zy2 = zy1 + zh
-    ix1 = max(dx1, zx1)
-    iy1 = max(dy1, zy1)
-    ix2 = min(dx2, zx2)
-    iy2 = min(dy2, zy2)
-    if ix2 <= ix1 or iy2 <= iy1:
-        return 0.0
-    intersection = (ix2 - ix1) * (iy2 - iy1)
-    detection_area = width * height
-    return intersection / detection_area if detection_area > 0 else 0.0
-
-
 def _detection_matches_compiled_zone(detection: dict[str, Any], compiled_zone: Any) -> bool:
     """Broad-phase bounds check followed by the exact polygon/rectangle test."""
     box = detection.get('box') or {}
@@ -294,17 +233,12 @@ def _detection_matches_compiled_zone(detection: dict[str, Any], compiled_zone: A
     return detection_matches_zone(detection, compiled_zone.zone)
 
 
-def _detection_matches_zone_uncached(detection: dict[str, Any], zone: dict[str, Any], min_overlap_ratio: float) -> bool:
-    if detection_center_in_zone(detection, zone):
-        return True
-    points = zone.get('points') or []
-    if isinstance(points, list) and len(points) >= 3:
-        return False
-    return detection_overlap_ratio_with_zone_rect(detection, zone) >= min_overlap_ratio
+def _detection_matches_zone_uncached(detection: dict[str, Any], zone: dict[str, Any]) -> bool:
+    return detection_center_in_zone(detection, zone)
 
 
-def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, min_overlap_ratio: float = 0.2) -> bool:
-    """Whether a detection's box falls inside a zone (centre-in, or rect overlap).
+def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any]) -> bool:
+    """Whether a detection's box centre falls inside a zone.
 
     The same (detection, zone) pair is tested several times per cycle -- the
     camera/zone filter, alert-rule matching, the record-on-detect check, and the
@@ -312,15 +246,14 @@ def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, m
     function of the detection box and the zone geometry, so it is memoised on the
     detection: the result is cached under a key of (zone id, box) so a ``{**det}``
     copy that keeps its box reuses the answer while one that changes its box
-    recomputes. Only the default ``min_overlap_ratio`` (every hot-path caller
-    uses it) is cached, and the ``_zone_match_memo`` field is internal -- history
+    recomputes. The ``_zone_match_memo`` field is internal -- history
     and event serialisation both whitelist detection fields, so it never leaves
     the process.
     """
     zone_id = zone.get('id') or zone.get('name')
     box = detection.get('box')
-    if min_overlap_ratio != 0.2 or zone_id is None or not isinstance(detection, dict) or not isinstance(box, dict):
-        return _detection_matches_zone_uncached(detection, zone, min_overlap_ratio)
+    if zone_id is None or not isinstance(detection, dict) or not isinstance(box, dict):
+        return _detection_matches_zone_uncached(detection, zone)
     key = (zone_id, box.get('x'), box.get('y'), box.get('width'), box.get('height'))
     memo = detection.get('_zone_match_memo')
     if memo is None:
@@ -329,7 +262,7 @@ def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, m
     cached = memo.get(key)
     if cached is not None:
         return cached
-    result = _detection_matches_zone_uncached(detection, zone, min_overlap_ratio)
+    result = _detection_matches_zone_uncached(detection, zone)
     memo[key] = result
     return result
 
@@ -429,8 +362,8 @@ def _zone_pixel_motion_fraction(
     """Return the fraction of pixels inside a zone's bounding box that changed.
 
     ``diff_mask`` is the boolean (H×W) array from ``detect_frame_motion``.  The
-    live monitor supplies the camera-local expected shape; direct legacy callers
-    retain the process-default shape check.
+    live monitor supplies the camera-local expected shape; direct callers
+    without one get the process-default shape check.
     """
     zone_id = str(zone.get('id') or zone.get('name') or id(zone))
     try:
@@ -478,7 +411,6 @@ def zone_motion_detections(
     frame_motion_confidence: float = 0.5,
     *,
     diff_mask: Any = None,
-    gate_fraction: float | None = None,
     scale_fraction: float | None = None,
     frame_size: tuple[int, int] | None = None,
     levels: list[dict[str, Any]] | None = None,
@@ -490,9 +422,10 @@ def zone_motion_detections(
     fired, so the live page can show how close each zone is to its trigger
     in the same units the operator set it in. ``fraction`` is ``None`` when
     there is no usable diff mask this cycle.
+
+    ``scale_fraction`` only converts a zone's changed-pixel share into the
+    detection's 0-1 ``confidence``; firing is decided by the zone's trigger.
     """
-    if gate_fraction is None:
-        gate_fraction = _state._MOTION_GATE_FRACTION
     if scale_fraction is None:
         scale_fraction = _state._MOTION_SCALE_FRACTION
     expected_shape = None if frame_size is None else (int(frame_size[1]), int(frame_size[0]))
@@ -506,20 +439,11 @@ def zone_motion_detections(
         zone_id = str(zone.get('id') or zone.get('name') or id(zone))
         if zone_id in seen_zones:
             continue
-        # Per-zone sensitivity: a zone may override the camera/global gate and
-        # scale on its motion rule so a sensitive doorway and a noisy tree-line
-        # can coexist on one camera. ``None`` inherits the passed-in value.
-        zone_gate = zone_motion_gate_fraction(zone)
-        if zone_gate is None:
-            zone_gate = gate_fraction
-        zone_scale = zone_motion_scale_fraction(zone)
-        if zone_scale is None:
-            zone_scale = scale_fraction
-        # "Trigger when X% of this zone moves" replaces the gate / scale /
-        # Sensitivity trio when set; otherwise the legacy maths below runs
-        # unchanged, so zones saved before the trigger existed fire exactly
-        # as they did.
+        # "Trigger when X% of this zone moves". A zone without an enabled
+        # motion rule has no trigger and never fires.
         trigger = zone_motion_trigger_fraction(zone)
+        if trigger is None:
+            continue
         zone_fraction = -1.0
         if diff_mask is not None:
             zone_fraction = _zone_pixel_motion_fraction(diff_mask, zone, expected_shape=expected_shape)
@@ -528,41 +452,23 @@ def zone_motion_detections(
                 'zone_id': zone_id,
                 'zone_name': zone.get('name') or zone_id,
                 'fraction': round(zone_fraction, 6) if zone_fraction >= 0 else None,
-                'trigger': round(trigger if trigger is not None else max(
-                    zone_gate, zone_motion_min_confidence(zone) * zone_scale,
-                ), 6),
+                'trigger': round(trigger, 6),
             })
         if diff_mask is not None:
-            if zone_fraction < (zone_gate if trigger is None else trigger):
+            if zone_fraction < trigger:
                 continue
-            zone_confidence = round(min(1.0, zone_fraction / max(zone_scale, 1e-09)), 3)
+            zone_confidence = round(min(1.0, zone_fraction / max(scale_fraction, 1e-09)), 3)
         else:
+            # Without a mask (first frame, fail-open, forced scan) there is
+            # nothing zone-local to compare, so fall back to the frame-wide
+            # confidence at 0.45 -- a forced scan's zero confidence never fires.
             zone_confidence = frame_motion_confidence
-        # A trigger zone already gated on its own pixels above. Without a mask
-        # (first frame, fail-open, forced scan) there is nothing zone-local to
-        # compare, so it falls back to the frame-wide confidence at the
-        # canonical 0.45 default -- a forced scan's zero confidence never fires.
-        conf_threshold = zone_motion_min_confidence(zone) if trigger is None else 0.45
-        if (trigger is None or diff_mask is None) and zone_confidence < conf_threshold:
-            logger.debug(
-                'Motion zone %r: zone_fraction=%.4f zone_confidence=%.3f below conf_threshold=%.3f (scale_fraction=%.4f)',
-                zone_id, zone_fraction, zone_confidence, conf_threshold, zone_scale,
-            )
-            continue
-        # Upper bound of the motion rule's [min, max] window. Dropping the
-        # detection HERE -- the single source of truth for motion, before it is
-        # appended to alert_detections/recording_detections in live_monitor --
-        # keeps alerts AND recordings consistent with the window (the
-        # AlertEngine gate alone only suppressed the notification, not the
-        # zone_motion_record_on_detect recording path). Defaults to 1.0, so
-        # zones without a configured max are unaffected.
-        max_threshold = zone_motion_max_confidence(zone)
-        if trigger is None and zone_confidence > max_threshold:
-            logger.debug(
-                'Motion zone %r: zone_confidence=%.3f above max_confidence=%.3f -- ignored',
-                zone_id, zone_confidence, max_threshold,
-            )
-            continue
+            if zone_confidence < 0.45:
+                logger.debug(
+                    'Motion zone %r: no diff mask and frame confidence %.3f below 0.45',
+                    zone_id, zone_confidence,
+                )
+                continue
         seen_zones.add(zone_id)
         # Shrink the box to the changed-pixel region when the diff mask is
         # available so overlays point at where movement actually happened;
@@ -601,42 +507,23 @@ def motion_zone_confirm_cycles(settings: dict[str, Any]) -> dict[str, int]:
     }
 
 
+def _rule_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]:
+    """A zone rule's alert schedules (``normalize_zone_alert_schedules`` always
+    gives a normalized rule at least one)."""
+    schedules = rule.get('alert_schedules')
+    return [schedule for schedule in schedules if isinstance(schedule, dict)] if isinstance(schedules, list) else []
+
+
+def _schedule_delivers(schedule: dict[str, Any]) -> bool:
+    return bool(schedule.get('email_enabled') or schedule.get('push_enabled'))
+
+
 def _has_enabled_face_rule(zone: dict[str, Any]) -> bool:
     return any(
         str(rule.get('label') or '').strip().lower() == 'face'
         and rule.get('enabled', True)
         for rule in zone.get('object_rules') or []
     )
-
-
-def _zone_key(zone: dict[str, Any]) -> str:
-    return str(zone.get('id') or zone.get('name') or '')
-
-
-def camera_face_zone_keys(settings: dict[str, Any]) -> set[str]:
-    """Keys of enabled zones that carry an enabled ``face`` rule.
-
-    Non-empty means the operator scoped face processing to those zones: the
-    live pipeline drops faces detected outside them before the recognition
-    pass. Empty means legacy/global behaviour (every face on the camera).
-    """
-    return {
-        _zone_key(zone)
-        for zone in (settings.get('detection') or {}).get('zones', [])
-        if zone.get('enabled', True) and _has_enabled_face_rule(zone)
-    }
-
-
-def detection_label_allowed_for_zone(detection: dict[str, Any], zone: dict[str, Any], camera_labels: set[str]) -> bool:
-    zone_labels = set(normalize_label_list(zone.get('object_labels', [])))
-    allowed_labels = zone_labels or camera_labels
-    if not allowed_labels:
-        return True
-    # ``detection_label_in_allowed`` canonicalizes the detection label AND
-    # expands any umbrella group in the allow-list (e.g. ``animal`` matches a
-    # ``cat`` detection), so a group configured on a zone/camera works the same
-    # way a concrete label does.
-    return detection_label_in_allowed(detection.get('label'), allowed_labels)
 
 
 def filter_detections_for_camera_zones(
@@ -662,11 +549,11 @@ def filter_detections_for_camera_zones(
     # rule (including face-only zones with ``monitor_objects`` off), a ``face``
     # detection must land geometrically inside one of them -- its confidence
     # window is enforced later by the matching rule. When no zone carries a
-    # face rule, faces follow the exact legacy path below.
+    # face rule, faces follow the same path as every other label below.
     face_scope_zones = tuple(policy.face_zones) if zone_monitor_key == 'monitor_objects' else ()
 
     def _face_allowed(detection: dict[str, Any]) -> bool | None:
-        """None = no face scoping configured (legacy path); True/False = scoped."""
+        """None = no face scoping configured; True/False = scoped."""
         if not face_scope_zones or canonical_label(detection.get('label')) != 'face':
             return None
         return any(_detection_matches_compiled_zone(detection, zone) for zone in face_scope_zones)
@@ -675,7 +562,7 @@ def filter_detections_for_camera_zones(
         if not require_zones and face_scope_zones:
             # Every zone is face-only: the object axis has no zones, but
             # face scoping must still bite while non-face detections keep
-            # the legacy camera-label / accept-all fallbacks.
+            # the camera-label / accept-all fallbacks.
             kept: list[dict[str, Any]] = []
             for detection in detections:
                 verdict = _face_allowed(detection)
@@ -691,7 +578,7 @@ def filter_detections_for_camera_zones(
             return kept
         if zone_monitor_key == 'monitor_objects' and camera_labels and (not require_zones):
             # Canonicalise the detection label through ``_LABEL_ALIASES`` exactly
-            # like ``detection_label_allowed_for_zone`` does on the zones path.
+            # like the zones path below does.
             # ``camera_labels`` was already aliased by ``normalize_label_list``
             # ('human' -> 'person'), so a raw comparison here would silently drop
             # a 'human' detection that the same camera accepts once a zone is
@@ -701,7 +588,7 @@ def filter_detections_for_camera_zones(
                 for detection in detections
                 if detection_label_in_allowed(detection.get('label'), camera_labels)
             ]  # dict pass-through carries track_id
-        # No zones and no camera labels: keep legacy "accept all" behavior so a
+        # No zones and no camera labels: accept everything so a
         # camera with object detection enabled but unconfigured still records
         # and alerts. Log the fallback once per call to aid debugging.
         if not camera_labels and not require_zones:
@@ -709,7 +596,7 @@ def filter_detections_for_camera_zones(
         return [] if require_zones else detections
     # Pre-compute each zone's allow-list once instead of re-parsing
     # ``zone['object_labels']`` for every (detection, zone) pair on the ~4 Hz
-    # hot path. Empty sets preserve the legacy "no allow-list anywhere ->
+    # hot path. Empty sets keep the "no allow-list anywhere ->
     # accept all" behavior of ``detection_label_allowed_for_zone``.
     need_labels = zone_monitor_key == 'monitor_objects'
     zones_with_labels = [
@@ -803,12 +690,7 @@ def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict
             if not rule.get('enabled', True):
                 continue
             if action == 'alert':
-                schedules = rule.get('alert_schedules')
-                deliverable = any(
-                    isinstance(schedule, dict) and (schedule.get('email_enabled') or schedule.get('push_enabled'))
-                    for schedule in schedules
-                ) if isinstance(schedules, list) and schedules else (rule.get('email_enabled') or rule.get('push_enabled'))
-                if not deliverable:
+                if not any(_schedule_delivers(schedule) for schedule in _rule_schedules(rule)):
                     continue
             if action == 'record' and (not rule.get('record_on_detect', True)):
                 continue
@@ -816,8 +698,8 @@ def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict
             # detection label is (so ``human``/``people``/``pedestrian`` all
             # match a ``person`` detection) AND expands umbrella group rules
             # (an ``animal``/``pet`` rule matches a ``cat`` detection). The
-            # recording path (``detection_has_matching_record_rule``) and the
-            # AlertEngine apply the same matcher, so all three agree.
+            # AlertEngine applies the same matcher, and recording goes through
+            # this function with ``action='record'``, so they all agree.
             if not label_matches(label, rule.get('label')):
                 continue
             # Per-rule confidence window (confidence hoisted above): the
@@ -921,14 +803,7 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
         label_totals: dict[str, int] = {}
         for _rule in zone.get('object_rules') or []:
             _label = str(_rule.get('label') or '').strip().lower()
-            has_delivery = any(
-                isinstance(_schedule, dict) and (_schedule.get('email_enabled') or _schedule.get('push_enabled'))
-                for _schedule in (
-                    _rule.get('alert_schedules')
-                    if isinstance(_rule.get('alert_schedules'), list) and _rule.get('alert_schedules')
-                    else [_rule]
-                )
-            )
+            has_delivery = any(_schedule_delivers(_schedule) for _schedule in _rule_schedules(_rule))
             _monitored = (
                 zone.get('monitor_objects', True)
                 or (_label == 'motion' and zone.get('monitor_motion', True))
@@ -950,12 +825,11 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
             # add dead rules to the engine's list.
             if not zone.get('monitor_objects', True) and label not in ('motion', 'face'):
                 continue
-            raw_schedules = rule.get('alert_schedules')
-            schedules = raw_schedules if isinstance(raw_schedules, list) and raw_schedules else [rule]
+            schedules = _rule_schedules(rule)
             deliverable_schedules = [
                 (schedule_index, schedule)
                 for schedule_index, schedule in enumerate(schedules, start=1)
-                if isinstance(schedule, dict) and (schedule.get('email_enabled') or schedule.get('push_enabled'))
+                if _schedule_delivers(schedule)
             ]
             if not deliverable_schedules:
                 continue
@@ -971,8 +845,8 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                     'object': label,
                     'zone_id': zone_id,
                     # Motion's and face's canonical confidence default is 0.45
-                    # (see zone_motion_min_confidence / the Face Confidence
-                    # setting); object classes default to 0.5. Matching the
+                    # (the Face Confidence setting); object classes default to
+                    # 0.5. Normalized motion rules carry 0 (trigger-gated). Matching the
                     # detection axis here keeps a rule missing min_confidence
                     # gating alerts at the same threshold that produced the
                     # detection in the first place.
@@ -1030,24 +904,23 @@ def zone_record_on_detect(detection: dict[str, Any], settings: dict[str, Any]) -
     return bool(zone_object_rule_matches(settings, detection, action='record'))
 
 
-def zone_motion_record_on_detect(settings: dict[str, Any], zone_id: str | None = None) -> bool:
+def zone_motion_record_on_detect(settings: dict[str, Any], zone_id: str) -> bool:
     """Return True if the motion rule covering ``zone_id`` has record_on_detect=True.
 
     zone_record_on_detect / zone_object_rule_matches filter by monitor_objects=True and therefore
     skip motion-only zones (monitor_objects=False, monitor_motion=True). This helper checks the
     correct monitor_motion axis so motion-only zones are not silently excluded from recording.
 
-    When ``zone_id`` is provided only that zone is considered, so the recording
-    decision is per-zone: motion in a record-off zone cannot piggyback on a
-    record-on rule in a different zone. Without ``zone_id`` (legacy callers,
-    tests) any matching zone counts.
+    Only ``zone_id`` is considered, so the recording decision is per-zone:
+    motion in a record-off zone cannot piggyback on a record-on rule in a
+    different zone.
     """
     detection_settings = settings.get('detection') or {}
     for zone in detection_settings.get('zones', []):
         if not zone.get('enabled', True) or not zone.get('monitor_motion', True):
             continue
         zone_key = str(zone.get('id') or zone.get('name') or id(zone))
-        if zone_id is not None and zone_key != str(zone_id):
+        if zone_key != str(zone_id):
             continue
         for rule in zone.get('object_rules') or []:
             if not rule.get('enabled', True):
@@ -1066,14 +939,7 @@ def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[st
             candidate for candidate in zone.get('object_rules') or []
             if candidate.get('enabled', True)
             and str(candidate.get('label') or '').strip().lower() == label
-            and any(
-                isinstance(schedule, dict) and (schedule.get('email_enabled') or schedule.get('push_enabled'))
-                for schedule in (
-                    candidate.get('alert_schedules')
-                    if isinstance(candidate.get('alert_schedules'), list) and candidate.get('alert_schedules')
-                    else [candidate]
-                )
-            )
+            and any(_schedule_delivers(schedule) for schedule in _rule_schedules(candidate))
         ]
         if len(same_label_rules) > 1:
             rule_position = next((index for index, candidate in enumerate(same_label_rules, start=1) if candidate is rule), 1)
@@ -1081,46 +947,12 @@ def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[st
         else:
             suffix = ''
         base_name = zone_rule_name(settings, zone, rule) + suffix
-        schedules = rule.get('alert_schedules')
-        schedules = schedules if isinstance(schedules, list) and schedules else [rule]
+        schedules = _rule_schedules(rule)
         for schedule_index, schedule in enumerate(schedules, start=1):
-            if not isinstance(schedule, dict) or not (
-                schedule.get('email_enabled') or schedule.get('push_enabled')
-            ):
+            if not _schedule_delivers(schedule):
                 continue
             names.add(f'{base_name} [Schedule {schedule_index}]' if len(schedules) > 1 else base_name)
     return names
-
-
-def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[dict[str, Any]]) -> bool:
-    """Return True if any enabled alert rule covers this detection by label and confidence.
-
-    Cooldown and time-window are intentionally ignored so a recording is created on every
-    matching detection, not only when a new alert notification is emitted.
-    """
-    label = canonical_label(detection.get('label'))
-    if not label:
-        return False
-    confidence = float(detection.get('confidence') or 0)
-    for rule in rules:
-        if not rule.get('enabled', True):
-            continue
-        # ``label_matches`` expands an umbrella group rule (``animal``/``pet``)
-        # to its member labels, so a group record rule captures a ``cat`` the
-        # same way the alert path does.
-        if not label_matches(label, rule.get('object')):
-            continue
-        try:
-            min_conf = float(rule.get('min_confidence', 0.0 if label == 'motion' else 0.5))
-        except (TypeError, ValueError):
-            min_conf = 0.0 if label == 'motion' else 0.5
-        try:
-            max_conf = float(rule.get('max_confidence', 1.0))
-        except (TypeError, ValueError):
-            max_conf = 1.0
-        if min_conf <= confidence <= max_conf and detection_within_box_limits(detection, rule):
-            return True
-    return False
 
 
 def filter_motion_detections_by_objects(

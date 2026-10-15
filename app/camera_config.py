@@ -18,8 +18,7 @@ Cluster membership:
   (selected camera id).
 - ``normalize_camera_settings`` -- full settings normaliser that layers
   defaults, recursively normalises nested ``detection`` / ``recording``
-  / ``ptz`` sub-dicts, and migrates legacy motion fields into the
-  current zones/object_rules schema.
+  / ``ptz`` sub-dicts.
 - ``_migrate_camera_id`` -- runtime helper used by ``update_cameras``
   when an operator renames a camera's id; carries the in-memory live
   detection/motion state plus the on-disk ingest dirs from old id to
@@ -47,7 +46,6 @@ from urllib.parse import urlsplit, urlunsplit
 import app.state as _state
 from app.camera_id import camera_storage_key, normalize_camera_id  # re-export
 from app.recording_settings import (
-    _migrate_legacy_camera_motion,
     _normalize_camera_sound_settings,
     apply_active_camera_detection_profile,
     normalize_camera_ptz_settings,
@@ -139,7 +137,6 @@ def normalize_camera_settings(
             detection.pop('labels_path', None)
         else:
             detection['labels_path'] = _labels_path
-    _migrate_legacy_camera_motion(detection)
     camera_settings['detection'] = detection
     camera_settings['recording'] = normalize_camera_recording_settings(
         camera_settings.get('recording'),
@@ -147,18 +144,6 @@ def normalize_camera_settings(
     camera_settings['ptz'] = normalize_camera_ptz_settings(
         camera_settings.get('ptz'),
     )
-    # Migrate legacy nested motion override dict to flat motion_* keys so
-    # per-camera overrides use the same naming convention as global live settings.
-    _legacy_cam_motion = camera_settings.pop('motion', None)
-    if isinstance(_legacy_cam_motion, dict):
-        for _flat_key, _short_key in (
-            ('motion_pixel_threshold', 'pixel_threshold'),
-            ('motion_gate_fraction', 'gate_fraction'),
-            ('motion_scale_fraction', 'scale_fraction'),
-            ('motion_background_alpha', 'background_alpha'),
-        ):
-            if camera_settings.get(_flat_key) is None and _legacy_cam_motion.get(_short_key) is not None:
-                camera_settings[_flat_key] = _legacy_cam_motion[_short_key]
     apply_active_camera_detection_profile(camera_settings)
     return camera_settings
 

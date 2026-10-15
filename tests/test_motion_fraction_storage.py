@@ -9,6 +9,7 @@ import sqlite3
 
 from app.database import EventDatabase
 from app.detection_state import build_track_from_live_history, record_live_detection_history
+from tests.support import add_event
 
 
 def _motion(fraction):
@@ -21,7 +22,7 @@ def _motion(fraction):
 
 def test_event_detections_keep_the_motion_fraction(tmp_path):
     db = EventDatabase(str(tmp_path / 'm.sqlite3'))
-    event_id = db.add_event(
+    event_id = add_event(db, 
         created_at='2026-09-30T00:00:00+00:00', source='rtsp', snapshot_path=None,
         detections=[_motion(0.0423), _motion(None), {**_motion(None), 'label': 'person', 'confidence': 0.9}],
     )

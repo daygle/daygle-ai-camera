@@ -423,8 +423,8 @@ def test_approaching_subject_size_annotations_are_exposed():
     # 5% jitter band. The step is reported in the units ``_TRACK_STEP_MOVING``
     # is expressed in, so 40% of jitter-band reference == 0.24, and it clears
     # the age-2 threshold regardless of the box's absolute size.
-    assert os_._two_point_step(second) == pytest.approx(0.24, abs=1e-9)
-    assert os_._two_point_step(second) >= os_._TRACK_STEP_MOVING
+    assert max(os_._step_components(second)) == pytest.approx(0.24, abs=1e-9)
+    assert max(os_._step_components(second)) >= os_._TRACK_STEP_MOVING
 
 
 def test_approaching_person_survives_the_age_two_bias():
@@ -498,7 +498,7 @@ def test_parked_car_drawn_at_two_extents_reads_still():
     ot.update_object_tracks(cam, [_as_det(CAR_WHOLE)])
     second = ot.update_object_tracks(cam, [_as_det(CAR_ROOF)])[0]
     assert second['track_age'] == 2
-    assert os_._two_point_step(second) == 0.0
+    assert max(os_._step_components(second)) == 0.0
     # Production reaches the age-2 branch with NO displacement yet, so the mask
     # is the only other signal. Make the mask say MOVING -- a passing car's
     # headlights sweep changed pixels right across this large box -- and check

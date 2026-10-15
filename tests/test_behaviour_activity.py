@@ -95,7 +95,7 @@ class ActivityStepTests(unittest.TestCase):
         self.assertNotIn('cam|z1|car|9', baselines)  # not committed until rollover
         bb.activity_step(today, baselines, cooldowns, [_obs(0, day=1, hour=10)], 0.0)
         self.assertEqual(baselines['cam|z1|car|9']['count'], 1.0)
-        self.assertEqual(bb.baseline_mean(baselines['cam|z1|car|9']), 4.0)
+        self.assertEqual(baselines['cam|z1|car|9']['mean'], 4.0)
 
     def test_ignores_malformed(self) -> None:
         today, baselines, cooldowns = {}, {}, {}

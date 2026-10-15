@@ -53,60 +53,6 @@ class EventsMixin:
     EventDatabase is still callable with the same arguments.
     """
 
-    def add_event(
-        self,
-        created_at: str,
-        source: str,
-        snapshot_path: str | None,
-        detections: list[dict[str, Any]],
-        alert_triggered: bool = False,
-        metadata: dict[str, Any] | None = None,
-        recording_id: int | None = None,
-        thumbnail_path: str | None = None,
-    ) -> int:
-        # Coerce ``created_at`` to canonical UTC ``+00:00`` before binding
-        # so the storage form is consistent across every event row. There is
-        # no current lexical TIMING compare on ``events.created_at`` (no
-        # age-based purge), but the column participates in five
-        # ``ORDER BY e.created_at DESC`` sites and any future where-bound
-        # search window. Storing the canonical form now means a future
-        # query using the same helper normalising its bound value still
-        # sorts and compares correctly.
-        created_at = _normalize_iso_to_utc(created_at) or created_at
-        with self.write_slot(), self.connect() as db:
-            cursor = db.execute(
-                """
-                INSERT INTO events (created_at, source, snapshot_path, thumbnail_path, alert_triggered, recording_id, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (created_at, source, snapshot_path, thumbnail_path, int(alert_triggered), recording_id, json.dumps(metadata or {})),
-            )
-            if cursor.lastrowid is None:
-                raise RuntimeError("Failed to create event row")
-            event_id = cursor.lastrowid
-            for detection in detections:
-                box = detection.get("box", {})
-                db.execute(
-                    """
-                    INSERT INTO detections (event_id, label, confidence, x, y, width, height, zone_name, still_alert, still_alert_minutes, motion_fraction)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        event_id,
-                        detection["label"],
-                        float(detection["confidence"]),
-                        float(box.get("x", 0)),
-                        float(box.get("y", 0)),
-                        float(box.get("width", 0)),
-                        float(box.get("height", 0)),
-                        detection.get("zone_name") or None,
-                        int(bool(detection.get("still_alert"))),
-                        detection.get("still_alert_minutes") or None,
-                        _motion_fraction(detection),
-                    ),
-                )
-            return event_id
-
     def add_event_with_alerts(
         self,
         *,
@@ -806,16 +752,6 @@ class EventsMixin:
                 "sound_alerts": sound_alerts,
                 "objects": [dict(row) for row in labels],
             }
-
-    def dismiss_event(self, event_id: int) -> bool:
-        with self.write_slot(), self.connect() as db:
-            cursor = db.execute("UPDATE events SET dismissed = 1 WHERE id = ?", (event_id,))
-            return cursor.rowcount > 0
-
-    def dismiss_all_events(self) -> int:
-        with self.write_slot(), self.connect() as db:
-            cursor = db.execute("UPDATE events SET dismissed = 1 WHERE dismissed = 0")
-            return cursor.rowcount
 
     def _event_with_detections(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         """Hydrate one event through the shared batched list hydrator."""

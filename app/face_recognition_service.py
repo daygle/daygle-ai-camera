@@ -93,12 +93,6 @@ class FaceRecognitionService:
         return self.embedder.embedding_dim if self.embedder is not None else None
 
     @property
-    def enrolled_count(self) -> int:
-        with self._lock:
-            matcher = self._matcher
-        return len(matcher) if matcher is not None else 0
-
-    @property
     def matcher_generation(self) -> int:
         """Monotonic generation used to invalidate live identity caches."""
         with self._lock:

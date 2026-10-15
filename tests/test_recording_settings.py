@@ -2,7 +2,7 @@
 
 Phase-19 extracted the 4 recording-settings helpers
 (``normalize_camera_recording_settings``, ``normalize_camera_ptz_settings``,
-``_normalize_camera_sound_settings``, ``_migrate_legacy_camera_motion``)
+``_normalize_camera_sound_settings``)
 from ``app/main.py`` into ``app/recording_settings.py`` using the
 hybrid-pattern template (same as Phase-16 ``app/auth_gates.py``,
 Phase-17 ``app/config_facades.py``, Phase-18 ``app/camera_config.py``).
@@ -31,10 +31,6 @@ Tests pin three contracts:
      from raw sound config, clamping confidence_threshold (0.1-1.0)
      and cooldown_seconds (>=5.0), plus 6 per-rule booleans + 4
      time-window optional strings.
-   - ``_migrate_legacy_camera_motion``: pops 3 legacy fields and,
-     when the legacy enabled flag was False, disables
-     ``monitor_motion`` on every zone + ``enabled`` on the motion
-     object_rule.
 3. **Top-level preload pattern.** ``import app.main`` BEFORE
    ``import app.recording_settings`` at module top -- same pattern as
    Phase-16 / 17 / 18 tests. Without this, pytest collection
@@ -504,79 +500,3 @@ def test_normalize_camera_sound_settings_drops_rules_when_class_lacks_default(mo
         'rules': [{'class': 'siren', 'confidence_threshold': 0.8}],
     })
     assert out == {'enabled': True, 'detection_interval_seconds': 0.5, 'rules': []}
-
-
-# -- _migrate_legacy_camera_motion --------------------------------------
-
-def test_migrate_legacy_camera_motion_pops_all_three_legacy_fields(rs):
-    """``detection.motion`` / ``detection.motion_enabled`` / ``detection.motion_email_enabled``
-    are popped regardless of the legacy ``enabled`` flag -- verifying the
-    field-cleanup contract.
-    """
-    detection = {
-        'motion': {'enabled': True},
-        'motion_enabled': True,
-        'motion_email_enabled': True,
-        'zones': [],
-    }
-    rs._migrate_legacy_camera_motion(detection)
-    assert 'motion' not in detection
-    assert 'motion_enabled' not in detection
-    assert 'motion_email_enabled' not in detection
-
-
-def test_migrate_legacy_camera_motion_no_op_when_legacy_enabled(rs):
-    """When the legacy motion switch was True (or absent), the migration
-    leaves zones + object_rules untouched -- preserving existing
-    motion-on configuration across the schema upgrade.
-    """
-    detection = {
-        'motion': {'enabled': True},
-        'zones': [{'monitor_motion': True, 'object_rules': [{'label': 'motion', 'enabled': True}]}],
-    }
-    snapshot = {'zones': [{'monitor_motion': True, 'object_rules': [{'label': 'motion', 'enabled': True}]}]}
-    rs._migrate_legacy_camera_motion(detection)
-    assert detection['zones'] == snapshot['zones']
-
-
-def test_migrate_legacy_camera_motion_disables_zone_motion_when_legacy_off(monkeypatch, rs):
-    """When the legacy motion switch was False (via the legacy dict),
-    every zone's ``monitor_motion`` flips to False and every motion
-    ``object_rule`` is disabled."""
-    _install_recording_dependencies(monkeypatch)
-    detection = {
-        'motion': {'enabled': False},
-        'zones': [
-            {
-                'monitor_motion': True,
-                'object_rules': [
-                    {'label': 'motion', 'enabled': True},
-                    {'label': 'person', 'enabled': True},
-                ],
-            },
-            {'monitor_motion': True, 'object_rules': []},
-        ],
-    }
-    rs._migrate_legacy_camera_motion(detection)
-    assert detection['zones'][0]['monitor_motion'] is False
-    assert detection['zones'][0]['object_rules'][0]['enabled'] is False  # motion rule
-    assert detection['zones'][0]['object_rules'][1]['enabled'] is True   # person untouched
-    assert detection['zones'][1]['monitor_motion'] is False
-
-
-def test_migrate_legacy_camera_motion_supports_flat_motion_enabled_field(monkeypatch, rs):
-    """Older configs use the flat ``motion_enabled`` boolean instead of
-    the ``detection.motion`` dict -- set it False and verify the same
-    zone-level disable propagates.
-    """
-    _install_recording_dependencies(monkeypatch)
-    detection = {
-        'motion_enabled': False,
-        'zones': [
-            {'monitor_motion': True, 'object_rules': [{'label': 'motion', 'enabled': True}]},
-        ],
-    }
-    rs._migrate_legacy_camera_motion(detection)
-    assert 'motion_enabled' not in detection, 'flat motion_enabled must be popped'
-    assert detection['zones'][0]['monitor_motion'] is False
-    assert detection['zones'][0]['object_rules'][0]['enabled'] is False

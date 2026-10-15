@@ -303,8 +303,8 @@ If cloudflared cannot start or later exits, Daygle logs a clear warning and cont
 
 The web UI has a left sidebar (a slide-in menu on phones). Pages that belong together are tabs of one section.
 
-- **Live** (`/`) - live camera view with detection overlay (the home page; `/live` redirects here)
-- **Events** (`/events`) - the activity feed, with plain-English footage search (`/search` redirects here)
+- **Live** (`/`) - live camera view with detection overlay (the home page)
+- **Events** (`/events`) - the activity feed, with plain-English footage search
 - **Recordings** - tabs: Recordings (`/recordings`), Timeline (`/recordings/timeline`), Snapshots (`/snapshots`)
 - **Setup** (admin)
   - **Cameras** (`/cameras`) - camera management, recording, and PTZ
@@ -314,8 +314,6 @@ The web UI has a left sidebar (a slide-in menu on phones). Pages that belong tog
 - **Intelligence** (admin)
   - **AI** (`/ai`) - the local vision model: alert verification, event descriptions, search and AI tags
   - **Models** - tabs: Object Models (`/models`), Face Models (`/models/faces`, face detection and ArcFace recognition models), Camera Models (`/models/cameras`, per-camera YOLO model assignment), Sound Model (`/models/sound`), Settings (`/models/settings`, detection runtime tuning)
-
-The old page URLs (`/objects`, `/sounds`, `/face-recognition`, `/onnx`, `/arcface`, `/camera-models`, `/yamnet-tflite`) redirect to their new locations, so bookmarks keep working.
 - **Admin** (admin)
   - **Settings** (`/settings`) - tabs: Detection & Live, Recording & Storage, Notifications, Network & Access (Cloudflare Tunnel, LAN & proxy, login security), Maintenance (updates, GPU health, backup, danger zone)
   - **Users** (`/users`) - user management

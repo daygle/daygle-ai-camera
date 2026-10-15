@@ -6,6 +6,7 @@ import pytest
 
 from app.database import EventDatabase
 from app.face_recognition import embedding_to_bytes
+from tests.support import add_event
 
 
 def _db(tmp_path) -> EventDatabase:
@@ -137,11 +138,11 @@ def _event_metadata(db, event_id):
 def test_purge_face_identities_strips_old_events_only(tmp_path):
     db = _db(tmp_path)
     ids = {'face_identities': {'people': [{'person_id': 1, 'name': 'Alex'}], 'unknown': 0}, 'camera_id': 'c1'}
-    old_id = db.add_event(
+    old_id = add_event(db, 
         created_at='2020-01-01T00:00:00+00:00', source='rtsp', snapshot_path=None,
         detections=[], metadata=dict(ids),
     )
-    recent_id = db.add_event(
+    recent_id = add_event(db, 
         created_at='2026-08-19T00:00:00+00:00', source='rtsp', snapshot_path=None,
         detections=[], metadata=dict(ids),
     )
@@ -157,7 +158,7 @@ def test_purge_face_identities_strips_old_events_only(tmp_path):
 
 def test_purge_face_identities_noop_without_matches(tmp_path):
     db = _db(tmp_path)
-    db.add_event(
+    add_event(db, 
         created_at='2020-01-01T00:00:00+00:00', source='rtsp', snapshot_path=None,
         detections=[], metadata={'camera_id': 'c1'},  # no face_identities
     )
@@ -169,7 +170,7 @@ def test_purge_face_identities_by_policy_respects_retention_setting(tmp_path, mo
     import app.state as state
 
     db = _db(tmp_path)
-    old_id = db.add_event(
+    old_id = add_event(db, 
         created_at='2020-01-01T00:00:00+00:00', source='rtsp', snapshot_path=None,
         detections=[], metadata={'face_identities': {'people': [], 'unknown': 1}},
     )

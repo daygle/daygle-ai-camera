@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
+from tests.support import add_event, list_recordings, _load_app, LocalClient, _login, _server, _setup_admin
 
 from app.database import EventDatabase
 
@@ -104,14 +104,6 @@ def test_clean_description_bounds_length_and_rejects_empty(av):
         av.clean_description('  "" ')
 
 
-def test_describe_events_setting_is_validated(av, monkeypatch):
-    monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: dict(av.DEFAULT_AI_VERIFICATION_SETTINGS))
-    assert av.validate_ai_verification_settings({'describe_events': 'ALL'})['describe_events'] == 'all'
-    with pytest.raises(Exception) as exc:
-        av.validate_ai_verification_settings({'describe_events': 'sometimes'})
-    assert getattr(exc.value, 'status_code', None) == 400
-
-
 # ---------------------------------------------------------------------------
 # Notification formatting
 # ---------------------------------------------------------------------------
@@ -195,7 +187,7 @@ def flow(av, monkeypatch):
 
 def test_alert_description_is_stored_and_attached(av, flow):
     configure, forwarded = flow
-    db = configure(describe_events='alerts')
+    db = configure(describe_alerts='both')
     av.verify_and_forward([{'label': 'car', 'confidence': 0.7}], 3, [], 'Driveway')
     assert forwarded == [[{'label': 'car', 'confidence': 0.7, 'ai_description': 'A red car parks in the driveway.'}]]
     assert db.descriptions[3]['text'] == 'A red car parks in the driveway.'
@@ -204,21 +196,21 @@ def test_alert_description_is_stored_and_attached(av, flow):
 
 def test_filtered_alert_is_not_described_in_alerts_mode(av, flow):
     configure, forwarded = flow
-    db = configure(describe_events='alerts', verdict=(False, 'shadow'))
+    db = configure(describe_alerts='both', verdict=(False, 'shadow'))
     av.verify_and_forward([{'label': 'person', 'confidence': 0.6, 'ai_verify': True}], 4, [], '')
     assert forwarded == [] and db.descriptions == {}
 
 
 def test_all_mode_describes_even_filtered_events(av, flow):
     configure, forwarded = flow
-    db = configure(describe_events='all', verdict=(False, 'shadow'))
+    db = configure(describe_alerts='both', describe_other_events='both', verdict=(False, 'shadow'))
     av.verify_and_forward([{'label': 'person', 'confidence': 0.6, 'ai_verify': True}], 5, [], '')
     assert forwarded == [] and 5 in db.descriptions
 
 
 def test_description_failure_still_delivers(av, flow):
     configure, forwarded = flow
-    db = configure(describe_events='alerts', caption=av.VerificationError('timed out'))
+    db = configure(describe_alerts='both', caption=av.VerificationError('timed out'))
     triggered = [{'label': 'car', 'confidence': 0.7}]
     av.verify_and_forward(triggered, 6, [], '')
     assert forwarded == [triggered] and db.descriptions == {}
@@ -226,14 +218,14 @@ def test_description_failure_still_delivers(av, flow):
 
 def test_describe_only_jobs(av, flow):
     configure, _forwarded = flow
-    db = configure(describe_events='all')
+    db = configure(describe_alerts='both', describe_other_events='both')
     av.describe_only(7, 'Gate')
     assert 7 in db.descriptions
     db.event['metadata'] = {'ai_description': {'text': 'done'}}
     db.descriptions.clear()
     av.describe_only(8, 'Gate')  # already described: no second model call
     assert db.descriptions == {}
-    db.settings['describe_events'] = 'alerts'
+    db.settings['describe_other_events'] = 'off'
     db.event['metadata'] = {}
     av.describe_only(9, 'Gate')
     assert db.descriptions == {}
@@ -252,7 +244,7 @@ def test_submit_routes_by_mode_and_camera(av, monkeypatch):
 
     monkeypatch.setattr(pools, 'verification_pool', lambda: _Pool())
     monkeypatch.setattr(dispatch, 'submit_alert_notification', lambda *_a: direct.append(1) or True)
-    settings = _settings(av, describe_events='alerts', camera_ids=['cam-1'])
+    settings = _settings(av, describe_alerts='both', camera_ids=['cam-1'])
     monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: settings)
 
     av.submit_alert_notification_with_verification([{'label': 'car', 'confidence': 0.5}], 1, [], camera_id='cam-1')
@@ -260,7 +252,7 @@ def test_submit_routes_by_mode_and_camera(av, monkeypatch):
     assert queued == [('verify_and_forward', pools.PRIORITY_CLIP)] and direct == [1]
 
     assert av.submit_event_description(3, camera_id='cam-1') is False  # alerts mode: background off
-    settings['describe_events'] = 'all'
+    settings['describe_other_events'] = 'both'
     assert av.submit_event_description(3, camera_id='cam-1') is True
     assert queued[-1] == ('describe_only', pools.PRIORITY_BACKGROUND)
 
@@ -287,7 +279,7 @@ def test_tags_are_sanitised(av):
 
 def test_tags_skip_detected_labels_and_reach_recordings(av, flow):
     configure, forwarded = flow
-    db = configure(describe_events='alerts', tags=['person', 'ladder', 'hi-vis vest'])
+    db = configure(describe_alerts='both', tags=['person', 'ladder', 'hi-vis vest'])
     db.event['detections'] = [{'label': 'person', 'confidence': 0.9}]
     av.verify_and_forward([{'label': 'person', 'confidence': 0.9}], 12, [], '')
     assert db.descriptions[12]['tags'] == ['ladder', 'hi-vis vest']
@@ -300,7 +292,7 @@ def test_tags_skip_detected_labels_and_reach_recordings(av, flow):
 # ---------------------------------------------------------------------------
 
 def _event(db, camera_id, created_at, text=None, name=None):
-    event_id = db.add_event(created_at=created_at, source='rtsp', snapshot_path='snap.jpg', detections=[],
+    event_id = add_event(db, created_at=created_at, source='rtsp', snapshot_path='snap.jpg', detections=[],
                             metadata={'camera_id': camera_id, 'camera_name': name or camera_id})
     if text is not None:
         db.set_event_description(event_id, {'text': text, 'model': 'm'})
@@ -398,7 +390,7 @@ def test_keyword_plan_finds_camera_and_time(search_env):
 
 def test_keyword_search_without_a_model(search_env, monkeypatch):
     search, ids = search_env
-    monkeypatch.setattr(search, 'effective_ai_verification_settings', lambda: {'enabled': False, 'describe_events': 'off'})
+    monkeypatch.setattr(search, 'effective_ai_verification_settings', lambda: {'enabled': False})
     result = search.search_events('red car', now_utc=NOW)
     assert [e['id'] for e in result['items']] == [ids['red_car']]
     assert result['interpretation']['interpreted_by'] == 'keywords'
@@ -410,7 +402,7 @@ def test_model_plan_with_synonyms_camera_and_times(search_env, monkeypatch):
     with _SmartModelServer(search={'terms': [['red'], ['car', 'vehicle', 'ute']], 'camera': 'driveway',
                                    'start': '2026-09-27 00:00', 'end': '2026-09-27 23:59'}) as server:
         monkeypatch.setattr(search, 'effective_ai_verification_settings',
-                            lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'describe_events': 'alerts',
+                            lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'describe_alerts': 'both',
                                     'server_url': server.url})
         result = search.search_events('red vehicle on the driveway yesterday', now_utc=NOW)
     assert [e['id'] for e in result['items']] == [ids['red_car']]
@@ -423,7 +415,7 @@ def test_model_failure_falls_back_and_unmatched_concepts_relax(search_env, monke
     search, ids = search_env
     av = importlib.import_module('app.ai_verification')
     monkeypatch.setattr(search, 'effective_ai_verification_settings',
-                        lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'describe_events': 'alerts',
+                        lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'describe_alerts': 'both',
                                  'server_url': 'http://127.0.0.1:9/v1', 'timeout_seconds': 3})
     result = search.search_events('blue car', now_utc=NOW)  # nothing mentions both
     assert result['interpretation']['interpreted_by'] == 'keywords'
@@ -507,7 +499,6 @@ def test_restore_accepts_a_genuine_database_with_the_index(tmp_path, monkeypatch
     backup.overwrite_database_from_file(genuine)  # no exception
 
 
-
 # ---------------------------------------------------------------------------
 # AI tags on recordings
 # ---------------------------------------------------------------------------
@@ -533,7 +524,7 @@ def test_ai_tags_are_searchable_and_marked_on_recordings(tmp_path):
     recording = db.get_recording(recording_id)
     assert recording['labels'] == ['person']          # the detected label stays a detection
     assert recording['ai_labels'] == ['ladder']
-    listed = db.list_recordings(label='ladder')       # the label filter matches AI tags
+    listed = list_recordings(db, label='ladder')       # the label filter matches AI tags
     assert [r['id'] for r in listed] == [recording_id]
     assert listed[0]['ai_labels'] == ['ladder'] and listed[0]['labels'] == ['person']
     event = db.get_event(event_id)
@@ -652,7 +643,7 @@ def catch_up(av, monkeypatch):
     def setup(events, *, modes=None):
         db = _CatchUpDb(events)
         monkeypatch.setattr(av._state, 'database', db)
-        monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, describe_events='all'))
+        monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, describe_alerts='both', describe_other_events='both'))
 
         def content(cid, _s, *, alerted, event=None):
             mode = (modes or {}).get(cid, 'all')
@@ -756,7 +747,7 @@ def test_catch_up_pages_past_skipped_events(av, catch_up, monkeypatch):
 @pytest.mark.parametrize('case', ['describe_failed', 'backlog', 'queue_full'])
 def test_alert_events_left_undescribed_start_the_catch_up(av, flow, monkeypatch, case):
     configure, forwarded = flow
-    configure(describe_events='alerts', caption=av.VerificationError('timed out'))
+    configure(describe_alerts='both', caption=av.VerificationError('timed out'))
     catch_ups: list = []
     monkeypatch.setattr(av, 'start_description_catch_up', lambda: catch_ups.append(True))
     triggered = [{'label': 'motion', 'confidence': 0.3, 'motion_event': True}]
@@ -781,7 +772,7 @@ def test_describe_only_defers_to_catch_up_while_the_model_cools_down(av, monkeyp
             return {'id': event_id, 'snapshot_path': 's.jpg', 'detections': [], 'metadata': {}}
 
     monkeypatch.setattr(av._state, 'database', _Db())
-    monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, describe_events='all'))
+    monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, describe_alerts='both', describe_other_events='both'))
     described: list = []
     catch_ups: list = []
     monkeypatch.setattr(av, '_describe_and_store', lambda *a, **k: described.append(k))

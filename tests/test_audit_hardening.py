@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 from starlette.responses import Response
 
-from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
+from tests.support import add_event, _load_app, LocalClient, _login, _server, _setup_admin
 
 from app.auth import AuthService
 
@@ -123,7 +123,7 @@ def test_delete_all_events_removes_snapshot_files(tmp_path, monkeypatch):
     try:
         _setup_admin(client)
         csrf = _login(client)
-        _state.database.add_event(
+        add_event(_state.database, 
             created_at=datetime.now(timezone.utc).isoformat(),
             source='camera',
             snapshot_path=str(snapshot),

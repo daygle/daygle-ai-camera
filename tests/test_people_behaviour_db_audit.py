@@ -76,9 +76,11 @@ def test_recognised_face_never_matches_the_unknown_rule(face_rules):
     assert fdr.known_face_rules_for_camera('cam', [_face(3, 'Unknown Person')]) == []
 
 
-def test_legacy_rule_without_person_id_still_matches_by_name(face_rules):
+def test_rule_without_person_id_never_matches(face_rules):
+    """Person rules match on person_id only; a same-named rule without one
+    is inert."""
     fdr = face_rules(_rule(person_id=None, name='Alice'))
-    assert len(fdr.known_face_rules_for_camera('cam', [_face(1, 'alice')])) == 1
+    assert fdr.known_face_rules_for_camera('cam', [_face(1, 'alice')]) == []
 
 
 def test_delete_person_erases_assigned_unknown_face_captures(tmp_path):

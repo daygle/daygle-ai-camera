@@ -23,8 +23,7 @@ The two pieces of state this cluster exclusively owns STAY on
   the dict.
 
 This mirrors the Phase-26 (``live_detection_history`` /
-``live_detection_history_lock``), Phase-27 (``_notification_threads`` /
-``_notification_threads_lock``) precedent for keeping state on
+``live_detection_history_lock``) precedent for keeping state on
 ``app.main`` while the helper moves into a sibling module.
 
 **Pool-A rebind (in ``app/main.py``):** all five helpers are re-bound as

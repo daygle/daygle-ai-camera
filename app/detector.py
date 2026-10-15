@@ -7,14 +7,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from app.utils import normalize_bool_setting
 
 logger = logging.getLogger('daygle.ai')
-
-try:
-    import numpy as np
-except ImportError:  # pragma: no cover - exercised in minimal installs without ONNX support
-    np = None  # type: ignore[assignment]
 
 
 class DetectorUnavailableError(RuntimeError):
@@ -59,14 +56,7 @@ def load_labels(labels_path: str | Path | None, fallback: list[str] | None = Non
     return fallback or []
 
 
-def _require_numpy():
-    if np is None:
-        raise DetectorUnavailableError("numpy is not installed. Install requirements.txt or run pip install numpy.")
-    return np
-
-
 def non_max_suppression(boxes: np.ndarray, scores: np.ndarray, classes: np.ndarray, iou_threshold: float) -> list[int]:
-    np = _require_numpy()
     if boxes.size == 0:
         return []
 
@@ -235,10 +225,6 @@ class OnnxYoloDetector:
 
         if not self.model_path.exists():
             self.unavailable_reason = f"ONNX model not found: {self.model_path}"
-            return
-
-        if np is None:
-            self.unavailable_reason = "numpy is not installed. Install requirements.txt or run pip install numpy."
             return
 
         try:
@@ -705,13 +691,7 @@ class OnnxYoloDetector:
         return [ort_value.numpy() for ort_value in io.get_outputs()]
 
     def _decode_image(self, image_bytes: bytes) -> np.ndarray:
-        np = _require_numpy()
-        try:
-            import cv2
-        except ImportError as exc:
-            raise DetectorUnavailableError(
-                "opencv-python-headless is not installed. Install requirements.txt or run pip install opencv-python-headless."
-            ) from exc
+        import cv2
 
         data = np.frombuffer(image_bytes, dtype=np.uint8)
         image = cv2.imdecode(data, cv2.IMREAD_COLOR)
@@ -720,12 +700,7 @@ class OnnxYoloDetector:
         return image
 
     def _preprocess(self, image: np.ndarray) -> tuple[np.ndarray, float, float, float, int, int]:
-        try:
-            import cv2
-        except ImportError as exc:
-            raise DetectorUnavailableError(
-                "opencv-python-headless is not installed. Install requirements.txt or run pip install opencv-python-headless."
-            ) from exc
+        import cv2
 
         if image.ndim != 3 or image.shape[2] != 3:
             raise ValueError(f"Expected a color image with shape HxWx3, got {getattr(image, 'shape', None)}")
@@ -1035,8 +1010,8 @@ class OnnxYoloDetector:
 
         n_labels = len(self.labels)
         # Pose/keypoint head (e.g. a YOLO-face export): columns are
-        # ``4 bbox + nc class scores + keypoint_count*3`` landmark values, with
-        # no objectness column. The trailing landmark columns carry pixel
+        # ``4 bbox + nc class scores + keypoint_count*3`` landmark values. The
+        # trailing landmark columns carry pixel
         # coordinates, not class logits, so they must be sliced off the class
         # block explicitly -- otherwise a single-class ``face`` model would
         # argmax across keypoint coordinates and mislabel (and mis-score) every
@@ -1045,23 +1020,10 @@ class OnnxYoloDetector:
         # for the model) falls through to the plain-detection heuristic below.
         keypoint_count = getattr(self, '_keypoint_count', 0)
         if keypoint_count > 0 and n_labels > 0 and n_cols >= 4 + n_labels:
-            objectness = None
             class_scores = predictions[:, 4:4 + n_labels]
         else:
-            # Detect model format: YOLOv5 has an explicit objectness column at
-            # index 4 (total = 4 bbox + 1 obj + N classes = N+5 cols); YOLOv8
-            # goes straight from bbox to class scores (total = 4 + N = N+4
-            # cols).  Use exact equality so an extra trailing column from some
-            # export tools doesn't trigger a false-positive.  Requires a labels
-            # file; without one we can't distinguish formats and default to
-            # YOLOv8 (no objectness) which is the safer guess.
-            has_objectness = n_labels > 0 and n_cols == n_labels + 5
-            if has_objectness:
-                objectness = predictions[:, 4]
-                class_scores = predictions[:, 5:]
-            else:
-                objectness = None
-                class_scores = predictions[:, 4:]
+            # YOLOv8 / YOLO11 grid head: 4 bbox columns, then one score per class.
+            class_scores = predictions[:, 4:]
 
         # Reject malformed model rows before argmax/scaling. NaN/Inf values can
         # otherwise survive vectorized post-processing and leak into normalized
@@ -1072,12 +1034,9 @@ class OnnxYoloDetector:
             return []
         predictions = predictions[finite_rows]
         class_scores = class_scores[finite_rows]
-        if objectness is not None:
-            objectness = objectness[finite_rows]
 
         class_ids = np.argmax(class_scores, axis=1)
-        raw_scores = class_scores[np.arange(len(class_ids)), class_ids]
-        scores = raw_scores * objectness if objectness is not None else raw_scores
+        scores = class_scores[np.arange(len(class_ids)), class_ids]
 
         conf_mask = scores >= confidence
         if not np.any(conf_mask):
@@ -1291,7 +1250,7 @@ def _resolve_confidence_only_nms(value: Any) -> bool:
     - ``'on'`` / truthy: skip the NMS pass (same effect as auto today).
     - ``'off'`` / falsy: always run the class-aware NMS dedupe.
 
-    Legacy persisted bools are honoured (``True`` -> skip, ``False`` -> run).
+    A bool is also accepted (``True`` -> skip, ``False`` -> run).
     """
     if value is None:
         return True

@@ -32,7 +32,6 @@ from app.quantization import (  # noqa: E402
     int8_cache_path,
     int8_quantization_available,
     invalidate_int8_cache,
-    normalize_precision,
     onnxruntime_gpu_available,
     precision_export_kwargs,
     quantize_int8,
@@ -100,25 +99,6 @@ def test_int8_cache_path_preserves_model_directory(tmp_path: Path):
     cache = int8_cache_path(nested)
     assert cache.parent == nested.parent
     assert cache.name == 'yolov8n.int8.onnx'
-
-
-# -- normalize_precision ---------------------------------------------------
-
-
-@pytest.mark.parametrize('value,expected', [
-    ('fp32', 'fp32'),
-    ('fp16', 'fp16'),
-    ('int8', 'int8'),
-    ('FP16', 'fp16'),
-    (' Int8 ', 'int8'),
-    ('', 'fp32'),
-    (None, 'fp32'),
-    ('unknown', 'fp32'),   # silent fallback preserves current behavior
-])
-def test_normalize_precision(value, expected):
-    """Unknown values silently normalise to ``fp32`` so a stale
-    ``precision`` in saved config doesn't break detector loading."""
-    assert normalize_precision(value) == expected
 
 
 # -- precision_export_kwargs ----------------------------------------------

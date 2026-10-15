@@ -213,13 +213,12 @@ def _use_unknown_rule(monkeypatch, rule):
     # helpers from app.face_detection_rules inside the function, so the
     # monkeypatch targets that module's namespace.
     import app.face_detection_rules as fdr
-    monkeypatch.setattr(fdr, 'enabled_unknown_rule', lambda: rule)
     monkeypatch.setattr(fdr, 'effective_face_detection_rules', lambda: {'rules': [rule] if rule else []})
 
 
 def test_deliver_email_alerts_unknown_face_uses_unknown_rule_recipients(tmp_path, monkeypatch):
-    """Unknown-face emails use the ``_unknown`` rule's recipients (replacing
-    the removed ``alert_unknown_email`` setting); no rule means no email."""
+    """Unknown-face emails use the recipients of the ``_unknown`` rule that
+    fired; no rule means no email."""
     _app, _ = _load_app(tmp_path, monkeypatch)
     captured: list[dict[str, object]] = []
 
@@ -239,8 +238,8 @@ def test_deliver_email_alerts_unknown_face_uses_unknown_rule_recipients(tmp_path
         lambda _event_id: {'metadata': {}, 'snapshot_path': None, 'created_at': ''},
     )
 
-    triggered = [{'label': 'face', 'rule_name': 'Unknown face', 'confidence': 0.9,
-                  'message': 'Alert triggered: unrecognized face detected'}]
+    triggered = [{'label': 'face', 'rule_name': 'Unknown face', 'face_rule_ids': ['_unknown'],
+                  'confidence': 0.9, 'message': 'Alert triggered: unrecognized face detected'}]
     _use_unknown_rule(monkeypatch, _unknown_face_rule())
 
     _ad.deliver_email_alerts(triggered, 42, rules=[])
@@ -255,8 +254,8 @@ def test_deliver_email_alerts_unknown_face_uses_unknown_rule_recipients(tmp_path
 
 
 def test_deliver_push_notifications_unknown_face_uses_unknown_rule_push(tmp_path, monkeypatch):
-    """Unknown-face pushes are gated on the ``_unknown`` rule's push_enabled
-    (replacing the removed ``alert_unknown`` setting)."""
+    """Unknown-face pushes are gated on the fired ``_unknown`` rule's
+    push_enabled."""
     _app, _ = _load_app(tmp_path, monkeypatch)
     captured: list[dict[str, object]] = []
 
@@ -276,8 +275,8 @@ def test_deliver_push_notifications_unknown_face_uses_unknown_rule_push(tmp_path
         lambda _event_id: {'metadata': {'camera_name': 'Front Door', 'camera_id': 'front'}},
     )
 
-    triggered = [{'label': 'face', 'rule_name': 'Unknown face', 'confidence': 0.9,
-                  'message': 'Alert triggered: unrecognized face detected'}]
+    triggered = [{'label': 'face', 'rule_name': 'Unknown face', 'face_rule_ids': ['_unknown'],
+                  'confidence': 0.9, 'message': 'Alert triggered: unrecognized face detected'}]
     _use_unknown_rule(monkeypatch, _unknown_face_rule(push_enabled=True))
 
     _ad.deliver_push_notifications(triggered, 42, rules=[])
@@ -678,7 +677,7 @@ def test_object_detection_with_email_rule_delivers_one_envelope_per_recipient(tm
     sent = _email_alert_capture(main, monkeypatch)
     settings = _zone_camera_settings_with_email('cat')
     # Override recipients on the nested rule so the alert fans out to 2 addresses.
-    settings['detection']['zones'][0]['object_rules'][0]['email_recipients'] = ['alice@example.com', 'bob@example.com']
+    settings['detection']['zones'][0]['object_rules'][0]['alert_schedules'][0]['email_recipients'] = ['alice@example.com', 'bob@example.com']
     event_id = _lm.process_live_stream_alerts(
         b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False,
     )

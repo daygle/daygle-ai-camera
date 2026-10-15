@@ -84,18 +84,17 @@ test('a single detection is reported as such, never as an invented 1.0s span', (
 
 test('a real span is reported with its measured duration', () => {
   const { legend } = render({ track: [sample(10), sample(10.4), sample(10.8)] });
-  const texts = legend.map((item) => item.text);
-  assert.deepEqual(texts.slice(0, 3), ['Pre-roll 10s', 'Event 0.8s', 'Tail 49s']);
+  const texts = legend.map((item) => item.text);    assert.deepEqual(texts.slice(0, 3), ['Pre-Roll 10s', 'Event 0.8s', 'Tail 49s']);
 });
 
 test('legend items say what they measure and which setting governs it', () => {
   const { legend } = render({ track: [sample(10), sample(20)] });
   const titles = Object.fromEntries(legend.map((item) => [item.text.split(' ')[0], item.title]));
-  assert.match(titles['Pre-roll'], /first detection/);
-  assert.match(titles['Pre-roll'], /Pre-Event setting covers clip start to the trigger/);
-  assert.match(titles.Event, /first to last detection/);
-  assert.match(titles.Tail, /last detection to clip end/);
-  assert.match(titles.Tail, /Post-event setting runs from the trigger/);
+  assert.match(titles['Pre-Roll'], /first detection/);
+  assert.match(titles['Pre-Roll'], /Pre-Event setting covers clip start to the trigger/);
+  assert.match(titles['Event'], /first to last detection/);
+  assert.match(titles['Tail'], /last detection to clip end/);
+  assert.match(titles['Tail'], /Post-event setting runs from the trigger/);
 });
 
 test('the trigger is marked where it actually fired, apart from the first detection', () => {
@@ -106,8 +105,7 @@ test('the trigger is marked where it actually fired, apart from the first detect
     event: { created_at: '2026-10-04T10:00:10+00:00' },
     track: [sample(16), sample(30)],
   });
-  const texts = legend.map((item) => item.text);
-  assert.ok(texts.includes('Pre-roll 16s'), texts.join(' | '));
+  const texts = legend.map((item) => item.text);    assert.ok(texts.includes('Pre-Roll 16s'), texts.join(' | '));
   assert.ok(texts.includes('Trigger 10s'), texts.join(' | '));
   const trigger = bar.find((el) => el.className === 'clip-event-trigger');
   assert.ok(trigger, 'trigger marker is drawn');
@@ -171,13 +169,13 @@ test('each extension run is marked on the bar and in the legend', () => {
   assert.equal(original.style.left, `${(25 / 60) * 100}%`);
   const texts = legend.map((item) => item.text);
   assert.ok(texts.includes('Extended ×3'), texts.join(' | '));
-  assert.ok(texts.includes('Original end 25s'), texts.join(' | '));
+  assert.ok(texts.includes('Original End 25s'), texts.join(' | '));
 });
 
 test('no original-end line when the clip did not run past it', () => {
   const { bar, legend } = render(extendedRecording([[11, 14, 'object', 'car']], 60));
   assert.ok(!bar.some((el) => el.className === 'clip-original-end'));
-  assert.ok(!legend.some((item) => item.text.startsWith('Original end')));
+  assert.ok(!legend.some((item) => item.text.startsWith('Original End')));
 });
 
 test('clips without extensions draw no markers', () => {

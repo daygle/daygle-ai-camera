@@ -245,17 +245,6 @@ function roundCoord(value) {
   return Math.round(clamp(value) * 10000) / 10000;
 }
 
-// eslint-disable-next-line no-unused-vars -- ESLint: exported for zones.js (zones page script)
-function normalizeLabelList(value) {
-  const source = Array.isArray(value) ? value : String(value || '').split(',');
-  const seen = new Set();
-  return source.map((label) => String(label).trim().toLowerCase()).filter((label) => {
-    if (!label || seen.has(label)) return false;
-    seen.add(label);
-    return true;
-  });
-}
-
 function snapshotUrl(camera = selectedCamera, width = 0) {
   const cameraId = encodeURIComponent(camera?.id || '');
   const size = width ? `&width=${width}` : '';

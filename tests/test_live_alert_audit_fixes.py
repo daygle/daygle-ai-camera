@@ -4,7 +4,7 @@
    with ``camera_settings`` scopes the ONNX floor to that camera's own rules, so
    a low-threshold rule on one camera can no longer drag every camera's floor
    down. A camera with no enabled object rules falls back to the AI-settings
-   confidence (motion rules are always skipped).
+   confidence (motion and face rules are always skipped).
 
 2. **Per-label event debounce.** ``live_event_fresh_labels`` gives each label
    its OWN cooldown window: a fast label can fire its own event while a slower
@@ -79,6 +79,23 @@ def test_min_rule_confidence_camera_scoped_no_rules(monkeypatch):
     _ad._per_camera_min_rule_confidence_cache.clear()
     try:
         assert _ad.compute_minimum_rule_confidence(camera_settings=camera) == pytest.approx(0.42)
+    finally:
+        _ad._min_rule_confidence_cache = None
+        _ad._per_camera_min_rule_confidence_cache.clear()
+
+
+def test_min_rule_confidence_skips_face_rules(monkeypatch):
+    """Faces run on the separate face model with its own threshold, so a low
+    zone face rule must not lower the object detector's floor."""
+    monkeypatch.setattr(_ad, 'effective_ai_config', lambda: {'confidence': 0.45})
+    camera = {'id': 'cam-face', 'detection': {'zones': [{'id': 'z', 'object_rules': [
+        {'label': 'face', 'min_confidence': 0.0, 'enabled': True},
+        {'label': 'person', 'min_confidence': 0.6, 'enabled': True},
+    ]}]}}
+    _ad._min_rule_confidence_cache = None
+    _ad._per_camera_min_rule_confidence_cache.clear()
+    try:
+        assert _ad.compute_minimum_rule_confidence(camera_settings=camera) == pytest.approx(0.45)
     finally:
         _ad._min_rule_confidence_cache = None
         _ad._per_camera_min_rule_confidence_cache.clear()
@@ -302,13 +319,7 @@ def test_motion_alert_does_not_record_when_record_off(tmp_path, monkeypatch):
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'monitor_motion': True,
                     'monitor_objects': False,
-                    'object_rules': [{
-                        'label': 'motion',
-                        'record_on_detect': record_on_detect,
-                        'email_enabled': True,
-                        'min_confidence': 0.0,
-                        'cooldown_seconds': 0,
-                    }],
+                    'object_rules': [{'label': 'motion', 'record_on_detect': record_on_detect, 'min_confidence': 0.0, 'cooldown_seconds': 0, 'alert_schedules': [{'email_enabled': True}]}],
                 }],
             },
             'recording': {'continuous': False},

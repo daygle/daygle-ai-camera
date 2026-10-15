@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from fastapi import HTTPException
 
-from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
+from tests.support import add_event, _load_app, LocalClient, _login, _server, _setup_admin
 
 
 @pytest.fixture
@@ -511,7 +511,7 @@ def test_merge_event_metadata_keeps_existing_keys(tmp_path):
     from app.database import EventDatabase
 
     db = EventDatabase(str(tmp_path / 'm.sqlite3'))
-    event_id = db.add_event(created_at='2026-09-28T00:00:00+00:00', source='rtsp', snapshot_path=None,
+    event_id = add_event(db, created_at='2026-09-28T00:00:00+00:00', source='rtsp', snapshot_path=None,
                             detections=[], metadata={'camera_id': 'cam'})
     assert db.merge_event_metadata(event_id, {'ai_verification': {'status': 'filtered'}}) is True
     metadata = db.get_event(event_id)['metadata']
@@ -626,29 +626,9 @@ def test_describe_prompt_and_reply_follow_the_content_choice(av):
 def test_alert_and_other_event_content_are_validated(av, no_stored_settings):
     settings = av.validate_ai_verification_settings({'describe_alerts': ' Both ', 'describe_other_events': 'tags'})
     assert (settings['describe_alerts'], settings['describe_other_events']) == ('both', 'tags')
-    # The old single mode is kept in step for anything still reading it.
-    assert settings['describe_events'] == 'all'
-    assert av.validate_ai_verification_settings({'describe_alerts': 'description'})['describe_events'] == 'alerts'
+    assert 'describe_events' not in settings
     with pytest.raises(HTTPException):
         av.validate_ai_verification_settings({'describe_alerts': 'everything'})
-
-
-def test_turning_both_off_is_not_overridden_by_the_old_mode(av, monkeypatch):
-    stored = {'describe_alerts': 'both', 'describe_other_events': 'tags', 'describe_events': 'all'}
-    monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: _settings(av, **stored))
-    settings = av.validate_ai_verification_settings({'describe_alerts': 'off', 'describe_other_events': 'off'})
-    assert settings['describe_events'] == 'off' and av.describe_mode(settings) == 'off'
-
-
-@pytest.mark.parametrize('legacy, alerts, others', [('off', 'off', 'off'), ('alerts', 'both', 'off'), ('all', 'both', 'both')])
-def test_old_describe_events_setting_maps_onto_the_two_settings(av, monkeypatch, no_stored_settings,
-                                                               legacy, alerts, others):
-    monkeypatch.setattr(av._state, 'database', _FakeDb({'describe_events': legacy}))
-    settings = av._build_effective_settings()
-    assert (settings['describe_alerts'], settings['describe_other_events']) == (alerts, others)
-    # An older API client that only sends the single mode.
-    payload = av.validate_ai_verification_settings({'describe_events': legacy})
-    assert (payload['describe_alerts'], payload['describe_other_events']) == (alerts, others)
 
 
 @pytest.mark.parametrize('alerts, others, mode', [
@@ -763,7 +743,7 @@ def test_single_label_without_description_keeps_the_plain_question(av, combined)
 def test_verification_and_description_share_one_request(av, combined):
     configure, forwarded, calls, catch_ups = combined
     db = configure(check=({'person': (True, 'walking')}, ('A person at the gate.', ['bag', 'person'])),
-                   describe_events='alerts')
+                   describe_alerts='both')
     db.get_event = lambda event_id: {'id': event_id, 'snapshot_path': 'x.jpg',
                                       'detections': [{'label': 'person'}], 'metadata': {}}
     av.verify_and_forward([_alert('person', 0.6)], 22, [], 'Gate', camera_id='cam')
@@ -777,7 +757,7 @@ def test_verification_and_description_share_one_request(av, combined):
 
 def test_unanswered_parts_are_asked_separately(av, combined):
     configure, forwarded, calls, _ = combined
-    db = configure(check=({'person': (True, 'walking')}, None), ask=(False, 'a bush'), describe_events='all')
+    db = configure(check=({'person': (True, 'walking')}, None), ask=(False, 'a bush'), describe_alerts='both', describe_other_events='both')
     triggered = [_alert('person', 0.6), _alert('dog', 0.5)]
     av.verify_and_forward(triggered, 23, [], '', camera_id='cam')
     assert calls == [('check', ('person', 'dog'), 'both'), ('ask', 'dog'), ('describe', 'both')]
@@ -797,7 +777,7 @@ def test_unreachable_model_is_not_asked_again_per_label(av, combined):
 
 def test_all_rejected_in_alerts_mode_stores_no_description(av, combined):
     configure, forwarded, calls, _ = combined
-    db = configure(check=({'person': (False, 'shadow')}, ('Nothing notable.', [])), describe_events='alerts')
+    db = configure(check=({'person': (False, 'shadow')}, ('Nothing notable.', [])), describe_alerts='both')
     av.verify_and_forward([_alert('person', 0.6)], 25, [], '', camera_id='cam')
     assert forwarded == [] and db.descriptions == {}
 

@@ -8,24 +8,24 @@ Routes:
 - GET  /favicon.ico   -- favicon
 - GET  /login         -- login_page
 - GET  /setup         -- setup_page
-- GET  /live          -- live_page
+- GET  /system        -- system_page
 - GET  /zones         -- zones_page
 - GET  /alerts        -- alerts_page
-- GET  /detection/sounds -- sounds_page (/sounds redirects)
-- GET  /detection     -- objects_page (/objects redirects)
-- GET  /detection/faces -- face_recognition_page (/face-recognition redirects)
+- GET  /detection/sounds -- sounds_page
+- GET  /detection     -- objects_page
+- GET  /detection/faces -- face_recognition_page
 - GET  /cameras       -- cameras_page
 - GET  /events        -- events_page
-- GET  /search        -- dashboard_aliases
 - GET  /recordings    -- recordings_page
 - GET  /snapshots     -- snapshots_page
 - GET  /recordings/timeline -- recordings_timeline_page
-- GET  /models        -- models_page (/onnx redirects)
-- GET  /models/faces  -- face_models_page (/arcface redirects)
-- GET  /models/cameras -- camera_models_page (/camera-models redirects)
-- GET  /models/sound  -- yamnet_tflite_page (/yamnet-tflite, /yamnet redirect)
+- GET  /recordings/{recording_id} -- recording_playback_page
+- GET  /models        -- models_page
+- GET  /models/faces  -- face_models_page
+- GET  /models/cameras -- camera_models_page
+- GET  /models/sound  -- yamnet_tflite_page
 - GET  /models/settings -- model_settings_page
-- GET  /ai            -- ai_settings_page (308 redirect)
+- GET  /ai            -- ai_page
 - GET  /profile       -- profile_page
 - GET  /settings      -- system_settings_page
 - GET  /users         -- users_page
@@ -210,12 +210,6 @@ def _setup_page_route(
     return setup_page(request, auth=auth, auth_enabled=auth_enabled)
 
 
-@router.get('/live')
-def live_page():
-    # Live is now the home page; keep old bookmarks working.
-    return RedirectResponse('/', status_code=308)
-
-
 @router.get('/system')
 def system_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     # Admin > System > Health: CPU, memory, GPU and storage at a glance.
@@ -241,20 +235,10 @@ def sounds_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     return _page(web_dir, 'sounds.html')
 
 
-@router.get('/sounds')
-def legacy_sounds_page():
-    return RedirectResponse('/detection/sounds', status_code=308)
-
-
 @router.get('/detection')
 def objects_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
     return _page(web_dir, 'objects.html')
-
-
-@router.get('/objects')
-def legacy_objects_page():
-    return RedirectResponse('/detection', status_code=308)
 
 
 @router.get('/cameras')
@@ -271,12 +255,6 @@ def events_page(web_dir: Path = Depends(get_web_dir)):
     # authenticated user like /recordings; the middleware enforces the session
     # and /api/events applies per-user recording scoping.
     return _page(web_dir, 'events.html')
-
-
-@router.get('/search')
-def dashboard_aliases():
-    # Footage search lives on the Events page.
-    return RedirectResponse('/events', status_code=308)
 
 
 @router.get('/recordings')
@@ -345,20 +323,10 @@ def model_settings_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     return _page(web_dir, 'models-settings.html')
 
 
-@router.get('/onnx')
-def onnx_page():
-    return RedirectResponse('/models', status_code=308)
-
-
-@router.get('/camera-models')
-def legacy_camera_models_page():
-    return RedirectResponse('/models/cameras', status_code=308)
-
-
 @router.get('/ai')
 def ai_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     # Intelligence > AI: the local vision model (verification, descriptions,
-    # search, tag alerts). Previously a legacy redirect to /onnx.
+    # search, tag alerts).
     require_admin(request)
     return _page(web_dir, 'ai.html')
 
@@ -367,34 +335,6 @@ def ai_page(request: Request, web_dir: Path = Depends(get_web_dir)):
 def face_recognition_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
     return _page(web_dir, 'face-recognition.html')
-
-
-@router.get('/face-recognition')
-def legacy_face_recognition_page():
-    return RedirectResponse('/detection/faces', status_code=308)
-
-
-@router.get('/arcface')
-def arcface_page():
-    return RedirectResponse('/models/faces', status_code=308)
-
-
-@router.get('/people')
-def people_page(request: Request, web_dir: Path = Depends(get_web_dir)):
-    require_admin(request)
-    # People enrolment lives in the People card on the Face Recognition page;
-    # the hash scrolls straight to that card.
-    return RedirectResponse('/detection/faces#people', status_code=303)
-
-
-@router.get('/yamnet-tflite')
-def legacy_yamnet_tflite_page():
-    return RedirectResponse('/models/sound', status_code=308)
-
-
-@router.get('/yamnet')
-def yamnet_page():
-    return RedirectResponse('/models/sound', status_code=308)
 
 
 @router.get('/profile')
