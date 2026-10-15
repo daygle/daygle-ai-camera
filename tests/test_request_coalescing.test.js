@@ -1,18 +1,12 @@
-// Tests for the request cancellation / coalescing / backoff layer added to
-// web/utils.js (Item 14 of the performance roadmap).
+// Tests for the request coalescing in web/utils.js (Item 14 of the
+// performance roadmap). The two guarantees under test, each of which was a
+// real defect:
 //
-// The three guarantees under test, each of which was a real defect:
-//
-//   1. A poll that is superseded before it settles must not write stale data
-//      over the newer response. Guaranteed twice over - by aborting the
-//      previous request AND by a sequence ticket - because either mechanism
-//      alone has a hole.
-//
-//   2. Concurrent GETs for the same path share ONE network request. The
+//   1. Concurrent GETs for the same path share ONE network request. The
 //      dashboard's several widgets routinely ask for the same endpoint at the
 //      same moment.
 //
-//   3. A poller whose tick outlasts its own period must not stack requests.
+//   2. A poller whose tick outlasts its own period must not stack requests.
 //      startPageInterval now skips a tick whose predecessor is still in
 //      flight, and must always release that lock, even on rejection.
 //
@@ -36,27 +30,6 @@ function deferred() {
   let reject;
   const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
-}
-
-// A DOMException-shaped abort error, matching what a real fetch() raises.
-function abortError() {
-  const error = new Error('The operation was aborted.');
-  error.name = 'AbortError';
-  return error;
-}
-
-// A stand-in for an in-flight fetch: resolves/rejects when the test says so,
-// and rejects with an AbortError the moment the signal fires - exactly the
-// contract the coalescer's abort half relies on. Without that last part a
-// superseded request would hang forever instead of settling, and the stale
-// promise would never resolve.
-function fetchLike(signal) {
-  const gate = deferred();
-  if (signal) {
-    if (signal.aborted) gate.reject(abortError());
-    else signal.addEventListener('abort', () => gate.reject(abortError()));
-  }
-  return gate;
 }
 
 function jsonResponse(payload, { status = 200 } = {}) {
@@ -111,13 +84,6 @@ function loadUtils({ respond } = {}) {
   return {
     sandbox,
     calls,
-    // Top-level `const` bindings in a vm script are lexical, not properties of
-    // the global object, so REQUEST_SUPERSEDED is invisible on `sandbox`.
-    // Other page scripts see it as a bare global identifier, so evaluate in
-    // the context to observe it exactly the way a consumer would.
-    evaluate(expression) {
-      return vm.runInContext(expression, sandbox);
-    },
     fireVisibility(visible) {
       sandbox.document.hidden = !visible;
       for (const handler of docListeners.get('visibilitychange') || []) handler();
@@ -126,86 +92,6 @@ function loadUtils({ respond } = {}) {
 }
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
-
-// ─── createRequestCoalescer: latest wins ──────────────────────────────────
-
-test('a superseded coalesced call resolves with REQUEST_SUPERSEDED, not stale data', async () => {
-  const { sandbox, evaluate } = loadUtils();
-  const SUPERSEDED = evaluate('REQUEST_SUPERSEDED');
-  const run = sandbox.createRequestCoalescer();
-
-  const first = run((signal) => fetchLike(signal).promise);
-  const second = run(async () => 'newest');
-
-  // The stale caller must be told it lost, and must NOT receive the winner's
-  // value - that is the bug this whole layer exists to prevent.
-  assert.equal(await first, SUPERSEDED);
-  assert.equal(await second, 'newest');
-});
-
-test('superseding aborts the previous request signal', async () => {
-  const { sandbox, evaluate } = loadUtils();
-  const SUPERSEDED = evaluate('REQUEST_SUPERSEDED');
-  const run = sandbox.createRequestCoalescer();
-
-  const seen = [];
-  const first = run((signal) => { seen.push(signal); return fetchLike(signal).promise; });
-  const second = run((signal) => { seen.push(signal); return 'ok'; });
-
-  assert.equal(seen[0].aborted, true, 'previous signal should be aborted');
-  assert.equal(seen[1].aborted, false, 'current signal must stay live');
-  assert.equal(await second, 'ok');
-  assert.equal(await first, SUPERSEDED);
-});
-
-test('the newest call wins even when the stale call ignores its abort signal', async () => {
-  const { sandbox, evaluate } = loadUtils();
-  const SUPERSEDED = evaluate('REQUEST_SUPERSEDED');
-  const run = sandbox.createRequestCoalescer();
-
-  // This task ignores `signal` completely - the sequence ticket alone has to
-  // carry the guarantee, because nothing will abort it for us.
-  const slow = deferred();
-  const stale = run(() => slow.promise);
-  const winner = run(async () => ({ value: 'fresh' }));
-
-  assert.equal((await winner).value, 'fresh');
-  // The stale response arrives LAST and resolves successfully; the ticket is
-  // the only thing stopping it from being handed back to the caller.
-  slow.resolve({ value: 'old' });
-  assert.equal(await stale, SUPERSEDED);
-});
-
-test('a real error still rejects; only cancellation is absorbed', async () => {
-  const { sandbox } = loadUtils();
-  const run = sandbox.createRequestCoalescer();
-
-  await assert.rejects(
-    run(async () => { throw new Error('backend down'); }),
-    /backend down/,
-  );
-});
-
-test('a synchronous throw from the task does not wedge the coalescer', async () => {
-  const { sandbox } = loadUtils();
-  const run = sandbox.createRequestCoalescer();
-
-  await assert.rejects(run(() => { throw new Error('sync boom'); }), /sync boom/);
-  // The next call must still work and must not be treated as superseded.
-  assert.equal(await run(async () => 'recovered'), 'recovered');
-});
-
-test('isAbortError recognises browser and Node abort spellings', () => {
-  const { sandbox } = loadUtils();
-  const isAbortError = sandbox.isAbortError;
-
-  assert.equal(isAbortError({ name: 'AbortError' }), true);
-  assert.equal(isAbortError({ code: 20 }), true);
-  assert.equal(isAbortError({ code: 'ABORT_ERR' }), true);
-  assert.equal(isAbortError(new Error('nope')), false);
-  assert.equal(isAbortError(null), false);
-  assert.equal(isAbortError('AbortError'), false);
-});
 
 // ─── api(): in-flight GET sharing ─────────────────────────────────────────
 
@@ -339,37 +225,4 @@ test('a hidden tab still skips polling, and resuming waits for the in-flight tic
 
   gates[0].resolve();
   await tick();
-});
-
-// ─── backoffDelayMs ───────────────────────────────────────────────────────
-
-test('backoff grows exponentially and clamps at maxMs', () => {
-  const { sandbox } = loadUtils();
-  const delay = (attempt) => sandbox.backoffDelayMs(attempt, { jitter: 0, baseMs: 1000, maxMs: 30000 });
-
-  assert.equal(delay(0), 1000);
-  assert.equal(delay(1), 2000);
-  assert.equal(delay(2), 4000);
-  assert.equal(delay(5), 30000, 'must clamp at maxMs');
-  assert.equal(delay(50), 30000, 'a long outage must not schedule hours out');
-});
-
-test('backoff jitter stays within bounds and never goes negative', () => {
-  const { sandbox } = loadUtils();
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const nominal = sandbox.backoffDelayMs(attempt, { jitter: 0, baseMs: 1000, maxMs: 30000 });
-    for (let i = 0; i < 50; i += 1) {
-      const value = sandbox.backoffDelayMs(attempt, { jitter: 0.2, baseMs: 1000, maxMs: 30000 });
-      assert.ok(value >= nominal * 0.8 - 1, `attempt ${attempt}: ${value} below jitter floor`);
-      assert.ok(value <= nominal * 1.2 + 1, `attempt ${attempt}: ${value} above jitter ceiling`);
-      assert.ok(value >= 0, 'delay must never be negative');
-    }
-  }
-});
-
-test('backoff normalises a nonsense attempt into the base delay', () => {
-  const { sandbox } = loadUtils();
-  assert.equal(sandbox.backoffDelayMs(-5, { jitter: 0, baseMs: 1000 }), 1000);
-  assert.equal(sandbox.backoffDelayMs(undefined, { jitter: 0, baseMs: 1000 }), 1000);
-  assert.equal(sandbox.backoffDelayMs('nope', { jitter: 0, baseMs: 1000 }), 1000);
 });

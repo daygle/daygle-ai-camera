@@ -80,21 +80,12 @@ def _coerce_detection_confidence(value: Any) -> float:
 
 
 def _normalize_recipients_field(value: Any) -> str:
-    """Normalise ``email_recipients`` to a clean comma-separated string.
-
-    Handles: list, comma-separated string, or a corrupted Python repr string
-    like ``"['glen@daygle.net']"`` that was stored when ``str()`` was called
-    on a list before the array-to-string fix.
-    """
+    """Normalise ``email_recipients`` (a list or comma-separated string) to a
+    clean comma-separated string."""
     if isinstance(value, list):
         parts = value
     elif isinstance(value, str):
-        stripped = value.strip()
-        if stripped.startswith('['):
-            # Corrupted Python list repr - strip brackets and quotes
-            parts = [s.strip().strip("'\"") for s in stripped.strip('[]').split(',')]
-        else:
-            parts = stripped.split(',')
+        parts = value.split(',')
     else:
         parts = []
     return ', '.join(

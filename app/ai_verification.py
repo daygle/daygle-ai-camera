@@ -751,11 +751,8 @@ SMALL_OBJECT_FRACTION = 0.2
 
 
 def _shrink_for_model(image_bytes: bytes) -> bytes:
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        return image_bytes
+    import cv2
+    import numpy as np
     frame = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         return image_bytes
@@ -825,11 +822,8 @@ def focus_image(image_bytes: bytes, detections: list[dict[str, Any]], label: str
     box = _label_box(detections, label)
     if box is None:
         return image_bytes
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        return image_bytes
+    import cv2
+    import numpy as np
     frame = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         return image_bytes

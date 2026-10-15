@@ -1403,7 +1403,6 @@ def test_clip_has_video_stream_rejects_declared_stream_with_zero_packets(tmp_pat
     monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
 
     assert RecordingService.clip_has_video_stream(clip) is False
-    assert RecordingService.clip_video_packet_count(clip) == 0
     assert RecordingService.clip_duration_seconds(clip) == pytest.approx(2.5)
     assert len(calls) == 1
 

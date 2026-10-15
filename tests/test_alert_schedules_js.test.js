@@ -8,7 +8,7 @@ import vm from 'node:vm';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(path.resolve(here, '../web/alerts.js'), 'utf8');
 const start = source.indexOf('function defaultAlertSchedule()');
-const end = source.indexOf('function policyHasChannel(');
+const end = source.indexOf('function defaultRule(');
 assert.ok(start >= 0 && end > start, 'alerts.js schedule helpers should be present');
 
 const sandbox = {

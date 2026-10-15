@@ -85,13 +85,9 @@ from app.config_facades import effective_live_config
 from app.zone_schema import canonical_label
 
 
-try:
-    import cv2
-    _CV2_ERROR = (cv2.error,) if cv2 is not None else ()
-except Exception:
-    _CV2_ERROR = ()
+import cv2
 
-_EXPECTED_MOTION_ERRORS = (ValueError, TypeError, MemoryError, OSError) + _CV2_ERROR
+_EXPECTED_MOTION_ERRORS = (ValueError, TypeError, MemoryError, OSError, cv2.error)
 
 # Motion errors fail closed. A decode/processing failure is not evidence of
 # movement: returning synthetic motion here lets a default motion rule pass and

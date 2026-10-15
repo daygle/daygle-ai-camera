@@ -691,12 +691,7 @@ class OnnxYoloDetector:
         return [ort_value.numpy() for ort_value in io.get_outputs()]
 
     def _decode_image(self, image_bytes: bytes) -> np.ndarray:
-        try:
-            import cv2
-        except ImportError as exc:
-            raise DetectorUnavailableError(
-                "opencv-python-headless is not installed. Install requirements.txt or run pip install opencv-python-headless."
-            ) from exc
+        import cv2
 
         data = np.frombuffer(image_bytes, dtype=np.uint8)
         image = cv2.imdecode(data, cv2.IMREAD_COLOR)
@@ -705,12 +700,7 @@ class OnnxYoloDetector:
         return image
 
     def _preprocess(self, image: np.ndarray) -> tuple[np.ndarray, float, float, float, int, int]:
-        try:
-            import cv2
-        except ImportError as exc:
-            raise DetectorUnavailableError(
-                "opencv-python-headless is not installed. Install requirements.txt or run pip install opencv-python-headless."
-            ) from exc
+        import cv2
 
         if image.ndim != 3 or image.shape[2] != 3:
             raise ValueError(f"Expected a color image with shape HxWx3, got {getattr(image, 'shape', None)}")

@@ -445,10 +445,12 @@ describe('cursor pagination helper', () => {
       return { items: [{ id: 2 }], next_cursor: null };
     };
 
-    const items = await vm.runInContext(
-      "fetchAllCursorPages('/api/events?with_recording=true', 2)",
-      sandbox,
-    );
+    const items = await vm.runInContext(`(async () => {
+      const pager = createCursorPager('/api/events?with_recording=true', 2);
+      const all = [];
+      do { all.push(...(await pager.loadPage()).items); } while (!pager.done);
+      return all;
+    })()`, sandbox);
 
     assert.deepEqual(Array.from(items, (item) => item.id), [3, 2]);
     assert.equal(calls.length, 2);

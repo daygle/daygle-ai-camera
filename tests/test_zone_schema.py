@@ -11,7 +11,7 @@ Phase-18 ``app/camera_config.py``, Phase-19 ``app/recording_settings.py``,
 Phase-20 ``app/ai_settings.py``).
 
 Internal ``main.py`` callers (``validate_camera_settings`` L2537-2538,
-``render_live_snapshot_svg`` L2025, ``filter_detections_for_camera_zones``)
+``filter_detections_for_camera_zones``)
 reference these as bare names inside function bodies; the top-of-file
 Pool A rebind wires ``main.<name>`` (and ``main._LABEL_ALIASES``)
 before any of those bodies evaluates.

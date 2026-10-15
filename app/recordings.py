@@ -3061,30 +3061,6 @@ class RecordingService:
             return True
 
     @staticmethod
-    def clip_video_packet_count(file_path: Path) -> int | None:
-        """Return video packet count when ffprobe can determine it.
-
-        Some failed renders produce a tiny MP4 with a video stream declaration
-        but no video packets (`frame=0`, `video:0KiB`). Codec-only probing treats
-        that as valid; packet counting catches it.
-        """
-        if not file_path.exists() or file_path.stat().st_size <= 0:
-            return 0
-        probe_succeeded, payload = RecordingService._probe_clip(file_path)
-        if not probe_succeeded:
-            return None
-        streams = payload.get('streams')
-        if not isinstance(streams, list) or not streams or not isinstance(streams[0], dict):
-            return None
-        raw_value = streams[0].get('nb_read_packets')
-        if raw_value is None or str(raw_value).strip().upper() == 'N/A':
-            return None
-        try:
-            return max(0, int(raw_value))
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
     def clip_duration_seconds(file_path: Path) -> float | None:
         """Actual decodable video duration of a clip in seconds, or None if it
         can't be determined. Used to store an honest duration (the requested

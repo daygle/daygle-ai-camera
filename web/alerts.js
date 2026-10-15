@@ -134,14 +134,6 @@ function ensureAlertSchedules(rule) {
   return rule.alert_schedules;
 }
 
-// eslint-disable-next-line no-unused-vars -- ESLint: tests/test_alert_schedules_js.test.js slices the schedule helpers up to this definition
-function policyHasChannel(rule, channel) {
-  if (Array.isArray(rule.alert_schedules) && rule.alert_schedules.length) {
-    return rule.alert_schedules.some((schedule) => schedule[channel]);
-  }
-  return Boolean(rule[channel]);
-}
-
 function defaultRule(label = 'person', type = alertType) {
   if (type === 'sound') {
     const sound = soundClasses.find((item) => item.id === label);

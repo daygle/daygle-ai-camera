@@ -73,12 +73,8 @@ def decode_bgr_image(image_bytes: bytes) -> Any:
     Raises ``ValueError`` on empty input or an undecodable image so the caller
     can return a clean 400 rather than passing garbage to the embedder.
     """
-    try:
-        import cv2
-    except ImportError as exc:  # pragma: no cover - exercised only in minimal installs
-        raise FaceEmbedderUnavailableError(
-            "opencv-python-headless is not installed. Install requirements.txt or run pip install opencv-python-headless."
-        ) from exc
+    import cv2
+
     if not image_bytes:
         raise ValueError("image is empty")
     array = np.frombuffer(image_bytes, dtype=np.uint8)
@@ -118,10 +114,8 @@ def encode_face_thumbnail(image_bgr: Any, *, max_size: int = 160, quality: int =
     """
     if image_bgr is None or getattr(image_bgr, 'size', 0) == 0:
         return None
-    try:
-        import cv2
-    except ImportError:  # pragma: no cover - exercised only in minimal installs
-        return None
+    import cv2
+
     try:
         height, width = image_bgr.shape[:2]
         if height <= 0 or width <= 0:
