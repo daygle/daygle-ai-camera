@@ -114,6 +114,12 @@ def invalidate_min_rule_confidence_cache() -> None:
         _min_rule_confidence_cache = None
         _per_camera_min_rule_confidence_cache.clear()
 
+# Rule labels that never reach the object detector: motion is gated on the
+# pixel diff and faces run on the separate face model with its own Face
+# Confidence threshold, so neither may lower the object detector's floor.
+_NON_OBJECT_RULE_LABELS = frozenset({'motion', 'face'})
+
+
 def _confidence_rules_signature(camera_settings: dict[str, Any]) -> tuple[Any, ...]:
     """Fingerprint only the active zones and rule fields used by the floor."""
     detection = camera_settings.get('detection') or {}
@@ -126,7 +132,7 @@ def _confidence_rules_signature(camera_settings: dict[str, Any]) -> tuple[Any, .
             if not isinstance(rule, dict) or not rule.get('enabled', True):
                 continue
             label = str(rule.get('label') or '').strip().lower()
-            if label == 'motion':
+            if label in _NON_OBJECT_RULE_LABELS:
                 continue
             raw_confidence = rule.get('min_confidence')
             try:
@@ -147,14 +153,19 @@ def _confidence_rules_signature(camera_settings: dict[str, Any]) -> tuple[Any, .
 
 
 def compute_minimum_rule_confidence(fallback: float | None = None, camera_settings: dict | None = None) -> float:
-    """Return the lowest min_confidence across enabled object rules.
+    """Return the confidence the object detector should run at.
+
+    That is the lower of the AI-settings confidence and every enabled object
+    rule's ``min_confidence``: a rule may ask for a lower threshold than the
+    global one, but never raises the detector above it, because the
+    behaviour engines (tripwire, loiter, ...) have no threshold of their own
+    and rely on the global value.
 
     Without ``camera_settings`` this is the global floor across ALL cameras
     (used by status readouts / snapshot overlays). When a camera's settings are
     passed, only that camera's zones are scanned, so a low-threshold rule on
-    one camera can no longer drag every camera's detector floor down. A camera
-    with no enabled object rules falls back to the AI-settings confidence.
-    Motion rules are always skipped (motion is gated separately). The result
+    one camera can no longer drag every camera's detector floor down. Motion
+    and face rules are skipped (``_NON_OBJECT_RULE_LABELS``). The result
     is cached per camera (or globally for the no-camera form) for
     _MIN_RULE_CONFIDENCE_TTL seconds to avoid a database read on every
     detection frame (called at ~4 Hz per camera from the hot path).
@@ -199,7 +210,7 @@ def compute_minimum_rule_confidence(fallback: float | None = None, camera_settin
                 for rule in zone.get('object_rules') or []:
                     if not isinstance(rule, dict) or not rule.get('enabled', True):
                         continue
-                    if str(rule.get('label') or '').strip().lower() == 'motion':
+                    if str(rule.get('label') or '').strip().lower() in _NON_OBJECT_RULE_LABELS:
                         continue
                     try:
                         conf = float(rule.get('min_confidence', fallback))

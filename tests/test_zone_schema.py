@@ -435,16 +435,11 @@ def test_normalize_zone_alert_schedules_upgrades_legacy_fields_and_keeps_multipl
     assert multiple['email_recipients'] == ['morning@example.com', 'evening@example.com']
 
 
-def test_normalize_zone_object_rules_synthesizes_from_object_labels_when_no_rules(monkeypatch, zs):
-    """If ``object_rules`` is missing, synthesize 1-row rules from
-    ``object_labels`` (the older UI-driven schema)."""
+def test_normalize_zone_object_rules_ignores_object_labels_without_rules(monkeypatch, zs):
+    """Rules come only from ``object_rules``; a bare ``object_labels`` list
+    (the pre-rules schema) no longer synthesizes any."""
     _install_zone_dependencies(monkeypatch)
-    zone = {'object_labels': ['human', 'car']}  # 'human' -> 'person' via alias
-    rules = zs.normalize_zone_object_rules(zone)
-    assert [r['label'] for r in rules] == ['person', 'car']
-    # All synthesized rules use defaults.
-    assert all(r['min_confidence'] == 0.5 for r in rules)
-    assert all('cooldown_seconds' not in r for r in rules)
+    assert zs.normalize_zone_object_rules({'object_labels': ['human', 'car']}) == []
 
 
 def test_normalize_zone_object_rules_clamps_min_confidence_and_drops_cooldown(monkeypatch, zs):
@@ -572,18 +567,15 @@ def test_normalize_monitoring_zones_falls_back_to_rectangle_when_lt3_points(monk
     assert len(zones[0]['points']) == 4
 
 
-def test_normalize_monitoring_zones_folds_legacy_monitor_motion_into_rule(monkeypatch, zs):
-    """When ``zone.monitor_motion`` is True but no motion rule exists
-    in ``object_rules``, a default motion rule is inserted at position 0.
-    """
+def test_normalize_monitoring_zones_ignores_input_monitor_motion(monkeypatch, zs):
+    """``monitor_motion`` is derived from the rules only: an input flag with no
+    motion rule neither inserts one nor survives normalization."""
     _install_zone_dependencies(monkeypatch)
     zones = zs.normalize_monitoring_zones([{
         'monitor_motion': True, 'object_rules': [{'label': 'person'}],
     }])
-    rules = zones[0]['object_rules']
-    assert rules[0]['label'] == 'motion'  # inserted
-    assert rules[0]['enabled'] is True
-    assert zones[0]['monitor_motion'] is True
+    assert [r['label'] for r in zones[0]['object_rules']] == ['person']
+    assert zones[0]['monitor_motion'] is False
 
 
 def test_normalize_monitoring_zones_does_not_insert_motion_when_already_present(monkeypatch, zs):

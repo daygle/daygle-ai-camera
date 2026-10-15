@@ -186,7 +186,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                     'object_detection_enabled': True,
                     'object_labels': ['person', 'cat'],
                     'zones': [
-                        {'id': 'porch', 'name': 'Porch', 'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': True, 'object_labels': ['person']}
+                        {'id': 'porch', 'name': 'Porch', 'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5, 'monitor_objects': True, 'object_rules': [{'label': 'motion'}, {'label': 'person'}]}
                     ],
                 },
             },
@@ -226,7 +226,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                 'detection': {
                     **listed['cameras'][0]['detection'],
                     'zones': [
-                        {'id': 'driveway', 'name': 'Driveway', 'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': False, 'object_labels': 'cat, person, cat'}
+                        {'id': 'driveway', 'name': 'Driveway', 'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'monitor_objects': False, 'object_rules': [{'label': 'motion'}, {'label': 'cat'}, {'label': 'person'}, {'label': 'cat'}]}
                     ],
                 },
             },
@@ -289,7 +289,7 @@ def test_monitoring_zones_filter_object_detections_by_label(tmp_path, monkeypatc
             'width': 1,
             'height': 1,
             'monitor_objects': True,
-            'object_labels': ['person', 'cat'],
+            'object_rules': [{'label': 'person'}, {'label': 'cat'}],
         }
     ])
     settings = {'detection': {'zones': zones}}

@@ -36,8 +36,8 @@ Cluster membership:
   deduplicates, returns the sorted-unique label list.
 
 - ``normalize_zone_object_rules`` -- per-zone object-detection rules
-  builder. Reads ``zone.object_rules`` OR synthesizes one rule per
-  label in ``zone.object_labels``. For each rule: parses min_confidence
+  builder. Reads ``zone.object_rules`` (anything else yields no
+  rules). For each rule: parses min_confidence
   (float [0,1]) + the optional object size /
   shape limits (``min_box_area`` ... ``max_aspect_ratio``, checked by
   ``detection_within_box_limits``), composes the canonical
@@ -65,10 +65,10 @@ Cluster membership:
   height to [0.0, 1.0]; picks 3+ points from ``zone.points`` OR falls
   back to ``rectangle_zone_points`` (for the legacy rectangle-only
   schema); re-derives (x, y, width, height) via ``zone_bounds``;
-  rebuilds ``object_rules`` via ``normalize_zone_object_rules``; if the
-  legacy ``monitor_motion`` was true but no motion rule exists, inserts
-  the motion rule; returns the canonical normalized zone list with
-  ``monitor_motion`` / ``object_labels`` / ``object_rules`` derived.
+  rebuilds ``object_rules`` via ``normalize_zone_object_rules``; returns
+  the canonical normalized zone list with ``monitor_motion`` /
+  ``object_labels`` derived from ``object_rules`` (input values for those
+  two flags are ignored).
 
 Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
@@ -354,13 +354,7 @@ def normalize_zone_alert_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]
 
 def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
     raw_rules = zone.get('object_rules')
-    if isinstance(raw_rules, list):
-        source_rules = raw_rules
-    else:
-        source_rules = [
-            {'label': label}
-            for label in normalize_label_list(zone.get('object_labels', []))
-        ]
+    source_rules = raw_rules if isinstance(raw_rules, list) else []
     rules: list[dict[str, Any]] = []
     labels_with_ids = {
         canonical_label(rule.get('label'))
@@ -974,29 +968,6 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             points = rectangle_zone_points(x, y, width, height)
         x, y, width, height = zone_bounds(points)
         object_rules = normalize_zone_object_rules(zone)
-        had_monitor_motion = 'monitor_motion' in zone and bool(zone['monitor_motion'])
-        if had_monitor_motion and (not any(
-            str(r.get('label') or '').strip().lower() == 'motion'
-            for r in object_rules
-        )):
-            object_rules.insert(0, {
-                'label': 'motion',
-                'enabled': True,
-                'record_on_detect': True,
-                'min_confidence': 0.45,
-                'max_confidence': 1.0,
-                'gate_fraction': None,
-                'scale_fraction': None,
-                'trigger_fraction': None,
-                'confirm_cycles': DEFAULT_MOTION_CONFIRM_CYCLES,
-                'email_enabled': False,
-                'email_recipients': [],
-                'active_start': None,
-                'active_end': None,
-                'notify_start': None,
-                'notify_end': None,
-                'push_enabled': False,
-            })
         monitor_motion = any(
             str(r.get('label') or '').strip().lower() == 'motion'
             and r.get('enabled', True)

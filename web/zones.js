@@ -1,7 +1,7 @@
 // zones.js - Zone drawing, editing, and object detection rules.
 // Loaded after live.js on zones.html only. Accesses live.js globals:
 //   isZonesPage, selectedCamera, liveEls, availableLabels,
-//   clamp, normalizePoint, roundCoord, normalizeLabelList,
+//   clamp, normalizePoint, roundCoord,
 //   api, cameraDetection, refreshFrame, refreshDetectionStatus,
 //   CLOSE_DRAFT_DISTANCE_PX.
 
@@ -618,7 +618,7 @@ function normalizeObjectRules(zone) {
       })
       .filter((rule) => Boolean(rule.label));
   }
-  return normalizeLabelList(zone.object_labels).map(defaultObjectRule);
+  return [];
 }
 
 function normalizeZone(zone) {
@@ -626,19 +626,14 @@ function normalizeZone(zone) {
   zone.points = sourcePoints.map(normalizePoint);
   zone.object_rules = normalizeObjectRules(zone);
   zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion' && r.label !== 'face').map((rule) => rule.label);
-  // Keep the legacy `monitor_motion` flag in sync with the actual rule list
-  // so a removed or disabled Motion rule stays gone after save. The backend's
-  // normalize_monitoring_zones() re-inserts Motion when it sees
-  // ``monitor_motion=true`` but no Motion rule in ``object_rules`` -- without
-  // this sync that legacy-migration path would resurrect the rule on every
-  // save round-trip, making the delete appear to be ignored.
+  // Derive the `monitor_motion` flag from the rule list, matching what the
+  // backend's normalize_monitoring_zones() stores, so the live page reads the
+  // same value before the next reload.
   zone.monitor_motion = zone.object_rules.some(
     (rule) => String(rule.label || '').trim().toLowerCase() === 'motion'
       && rule.enabled !== false
   );
-  // Same legacy-flag pattern for the Faces axis: derived from the enabled
-  // face rule so the backend's normalize_monitoring_zones never resurrects a
-  // deleted rule on save round-trips.
+  // Same derived flag for the Faces axis.
   zone.monitor_faces = zone.object_rules.some(
     (rule) => String(rule.label || '').trim().toLowerCase() === 'face'
       && rule.enabled !== false
@@ -1379,9 +1374,7 @@ function bindObjectRuleControls() {
       const removedLabel = String(removedRule.label || '').trim().toLowerCase();
       zones[zoneIndex].object_rules.splice(ruleIndex, 1);
       if (removedLabel === 'motion') {
-        // Belt-and-suspenders alongside the normalizeZone() sync above: clear
-        // the legacy flag immediately so the in-memory model is consistent
-        // even if the next save path bypasses a renderZones() re-render.
+        // Keep the derived flag consistent before the next renderZones().
         zones[zoneIndex].monitor_motion = false;
       }
       zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
@@ -1405,7 +1398,7 @@ function bindMotionControls() {
       const rule = motionRuleOf(zone);
       if (cb.checked) ensureMotionRule(zone).enabled = true;
       else if (rule) rule.enabled = false;
-      // Keep the legacy flag in sync immediately; normalizeZone() also
+      // Keep the derived flag in sync immediately; normalizeZone() also
       // derives it from the enabled motion rule on every render/save.
       zone.monitor_motion = cb.checked;
       zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
