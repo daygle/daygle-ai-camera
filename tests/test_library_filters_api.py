@@ -10,12 +10,13 @@ tests pin each filter; the API test checks the routers forward them and that
 from __future__ import annotations
 
 from tests.support import (
-    TEST_IMAGE_PNG,
-    LocalClient,
+    add_event,
     _load_app,
+    LocalClient,
     _login,
     _server,
     _setup_admin,
+    TEST_IMAGE_PNG,
 )
 
 
@@ -29,7 +30,7 @@ def _det(label, confidence=0.9, zone=None):
 def _seed(db):
     """Three events on two cameras across two days; ids returned by name."""
     ids = {}
-    ids['person_front'] = db.add_event(
+    ids['person_front'] = add_event(db, 
         created_at='2026-06-01T08:00:00+00:00', source='rtsp', snapshot_path='a.jpg',
         detections=[_det('person', zone='Driveway')],
         metadata={
@@ -38,12 +39,12 @@ def _seed(db):
             'face_identities': {'people': [{'person_id': 7, 'name': 'Alice'}], 'unknown': 0},
         },
     )
-    ids['car_back'] = db.add_event(
+    ids['car_back'] = add_event(db, 
         created_at='2026-06-02T09:00:00+00:00', source='rtsp', snapshot_path='b.jpg',
         detections=[_det('car')],
         metadata={'camera_id': 'back', 'camera_name': 'Back Yard', 'face_identities': {'people': [], 'unknown': 2}},
     )
-    ids['motion_front'] = db.add_event(
+    ids['motion_front'] = add_event(db, 
         created_at='2026-06-02T10:00:00+00:00', source='rtsp', snapshot_path=None,
         detections=[_det('motion')],
         metadata={'camera_id': 'front', 'camera_name': 'Front Door'},
@@ -194,11 +195,11 @@ def test_api_forwards_filters_and_serves_facets(tmp_path, monkeypatch):
         _setup_admin(admin)
         _login(admin)
         snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'snap.png')
-        person = main.database.add_event(
+        person = add_event(main.database, 
             created_at='2026-06-01T08:00:00+00:00', source='rtsp', snapshot_path=snapshot_path,
             detections=[_det('person')], metadata={'camera_id': 'front', 'camera_name': 'Front Door'},
         )
-        car = main.database.add_event(
+        car = add_event(main.database, 
             created_at='2026-06-02T08:00:00+00:00', source='rtsp', snapshot_path=snapshot_path,
             detections=[_det('car')], metadata={'camera_id': 'back', 'camera_name': 'Back Yard'},
         )

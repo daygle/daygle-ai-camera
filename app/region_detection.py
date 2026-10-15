@@ -222,12 +222,10 @@ _MAX_TILE_DET_AREA_FRAC = 0.1
 def parse_tile_grid(value: Any) -> tuple[int, int] | None:
     """Parse the ``object_detection_tiling`` setting to ``(cols, rows)`` or None.
 
-    Accepts ``'off'`` / '' / falsy -> None (disabled), ``'CxR'`` (e.g. ``'3x3'``,
-    ``'3x2'``) -> ``(C, R)`` clamped to 1..6 with at least one axis > 1, and a
-    legacy bool ``True`` -> ``(2, 2)``. Anything unrecognised -> None.
+    Accepts ``'off'`` / '' / falsy -> None (disabled) and ``'CxR'`` (e.g.
+    ``'3x3'``, ``'3x2'``) -> ``(C, R)`` within 1..6 with at least one axis > 1.
+    Anything unrecognised -> None.
     """
-    if value is True:
-        return (2, 2)
     text = str(value if value is not None else "").strip().lower()
     if text in {"", "off", "false", "0", "none", "disabled"}:
         return None

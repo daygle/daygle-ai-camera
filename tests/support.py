@@ -386,16 +386,28 @@ def _email_alert_capture(main, monkeypatch):
 def _zone_camera_settings_with_email(label: str):
     """Full-frame zone with a single alert+email rule for the given object label."""
     return _zone_camera_settings([
-        {
-            'label': label,
-            'record_on_detect': True,
-            'alert_on_detect': True,
-            'min_confidence': 0.5,
-            'cooldown_seconds': 0,
-            'email_enabled': True,
-            'email_recipients': ['glenbday82@gmail.com'],
-        },
+        {'label': label, 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0, 'alert_schedules': [{'email_enabled': True, 'email_recipients': ['glenbday82@gmail.com']}]},
     ])
+
+def add_event(database, created_at, source, snapshot_path, detections, alert_triggered=False,
+              metadata=None, recording_id=None, thumbnail_path=None):
+    """Insert an event with no alerts through the production write path,
+    optionally linked to a recording."""
+    event_id = database.add_event_with_alerts(
+        created_at=created_at, source=source, snapshot_path=snapshot_path,
+        detections=detections, alerts=[], alert_triggered=alert_triggered,
+        metadata=metadata, thumbnail_path=thumbnail_path,
+    )
+    if recording_id is not None:
+        database.set_event_recording(event_id, recording_id)
+    return event_id
+
+
+def list_recordings(database, **filters):
+    """First page of recordings (the page cursor is dropped)."""
+    items, _next = database.list_recordings_page(**filters)
+    return items
+
 
 __all__ = [
     'LocalClient',
@@ -417,4 +429,6 @@ __all__ = [
     '_setup_admin',
     '_zone_camera_settings',
     '_zone_camera_settings_with_email',
+    'add_event',
+    'list_recordings',
 ]

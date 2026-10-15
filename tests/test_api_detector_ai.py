@@ -78,9 +78,7 @@ def test_detector_backend_selection(tmp_path):
     )
     assert isinstance(detector, OnnxYoloDetector)
     assert detector.available is False
-    assert "ONNX model not found" in (detector.unavailable_reason or "") or "numpy is not installed" in (
-        detector.unavailable_reason or ""
-    )
+    assert "ONNX model not found" in (detector.unavailable_reason or "")
 
 
 def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
@@ -134,7 +132,7 @@ def test_status_ai_reports_model_missing_for_missing_onnx(tmp_path, monkeypatch)
         assert payload['detector_loaded'] is False
         assert payload['active_config_source'] == 'config.yaml'
         assert str(tmp_path / 'missing.onnx') == payload['model_path']
-        assert 'ONNX model not found' in payload['error'] or 'numpy is not installed' in payload['error']
+        assert 'ONNX model not found' in payload['error']
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -191,29 +189,6 @@ def test_ai_settings_save_missing_model_path_is_rejected_and_preserves_previous(
     finally:
         server.should_exit = True
         thread.join(timeout=5)
-
-
-def test_live_snapshot_renderer_can_hide_object_overlay(tmp_path, monkeypatch):
-    _load_app(tmp_path, monkeypatch)
-    mods = _m()
-
-    frame = {'width': 1280, 'height': 720, 'frame_number': 7, 'timestamp': 1_700_000_000}
-    detections = [
-        {
-            'label': 'person',
-            'confidence': 0.92,
-            'box': {'x': 0.1, 'y': 0.2, 'width': 0.3, 'height': 0.4},
-        }
-    ]
-
-    without_overlay = mods.live_snapshot.render_live_snapshot_svg(frame, detections, overlay=False)
-    assert 'Overlay OFF' in without_overlay
-    assert '<g class="detection-box"' not in without_overlay
-
-    with_overlay = mods.live_snapshot.render_live_snapshot_svg(frame, detections, overlay=True)
-    assert 'Overlay ON' in with_overlay
-    assert '<g class="detection-box"' in with_overlay
-    assert 'Person · 92%' in with_overlay
 
 
 def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path, monkeypatch):

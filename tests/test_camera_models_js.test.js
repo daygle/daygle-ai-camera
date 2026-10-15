@@ -1,4 +1,4 @@
-// Regression tests for the Camera Models assignment page (/camera-models).
+// Regression tests for the Camera Models assignment page (/models/cameras).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -65,7 +65,7 @@ test('the actions cell does not reuse the page-level button-row bar', () => {
 });
 
 test('Camera Models is a tab of Intelligence > Models', () => {
-  assert.match(nav, /\{ href: '\/models', matches: \['\/models', '\/onnx', '\/camera-models', '\/yamnet-tflite', '\/arcface'\], label: 'Models'/);
+  assert.match(nav, /\{ href: '\/models', matches: \['\/models'\], label: 'Models'/);
   assert.match(nav, /\{ href: '\/models\/cameras', icon: '[^']+', label: 'Camera Models' \}/);
   assert.ok(nav.indexOf("href: '/models/cameras', icon") > nav.indexOf("href: '/models', icon"));
 });

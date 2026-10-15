@@ -19,102 +19,6 @@ from tests.support import (
 )
 
 
-def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypatch):
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-    mods = _m()
-
-    class FakeDetector:
-        backend = 'onnx'
-        available = True
-        unavailable_reason = None
-
-        def detect_image(self, _image_bytes, confidence=None):
-            return [
-                {
-                    'label': 'person',
-                    'confidence': 0.4,
-                    'box': {'x': 64, 'y': 72, 'width': 320, 'height': 360},
-                }
-            ]
-
-    monkeypatch.setattr(main._state, 'detector', FakeDetector())
-    main._state.live_detection_last_checked.clear()
-    # The 'jpeg-frame' bytes below are not a decodable image, so the adaptive
-    # background gate cannot measure them. Pin the gate to a deterministic
-    # low-confidence (0.4) motion read instead: this test exercises the
-    # motion-rule min_confidence filter itself, not image decoding.
-    monkeypatch.setattr(
-        mods.live_monitor,
-        'detect_frame_motion',
-        lambda camera_id, image, **_kwargs: (True, 0.4, None, 0.04),
-    )
-
-    strict_settings = {
-        'id': 'camera-1',
-        'name': 'Front Door',
-        'detection': {
-            'object_labels': ['cat'],
-            'zones': [
-                {
-                    'id': 'motion-zone',
-                    'name': 'Motion Zone',
-                    'x': 0,
-                    'y': 0,
-                    'width': 1,
-                    'height': 1,
-                    'object_rules': [{'label': 'motion', 'min_confidence': 0.45}],
-                },
-            ],
-        },
-    }
-
-    blocked_event_id = mods.live_monitor.process_live_stream_alerts(
-        b'jpeg-frame',
-        {'width': 1280, 'height': 720},
-        strict_settings,
-        enforce_interval=False,
-    )
-    assert blocked_event_id is None
-
-    relaxed_settings = {
-        'id': 'camera-1',
-        'name': 'Front Door',
-        'detection': {
-            'object_labels': ['cat'],
-            'zones': [
-                {
-                    'id': 'motion-zone',
-                    'name': 'Motion Zone',
-                    'x': 0,
-                    'y': 0,
-                    'width': 1,
-                    'height': 1,
-                    'object_rules': [{'label': 'motion', 'min_confidence': 0.35}],
-                },
-            ],
-        },
-    }
-
-    first_allowed_frame = mods.live_monitor.process_live_stream_alerts(
-        b'jpeg-frame',
-        {'width': 1280, 'height': 720},
-        relaxed_settings,
-        enforce_interval=False,
-    )
-    assert first_allowed_frame is None, 'the first motion frame must wait for confirmation'
-    allowed_event_id = mods.live_monitor.process_live_stream_alerts(
-        b'jpeg-frame',
-        {'width': 1280, 'height': 720},
-        relaxed_settings,
-        enforce_interval=False,
-    )
-    assert allowed_event_id is not None
-    event = main.database.get_event(allowed_event_id)
-    assert event is not None
-    assert any(detection['label'] == 'motion' for detection in event['detections'])
-
-
 def test_invalid_motion_frame_does_not_create_recording(tmp_path, monkeypatch):
     """A motion-gate decode failure must not synthesize a motion recording."""
     _load_app(tmp_path, monkeypatch)
@@ -186,7 +90,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                     'object_detection_enabled': True,
                     'object_labels': ['person', 'cat'],
                     'zones': [
-                        {'id': 'porch', 'name': 'Porch', 'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': True, 'object_labels': ['person']}
+                        {'id': 'porch', 'name': 'Porch', 'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5, 'monitor_objects': True, 'object_rules': [{'label': 'motion'}, {'label': 'person'}]}
                     ],
                 },
             },
@@ -226,7 +130,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                 'detection': {
                     **listed['cameras'][0]['detection'],
                     'zones': [
-                        {'id': 'driveway', 'name': 'Driveway', 'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': False, 'object_labels': 'cat, person, cat'}
+                        {'id': 'driveway', 'name': 'Driveway', 'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'monitor_objects': False, 'object_rules': [{'label': 'motion'}, {'label': 'cat'}, {'label': 'person'}, {'label': 'cat'}]}
                     ],
                 },
             },
@@ -289,7 +193,7 @@ def test_monitoring_zones_filter_object_detections_by_label(tmp_path, monkeypatc
             'width': 1,
             'height': 1,
             'monitor_objects': True,
-            'object_labels': ['person', 'cat'],
+            'object_rules': [{'label': 'person'}, {'label': 'cat'}],
         }
     ])
     settings = {'detection': {'zones': zones}}
@@ -317,19 +221,7 @@ def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
             'height': 1,
             'monitor_motion': False,
             'object_rules': [
-                {
-                    'label': 'Cat',
-                    'record_on_detect': False,
-                    'alert_on_detect': True,
-                    'min_confidence': 0.7,
-                    'cooldown_seconds': 5,
-                    'email_enabled': True,
-                    'email_recipients': 'alerts@example.test, bad-address',
-                    'active_start': '07:00',
-                    'active_end': '18:00',
-                    'notify_start': '22:00',
-                    'notify_end': '05:00',
-                }
+                {'label': 'Cat', 'record_on_detect': False, 'alert_on_detect': True, 'min_confidence': 0.7, 'cooldown_seconds': 5, 'alert_schedules': [{'email_enabled': True, 'email_recipients': 'alerts@example.test, bad-address', 'active_start': '07:00', 'active_end': '18:00', 'notify_start': '22:00', 'notify_end': '05:00'}]}
             ],
         }
     ])
@@ -340,11 +232,12 @@ def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
     assert rule['record_on_detect'] is False
     assert rule['min_confidence'] == 0.7
     assert 'cooldown_seconds' not in rule  # retired: presence gate, no cooldown
-    assert rule['email_recipients'] == ['alerts@example.test']
-    assert rule['active_start'] == '07:00'
-    assert rule['active_end'] == '18:00'
-    assert rule['notify_start'] == '22:00'
-    assert rule['notify_end'] == '05:00'
+    schedule = rule['alert_schedules'][0]
+    assert schedule['email_recipients'] == ['alerts@example.test']
+    assert schedule['active_start'] == '07:00'
+    assert schedule['active_end'] == '18:00'
+    assert schedule['notify_start'] == '22:00'
+    assert schedule['notify_end'] == '05:00'
 
 
 def test_rule_notify_active_now_window(tmp_path, monkeypatch):
@@ -393,7 +286,7 @@ def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypat
             'width': 0.5,
             'height': 0.5,
             'monitor_motion': False,
-            'object_rules': [{'label': 'cat', 'email_enabled': True, 'record_on_detect': False}],
+            'object_rules': [{'label': 'cat', 'record_on_detect': False, 'alert_schedules': [{'email_enabled': True}]}],
         },
         {
             'id': 'driveway',
@@ -475,35 +368,6 @@ def test_zone_motion_rule_gates_motion_detections(tmp_path, monkeypatch):
     assert _zd.zone_motion_detections(disabled_settings, frame_motion_confidence=0.9) == []
 
 
-def test_legacy_camera_motion_disabled_migrates_to_zone_rules(tmp_path, monkeypatch):
-    """Cameras stored with the removed camera-level motion switch off must keep
-    motion off after the upgrade by disabling each zone's motion rule."""
-    _load_app(tmp_path, monkeypatch)
-    import app.camera_config as _cc
-    import app.zone_detection as _zd
-
-    def legacy_zone():
-        return {'id': 'z1', 'name': 'Zone 1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                'object_rules': [{'label': 'motion', 'min_confidence': 0.3}]}
-
-    for legacy_detection in (
-        {'motion_enabled': False, 'zones': [legacy_zone()]},
-        {'motion': {'enabled': False}, 'zones': [legacy_zone()]},
-    ):
-        camera = _cc.normalize_camera_settings({'id': 'cam-1', 'detection': legacy_detection})
-        detection = camera['detection']
-        assert 'motion' not in detection
-        assert 'motion_enabled' not in detection
-        assert detection['zones'][0]['monitor_motion'] is False
-        motion_rule = next(r for r in detection['zones'][0]['object_rules'] if r['label'] == 'motion')
-        assert motion_rule['enabled'] is False
-        assert _zd.zone_motion_detections({'detection': detection}, frame_motion_confidence=0.9) == []
-
-    # Cameras without the legacy switch keep motion governed by the zone rule.
-    camera = _cc.normalize_camera_settings({'id': 'cam-2', 'detection': {'zones': [legacy_zone()]}})
-    assert camera['detection']['zones'][0]['monitor_motion'] is True
-
-
 def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeypatch):
     """Objects outside the configured zone area must not trigger alerts."""
     _load_app(tmp_path, monkeypatch)
@@ -578,7 +442,7 @@ def test_zone_label_aliases_match_configured_rules(tmp_path, monkeypatch):
             'height': 1.0,
             'monitor_motion': False,
             'monitor_objects': True,
-            'object_rules': [{'label': 'person', 'email_enabled': True, 'min_confidence': 0.5}],
+            'object_rules': [{'label': 'person', 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]}],
         }
     ])
     settings = {'detection': {'zones': zones}}
@@ -592,28 +456,6 @@ def test_zone_label_aliases_match_configured_rules(tmp_path, monkeypatch):
     matches = _zd.zone_object_rule_matches(settings, aliased_detection, action='alert')
     assert len(matches) == 1
     assert matches[0][1]['label'] == 'person'
-
-
-def test_detection_has_matching_record_rule(tmp_path, monkeypatch):
-    _load_app(tmp_path, monkeypatch)
-    import app.zone_detection as _zd
-
-    rules = [
-        {'name': 'Person alert', 'object': 'person', 'min_confidence': 0.5, 'enabled': True},
-        {'name': 'Dog alert', 'object': 'dog', 'min_confidence': 0.7, 'enabled': True},
-        {'name': 'Disabled cat', 'object': 'cat', 'min_confidence': 0.5, 'enabled': False},
-        {'name': 'Motion alert', 'object': 'motion', 'min_confidence': 0.3, 'enabled': True},
-    ]
-
-    assert _zd.detection_has_matching_record_rule({'label': 'person', 'confidence': 0.8}, rules) is True
-    assert _zd.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.7}, rules) is True
-    assert _zd.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.69}, rules) is False
-    assert _zd.detection_has_matching_record_rule({'label': 'car', 'confidence': 0.9}, rules) is False
-    assert _zd.detection_has_matching_record_rule({'label': 'cat', 'confidence': 0.9}, rules) is False
-    assert _zd.detection_has_matching_record_rule({'label': 'human', 'confidence': 0.8}, rules) is True
-    assert _zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.4}, rules) is True
-    assert _zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.1}, rules) is False
-    assert _zd.detection_has_matching_record_rule({'label': '', 'confidence': 0.9}, rules) is False
 
 
 def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, monkeypatch):
@@ -660,7 +502,7 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
                         'monitor_objects': True,
                         'object_rules': [
                             {'label': 'cat', 'record_on_detect': True, 'min_confidence': 0.5},
-                            {'label': 'person', 'record_on_detect': False, 'email_enabled': True, 'min_confidence': 0.5},
+                            {'label': 'person', 'record_on_detect': False, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]},
                         ],
                     },
                 ],
@@ -759,7 +601,7 @@ def test_zone_detection_creates_alert_and_recording(tmp_path, monkeypatch, label
     main._state.live_event_presence.clear()
 
     settings = _zone_camera_settings([
-        {'label': label, 'record_on_detect': True, 'email_enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
+        {'label': label, 'record_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0, 'alert_schedules': [{'email_enabled': True}]},
     ])
     event_id = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
 
@@ -802,7 +644,7 @@ def test_confirmation_gate_holds_first_frame_then_alerts_on_second(tmp_path, mon
     main._state.live_event_presence.clear()
 
     settings = _zone_camera_settings([
-        {'label': 'person', 'record_on_detect': True, 'email_enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
+        {'label': 'person', 'record_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0, 'alert_schedules': [{'email_enabled': True}]},
     ])
 
     first = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
@@ -1082,7 +924,7 @@ def test_ongoing_activity_stays_one_event_until_it_has_been_gone(tmp_path, monke
     main._state.live_detection_last_checked.clear()
     main._state.live_event_presence.clear()
     settings = _zone_camera_settings([
-        {'label': 'person', 'email_enabled': True, 'min_confidence': 0.5},
+        {'label': 'person', 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]},
     ])
 
     def run():
@@ -1135,7 +977,7 @@ def test_alert_only_event_is_debounced_without_recording(tmp_path, monkeypatch):
     # Alert rule with NO record_on_detect: the detection fires the alert path but
     # never attaches a recording, so should_record_event is False.
     settings = _zone_camera_settings([
-        {'label': 'person', 'email_enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 30},
+        {'label': 'person', 'min_confidence': 0.5, 'cooldown_seconds': 30, 'alert_schedules': [{'email_enabled': True}]},
     ])
 
     first_event = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)

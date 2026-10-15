@@ -14,12 +14,14 @@ from urllib.parse import urlencode
 import pytest
 
 from tests.support import (
-    TEST_IMAGE_PNG,
-    LocalClient,
+    add_event,
+    list_recordings,
     _load_app,
+    LocalClient,
     _login,
     _server,
     _setup_admin,
+    TEST_IMAGE_PNG,
     _zone_camera_settings,
 )
 
@@ -31,7 +33,7 @@ def test_event_and_recording_cursor_pages_use_stable_tie_breaking(tmp_path):
     event_ids = []
     recording_ids = []
     for index in range(5):
-        event_id = database.add_event(
+        event_id = add_event(database, 
             created_at='2026-06-06T00:00:00+00:00',
             source='camera',
             snapshot_path=f'snapshot-{index}.jpg',
@@ -94,7 +96,7 @@ def test_event_list_hydration_batches_related_rows(tmp_path):
 
     database = EventDatabase(str(tmp_path / 'batch.sqlite3'))
     for index in range(8):
-        event_id = database.add_event(
+        event_id = add_event(database, 
             created_at=f'2026-06-06T00:00:{index:02d}+00:00',
             source='camera',
             snapshot_path=f'snapshot-{index}.jpg',
@@ -147,7 +149,7 @@ def test_cursor_list_api_contract_and_validation(tmp_path, monkeypatch):
         _setup_admin(admin)
         _login(admin)
         for index in range(3):
-            event_id = main.database.add_event(
+            event_id = add_event(main.database, 
                 created_at=f'2026-06-06T00:00:0{index}+00:00',
                 source='motion',
                 snapshot_path=f'snapshot-{index}.jpg',
@@ -192,7 +194,7 @@ def test_alerted_only_event_and_recording_queries(tmp_path):
     database = EventDatabase(str(tmp_path / 'events.sqlite3'))
     now = '2026-06-06T00:00:00+00:00'
     events = [
-        database.add_event(
+        add_event(database, 
             created_at=f'2026-06-06T00:0{index}:00+00:00',
             source='camera',
             snapshot_path=None,
@@ -222,8 +224,8 @@ def test_alerted_only_event_and_recording_queries(tmp_path):
     assert [event['id'] for event in database.search_events(alerted_only=True)] == [events[2], events[1]]
     assert database.search_events(label='cat', alerted_only=True) == []
     assert [event['id'] for event in database.search_events(label='dog', alerted_only=True)] == [events[1]]
-    assert [recording['event_id'] for recording in database.list_recordings(alerted_only=True)] == [events[2], events[1]]
-    assert [recording['event_id'] for recording in database.list_recordings(label='person', alerted_only=True)] == [events[2]]
+    assert [recording['event_id'] for recording in list_recordings(database, alerted_only=True)] == [events[2], events[1]]
+    assert [recording['event_id'] for recording in list_recordings(database, label='person', alerted_only=True)] == [events[2]]
 
 
 def test_alerts_endpoint_exposes_event_id_for_grouping(tmp_path):
@@ -233,7 +235,7 @@ def test_alerts_endpoint_exposes_event_id_for_grouping(tmp_path):
     from app.database import EventDatabase
 
     database = EventDatabase(str(tmp_path / 'alerts.sqlite3'))
-    event_id = database.add_event(
+    event_id = add_event(database, 
         created_at='2026-06-07T00:00:00+00:00',
         source='camera',
         snapshot_path=None,
@@ -279,7 +281,7 @@ def test_event_recordings_include_alert_history_recording_links(tmp_path):
 
     database = EventDatabase(str(tmp_path / 'sound-alert-recording.sqlite3'))
     now = '2026-06-07T00:00:00+00:00'
-    original_event_id = database.add_event(
+    original_event_id = add_event(database, 
         created_at=now,
         source='rtsp',
         snapshot_path=None,
@@ -300,7 +302,7 @@ def test_event_recordings_include_alert_history_recording_links(tmp_path):
         trigger_label='person',
         labels=['person'],
     )
-    sound_event_id = database.add_event(
+    sound_event_id = add_event(database, 
         created_at='2026-06-07T00:00:10+00:00',
         source='sound',
         snapshot_path=None,
@@ -335,7 +337,7 @@ def test_recording_labels_join_table_round_trip(tmp_path):
     # A single event whose detections include BOTH cat and person. The
     # recording's trigger_label is the first alert-triggered detection (cat),
     # but recording_labels must carry every label that appeared inside the clip.
-    event_id = database.add_event(
+    event_id = add_event(database, 
         created_at=now,
         source='camera',
         snapshot_path=None,
@@ -361,26 +363,26 @@ def test_recording_labels_join_table_round_trip(tmp_path):
     )
 
     # Multi-label set is returned via the list endpoint.
-    recordings = database.list_recordings()
+    recordings = list_recordings(database)
     assert len(recordings) == 1
     assert recordings[0]['trigger_label'] == 'cat'
     assert recordings[0]['labels'] == ['cat', 'person']
 
     # The Object Label filter should now match a recording on EITHER of its
     # labels, not just the trigger_label.
-    assert [r['id'] for r in database.list_recordings(label='cat')] == [recording_id]
-    assert [r['id'] for r in database.list_recordings(label='person')] == [recording_id]
-    assert database.list_recordings(label='dog') == []
+    assert [r['id'] for r in list_recordings(database, label='cat')] == [recording_id]
+    assert [r['id'] for r in list_recordings(database, label='person')] == [recording_id]
+    assert list_recordings(database, label='dog') == []
 
     # add_recording_labels merges (no duplicates) and tracks the source.
     new_total = database.add_recording_labels(recording_id, ['person', 'dog', '  Cat  '], source='extension')
     assert new_total == 1  # 'dog' was new; 'person' and 'cat' (re-cased) were already present
-    recordings = database.list_recordings()
+    recordings = list_recordings(database)
     assert recordings[0]['labels'] == ['cat', 'dog', 'person']
 
     # Deleting the recording cascades to recording_labels.
     database.delete_recording(recording_id)
-    assert database.list_recordings() == []
+    assert list_recordings(database) == []
 
 
 def test_recording_labels_api_filter_matches_any_recorded_label(tmp_path, monkeypatch):
@@ -411,7 +413,7 @@ def test_recording_labels_api_filter_matches_any_recorded_label(tmp_path, monkey
             {'label': 'cat', 'confidence': 0.9, 'alert_triggered': True, 'box': {'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5}},
             {'label': 'person', 'confidence': 0.8, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.5, 'height': 0.5}},
         ]
-        event_id = main.database.add_event(
+        event_id = add_event(main.database, 
             created_at=event_time,
             source='motion',
             snapshot_path=snapshot_path,
@@ -461,7 +463,7 @@ def test_event_snapshot_endpoint_serves_annotated_image(tmp_path, monkeypatch):
         _login(admin)
         event_time = datetime.now(timezone.utc).isoformat()
         snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'snap.png')
-        event_id = main.database.add_event(
+        event_id = add_event(main.database, 
             created_at=event_time,
             source='motion',
             snapshot_path=snapshot_path,
@@ -482,7 +484,7 @@ def test_event_snapshot_endpoint_serves_annotated_image(tmp_path, monkeypatch):
         assert isinstance(body, (bytes, bytearray)) and len(body) > 0
 
         # A frameless (sound) event has no snapshot: has_snapshot False + 404.
-        sound_id = main.database.add_event(
+        sound_id = add_event(main.database, 
             created_at=event_time, source='sound', snapshot_path=None, detections=[],
         )
         status, _, events2 = admin.request('/api/events')
@@ -502,7 +504,7 @@ def test_recording_labels_backfill_seeds_existing_recordings(tmp_path):
     # recording_labels entries. EventDatabase.init() should backfill them from
     # the detections + trigger_label columns on first open.
     database = EventDatabase(str(tmp_path / 'legacy.sqlite3'))
-    event_id = database.add_event(
+    event_id = add_event(database, 
         created_at='2026-06-06T00:00:00+00:00',
         source='camera',
         snapshot_path=None,
@@ -533,7 +535,7 @@ def test_recording_labels_backfill_seeds_existing_recordings(tmp_path):
     # Re-open the database - init() should re-seed recording_labels from the
     # existing detections and trigger_label.
     reopened = EventDatabase(str(tmp_path / 'legacy.sqlite3'))
-    recording = reopened.list_recordings()[0]
+    recording = list_recordings(reopened)[0]
     assert recording['labels'] == ['cat', 'person']
 
 
@@ -567,7 +569,7 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         detections = [{'label': 'cat', 'confidence': 0.91, 'alert_triggered': True, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
         event_time = datetime.now(timezone.utc).isoformat()
         snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'test.png')
-        event_id = main.database.add_event(
+        event_id = add_event(main.database, 
             created_at=event_time,
             source='motion',
             snapshot_path=snapshot_path,
@@ -656,7 +658,7 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
         admin_csrf = _login(admin)
         detections = [{'label': 'cat', 'confidence': 0.91, 'alert_triggered': True, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
         event_time = datetime.now(timezone.utc).isoformat()
-        event_id = main.database.add_event(
+        event_id = add_event(main.database, 
             created_at=event_time,
             source='motion',
             snapshot_path=None,
@@ -706,7 +708,7 @@ def test_recordings_timeline_returns_camera_day_segments(tmp_path, monkeypatch):
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(b'not-a-real-video')
 
-        event_id = main_module.database.add_event(
+        event_id = add_event(main_module.database, 
             created_at=started_at,
             source='camera',
             snapshot_path=None,
@@ -729,7 +731,7 @@ def test_recordings_timeline_returns_camera_day_segments(tmp_path, monkeypatch):
 
         motion_started_at = f'{target_day}T08:30:00+00:00'
         motion_ended_at = f'{target_day}T08:30:10+00:00'
-        motion_event_id = main_module.database.add_event(
+        motion_event_id = add_event(main_module.database, 
             created_at=motion_started_at,
             source='camera',
             snapshot_path=None,
@@ -909,7 +911,7 @@ def test_recording_detail_track_backfill(tmp_path, monkeypatch, has_history_cove
                 maxlen=1200,
             )
 
-        event_id = main.database.add_event(
+        event_id = add_event(main.database, 
             created_at=main.utc_now(), source='rtsp', snapshot_path=None,
             detections=[{'label': 'person', 'confidence': 0.9, 'box': box}],
             alert_triggered=True, metadata={},
@@ -1006,7 +1008,7 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
         ]
         event_time = datetime.now(timezone.utc).isoformat()
         snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'test.png')
-        event_id = main.database.add_event(
+        event_id = add_event(main.database, 
             created_at=event_time,
             source='motion',
             snapshot_path=snapshot_path,
@@ -1137,7 +1139,7 @@ def test_stats_with_since_filter_builds_valid_sql(tmp_path):
     from app.database import EventDatabase
 
     database = EventDatabase(str(tmp_path / 'stats-since.sqlite3'))
-    event_id = database.add_event(
+    event_id = add_event(database, 
         created_at='2026-07-27T00:00:00+00:00',
         source='camera',
         snapshot_path=None,
@@ -1191,7 +1193,7 @@ def test_alerts_events_stats_accept_local_day_start_since_bound(tmp_path):
 
     # An alert fired exactly at local midnight for a UTC+5:30 operator on
     # Aug 1: the stored UTC instant is 18:30 on Jul 31.
-    event_id = database.add_event(
+    event_id = add_event(database, 
         created_at='2026-07-31T18:30:00+00:00',
         source='camera',
         snapshot_path=None,
@@ -1207,7 +1209,7 @@ def test_alerts_events_stats_accept_local_day_start_since_bound(tmp_path):
         message='person matched',
     )
     # One second BEFORE local midnight: must stay excluded.
-    early_event = database.add_event(
+    early_event = add_event(database, 
         created_at='2026-07-31T18:29:59+00:00',
         source='camera',
         snapshot_path=None,
@@ -1255,7 +1257,7 @@ def test_event_payload_describes_the_linked_clips_media_ready_state(monkeypatch,
 
     database = EventDatabase(str(tmp_path / 'events-media-ready.sqlite3'))
     now = '2026-06-08T00:00:00+00:00'
-    event_id = database.add_event(
+    event_id = add_event(database, 
         created_at=now,
         source='camera',
         snapshot_path=None,

@@ -315,152 +315,6 @@ function observeMediaLifecycle(root) {
   return _daygleMediaObserver;
 }
 
-// ─── Request cancellation, coalescing and backoff ─────────────────────────
-// Item 14 of the performance roadmap. Three problems, one root cause: the
-// dashboard re-requests the same resources on a timer and has no way to tell
-// the browser to stop work it no longer needs.
-//
-//   1. Superseded responses. A poll that is replaced before it returns can
-//      still land afterwards and overwrite fresher DOM with staler data. The
-//      abort signal makes the browser discard it; the sequence guard makes the
-//      discard correct even when a caller ignores the signal.
-//   2. Duplicate concurrent GETs. Several components independently ask for the
-//      same endpoint; the in-flight registry lets them share one response
-//      instead of one response per component.
-//   3. Overlapping intervals. Handled above in `_runDayglePagePoller`.
-//
-// Cancellations are reported as the REQUEST_SUPERSEDED sentinel rather than a
-// rejection: superseding a request is the normal, expected outcome of the
-// "latest wins" pattern, not an error, and throwing it would force every
-// caller into a `.catch` that hides genuine failures. A real error still
-// rejects.
-
-// Resolves with REQUEST_SUPERSEDED when a newer call for the same coalescer
-// started before this one finished. Symbol-keyed so it can never collide with
-// a legitimate API payload.
-const REQUEST_SUPERSEDED = Symbol('daygle.requestSuperseded');
-
-// True for the DOMException a real fetch() raises on abort, across the
-// browser (`name`) and Node (`code` 20 / 'ABORT_ERR') spellings. Guards against
-// a caller that swallows its own AbortController signal and throws something
-// else: the sequence check in createRequestCoalescer still catches that case,
-// but recognising the error keeps the two mechanisms consistent.
-//
-// No eslint-disable marker here (unlike its siblings): isAbortError is called
-// by createRequestCoalescer below, so it is genuinely used in this file and a
-// no-unused-vars suppression would itself be flagged as an unused directive.
-// It is still exported for later scripts via WEB_SHARED_GLOBALS.
-function isAbortError(error) {
-  if (!error || typeof error !== 'object') return false;
-  if (error.name === 'AbortError') return true;
-  const code = error.code ?? error.errno;
-  return code === 20 || code === 'ABORT_ERR';
-}
-
-// A fetch that is still in flight when the user clicks a nav link is cancelled
-// by the browser as the document unloads, and the pending promise rejects with
-// a network-level TypeError ("Failed to fetch" / "Load failed") that carries
-// neither name === 'AbortError' nor an abort code, so isAbortError alone does
-// not recognise it. Left unguarded, every in-flight poll rejected on the way
-// out and the page's catch handler raised an error toast during the very
-// navigation that was tearing the page down: a red banner flashing for a few
-// hundred milliseconds, too short to read and impossible to act on.
-//
-// Mark the document as leaving on the two events that actually precede
-// teardown, and treat any failure from that point on as expected. pagehide
-// covers the navigation itself and bfcache eviction; beforeunload covers the
-// legacy path. The flag is deliberately latching: once the page is going away
-// it never comes back, so there is nothing to reset.
-let _dayglePageLeaving = false;
-function markPageLeaving() {
-  _dayglePageLeaving = true;
-}
-if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-  window.addEventListener('pagehide', markPageLeaving);
-  window.addEventListener('beforeunload', markPageLeaving);
-}
-
-// True when a rejection is the browser tearing the page down rather than a
-// real failure worth telling the user about. Callers guard their toasts (and
-// any error state they were about to paint) with this so navigating away from
-// a polling page stays silent.
-//
-// Exported for later scripts via WEB_SHARED_GLOBALS.
-// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
-function isPageLeavingError(error) {
-  return _dayglePageLeaving || isAbortError(error);
-}
-
-// Returns a runner that enforces "latest frame wins" for one logical resource.
-//
-//   const run = createRequestCoalescer();
-//   async function refresh() {
-//     const data = await run((signal) => api('/api/stats', { signal }));
-//     if (data === REQUEST_SUPERSEDED) return;   // a newer refresh took over
-//     render(data);
-//   }
-//
-// Each call aborts the previous one and takes a new sequence ticket. Two
-// independent guards, because either alone has a hole:
-//   * the abort stops the wasted network work, but a caller that ignores
-//     `signal` (or a response already in the browser's cache) can still
-//     resolve normally - the ticket check catches that;
-//   * the ticket stops a stale DOM write, but does not free the connection.
-//
-// When AbortController is unavailable the abort is skipped and the ticket
-// guard alone still provides the correctness half of the guarantee.
-// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
-function createRequestCoalescer() {
-  let controller = null;
-  let sequence = 0;
-  return function runLatest(task) {
-    if (controller && typeof AbortController === 'function') {
-      try { controller.abort(); } catch (_err) { /* an already-aborted signal is fine */ }
-    }
-    const own = typeof AbortController === 'function' ? new AbortController() : null;
-    controller = own;
-    const ticket = (sequence += 1);
-    let pending;
-    try {
-      pending = Promise.resolve(task(own ? own.signal : undefined));
-    } catch (err) {
-      // A synchronous throw from the task must not leave the coalescer wedged
-      // with a controller that will never settle.
-      pending = Promise.reject(err);
-    }
-    return pending
-      .then(
-        (value) => (ticket === sequence ? value : REQUEST_SUPERSEDED),
-        (err) => {
-          if (ticket !== sequence || isAbortError(err)) return REQUEST_SUPERSEDED;
-          throw err;
-        },
-      )
-      .finally(() => {
-        if (controller === own) controller = null;
-      });
-  };
-}
-
-// Exponential backoff for a repeating poller, with full jitter around the
-// nominal delay. Jitter matters because every open dashboard tab that loses
-// the network at the same moment would otherwise retry in lockstep forever and
-// keep the backend pinned. `attempt` is 0-based; the result is clamped to
-// maxMs so a long outage cannot schedule a retry hours out. Pass jitter: 0
-// for a deterministic delay (tests).
-// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
-function backoffDelayMs(attempt, options = {}) {
-  const baseMs = Number.isFinite(options.baseMs) ? options.baseMs : 1000;
-  const factor = Number.isFinite(options.factor) ? options.factor : 2;
-  const maxMs = Number.isFinite(options.maxMs) ? options.maxMs : 30000;
-  const jitter = Number.isFinite(options.jitter) ? options.jitter : 0.2;
-  const step = Math.max(0, Math.floor(Number(attempt) || 0));
-  const capped = Math.min(maxMs, baseMs * factor ** step);
-  if (!(jitter > 0)) return Math.round(capped);
-  const spread = capped * jitter;
-  return Math.round(Math.max(0, capped - spread + Math.random() * spread * 2));
-}
-
 // ─── Tabbed section navigation (settings + onnx pages) ─────────────────────
 // Groups a page's cards into `.settings-panel` blocks switched by a
 // `.settings-tab` bar. Implements the ARIA tabs pattern (roving tabindex +
@@ -716,6 +570,7 @@ window.api = api;
 // page. Callers accumulate and render; loadPage() coalesces concurrent calls
 // into one request so a scroll sentinel and the load-more button can never
 // double-fetch or double-append the same page.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
 function createCursorPager(path, pageSize = 200) {
   const separator = path.includes('?') ? '&' : '?';
   const size = Math.max(1, Number(pageSize) || 200);
@@ -727,12 +582,6 @@ function createCursorPager(path, pageSize = 200) {
   async function fetchPage() {
     const query = `${path}${separator}limit=${encodeURIComponent(size)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     const page = await api(query);
-    // Accept the historical array shape during rolling upgrades: it carries
-    // no cursor, so it is by definition the complete set.
-    if (Array.isArray(page)) {
-      done = true;
-      return { items: page, done };
-    }
     const items = Array.isArray(page?.items) ? page.items : [];
     cursor = String(page?.next_cursor || '');
     if (cursor && seenCursors.has(cursor)) throw new Error('API returned a repeated pagination cursor.');
@@ -751,23 +600,6 @@ function createCursorPager(path, pageSize = 200) {
       return inflight;
     },
   };
-}
-
-// Follow an API list's opaque cursor until the complete result set is loaded.
-// Callers still perform their existing client-side filtering (motion/face),
-// but no longer trade correctness for a fixed 500/10,000-row ceiling. For
-// lists that must PAINT before the whole history arrives (events, recordings)
-// use createCursorPager directly instead of draining through this helper.
-// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
-async function fetchAllCursorPages(path, pageSize = 500) {
-  const size = Math.max(1, Number(pageSize) || 500);
-  const pager = createCursorPager(path, size);
-  const items = [];
-  do {
-    const page = await pager.loadPage();
-    items.push(...page.items);
-  } while (!pager.done);
-  return items;
 }
 
 // ─── Load-more sentinel ───────────────────────────────────────────────────

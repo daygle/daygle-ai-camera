@@ -15,8 +15,7 @@ This module owns the five helpers that previously lived inline on
   orchestrator that delegates to email + push.
 
 Alert work is submitted to a bounded notification pool in
-``app.postprocess_pool``. The legacy thread-list state remains available for
-compatibility, but new dispatch does not create one thread per event.
+``app.postprocess_pool``; dispatch never creates one thread per event.
 
 **Pool-A rebind (in ``app/main.py``):** every helper is re-bound as
 ``main.<orig_name>``. The two originally-underscored names
@@ -114,6 +113,12 @@ def invalidate_min_rule_confidence_cache() -> None:
         _min_rule_confidence_cache = None
         _per_camera_min_rule_confidence_cache.clear()
 
+# Rule labels that never reach the object detector: motion is gated on the
+# pixel diff and faces run on the separate face model with its own Face
+# Confidence threshold, so neither may lower the object detector's floor.
+_NON_OBJECT_RULE_LABELS = frozenset({'motion', 'face'})
+
+
 def _confidence_rules_signature(camera_settings: dict[str, Any]) -> tuple[Any, ...]:
     """Fingerprint only the active zones and rule fields used by the floor."""
     detection = camera_settings.get('detection') or {}
@@ -126,7 +131,7 @@ def _confidence_rules_signature(camera_settings: dict[str, Any]) -> tuple[Any, .
             if not isinstance(rule, dict) or not rule.get('enabled', True):
                 continue
             label = str(rule.get('label') or '').strip().lower()
-            if label == 'motion':
+            if label in _NON_OBJECT_RULE_LABELS:
                 continue
             raw_confidence = rule.get('min_confidence')
             try:
@@ -147,14 +152,19 @@ def _confidence_rules_signature(camera_settings: dict[str, Any]) -> tuple[Any, .
 
 
 def compute_minimum_rule_confidence(fallback: float | None = None, camera_settings: dict | None = None) -> float:
-    """Return the lowest min_confidence across enabled object rules.
+    """Return the confidence the object detector should run at.
+
+    That is the lower of the AI-settings confidence and every enabled object
+    rule's ``min_confidence``: a rule may ask for a lower threshold than the
+    global one, but never raises the detector above it, because the
+    behaviour engines (tripwire, loiter, ...) have no threshold of their own
+    and rely on the global value.
 
     Without ``camera_settings`` this is the global floor across ALL cameras
     (used by status readouts / snapshot overlays). When a camera's settings are
     passed, only that camera's zones are scanned, so a low-threshold rule on
-    one camera can no longer drag every camera's detector floor down. A camera
-    with no enabled object rules falls back to the AI-settings confidence.
-    Motion rules are always skipped (motion is gated separately). The result
+    one camera can no longer drag every camera's detector floor down. Motion
+    and face rules are skipped (``_NON_OBJECT_RULE_LABELS``). The result
     is cached per camera (or globally for the no-camera form) for
     _MIN_RULE_CONFIDENCE_TTL seconds to avoid a database read on every
     detection frame (called at ~4 Hz per camera from the hot path).
@@ -199,7 +209,7 @@ def compute_minimum_rule_confidence(fallback: float | None = None, camera_settin
                 for rule in zone.get('object_rules') or []:
                     if not isinstance(rule, dict) or not rule.get('enabled', True):
                         continue
-                    if str(rule.get('label') or '').strip().lower() == 'motion':
+                    if str(rule.get('label') or '').strip().lower() in _NON_OBJECT_RULE_LABELS:
                         continue
                     try:
                         conf = float(rule.get('min_confidence', fallback))
@@ -379,8 +389,8 @@ def deliver_email_alerts(
     detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
     rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
     # Check if any triggered alerts have email enabled via zone rules.
-    # Rule names remain unchanged for legacy schedules; expanded schedules use
-    # a unique name and resolve their delivery fields from the schedule entry.
+    # A single-schedule rule keeps its plain name; multi-schedule rules use a
+    # unique name per schedule and resolve delivery fields from that entry.
     any_email_enabled = any(
         (
             (rule := rules_by_name.get(str(alert.get('rule_name')), {})).get('email_enabled')
@@ -391,11 +401,9 @@ def deliver_email_alerts(
     )
     # Unknown-face alerts (rule_name == 'Unknown face') are governed by the
     # ``_unknown`` system face-detection rule (Face Rules tab), which carries
-    # its own email recipients -- replacing the removed ``alert_unknown_email``
-    # recognition setting.
+    # its own email recipients.
     from app.face_detection_rules import (
         _coerce_bool,
-        enabled_unknown_rule,
         effective_face_detection_rules,
         face_rule_email_recipients,
         face_rule_notify_active_now as _face_rule_active,
@@ -403,13 +411,11 @@ def deliver_email_alerts(
     # Face detection rules: per-person alerts with their own email recipients.
     _face_rules_list = effective_face_detection_rules().get('rules') or []
     _face_rules_by_id = {str(r.get('id')): r for r in _face_rules_list}
-    _face_rules_by_name = {str(r.get('name')): r for r in _face_rules_list}
 
     def _resolve_face_rule(alert: dict) -> dict:
-        """Prefer the exact rule id stamped on the alert (zone-scoped rules can
-        share a person name); fall back to the legacy name lookup."""
-        by_id = _face_rules_by_id.get(str(alert.get('face_rule_id') or ''))
-        return by_id or _face_rules_by_name.get(str(alert.get('rule_name')), {}) or {}
+        """The rule whose id is stamped on the alert (zone-scoped rules can
+        share a person name, so the id is the only reliable key)."""
+        return _face_rules_by_id.get(str(alert.get('face_rule_id') or ''), {})
 
     def _face_rule_emails(rule: dict) -> bool:
         """A face rule emails only with its Email toggle on (mirroring the push
@@ -418,21 +424,14 @@ def deliver_email_alerts(
         return bool(rule) and _coerce_bool(rule.get('email_enabled'), False) and _face_rule_active(rule)
 
     def _unknown_email_recipients_for(alert: dict) -> list[str]:
-        """Union the recipients of the scoped unknown rule(s) that fired.
-
-        Legacy alerts without ``face_rule_ids`` fall back to the global
-        ``_unknown`` rule, preserving pre-scoping behaviour.
-        """
-        fired_ids = alert.get('face_rule_ids')
-        if isinstance(fired_ids, list) and fired_ids:
-            wanted = {str(rid) for rid in fired_ids}
-            recips: list[str] = []
-            for r in _face_rules_list:
-                if str(r.get('id')) in wanted and _face_rule_emails(r):
-                    recips.extend(face_rule_email_recipients(r))
-            return sorted(set(recips))
-        _legacy = enabled_unknown_rule()
-        return face_rule_email_recipients(_legacy) if _legacy and _face_rule_emails(_legacy) else []
+        """Union the recipients of the scoped unknown rule(s) that fired, in
+        configured order."""
+        wanted = {str(rid) for rid in alert.get('face_rule_ids') or []}
+        recips: list[str] = []
+        for r in _face_rules_list:
+            if str(r.get('id')) in wanted and _face_rule_emails(r):
+                recips.extend(face_rule_email_recipients(r))
+        return list(dict.fromkeys(recips))
 
     has_unknown_face_alerts = any(str(alert.get('rule_name') or '') == 'Unknown face' for alert in triggered)
     if has_unknown_face_alerts and any(
@@ -569,28 +568,21 @@ def deliver_push_notifications(
     # case in ``deliver_email_alerts``.
     from app.face_detection_rules import (
         effective_face_detection_rules as _face_rules_fn,
-        enabled_unknown_rule as _unknown_push_rule_fn,
         face_rule_notify_active_now as _face_rule_active,
     )
     _face_rules_list_push = _face_rules_fn().get('rules') or []
     _face_rules_by_id_push = {str(r.get('id')): r for r in _face_rules_list_push}
-    _face_rules_by_name = {str(r.get('name')): r for r in _face_rules_list_push}
 
     def _resolve_face_rule_push(alert: dict) -> dict:
-        by_id = _face_rules_by_id_push.get(str(alert.get('face_rule_id') or ''))
-        return by_id or _face_rules_by_name.get(str(alert.get('rule_name')), {}) or {}
+        return _face_rules_by_id_push.get(str(alert.get('face_rule_id') or ''), {})
 
     def _unknown_push_active_for(alert: dict) -> bool:
-        fired_ids = alert.get('face_rule_ids')
-        if isinstance(fired_ids, list) and fired_ids:
-            wanted = {str(rid) for rid in fired_ids}
-            return any(
-                _face_rule_active(r) and r.get('push_enabled')
-                for r in _face_rules_list_push
-                if str(r.get('id')) in wanted
-            )
-        _legacy = _unknown_push_rule_fn()
-        return bool(_legacy and _face_rule_active(_legacy) and _legacy.get('push_enabled'))
+        wanted = {str(rid) for rid in alert.get('face_rule_ids') or []}
+        return any(
+            _face_rule_active(r) and r.get('push_enabled')
+            for r in _face_rules_list_push
+            if str(r.get('id')) in wanted
+        )
     all_triggered_labels = sorted(
         {
             str(alert.get('label') or '').strip()

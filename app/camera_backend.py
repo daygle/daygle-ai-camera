@@ -51,7 +51,7 @@ def _configure_opencv_threads() -> None:
             import cv2
 
             cv2.setNumThreads(1)
-        except (ImportError, AttributeError, RuntimeError):
+        except (AttributeError, RuntimeError):
             logger.debug('OpenCV thread limit unavailable', exc_info=True)
         _opencv_threads_configured = True
 

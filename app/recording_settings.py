@@ -36,11 +36,6 @@ Cluster membership:
   from ``app.sound_detector`` re-exposed via ``main`` and applying
   confidence_threshold + cooldown_seconds clamping + email / push
   notification flags.
-- ``_migrate_legacy_camera_motion`` -- folds the removed camera-level
-  motion master switch (``detection.motion`` dict and ``motion_enabled``
-  flat field) into each zone's per-zone ``monitor_motion`` /
-  ``object_rules[label='motion'].enabled`` settings so motion stays
-  off across the upgrade.
 
 These helpers are reached almost exclusively via
 ``app/camera_config.py::normalize_camera_settings`` (Phase-18), which
@@ -407,33 +402,3 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
             'notify_end': normalize_hhmm(r.get('notify_end')),
         })
     return {'enabled': enabled, 'detection_interval_seconds': detection_interval_seconds, 'rules': rules}
-
-
-def _migrate_legacy_camera_motion(detection: dict[str, Any]) -> None:
-    """Fold the removed camera-level motion master switch into each
-    zone's motion rule, then drop the legacy fields.
-
-    Motion is configured per zone via each zone's ``motion`` object
-    rule; there is no camera-level motion setting any more. If a stored
-    config still has the old camera-level switch turned off (either
-    the short-lived ``detection.motion.enabled`` dict or the older
-    flat ``motion_enabled`` field), disable the motion rule in every
-    zone so motion stays off after the upgrade. The legacy
-    record/email/push flags are dropped: the zone rule's own
-    checkboxes are the single source of truth.
-    """
-    legacy = detection.pop('motion', None)
-    flat_enabled = detection.pop('motion_enabled', None)
-    detection.pop('motion_email_enabled', None)
-    enabled = True
-    if isinstance(legacy, dict):
-        enabled = normalize_bool_setting(legacy.get('enabled'), True)
-    elif flat_enabled is not None:
-        enabled = normalize_bool_setting(flat_enabled, True)
-    if enabled:
-        return
-    for zone in detection.get('zones', []):
-        zone['monitor_motion'] = False
-        for rule in zone.get('object_rules', []):
-            if str(rule.get('label') or '').strip().lower() == 'motion':
-                rule['enabled'] = False

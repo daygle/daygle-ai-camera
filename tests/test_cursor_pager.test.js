@@ -235,41 +235,6 @@ test('a repeated cursor is rejected instead of looping', async () => {
   await assert.rejects(() => pager.loadPage(), /repeated pagination cursor/);
 });
 
-test('legacy array payloads load as a single complete page', async () => {
-  const { sandbox, calls } = loadUtils({
-    respond: () => jsonResponse([1, 2, 3]),
-  });
-  const pager = sandbox.createCursorPager('/api/events', 200);
-
-  const page = await pager.loadPage();
-
-  assert.deepEqual(page.items, [1, 2, 3]);
-  assert.equal(pager.done, true, 'an array carries no cursor: it is the whole set');
-  const after = await pager.loadPage();
-  assert.equal(after.items.length, 0, 'nothing follows a complete set');
-  assert.equal(calls.length, 1, 'a finished pager must not hit the network');
-});
-
-// ─── fetchAllCursorPages (kept honest after the pager refactor) ────────────
-
-test('fetchAllCursorPages still drains every page in order', async () => {
-  const replies = [
-    { items: [1, 2], next_cursor: 'c1' },
-    { items: [3], next_cursor: '' },
-  ];
-  const { sandbox, calls } = loadUtils({
-    respond: () => jsonResponse(replies.shift()),
-  });
-
-  const items = await sandbox.fetchAllCursorPages('/api/events', 500);
-
-  // Spread into a host-realm array: the accumulator is a vm-realm Array and
-  // deepStrictEqual is prototype-sensitive across realms.
-  assert.deepEqual([...items], [1, 2, 3]);
-  assert.equal(calls.length, 2);
-  assert.match(calls[0].url, /limit=500/);
-});
-
 // ─── renderIncrementally append mode ───────────────────────────────────────
 
 test('an appended page lands after the painted rows without a wipe', () => {

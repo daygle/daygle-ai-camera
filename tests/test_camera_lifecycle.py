@@ -105,14 +105,13 @@ def test_cleanup_camera_runtime_state_removes_all_dicts(state):
         state._object_tracks['cam-old'] = {'tracks': [], 'next_id': 1}
     with state._motion_confirm_lock:
         state._motion_confirm_streaks['cam-old'] = {'zone-1': 2}
-    with state._frame_motion_lock:
-        state._frame_motion_prev['cam-old'] = 'bg'
-        state._frame_motion_last_frame['cam-old'] = 'f'
-        state._frame_motion_last_gray['cam-old'] = 'g'
-        state._frame_motion_mog2['cam-old'] = 'mog2'
-        state._frame_motion_mog2_meta['cam-old'] = ('sig',)
-        state._frame_motion_scene_streak['cam-old'] = 3
-        state._frame_motion_error_cameras.add('cam-old')
+    state._frame_motion_prev['cam-old'] = 'bg'
+    state._frame_motion_last_frame['cam-old'] = 'f'
+    state._frame_motion_last_gray['cam-old'] = 'g'
+    state._frame_motion_mog2['cam-old'] = 'mog2'
+    state._frame_motion_mog2_meta['cam-old'] = ('sig',)
+    state._frame_motion_scene_streak['cam-old'] = 3
+    state._frame_motion_error_cameras.add('cam-old')
     with state._live_backoff_lock:
         state.live_detection_retry_after['cam-old'] = 999.0
         state.live_detection_failure_count['cam-old'] = 2

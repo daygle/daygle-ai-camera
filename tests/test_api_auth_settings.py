@@ -12,15 +12,16 @@ import time
 from pathlib import Path
 
 from tests.support import (
-    TEST_IMAGE_PNG,
-    LocalClient,
+    add_event,
     _load_app,
+    LocalClient,
     _login,
     _m,
     _multipart_file,
     _post_frame_detection,
     _server,
     _setup_admin,
+    TEST_IMAGE_PNG,
 )
 
 
@@ -624,7 +625,7 @@ def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path,
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(b'not-a-real-video')
 
-        event_id = main_module.database.add_event(
+        event_id = add_event(main_module.database, 
             created_at='2026-06-07T00:00:00+00:00',
             source='camera',
             snapshot_path=None,

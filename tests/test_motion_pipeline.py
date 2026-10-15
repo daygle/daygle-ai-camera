@@ -70,7 +70,7 @@ class MotionPipelineTests(unittest.TestCase):
         mask = np.zeros((20, 30), dtype=bool)
         mask[:3, :10] = True  # 30 of 600 pixels = 5%
         detections = zone_motion_detections(
-            settings, diff_mask=mask, frame_size=(30, 20), gate_fraction=0.001, scale_fraction=0.02,
+            settings, diff_mask=mask, frame_size=(30, 20), scale_fraction=0.02,
         )
         self.assertEqual(len(detections), 1)
         self.assertEqual(detections[0]['confidence'], 1.0)

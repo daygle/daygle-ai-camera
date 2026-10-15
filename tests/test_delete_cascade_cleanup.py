@@ -21,10 +21,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from app.database import EventDatabase  # noqa: E402
+from tests.support import add_event  # noqa: E402
 
 
 def _seed(db: EventDatabase) -> tuple[int, int]:
-    event_id = db.add_event(
+    event_id = add_event(db, 
         created_at='2026-01-01T00:00:00+00:00', source='camera', snapshot_path=None,
         detections=[{'label': 'dog', 'confidence': 0.9,
                      'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}],

@@ -187,11 +187,8 @@ def _zone_image(image: bytes, zone: dict[str, Any]) -> bytes:
     """Restrict the independent term check to the configured area, not the scene."""
     if _full_frame(zone):
         return image
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        return image
+    import cv2
+    import numpy as np
     frame = cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         return image

@@ -98,7 +98,7 @@ You configure it on the **Zones** page: each area has a **Motion** row with a si
 
 **The live meter.** Under the Motion row, and for each motion area in the Live page's *AI Detection Status* card, a meter shows how much of the area is moving right now, in the same units as the trigger. For example, *Driveway: 0.4% Moving · Triggers at 2%*. The trigger tick sits in the middle of the bar, so a bar past the tick will fire. Each area reads **Quiet** (nothing moving), **Moving** (movement below the trigger, or above it but still waiting for its next check) or **Triggered** (passed the trigger for long enough to record or alert). The meter also shows *Highest in the Last 10 Minutes*. To pick a trigger, watch that peak while the scene is quiet and set the trigger just above it.
 
-**Areas saved before the trigger existed** keep firing exactly where they did. Their old *Sensitivity* × scale and gate (including any per-zone gate/scale override) are folded into the equivalent trigger. The editor shows that value (usually as *Custom*) and stores it the next time the area is saved.
+A motion rule without a stored trigger runs at **Normal (2%)**.
 
 Use this when you want to be notified any time *anything* moves in an area, regardless of what it is.
 

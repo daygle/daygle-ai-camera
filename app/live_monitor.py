@@ -231,23 +231,19 @@ FAINT_LOG_FLOOR = 0.20
 FAINT_LOG_MAX = 5
 
 
-def _faint_log_floor(detect_floor: float | None) -> float | None:
+def _faint_log_floor(detect_floor: float) -> float:
     """Confidence to ask the detector for: the log floor, unless the real one is lower."""
-    if detect_floor is None:
-        return None
     return min(float(detect_floor), FAINT_LOG_FLOOR)
 
 
 def _split_faint_detections(
-    detections: list[dict[str, Any]], detect_floor: float | None,
+    detections: list[dict[str, Any]], detect_floor: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """``(kept, faint)``: faint detections scored under ``detect_floor``.
 
     Kept detections are exactly what a detector asked at ``detect_floor``
     returns, so everything downstream behaves as before.
     """
-    if detect_floor is None:
-        return detections, []
     floor = float(detect_floor)
     kept: list[dict[str, Any]] = []
     faint: list[dict[str, Any]] = []
@@ -544,6 +540,11 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config)
             if cam_rec_config.get('continuous'):
                 _state.recording_service.start_continuous_chunk_recording(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config, on_chunk_complete=_make_continuous_chunk_callback(camera_id))
+            else:
+                # Continuous recording switched off (or never on): drop the
+                # camera's continuous entry so its ingest reconnects without
+                # chunking. A no-op when nothing was recording.
+                _state.recording_service.stop_continuous_chunk_recording(camera_id)
         # The camera's Day/Night profile value when set, else the global one
         # (effective_camera_live_settings merges them), so a camera can be
         # switched on while the global default is off as well as the reverse.
@@ -1015,7 +1016,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # override resolved below alongside the numeric thresholds).
     _algorithm = str(live_settings.get('motion_algorithm', getattr(_state, '_MOTION_ALGORITHM', 'mog2')) or 'mog2').strip().lower()
     _denoise = normalize_bool_setting(live_settings.get('motion_denoise'), getattr(_state, '_MOTION_DENOISE', True))
-    # Tri-state ('on'/'off'/'auto', legacy bool tolerated) resolved per-frame in
+    # Tri-state ('on'/'off'/'auto'; a bool is also accepted) resolved per-frame in
     # the engine, so pass the raw value through rather than coercing to a bool.
     _shadow_suppression = live_settings.get('motion_shadow_suppression', getattr(_state, '_MOTION_SHADOW_SUPPRESSION', 'on'))
     # Clamp to the SAME bounds validate_live_settings enforces (40-640 x
@@ -1031,31 +1032,28 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # invalidated one another.  detect_frame_motion passes the size into the
     # per-camera model signature and the zone scorer derives geometry from the
     # returned mask shape.
-    _cam_motion_nest = settings.get('motion') if isinstance(settings.get('motion'), dict) else {}
-    # Flat per-camera key wins (including the present-but-None case, which
-    # falls through to the legacy nested ``settings['motion']`` dict exactly
-    # as before); a parsed value that fails its cast keeps the validated
-    # global default via _parse_motion_override.
-    _cam_pt = settings.get('motion_pixel_threshold') if settings.get('motion_pixel_threshold') is not None else _cam_motion_nest.get('pixel_threshold')
+    # Per-camera flat overrides; a value that fails its cast keeps the
+    # validated global default via _parse_motion_override.
+    _cam_pt = settings.get('motion_pixel_threshold')
     if _cam_pt is not None:
         _pixel_threshold = _parse_motion_override(_cam_pt, _pixel_threshold)
-    _cam_gf = settings.get('motion_gate_fraction') if settings.get('motion_gate_fraction') is not None else _cam_motion_nest.get('gate_fraction')
+    _cam_gf = settings.get('motion_gate_fraction')
     if _cam_gf is not None:
         _gate_fraction = _parse_motion_override(_cam_gf, _gate_fraction)
-    _cam_sf = settings.get('motion_scale_fraction') if settings.get('motion_scale_fraction') is not None else _cam_motion_nest.get('scale_fraction')
+    _cam_sf = settings.get('motion_scale_fraction')
     if _cam_sf is not None:
         _scale_fraction = _parse_motion_override(_cam_sf, _scale_fraction)
-    _cam_ba = settings.get('motion_background_alpha') if settings.get('motion_background_alpha') is not None else _cam_motion_nest.get('background_alpha')
+    _cam_ba = settings.get('motion_background_alpha')
     if _cam_ba is not None:
         _background_alpha = _parse_motion_override(_cam_ba, _background_alpha)
-    # Per-camera engine / post-processing overrides (flat key, else legacy nested).
-    _cam_algo = settings.get('motion_algorithm') if settings.get('motion_algorithm') is not None else _cam_motion_nest.get('algorithm')
+    # Per-camera engine / post-processing overrides.
+    _cam_algo = settings.get('motion_algorithm')
     if _cam_algo is not None:
         _algorithm = str(_cam_algo or 'mog2').strip().lower() or _algorithm
-    _cam_dn = settings.get('motion_denoise') if settings.get('motion_denoise') is not None else _cam_motion_nest.get('denoise')
+    _cam_dn = settings.get('motion_denoise')
     if _cam_dn is not None:
         _denoise = normalize_bool_setting(_cam_dn, _denoise)
-    _cam_ss = settings.get('motion_shadow_suppression') if settings.get('motion_shadow_suppression') is not None else _cam_motion_nest.get('shadow_suppression')
+    _cam_ss = settings.get('motion_shadow_suppression')
     if _cam_ss is not None:
         _shadow_suppression = _cam_ss  # raw tri-state; resolved in the engine
     periodic_scan_interval = float(live_settings.get('periodic_scan_interval_seconds', 0))
@@ -1176,7 +1174,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             diff_mask = None
     # Per-zone motion rules score independently of the frame-wide gate.
     _motion_levels: list[dict[str, Any]] = []
-    motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, frame_size=(_frame_w, _frame_h), levels=_motion_levels)
+    motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, scale_fraction=_scale_fraction, frame_size=(_frame_w, _frame_h), levels=_motion_levels)
     # Require the same motion zone to be active in consecutive analyzed frames
     # (each zone's "Must last: N checks", two by default) before allowing it
     # to create an event or recording. The raw motion telemetry and
@@ -1297,7 +1295,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             # Second look (opt-in): the full-frame pass runs at a lower floor so
             # near-misses survive long enough to be re-checked at higher
             # resolution below; anything still unconfirmed is dropped there.
-            _second_look = min_conf is not None and second_look_enabled(live_settings)
+            _second_look = second_look_enabled(live_settings)
             _inference_started = time.perf_counter()
             _detect_floor = second_look_floor(min_conf) if _second_look else min_conf
             # Ask down to the detection-log floor, then split anything under the
@@ -1882,8 +1880,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             'rule_name': 'Unknown face',
             'label': 'face',
             # Which scoped ``_unknown`` rule(s) fired -- dispatch unions the
-            # email/push config of exactly these (legacy alerts without the
-            # key fall back to the global _unknown rule).
+            # email/push config of exactly these.
             'face_rule_ids': _unknown.get('face_rule_ids') or [],
             'zone_id': str(_unknown.get('zone_id') or ''),
             'confidence': float(_unknown.get('confidence') or 0),
@@ -1929,7 +1926,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # zones move at once.
     for _mot in motion_detections:
         _motion_zone_key = str(_mot.get('zone_id') or _mot.get('zone_name') or '')
-        _motion_record = zone_motion_record_on_detect(settings, _motion_zone_key) if _motion_zone_key else zone_motion_record_on_detect(settings)
+        _motion_record = zone_motion_record_on_detect(settings, _motion_zone_key)
         # alert_triggered tracks ONLY the motion rule's own Record flag: an
         # enabled Email/Push alert on the motion rule must not silently force a
         # recording when Record is off. The alert itself still fires via

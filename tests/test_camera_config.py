@@ -138,7 +138,7 @@ def _stub_main_with_camera_recording_renamer(monkeypatch):
     """Install a hermetic stand-in for the attributes that
     ``_migrate_camera_id`` reaches: ``camera_storage_key`` (on cc module),
     ``live_detection_history``, ``live_detection_history_lock``,
-    ``_frame_motion_prev``, ``_frame_motion_lock``, ``recording_service``
+    ``_frame_motion_prev``, ``_frame_motion_locks``, ``recording_service``
     (on _state), and ``logger`` (on cc module).
 
     Returns ``(_state, lock_log)`` so callers can read back side-effects
@@ -151,7 +151,6 @@ def _stub_main_with_camera_recording_renamer(monkeypatch):
     monkeypatch.setattr(cc, 'camera_storage_key', lambda camera_id: f'cam-{camera_id}')
     monkeypatch.setattr(_state, 'live_detection_history_lock', _LockStub('history', log))
     monkeypatch.setattr(_state, 'live_detection_history', {'old': ['a', 'b']})
-    monkeypatch.setattr(_state, '_frame_motion_lock', _LockStub('motion', log))
     monkeypatch.setattr(_state, '_frame_motion_locks', (_LockStub('stripe', log),))
     monkeypatch.setattr(_state, '_frame_motion_prev', {'old': {'m': 1}})
     monkeypatch.setattr(

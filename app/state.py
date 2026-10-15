@@ -31,8 +31,8 @@ _MOTION_SCALE_FRACTION: float = 0.03
 _MOTION_BACKGROUND_ALPHA: float = 0.05
 # Motion background engine. ``mog2`` is the default OpenCV Gaussian-mixture
 # background subtractor (handles gradual light changes, swaying foliage, and
-# shadow rejection); ``diff`` selects the legacy single-frame adaptive-diff
-# fallback (also used automatically when the OpenCV build lacks MOG2).
+# shadow rejection); ``diff`` selects the single-frame adaptive-diff engine
+# (also used automatically when the OpenCV build lacks MOG2).
 _MOTION_ALGORITHM: str = 'mog2'
 # Morphological open+close on the foreground mask to erase isolated sensor
 # noise (a major false-positive source on IR/night cameras) and consolidate
@@ -42,8 +42,8 @@ _MOTION_DENOISE: bool = True
 # a moving shadow does not register as motion. Tri-state: 'on' (default) always
 # rejects shadows, 'off' never does, 'auto' rejects them only while the scene is
 # bright (day) and disables rejection when the frame goes dark (night/IR), where
-# a genuine subject is otherwise easily misread as a shadow and dropped. Legacy
-# bool values (True/False) are still honoured as on/off.
+# a genuine subject is otherwise easily misread as a shadow and dropped. A bool
+# (True/False) is also accepted as on/off.
 _MOTION_SHADOW_SUPPRESSION: str = 'on'
 # Mean-brightness threshold (0-255) below which 'auto' shadow suppression treats
 # the scene as night and stops rejecting shadows.
@@ -68,9 +68,9 @@ PUBLIC_PREFIXES: tuple[str, ...] = ('/static/',)
 PUBLIC_PATHS: frozenset[str] = frozenset({'/favicon.ico', '/healthz', '/login', '/setup'})
 ADMIN_PATHS: frozenset[str] = frozenset({
     '/models', '/models/faces', '/models/cameras', '/models/sound', '/models/settings',
-    '/onnx', '/yamnet-tflite', '/ai', '/cameras', '/settings',
+    '/ai', '/cameras', '/settings',
     '/users', '/zones', '/detection', '/detection/sounds', '/detection/faces',
-    '/sounds', '/objects', '/audit', '/camera-log', '/application-log',
+    '/audit', '/camera-log', '/application-log',
 })
 MUTATING_METHODS: frozenset[str] = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 
@@ -176,10 +176,8 @@ _periodic_scan_last_ts: dict = {}
 # Frame-motion shared state
 # ---------------------------------------------------------------------------
 
-# Keep legacy global guard for external compatibility. Frame processing uses
-# striped camera locks below so independent cameras need not serialize behind
-# one OpenCV subtractor call.
-_frame_motion_lock: threading.Lock = threading.Lock()
+# Frame processing uses striped camera locks so independent cameras need not
+# serialize behind one OpenCV subtractor call.
 _FRAME_MOTION_LOCK_STRIPES = 64
 _frame_motion_locks: tuple[threading.Lock, ...] = tuple(
     threading.Lock() for _ in range(_FRAME_MOTION_LOCK_STRIPES)
@@ -195,8 +193,7 @@ _frame_motion_last_gray: dict = {}
 _frame_motion_error_cameras: set = set()
 # Per-camera OpenCV MOG2 background subtractor + the geometry/params it was
 # built with (so a live frame-size or threshold change rebuilds it). Each camera
-# is protected by its deterministic striped lock from app/detection_state.py; a
-# coarse compatibility lock is retained for legacy integrations.
+# is protected by its deterministic striped lock from app/detection_state.py.
 # codeql[py/unused-global-variable]
 _frame_motion_mog2: dict = {}
 # codeql[py/unused-global-variable]
@@ -264,12 +261,6 @@ last_rtsp_capture_capped: dict = {}
 
 _camera_health_lock: threading.Lock = threading.Lock()
 _camera_health_state: dict = {}
-
-# ---------------------------------------------------------------------------
-# Legacy compatibility state for notification-thread consumers. New deliveries
-# are tracked by the bounded notification pool in app.postprocess_pool.
-_notification_threads_lock: threading.Lock = threading.Lock()
-_notification_threads: list = []
 
 # ---------------------------------------------------------------------------
 # Sound-monitor shared state

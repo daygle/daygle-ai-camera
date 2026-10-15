@@ -89,10 +89,6 @@ def update_dwell_baseline(baseline: Any, dwell_seconds: Any) -> dict[str, float]
     return state
 
 
-def baseline_mean(baseline: Any) -> float:
-    return _coerce_baseline(baseline)['mean']
-
-
 def baseline_std(baseline: Any) -> float:
     """Sample standard deviation of the observed dwells (0 with <2 samples)."""
     state = _coerce_baseline(baseline)

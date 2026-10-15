@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 import app.state as _state
 from app.camera_id import camera_storage_key
-from app.detection_status import json_safe_detections
+from app.detection_status import GENERIC_TRIGGER_LABELS, json_safe_detections
 from app.media_utils import hevc_mp4_tag_args, newest_video_file
 from app.frame_capture_clock import (
     FrameCaptureClock,
@@ -40,7 +40,6 @@ class RecordingService:
     """Event recording facade with policy selection and generated test footage."""
 
     PLAYBACK_FORMAT = 'mp4'
-    GENERIC_TRIGGER_LABELS = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
     # A prebuffer render is "degenerate" when it produced far less video than the
     # window we asked for - a sign the source segments held no usable continuous
     # footage (sparse keyframes / corrupt stream). It surfaces as a near-still
@@ -278,13 +277,13 @@ class RecordingService:
         config = recording_config or self.recording_config
         labels = [label for label in (str(detection.get('label') or '').strip().lower() for detection in detections) if label]
 
-        def preferred_label(candidates: list[dict[str, Any]], *, allow_motion: bool = False) -> str | None:
+        def preferred_label(candidates: list[dict[str, Any]]) -> str | None:
             sorted_candidates = sorted(candidates, key=lambda detection: float(detection.get('confidence') or 0), reverse=True)
             for candidate in sorted_candidates:
                 label = str(candidate.get('label') or '').strip().lower()
                 if not label:
                     continue
-                if not allow_motion and label in self.GENERIC_TRIGGER_LABELS:
+                if label in GENERIC_TRIGGER_LABELS:
                     continue
                 return label
             return None
@@ -441,7 +440,7 @@ class RecordingService:
         # forgets to pass an explicit value can't silently regress to a tight
         # 2s join that masks a still-running ffmpeg. Callers should always
         # pass the worker-appropriate constant explicitly; this fallback is
-        # only here for safety on legacy / monkeypatched call paths.
+        # only here for safety on monkeypatched call paths.
         if join_timeout is None:
             join_timeout = RecordingService.CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS
         stop_event = worker.get('stop_event')
@@ -1215,7 +1214,7 @@ class RecordingService:
 
     @staticmethod
     def _camera_key(camera_id: str) -> str:
-        # Keep the legacy class-level API while sharing the pure key helper
+        # Class-level entry point sharing the pure key helper
         # with camera configuration without importing this service there.
         return camera_storage_key(camera_id)
 
@@ -3060,30 +3059,6 @@ class RecordingService:
             return int(raw_packet_count) > 0
         except (TypeError, ValueError):
             return True
-
-    @staticmethod
-    def clip_video_packet_count(file_path: Path) -> int | None:
-        """Return video packet count when ffprobe can determine it.
-
-        Some failed renders produce a tiny MP4 with a video stream declaration
-        but no video packets (`frame=0`, `video:0KiB`). Codec-only probing treats
-        that as valid; packet counting catches it.
-        """
-        if not file_path.exists() or file_path.stat().st_size <= 0:
-            return 0
-        probe_succeeded, payload = RecordingService._probe_clip(file_path)
-        if not probe_succeeded:
-            return None
-        streams = payload.get('streams')
-        if not isinstance(streams, list) or not streams or not isinstance(streams[0], dict):
-            return None
-        raw_value = streams[0].get('nb_read_packets')
-        if raw_value is None or str(raw_value).strip().upper() == 'N/A':
-            return None
-        try:
-            return max(0, int(raw_value))
-        except (TypeError, ValueError):
-            return None
 
     @staticmethod
     def clip_duration_seconds(file_path: Path) -> float | None:

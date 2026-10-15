@@ -26,9 +26,8 @@ Cluster membership:
 - ``_LABEL_ALIASES`` -- module-private dict (e.g. ``{'human': 'person'}``)
   used exclusively by ``normalize_label_list``. Moved alongside the
   helper to eliminate a cross-module Pool C reach; main.py's Pool A
-  rebind keeps the 4 main.py-internal usages (e.g.
-  ``detection_label_allowed_for_zone``, ``filter_detections_for_camera_zones``)
-  resolving via a bare-name.
+  rebind keeps main.py-internal usages (e.g.
+  ``filter_detections_for_camera_zones``) resolving via a bare-name.
 
 - ``normalize_label_list`` -- accepts a string (comma-separated), a
   list, or other (returns ``[]``). Splits, lowercases + strips, applies
@@ -36,13 +35,13 @@ Cluster membership:
   deduplicates, returns the sorted-unique label list.
 
 - ``normalize_zone_object_rules`` -- per-zone object-detection rules
-  builder. Reads ``zone.object_rules`` OR synthesizes one rule per
-  label in ``zone.object_labels``. For each rule: parses min_confidence
+  builder. Reads ``zone.object_rules`` (anything else yields no
+  rules). For each rule: parses min_confidence
   (float [0,1]) + the optional object size /
   shape limits (``min_box_area`` ... ``max_aspect_ratio``, checked by
   ``detection_within_box_limits``), composes the canonical
-  shape with normalized en-/disable + e-mail / push flags + 4
-  notification-window optional strings.
+  shape with normalized en-/disable flags and ``alert_schedules`` (each
+  carrying its e-mail / push flags and detection / notification windows).
 
 - ``normalize_zone_point`` -- single zone-coordinate sanitizer.
   Coerces ``{'x': fx, 'y': fy}`` into ``{'x': round(fx,4), 'y': round(fy,4)}``
@@ -55,20 +54,18 @@ Cluster membership:
 - ``zone_bounds`` -- inverse: bounding rect (left, top, right, bottom)
   from a list of points with a 0.01 minimum width / height.
 
-- ``zone_motion_min_confidence`` -- reads the per-zone "motion" object
-  rule; returns its min_confidence (clamped [0.0, 1.0]), or 0.45 when no
-  motion rule exists. Used by ``detection_label_allowed_for_zone`` and
-  ``filter_detections_for_camera_zones`` (both stay on main.py).
+- ``zone_motion_trigger_fraction`` -- the enabled motion rule's
+  "trigger when X% moves" share (default 0.02), or ``None`` without one.
 
 - ``normalize_monitoring_zones`` -- orchestrator. Walks the input zone
   list (non-list returns ``[]``); for each zone sanitizes x/y/width/
   height to [0.0, 1.0]; picks 3+ points from ``zone.points`` OR falls
-  back to ``rectangle_zone_points`` (for the legacy rectangle-only
-  schema); re-derives (x, y, width, height) via ``zone_bounds``;
-  rebuilds ``object_rules`` via ``normalize_zone_object_rules``; if the
-  legacy ``monitor_motion`` was true but no motion rule exists, inserts
-  the motion rule; returns the canonical normalized zone list with
-  ``monitor_motion`` / ``object_labels`` / ``object_rules`` derived.
+  back to ``rectangle_zone_points`` (a zone given only as
+  x/y/width/height); re-derives (x, y, width, height) via ``zone_bounds``;
+  rebuilds ``object_rules`` via ``normalize_zone_object_rules``; returns
+  the canonical normalized zone list with ``monitor_motion`` /
+  ``object_labels`` derived from ``object_rules`` (input values for those
+  two flags are ignored).
 
 Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
@@ -101,10 +98,8 @@ _normalize_hhmm = normalize_hhmm
 
 # Module-private label canonicalization: maps alternative spellings of the
 # same detection label to a single canonical form. Used exclusively by
-# ``normalize_label_list`` below. main.py keeps a Pool A rebind so its 4
-# bare-name references (``detection_label_allowed_for_zone`` L799,
-# ``filter_detections_for_camera_zones`` L815 + L911 + L919) still resolve
-# to this dict after the Phase-21 splice.
+# ``normalize_label_list`` below. main.py keeps a Pool A rebind so its
+# bare-name references still resolve to this dict after the Phase-21 splice.
 _LABEL_ALIASES: dict[str, str] = {
     'human': 'person',
     'people': 'person',
@@ -135,7 +130,7 @@ def _optional_fraction(value: Any, low: float, high: float) -> float | None:
 
     ``None`` / ``''`` / non-numeric input all resolve to ``None`` ("inherit the
     camera/global value") so an unset per-zone override never forces a value.
-    Used for the optional per-zone motion ``gate_fraction`` / ``scale_fraction``.
+    Used for the optional per-zone fractions (motion trigger, box limits).
     """
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
@@ -150,6 +145,8 @@ def _optional_fraction(value: Any, low: float, high: float) -> float | None:
 # before it became a per-zone setting, so it stays the default.
 MOTION_TRIGGER_MIN = 0.0005
 MOTION_TRIGGER_MAX = 0.5
+# A motion rule without a trigger starts on "Normal" (matches the Zones page).
+DEFAULT_MOTION_TRIGGER = 0.02
 DEFAULT_MOTION_CONFIRM_CYCLES = 2
 MAX_MOTION_CONFIRM_CYCLES = 5
 
@@ -306,19 +303,17 @@ def normalize_label_list(value: Any) -> list[str]:
 def normalize_zone_alert_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize an object's independent detection and notification windows.
 
-    Legacy rules store one set of schedule/delivery fields directly on the
-    object rule. When no schedule list exists, lift those fields into one
-    entry so existing configurations keep their exact behavior.
+    A rule without an ``alert_schedules`` list gets one empty schedule (no
+    delivery, no windows).
     """
     raw_schedules = rule.get('alert_schedules')
-    has_schedules = isinstance(raw_schedules, list) and bool(raw_schedules)
-    source = raw_schedules if has_schedules else [rule]
+    source = raw_schedules if isinstance(raw_schedules, list) else []
     schedules: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for index, raw in enumerate(source, start=1):
         if not isinstance(raw, dict):
             continue
-        raw_id = raw.get('id') if has_schedules else None
+        raw_id = raw.get('id')
         schedule_id = str(raw_id or f'schedule-{index}').strip() or f'schedule-{index}'
         base_id = schedule_id
         duplicate = 2
@@ -336,8 +331,6 @@ def normalize_zone_alert_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]
             'notify_start': _normalize_hhmm(raw.get('notify_start')),
             'notify_end': _normalize_hhmm(raw.get('notify_end')),
         })
-    if has_schedules and schedules:
-        return schedules
     if not schedules:
         schedules.append({
             'id': 'schedule-1',
@@ -354,20 +347,8 @@ def normalize_zone_alert_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]
 
 def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
     raw_rules = zone.get('object_rules')
-    if isinstance(raw_rules, list):
-        source_rules = raw_rules
-    else:
-        source_rules = [
-            {'label': label}
-            for label in normalize_label_list(zone.get('object_labels', []))
-        ]
+    source_rules = raw_rules if isinstance(raw_rules, list) else []
     rules: list[dict[str, Any]] = []
-    labels_with_ids = {
-        canonical_label(rule.get('label'))
-        for rule in source_rules
-        if isinstance(rule, dict) and str(rule.get('id') or rule.get('alert_id') or '').strip()
-    }
-    seen_labels: set[str] = set()
     for rule in source_rules:
         if not isinstance(rule, dict):
             continue
@@ -375,21 +356,13 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         if not labels:
             continue
         label = labels[0]
-        # Legacy zone payloads used one rule per label. Continue collapsing
-        # duplicate id-less entries, while retaining explicitly identified
-        # alert instances already present in saved camera settings.
-        raw_rule_id = str(rule.get('id') or rule.get('alert_id') or '').strip()
-        if label in seen_labels and (label not in labels_with_ids or not raw_rule_id):
-            continue
-        seen_labels.add(label)
-        # Motion and faces are non-object-class axes, so their canonical
-        # confidence default is 0.45 (matching zone_motion_min_confidence /
-        # the global Face Confidence default / the frontend's defaultObjectRule)
-        # rather than the 0.5 object-class default. Keeping the defaults
-        # distinct matters: a persisted rule that omits min_confidence must
-        # gate at the same value the detection / recording / alerting axes
-        # fall back to, or those axes silently disagree about what fires.
-        non_object_default = 0.45 if label in ('motion', 'face') else 0.5
+        raw_rule_id = str(rule.get('id') or '').strip()
+        # Faces are a non-object-class axis, so their canonical confidence
+        # default is 0.45 (matching the global Face Confidence default / the
+        # frontend's defaultObjectRule) rather than the 0.5 object-class
+        # default. A persisted rule that omits min_confidence must gate at the
+        # same value the detection / recording / alerting axes fall back to.
+        non_object_default = 0.45 if label == 'face' else 0.5
         try:
             min_confidence = float(rule.get('min_confidence', non_object_default))
         except (TypeError, ValueError):
@@ -407,27 +380,17 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         except (TypeError, ValueError):
             max_confidence = 1.0
         max_confidence = max(min_confidence, min(1.0, max_confidence))
-        # Optional per-zone motion sensitivity overrides. When set on a motion
-        # rule they replace the camera/global gate + scale for THIS zone only, so
-        # a sensitive doorway and a noisy tree-line can coexist on one camera.
-        # ``None`` means "inherit". Clamped to the same ranges the global live
-        # settings enforce. Ignored for non-motion (object) rules.
-        gate_fraction = _optional_fraction(
-            rule.get('gate_fraction'), 0.0001, 0.5,
-        ) if label == 'motion' else None
-        scale_fraction = _optional_fraction(
-            rule.get('scale_fraction'), 0.001, 1.0,
-        ) if label == 'motion' else None
-        # The plain-language motion trigger: "trigger when X% of this zone
-        # moves". When set it replaces the gate / scale / Sensitivity trio for
-        # this zone (see zone_motion_effective_trigger), so the confidence
-        # window is opened fully -- the zone already gated on the trigger and
-        # the alert / record axes must not re-gate on a scaled confidence the
-        # operator no longer sees. ``None`` keeps the legacy behaviour.
-        trigger_fraction = _optional_fraction(
-            rule.get('trigger_fraction'), MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX,
-        ) if label == 'motion' else None
-        if trigger_fraction is not None:
+        # Motion fires on its plain-language trigger: "trigger when X% of this
+        # zone moves". The zone already gated on that share of its pixels, so
+        # the confidence window is opened fully -- the alert / record axes must
+        # not re-gate on a scaled confidence the operator never sees.
+        trigger_fraction = None
+        if label == 'motion':
+            trigger_fraction = _optional_fraction(
+                rule.get('trigger_fraction'), MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX,
+            )
+            if trigger_fraction is None:
+                trigger_fraction = DEFAULT_MOTION_TRIGGER
             min_confidence = 0.0
             max_confidence = 1.0
         confirm_cycles = _motion_confirm_cycles(rule.get('confirm_cycles')) if label == 'motion' else None
@@ -447,13 +410,6 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         except (TypeError, ValueError):
             ai_verify_skip_above = 1.0
         ai_verify_skip_above = max(0.0, min(1.0, ai_verify_skip_above))
-        alert_schedules = normalize_zone_alert_schedules(rule)
-        first_schedule = alert_schedules[0]
-        email_recipients = list(dict.fromkeys(
-            recipient
-            for schedule in alert_schedules
-            for recipient in schedule['email_recipients']
-        ))
         rules.append({
             **({'id': raw_rule_id} if raw_rule_id else {}),
             'label': label,
@@ -461,23 +417,14 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             'record_on_detect': normalize_bool_setting(rule.get('record_on_detect'), True),
             'min_confidence': min_confidence,
             'max_confidence': max_confidence,
-            'gate_fraction': gate_fraction,
-            'scale_fraction': scale_fraction,
             'trigger_fraction': trigger_fraction,
             'confirm_cycles': confirm_cycles,
             **box_limits,
             'ai_verify': ai_verify,
             'ai_verify_skip_above': ai_verify_skip_above,
-            # Legacy top-level fields aggregate channels/recipients and mirror
-            # the first window; schedule-aware dispatch uses the full list.
-            'email_enabled': any(schedule['email_enabled'] for schedule in alert_schedules),
-            'email_recipients': email_recipients,
-            'active_start': first_schedule['active_start'],
-            'active_end': first_schedule['active_end'],
-            'notify_start': first_schedule['notify_start'],
-            'notify_end': first_schedule['notify_end'],
-            'push_enabled': any(schedule['push_enabled'] for schedule in alert_schedules),
-            'alert_schedules': alert_schedules,
+            # Delivery and time windows live only on the schedules;
+            # zone_object_alert_rules flattens them per schedule.
+            'alert_schedules': normalize_zone_alert_schedules(rule),
         })
     return rules
 
@@ -517,43 +464,6 @@ def zone_bounds(points: list[dict[str, float]]) -> tuple[float, float, float, fl
     return (left, top, max(0.01, right - left), max(0.01, bottom - top))
 
 
-def zone_motion_min_confidence(zone: dict[str, Any]) -> float:
-    for rule in zone.get('object_rules', []):
-        if (
-            str(rule.get('label') or '').strip().lower() == 'motion'
-            and rule.get('enabled', True)
-        ):
-            try:
-                return max(0.0, min(1.0, float(rule.get('min_confidence', 0.45))))
-            except (TypeError, ValueError):
-                return 0.45
-    return 0.45
-
-
-def zone_motion_gate_fraction(zone: dict[str, Any]) -> float | None:
-    """Return the enabled motion rule's per-zone ``gate_fraction`` override, or
-    ``None`` when the zone inherits the camera/global gate."""
-    for rule in zone.get('object_rules', []):
-        if (
-            str(rule.get('label') or '').strip().lower() == 'motion'
-            and rule.get('enabled', True)
-        ):
-            return _optional_fraction(rule.get('gate_fraction'), 0.0001, 0.5)
-    return None
-
-
-def zone_motion_scale_fraction(zone: dict[str, Any]) -> float | None:
-    """Return the enabled motion rule's per-zone ``scale_fraction`` override, or
-    ``None`` when the zone inherits the camera/global scale."""
-    for rule in zone.get('object_rules', []):
-        if (
-            str(rule.get('label') or '').strip().lower() == 'motion'
-            and rule.get('enabled', True)
-        ):
-            return _optional_fraction(rule.get('scale_fraction'), 0.001, 1.0)
-    return None
-
-
 def _enabled_motion_rule(zone: dict[str, Any]) -> dict[str, Any] | None:
     for rule in zone.get('object_rules') or []:
         if (
@@ -566,12 +476,14 @@ def _enabled_motion_rule(zone: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def zone_motion_trigger_fraction(zone: dict[str, Any]) -> float | None:
-    """Return the zone's "trigger when X% moves" fraction, or ``None`` when
-    the zone still uses the legacy gate / scale / Sensitivity trio."""
+    """The share of the zone's pixels that must change for its motion to count
+    ("trigger when X% moves"), or ``None`` when the zone has no enabled motion
+    rule."""
     rule = _enabled_motion_rule(zone)
     if rule is None:
         return None
-    return _optional_fraction(rule.get('trigger_fraction'), MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX)
+    trigger = _optional_fraction(rule.get('trigger_fraction'), MOTION_TRIGGER_MIN, MOTION_TRIGGER_MAX)
+    return DEFAULT_MOTION_TRIGGER if trigger is None else trigger
 
 
 def zone_motion_confirm_cycles(zone: dict[str, Any]) -> int:
@@ -581,48 +493,6 @@ def zone_motion_confirm_cycles(zone: dict[str, Any]) -> int:
     if rule is None:
         return DEFAULT_MOTION_CONFIRM_CYCLES
     return _motion_confirm_cycles(rule.get('confirm_cycles', DEFAULT_MOTION_CONFIRM_CYCLES))
-
-
-def zone_motion_effective_trigger(
-    zone: dict[str, Any],
-    gate_fraction: float,
-    scale_fraction: float,
-) -> float:
-    """The share of the zone's pixels that must change for motion to count.
-
-    A zone with ``trigger_fraction`` uses it directly. Older zones keep their
-    exact behaviour: the larger of the gate and Sensitivity x scale, with the
-    per-zone gate / scale overrides winning over the camera values.
-    """
-    trigger = zone_motion_trigger_fraction(zone)
-    if trigger is not None:
-        return trigger
-    gate = zone_motion_gate_fraction(zone)
-    scale = zone_motion_scale_fraction(zone)
-    gate = gate_fraction if gate is None else gate
-    scale = scale_fraction if scale is None else scale
-    return max(float(gate), zone_motion_min_confidence(zone) * float(scale))
-
-
-def zone_motion_max_confidence(zone: dict[str, Any]) -> float:
-    """Return the enabled motion rule's ``max_confidence`` upper bound.
-
-    Mirrors ``zone_motion_min_confidence`` so a zone's motion detections are
-    gated by the SAME ``[min, max]`` window as its object rules. Defaults to
-    1.0 (no upper limit) when no enabled motion rule exists or the value is
-    absent/invalid, so pre-existing zones keep firing on any motion at or
-    above their min threshold.
-    """
-    for rule in zone.get('object_rules', []):
-        if (
-            str(rule.get('label') or '').strip().lower() == 'motion'
-            and rule.get('enabled', True)
-        ):
-            try:
-                return max(0.0, min(1.0, float(rule.get('max_confidence', 1.0))))
-            except (TypeError, ValueError):
-                return 1.0
-    return 1.0
 
 
 def normalize_zone_tripwire(zone: dict[str, Any]) -> dict[str, Any] | None:
@@ -974,29 +844,6 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             points = rectangle_zone_points(x, y, width, height)
         x, y, width, height = zone_bounds(points)
         object_rules = normalize_zone_object_rules(zone)
-        had_monitor_motion = 'monitor_motion' in zone and bool(zone['monitor_motion'])
-        if had_monitor_motion and (not any(
-            str(r.get('label') or '').strip().lower() == 'motion'
-            for r in object_rules
-        )):
-            object_rules.insert(0, {
-                'label': 'motion',
-                'enabled': True,
-                'record_on_detect': True,
-                'min_confidence': 0.45,
-                'max_confidence': 1.0,
-                'gate_fraction': None,
-                'scale_fraction': None,
-                'trigger_fraction': None,
-                'confirm_cycles': DEFAULT_MOTION_CONFIRM_CYCLES,
-                'email_enabled': False,
-                'email_recipients': [],
-                'active_start': None,
-                'active_end': None,
-                'notify_start': None,
-                'notify_end': None,
-                'push_enabled': False,
-            })
         monitor_motion = any(
             str(r.get('label') or '').strip().lower() == 'motion'
             and r.get('enabled', True)
@@ -1016,11 +863,11 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             # ``object_labels`` feeds OBJECT allow-lists only -- motion and
             # face are their own detection axes, not object classes, so they
             # never belong in the allow-list derivation.
-            'object_labels': [
+            'object_labels': list(dict.fromkeys(
                 rule['label']
                 for rule in object_rules
                 if str(rule.get('label') or '').strip().lower() not in ('motion', 'face')
-            ],
+            )),
             # Faces axis flag: True when the zone carries an enabled ``face``
             # rule. Consumed by the live pipeline to scope face processing to
             # these zones (faces detected elsewhere are dropped BEFORE the

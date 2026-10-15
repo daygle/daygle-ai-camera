@@ -17,12 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tests.support import (
-    TEST_IMAGE_PNG,
-    LocalClient,
+    add_event,
     _load_app,
+    LocalClient,
     _login,
     _server,
     _setup_admin,
+    TEST_IMAGE_PNG,
 )
 
 
@@ -38,7 +39,7 @@ def test_list_snapshots_returns_only_framed_events(tmp_path, monkeypatch):
         _login(admin)
         now = datetime.now(timezone.utc).isoformat()
         snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'snap.png')
-        framed_id = main.database.add_event(
+        framed_id = add_event(main.database, 
             created_at=now,
             source='motion',
             snapshot_path=snapshot_path,
@@ -50,7 +51,7 @@ def test_list_snapshots_returns_only_framed_events(tmp_path, monkeypatch):
             now, 'Front Door / person', framed_id, 'person', 0.9, 'person matched',
         )
         # Sound events are frameless and must NOT appear in the library.
-        main.database.add_event(
+        add_event(main.database, 
             created_at=now, source='sound', snapshot_path=None, detections=[],
         )
 
@@ -84,13 +85,13 @@ def test_list_snapshots_since_filter(tmp_path, monkeypatch):
     try:
         _setup_admin(admin)
         _login(admin)
-        old = main.database.add_event(
+        old = add_event(main.database, 
             created_at='2026-06-01T00:00:00+00:00',
             source='motion',
             snapshot_path=main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'old.png'),
             detections=[],
         )
-        recent = main.database.add_event(
+        recent = add_event(main.database, 
             created_at='2026-06-10T00:00:00+00:00',
             source='motion',
             snapshot_path=main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'recent.png'),
@@ -129,7 +130,7 @@ def test_delete_snapshot_removes_image_keeps_event(tmp_path, monkeypatch):
         snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'del.png')
         snapshot_file = Path(snapshot_path)
         assert snapshot_file.exists()
-        event_id = main.database.add_event(
+        event_id = add_event(main.database, 
             created_at=now,
             source='motion',
             snapshot_path=snapshot_path,
@@ -198,10 +199,10 @@ def test_delete_snapshot_gates_and_404s(tmp_path, monkeypatch):
 
         now = datetime.now(timezone.utc).isoformat()
         snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'gate.png')
-        event_id = main.database.add_event(
+        event_id = add_event(main.database, 
             created_at=now, source='motion', snapshot_path=snapshot_path, detections=[],
         )
-        frameless_id = main.database.add_event(
+        frameless_id = add_event(main.database, 
             created_at=now, source='sound', snapshot_path=None, detections=[],
         )
 
@@ -274,7 +275,7 @@ def test_list_snapshots_applies_recording_scoping(tmp_path, monkeypatch):
 
         now = datetime.now(timezone.utc).isoformat()
         snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'scope.png')
-        event_id = main.database.add_event(
+        event_id = add_event(main.database, 
             created_at=now, source='motion', snapshot_path=snapshot_path,
             detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.5, 'height': 0.5}}],
             metadata={'camera_id': 'front'},
@@ -318,7 +319,7 @@ def test_retention_purge_deletes_event_when_recording_media_is_removed(tmp_path,
         csrf = _login(admin)
         old_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'expired.png')
         recent_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'current.png')
-        old_id = main.database.add_event(
+        old_id = add_event(main.database, 
             created_at='2000-01-01T00:00:00+00:00', source='motion',
             snapshot_path=old_path, detections=[],
         )
@@ -333,10 +334,10 @@ def test_retention_purge_deletes_event_when_recording_media_is_removed(tmp_path,
             created_at='2000-01-01T00:00:00+00:00', trigger_type='motion',
             trigger_label=None,
         )
-        recent_id = main.database.add_event(
+        recent_id = add_event(main.database, 
             created_at=main.utc_now(), source='motion', snapshot_path=recent_path, detections=[],
         )
-        old_sound_id = main.database.add_event(
+        old_sound_id = add_event(main.database, 
             created_at='2000-01-01T00:00:00+00:00', source='sound',
             snapshot_path=None, detections=[],
         )
@@ -402,7 +403,7 @@ def test_snapshot_image_thumb_variant_downscales(tmp_path, monkeypatch):
         ok, encoded = cv2.imencode('.jpg', frame)
         assert ok
         snapshot_path = main.storage.save_image_snapshot(encoded.tobytes(), 'wide.jpg')
-        event_id = main.database.add_event(
+        event_id = add_event(main.database, 
             created_at=datetime.now(timezone.utc).isoformat(),
             source='motion',
             snapshot_path=snapshot_path,
@@ -457,7 +458,7 @@ def test_snapshot_thumb_serves_the_capture_time_thumbnail_when_stored(tmp_path, 
         # byte equality proves the stored file was served as-is.
         thumb_bytes = b'\xff\xd8\xff\xe0capture-time-thumbnail\xff\xd9'
         thumbnail_path = main.storage.save_image_snapshot(thumb_bytes, 'wide.thumb.jpg')
-        event_id = main.database.add_event(
+        event_id = add_event(main.database, 
             created_at=datetime.now(timezone.utc).isoformat(),
             source='motion',
             snapshot_path=snapshot_path,

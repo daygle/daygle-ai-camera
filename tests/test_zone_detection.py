@@ -8,13 +8,10 @@ public path:
 - ``point_in_polygon`` -- 0/1/3+ point cases, even-odd parity check.
 - ``point_on_segment`` -- colinear + straddling + off-segment cases.
 - ``detection_center_in_zone`` -- polygon vs rectangle dispatch.
-- ``detection_overlap_ratio_with_zone_rect`` -- partial, full, disjoint.
 - ``detection_matches_zone`` -- center + rect overlap paths.
 - ``_zone_pixel_motion_fraction`` -- numpy slice + points-only fallback.
 - ``zone_motion_detections`` -- enabled/disabled zones, motion rule
   threshold, default-arg lazy resolution.
-- ``detection_label_allowed_for_zone`` -- zone allow-list vs camera
-  allow-list fall-through.
 - ``filter_detections_for_camera_zones`` -- per-monitor-key dispatch,
   empty-zones camera-labels fallback, require_zones=True.
 - ``filter_detections_for_camera`` -- object_detection_enabled=False
@@ -30,8 +27,6 @@ public path:
 - ``zone_motion_record_on_detect`` -- motion-axis (monitor_motion=True)
   finding rule with record_on_detect=True.
 - ``zone_detection_alert_rule_names`` -- set of matched names.
-- ``detection_has_matching_record_rule`` -- label/confidence coverage,
-  cooldown ignored, motion min_conf=0 default branch.
 - ``normalize_detection_boxes_for_frame`` -- pixel->normalized,
   already-normalized pass-through, missing dimensions pass-through.
 - ``get_camera_instance`` -- 404 raise, camera_instances lookup,
@@ -112,7 +107,7 @@ def test_point_on_segment_off_segment(zd):
 
 
 # ---------------------------------------------------------------------------
-# detection_center_in_zone + detection_overlap_ratio_with_zone_rect
+# detection_center_in_zone + detection_matches_zone
 # ---------------------------------------------------------------------------
 
 def test_detection_center_in_zone_polygon_vs_rectangle(zd):
@@ -127,47 +122,21 @@ def test_detection_center_in_zone_polygon_vs_rectangle(zd):
     assert zd.detection_center_in_zone(outside_detection, rect_zone) is False
 
 
-def test_detection_overlap_ratio_disjoint_returns_zero(zd):
-    detection = {'box': {'x': 5, 'y': 5, 'width': 0.1, 'height': 0.1}}
-    zone = {'x': 0, 'y': 0, 'width': 1, 'height': 1}
-    assert zd.detection_overlap_ratio_with_zone_rect(detection, zone) == 0.0
-
-
-def test_detection_overlap_ratio_fully_inside_returns_one(zd):
-    detection = {'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}
-    zone = {'x': 0, 'y': 0, 'width': 1, 'height': 1}
-    assert zd.detection_overlap_ratio_with_zone_rect(detection, zone) == pytest.approx(1.0)
-
-
-def test_detection_overlap_ratio_partial(zd):
-    # Half-and-half overlap: detection [0..0.5], zone [0.25..0.75] in width-height 1x1 square
-    detection = {'box': {'x': 0, 'y': 0, 'width': 0.5, 'height': 0.5}}
-    zone = {'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5}
-    # Intersection is 0.25 x 0.25 = 0.0625; detection area is 0.25; ratio = 0.25
-    assert zd.detection_overlap_ratio_with_zone_rect(detection, zone) == pytest.approx(0.25)
-
-
-def test_detection_overlap_ratio_zero_dim_returns_zero(zd):
-    detection = {'box': {'x': 0, 'y': 0, 'width': 0, 'height': 0}}
-    zone = {'x': 0, 'y': 0, 'width': 1, 'height': 1}
-    assert zd.detection_overlap_ratio_with_zone_rect(detection, zone) == 0.0
-
-
-def test_detection_matches_zone_center_overrides_overlap(zd):
-    # In rectangle zone by center but slight overlap < 0.2
+def test_detection_matches_zone_center_inside_rect(zd):
     detection = {'box': {'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}}
     zone = {'x': 0, 'y': 0, 'width': 1, 'height': 1}
     assert zd.detection_matches_zone(detection, zone) is True
 
 
-def test_detection_matches_zone_rect_min_overlap_threshold(zd):
-    # Center outside rectangle [0..1]x[0..1]; detection {x:0.85, w:0.5} -> center 1.1 OUT,
-    # overlap = [0.85..1]x[0.85..1] = 0.0225, detection area = 0.25, ratio = 0.09 (below 0.2).
-    detection = {'box': {'x': 0.85, 'y': 0.85, 'width': 0.5, 'height': 0.5}}
-    zone = {'x': 0, 'y': 0, 'width': 1, 'height': 1}
-    assert zd.detection_matches_zone(detection, zone, min_overlap_ratio=0.2) is False
-    # Lowered threshold accepts
-    assert zd.detection_matches_zone(detection, zone, min_overlap_ratio=0.01) is True
+def test_detection_matches_zone_rect_is_centre_only(zd):
+    # Rectangle zones match by centre exactly like polygons: a box that mostly
+    # overlaps the zone but whose centre (0.65, 0.65) is outside it does not match.
+    detection = {'box': {'x': 0.3, 'y': 0.3, 'width': 0.7, 'height': 0.7}}
+    zone = {'x': 0, 'y': 0, 'width': 0.6, 'height': 0.6}
+    assert zd.detection_matches_zone(detection, zone) is False
+    assert zd.detection_matches_zone(detection, {'points': [
+        {'x': 0, 'y': 0}, {'x': 0.6, 'y': 0}, {'x': 0.6, 'y': 0.6}, {'x': 0, 'y': 0.6},
+    ]}) is False
 
 
 def test_detection_matches_zone_polygon_center_only(zd):
@@ -181,15 +150,15 @@ def test_detection_matches_zone_polygon_center_only(zd):
 
 def test_detection_matches_zone_memoizes_per_detection(zd, monkeypatch):
     """The verdict is cached per (zone, box) so repeated tests within a cycle
-    compute the geometry once; a box change (or a different ratio) recomputes."""
+    compute the geometry once; a box change recomputes."""
     detection = {'box': {'x': 0.0, 'y': 0.0, 'width': 0.1, 'height': 0.1}}
     zone = {'id': 'z1', 'x': 0, 'y': 0, 'width': 1, 'height': 1}
     calls = {'n': 0}
     real = zd._detection_matches_zone_uncached
 
-    def counting(det, z, ratio):
+    def counting(det, z):
         calls['n'] += 1
-        return real(det, z, ratio)
+        return real(det, z)
     monkeypatch.setattr(zd, '_detection_matches_zone_uncached', counting)
 
     assert zd.detection_matches_zone(detection, zone) is True
@@ -206,20 +175,16 @@ def test_detection_matches_zone_memoizes_per_detection(zd, monkeypatch):
     zd.detection_matches_zone(moved, zone)
     assert calls['n'] == 2
 
-    # A non-default overlap ratio never uses the memo.
-    zd.detection_matches_zone(detection, zone, min_overlap_ratio=0.01)
-    assert calls['n'] == 3
-
 
 def test_detection_matches_zone_memo_matches_uncached(zd):
     """Memoized result is identical to the uncached geometry for both a rect
-    (overlap path) and a polygon (centre path) zone."""
+    and a polygon zone."""
     for zone in ({'id': 'r', 'x': 0, 'y': 0, 'width': 1, 'height': 1},
                  {'id': 'p', 'points': SQUARE}):
         for box in ({'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1},
                     {'x': 0.9, 'y': 0.9, 'width': 0.4, 'height': 0.4}):
             det = {'box': dict(box)}
-            expected = zd._detection_matches_zone_uncached(det, zone, 0.2)
+            expected = zd._detection_matches_zone_uncached(det, zone)
             assert zd.detection_matches_zone({'box': dict(box)}, zone) is expected
 
 
@@ -333,92 +298,6 @@ def test_zone_motion_detections_disabled_zone_skipped(zd):
     assert zd.zone_motion_detections(settings, 0.9, diff_mask=None) == []
 
 
-def test_zone_motion_detections_per_zone_gate_override():
-    """A zone's own gate_fraction override wins over the camera/global gate, so
-    a sensitive zone can fire even when the camera gate is set insensitive (and
-    vice versa)."""
-    np = pytest.importorskip('numpy')
-    from app import zone_detection as zd
-    import app.state as st
-    mask = np.zeros((st._MOTION_FRAME_H, st._MOTION_FRAME_W), dtype=bool)
-    # Change ~10% of the RIGHT-HALF zone: a thin band of columns inside it, so
-    # the zone fraction (~0.1) sits between the two gate values under test.
-    half = st._MOTION_FRAME_W // 2
-    band = max(1, int(0.1 * (st._MOTION_FRAME_W - half)))
-    mask[:, half:half + band] = True
-    base_rule = {'label': 'motion', 'enabled': True, 'min_confidence': 0.01}
-    settings = {
-        'detection': {'zones': [{
-            'id': 'z', 'name': 'Z', 'enabled': True, 'monitor_motion': True,
-            'x': 0.5, 'y': 0.0, 'width': 0.5, 'height': 1.0,
-            'object_rules': [dict(base_rule)],
-        }]},
-    }
-    zone = settings['detection']['zones'][0]
-
-    # Insensitive per-zone gate (0.5) suppresses even with a low camera gate.
-    zone['object_rules'][0]['gate_fraction'] = 0.5
-    assert zd.zone_motion_detections(settings, 0.9, diff_mask=mask, gate_fraction=0.005, scale_fraction=0.03) == []
-
-    # Sensitive per-zone gate fires even with an insensitive camera gate (0.9).
-    zone['object_rules'][0]['gate_fraction'] = 0.0005
-    fired = zd.zone_motion_detections(settings, 0.9, diff_mask=mask, gate_fraction=0.9, scale_fraction=0.03)
-    assert len(fired) == 1
-
-
-def test_zone_motion_detections_threshold_filters_low_confidence():
-    from app import zone_detection as zd
-    settings = {
-        'id': 'cam-1',
-        'name': 'Cam 1',
-        'detection': {
-            'zones': [
-                {
-                    'id': 'z',
-                    'enabled': True,
-                    'monitor_motion': True,
-                    'x': 0,
-                    'y': 0,
-                    'width': 1,
-                    'height': 1,
-                    'object_rules': [{'label': 'motion', 'min_confidence': 0.9}],
-                },
-            ],
-        },
-    }
-    # frame_motion_confidence=0.5 -> below zone threshold of 0.9 -> filtered
-    assert zd.zone_motion_detections(settings, 0.5, diff_mask=None) == []
-
-
-def test_zone_motion_detections_filters_above_max_confidence():
-    """A motion rule's ``max_confidence`` upper bound gates the motion
-    detection at its source, so an over-max motion never reaches the alert OR
-    the recording path (both derive from ``zone_motion_detections``)."""
-    from app import zone_detection as zd
-    settings = {
-        'id': 'cam-1',
-        'name': 'Cam 1',
-        'detection': {
-            'zones': [
-                {
-                    'id': 'z',
-                    'enabled': True,
-                    'monitor_motion': True,
-                    'x': 0,
-                    'y': 0,
-                    'width': 1,
-                    'height': 1,
-                    'object_rules': [{'label': 'motion', 'min_confidence': 0.2, 'max_confidence': 0.6}],
-                },
-            ],
-        },
-    }
-    # 0.9 is above the 0.6 max -> dropped entirely.
-    assert zd.zone_motion_detections(settings, 0.9, diff_mask=None) == []
-    # 0.5 sits inside [0.2, 0.6] -> kept.
-    assert len(zd.zone_motion_detections(settings, 0.5, diff_mask=None)) == 1
-
-
 def test_zone_motion_detections_stamps_zone_name_and_id():
     """Motion pseudo-detections must carry the zone name so the playback cards
     can render a Zone row for motion-triggered events."""
@@ -470,60 +349,6 @@ def test_zone_motion_detections_zone_name_falls_back_to_id():
     }
     result = zd.zone_motion_detections(settings, 0.9, diff_mask=None)
     assert result[0]['zone_name'] == 'z1'
-
-
-def test_zone_motion_detections_default_gate_fraction_resolves_via_state(
-    monkeypatch, zd
-):
-    """gate_fraction=None must resolve to ``_state._MOTION_GATE_FRACTION`` at call time.
-
-    Ensures the actual gate value is read from app.state by raising
-    ``_state._MOTION_GATE_FRACTION`` past the diff_mask fraction and verifying
-    the function THEN returns [].
-    """
-    import app.state as _state
-    np = pytest.importorskip('numpy')
-    settings = {
-        'id': 'cam-1',
-        'name': 'Cam 1',
-        'detection': {
-            'zones': [
-                {
-                    'id': 'z',
-                    'enabled': True,
-                    'monitor_motion': True,
-                    'x': 0,
-                    'y': 0,
-                    'width': 1,
-                    'height': 1,
-                    'object_rules': [{'label': 'motion', 'min_confidence': 0.0}],
-                },
-            ],
-        },
-    }
-    mask = np.zeros((240, 320), dtype=bool)
-    mask[20:220, 20:300] = True  # ~73% of pixels changed
-
-    # Default resolution: gate is _state._MOTION_GATE_FRACTION (0.005) -> zone fires.
-    original = _state._MOTION_GATE_FRACTION
-    try:
-        result_default = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)
-        assert len(result_default) == 1
-
-        # Crank the gate up so the SAME mask is below threshold.
-        monkeypatch.setattr(_state, '_MOTION_GATE_FRACTION', 0.99)
-        result_filtered = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)
-        assert result_filtered == [], (
-            'gate_fraction must resolve from _state._MOTION_GATE_FRACTION at call time; '
-            'cranking the state constant past the diff_mask fraction should filter the zone out'
-        )
-
-        # And back to original: zone fires again.
-        monkeypatch.setattr(_state, '_MOTION_GATE_FRACTION', original)
-        result_restored = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)
-        assert len(result_restored) == 1
-    finally:
-        monkeypatch.setattr(_state, '_MOTION_GATE_FRACTION', original)
 
 
 def test_zone_motion_detections_box_tightens_to_changed_pixels(zd):
@@ -590,34 +415,28 @@ def test_zone_motion_detections_box_uses_zone_rect_without_mask(zd):
 
 
 # ---------------------------------------------------------------------------
-# detection_label_allowed_for_zone -- zone allow-list vs camera allow-list
+# zone allow-list vs camera allow-list
 # ---------------------------------------------------------------------------
 
-def test_detection_label_allowed_for_zone_zones_label_match():
+def test_filter_for_camera_zones_zone_without_labels_uses_camera_labels():
+    """A zone with its own ``object_labels`` filters by them; one without
+    falls back to the camera's allow-list."""
     from app import zone_detection as zd
-    zone = {'object_labels': ['person', 'cat']}
-    assert zd.detection_label_allowed_for_zone({'label': 'cat'}, zone, set()) is True
-    assert zd.detection_label_allowed_for_zone({'label': 'dog'}, zone, set()) is False
+    box = {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}
+    detections = [{'label': label, 'box': dict(box)} for label in ('cat', 'dog', 'bird')]
 
+    def labels_for(zone_labels):
+        settings = {'detection': {'object_labels': ['cat', 'dog'], 'zones': [{
+            'id': 'z', 'enabled': True, 'monitor_objects': True,
+            'x': 0, 'y': 0, 'width': 1, 'height': 1, 'object_labels': zone_labels,
+        }]}}
+        kept = zd.filter_detections_for_camera_zones(
+            [dict(d) for d in detections], settings, zone_monitor_key='monitor_objects',
+        )
+        return [d['label'] for d in kept]
 
-def test_detection_label_allowed_for_zone_human_alised_to_person():
-    from app import zone_detection as zd
-    zone = {'object_labels': ['person']}
-    assert zd.detection_label_allowed_for_zone({'label': 'human'}, zone, set()) is True
-
-
-def test_detection_label_allowed_for_zone_camera_fallback():
-    from app import zone_detection as zd
-    # No zone allow-list; falls back to camera_labels
-    zone = {'object_labels': []}
-    assert zd.detection_label_allowed_for_zone({'label': 'cat'}, zone, {'cat', 'dog'}) is True
-    assert zd.detection_label_allowed_for_zone({'label': 'bird'}, zone, {'cat', 'dog'}) is False
-
-
-def test_detection_label_allowed_for_zone_no_allow_list_returns_true():
-    from app import zone_detection as zd
-    # Both empty -- everyone allowed (no filter)
-    assert zd.detection_label_allowed_for_zone({'label': 'anything'}, {}, set()) is True
+    assert labels_for(['cat']) == ['cat']
+    assert labels_for([]) == ['cat', 'dog']
 
 
 # ---------------------------------------------------------------------------
@@ -704,7 +523,7 @@ def test_filter_for_camera_zones_no_zones_camera_labels_fallback(monkeypatch):
 
 def test_filter_for_camera_zones_no_zones_fallback_aliases_detection_labels():
     """The zone-less camera-label fallback must alias detection labels exactly
-    like the zones path (``detection_label_allowed_for_zone``): a camera with
+    like the zones path: a camera with
     ``object_labels: ['person']`` should accept a detection labeled 'human'.
 
     Regression: the fallback previously compared the RAW lowercase label
@@ -779,8 +598,7 @@ def _one_person_zone_settings():
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
-                        {'label': 'person', 'enabled': True, 'email_enabled': True,
-                         'min_confidence': 0.5, 'record_on_detect': True},
+                        {'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'record_on_detect': True, 'alert_schedules': [{'email_enabled': True}]},
                     ],
                 },
             ],
@@ -840,7 +658,7 @@ def test_zone_object_rule_matches_label_aliases_human_to_person():
                 {
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -861,7 +679,7 @@ def test_zone_object_rule_matches_below_confidence_excluded():
                 {
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.95}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.95, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -885,10 +703,7 @@ def test_zone_object_rule_matches_above_max_confidence_excluded():
                 {
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{
-                        'label': 'person', 'enabled': True, 'email_enabled': True,
-                        'min_confidence': 0.4, 'max_confidence': 0.7,
-                    }],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.4, 'max_confidence': 0.7, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -915,10 +730,7 @@ def test_zone_object_rule_matches_default_max_confidence_is_no_upper_limit():
                 {
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{
-                        'label': 'person', 'enabled': True, 'email_enabled': True,
-                        'min_confidence': 0.5,
-                    }],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -947,7 +759,7 @@ def test_zone_object_rule_matches_action_alert_requires_notify():
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     # rule with NO email/push -- alert action filters it out
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': False, 'push_enabled': False, 'min_confidence': 0.5}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': False, 'push_enabled': False}]}],
                 },
             ],
         },
@@ -976,7 +788,7 @@ def test_zone_object_alert_rules_includes_motion_rules_from_motion_only_zones():
                     'id': 'porch', 'name': 'Porch',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
-                        {'label': 'motion', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.45, 'cooldown_seconds': 30},
+                        {'label': 'motion', 'enabled': True, 'min_confidence': 0.45, 'cooldown_seconds': 30, 'alert_schedules': [{'email_enabled': True}]},
                     ],
                 },
             ],
@@ -1028,7 +840,6 @@ def test_zone_object_alert_rules_expands_schedules_with_independent_windows(monk
     assert [alert['rule_name'] for alert in engine.process([detection])] == [rules[1]['name']]
 
 
-
 def test_zone_object_alert_rules_keeps_object_rules_inert_in_motion_only_zones():
     """An OBJECT rule inside a motion-only zone stays out of the alert list:
     object detections are filtered through the monitor_objects axis and can
@@ -1045,7 +856,7 @@ def test_zone_object_alert_rules_keeps_object_rules_inert_in_motion_only_zones()
                     'id': 'porch', 'name': 'Porch',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
-                        {'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5},
+                        {'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]},
                     ],
                 },
             ],
@@ -1065,11 +876,7 @@ def test_zone_object_alert_rules_email_recipients_cleaned(monkeypatch):
                     'enabled': True, 'monitor_objects': True, 'id': 'zon', 'name': 'Zone',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
-                        {
-                            'label': 'person', 'enabled': True, 'email_enabled': True,
-                            'email_recipients': ['admin@example.com', 'BadEntry'],
-                            'push_enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 60,
-                        },
+                        {'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 60, 'alert_schedules': [{'email_enabled': True, 'email_recipients': ['admin@example.com', 'BadEntry'], 'push_enabled': True}]},
                     ],
                 },
             ],
@@ -1135,7 +942,7 @@ def test_zone_alert_detections_stamps_once_per_zone_index():
                 {
                     'enabled': True, 'monitor_objects': True, 'id': 'porch', 'name': 'Porch',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -1164,7 +971,7 @@ def test_zone_name_for_detection_returns_first_matching_zone_name():
                 {
                     'enabled': True, 'monitor_objects': True, 'id': 'porch', 'name': 'Porch',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5, 'record_on_detect': True}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'record_on_detect': True, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -1198,7 +1005,7 @@ def test_zone_motion_record_on_detect_finds_motion_rule():
         'detection': {
             'zones': [
                 {
-                    'enabled': True, 'monitor_motion': True, 'monitor_objects': False,
+                    'id': 'z', 'enabled': True, 'monitor_motion': True, 'monitor_objects': False,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
                         {'label': 'motion', 'enabled': True, 'record_on_detect': True},
@@ -1207,7 +1014,8 @@ def test_zone_motion_record_on_detect_finds_motion_rule():
             ],
         },
     }
-    assert zd.zone_motion_record_on_detect(settings) is True
+    assert zd.zone_motion_record_on_detect(settings, 'z') is True
+    assert zd.zone_motion_record_on_detect(settings, 'other') is False, 'per-zone only'
 
 
 def test_zone_motion_record_on_detect_false_when_no_motion_rule():
@@ -1217,7 +1025,7 @@ def test_zone_motion_record_on_detect_false_when_no_motion_rule():
         'detection': {
             'zones': [
                 {
-                    'enabled': True, 'monitor_motion': True, 'monitor_objects': False,
+                    'id': 'z', 'enabled': True, 'monitor_motion': True, 'monitor_objects': False,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
                         {'label': 'person', 'enabled': True, 'record_on_detect': True},
@@ -1226,7 +1034,7 @@ def test_zone_motion_record_on_detect_false_when_no_motion_rule():
             ],
         },
     }
-    assert zd.zone_motion_record_on_detect(settings) is False
+    assert zd.zone_motion_record_on_detect(settings, 'z') is False
 
 
 def test_zone_motion_record_on_detect_skips_monitor_objects_zones():
@@ -1237,7 +1045,7 @@ def test_zone_motion_record_on_detect_skips_monitor_objects_zones():
         'detection': {
             'zones': [
                 {
-                    'enabled': True, 'monitor_motion': False, 'monitor_objects': True,
+                    'id': 'z', 'enabled': True, 'monitor_motion': False, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
                         {'label': 'motion', 'enabled': True, 'record_on_detect': True},
@@ -1246,11 +1054,11 @@ def test_zone_motion_record_on_detect_skips_monitor_objects_zones():
             ],
         },
     }
-    assert zd.zone_motion_record_on_detect(settings) is False
+    assert zd.zone_motion_record_on_detect(settings, 'z') is False
 
 
 # ---------------------------------------------------------------------------
-# zone_detection_alert_rule_names / detection_has_matching_record_rule
+# zone_detection_alert_rule_names
 # ---------------------------------------------------------------------------
 
 def test_zone_detection_alert_rule_names_returns_set():
@@ -1263,7 +1071,7 @@ def test_zone_detection_alert_rule_names_returns_set():
                 {
                     'enabled': True, 'monitor_objects': True, 'id': 'porch', 'name': 'Porch',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -1271,44 +1079,6 @@ def test_zone_detection_alert_rule_names_returns_set():
     detection = {'label': 'person', 'confidence': 0.9, 'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}}
     names = zd.zone_detection_alert_rule_names(settings, detection)
     assert names == {'Front Yard / Porch / person'}
-
-
-def test_detection_has_matching_record_rule_emits_alias_match():
-    """Human detection matches a 'person' rule via _LABEL_ALIASES."""
-    from app import zone_detection as zd
-    rules = [
-        {'enabled': True, 'object': 'person', 'min_confidence': 0.5},
-    ]
-    assert zd.detection_has_matching_record_rule({'label': 'human', 'confidence': 0.8}, rules) is True
-
-
-def test_detection_has_matching_record_rule_motion_min_zero():
-    from app import zone_detection as zd
-    rules = [{'enabled': True, 'object': 'motion', 'min_confidence': 0.0}]
-    # Motion default min_confidence is 0.0: any non-falsy confidence matches (`>=`).
-    assert zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.0}, rules) is True
-    assert zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.3}, rules) is True
-    # Negative coverage: with min_confidence > 0, a confidence below the floor is excluded.
-    strict = [{'enabled': True, 'object': 'motion', 'min_confidence': 0.5}]
-    assert zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.3}, strict) is False
-
-
-def test_detection_has_matching_record_rule_disabled_skipped():
-    from app import zone_detection as zd
-    rules = [{'enabled': False, 'object': 'person', 'min_confidence': 0.5}]
-    assert zd.detection_has_matching_record_rule({'label': 'person', 'confidence': 0.9}, rules) is False
-
-
-def test_detection_has_matching_record_rule_empty_label_returns_false():
-    from app import zone_detection as zd
-    rules = [{'enabled': True, 'object': 'person', 'min_confidence': 0.5}]
-    assert zd.detection_has_matching_record_rule({'label': '', 'confidence': 0.9}, rules) is False
-
-
-def test_detection_has_matching_record_rule_unmatched_label_returns_false():
-    from app import zone_detection as zd
-    rules = [{'enabled': True, 'object': 'car', 'min_confidence': 0.5}]
-    assert zd.detection_has_matching_record_rule({'label': 'cat', 'confidence': 0.9}, rules) is False
 
 
 # ---------------------------------------------------------------------------
@@ -1394,21 +1164,6 @@ def test_get_camera_instance_missing_raises_404(monkeypatch, zd):
 # Umbrella label groups end-to-end through the zone matching pipeline
 # ---------------------------------------------------------------------------
 
-def test_detection_label_allowed_for_zone_group_matches_member(zd):
-    zone = {'object_labels': ['animal']}
-    assert zd.detection_label_allowed_for_zone({'label': 'cat'}, zone, set()) is True
-    assert zd.detection_label_allowed_for_zone({'label': 'dog'}, zone, set()) is True
-    # person is not in the animal group
-    assert zd.detection_label_allowed_for_zone({'label': 'person'}, zone, set()) is False
-
-
-def test_detection_label_allowed_for_zone_concrete_label_still_exclusive(zd):
-    # Regression: a concrete 'cat' allow-list must not leak to 'dog'.
-    zone = {'object_labels': ['cat']}
-    assert zd.detection_label_allowed_for_zone({'label': 'cat'}, zone, set()) is True
-    assert zd.detection_label_allowed_for_zone({'label': 'dog'}, zone, set()) is False
-
-
 def test_filter_for_camera_zones_group_camera_label_fallback(zd):
     settings = {'id': 'cam-1', 'detection': {'object_labels': ['pet']}}
     detections = [
@@ -1430,7 +1185,7 @@ def test_zone_object_rule_matches_group_rule_matches_member(zd):
                 {
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'animal', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.3}],
+                    'object_rules': [{'label': 'animal', 'enabled': True, 'min_confidence': 0.3, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -1440,14 +1195,6 @@ def test_zone_object_rule_matches_group_rule_matches_member(zd):
     assert len(zd.zone_object_rule_matches(settings, {'label': 'dog', 'confidence': 0.8, 'box': box}, action='alert')) == 1
     # person is outside the animal group -> no match
     assert zd.zone_object_rule_matches(settings, {'label': 'person', 'confidence': 0.8, 'box': box}, action='alert') == []
-
-
-def test_detection_has_matching_record_rule_group_rule(zd):
-    rules = [{'enabled': True, 'object': 'pet', 'min_confidence': 0.3}]
-    assert zd.detection_has_matching_record_rule({'label': 'cat', 'confidence': 0.8}, rules) is True
-    assert zd.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.8}, rules) is True
-    # horse is an animal but not a 'pet'
-    assert zd.detection_has_matching_record_rule({'label': 'horse', 'confidence': 0.8}, rules) is False
 
 
 def test_rule_rejection_reason_names_the_failed_check():

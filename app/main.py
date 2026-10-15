@@ -174,24 +174,6 @@ def _startup() -> None:
     camera_instances = create_camera_instances(cameras_config)
     _state.camera_instances = camera_instances
     _state.camera = camera_instances[camera_config['id']] if camera_config else None
-    # Repair legacy settings BEFORE building detectors: installs that saved a
-    # FACE model as the primary detector (possible before the parallel face
-    # pass existed) must be migrated to object-primary + face-secondary, or
-    # object detection stays dead until an admin intervenes.
-    try:
-        from app.ai_settings import heal_legacy_face_primary
-        heal_legacy_face_primary()
-    except Exception as exc:
-        _logger.warning('AI settings heal skipped: %s', exc)
-    # One-time migration: unknown-face alerting moved from the removed
-    # ``alert_unknown`` / ``alert_unknown_email`` recognition settings to the
-    # ``_unknown`` system face-detection rule (Face Rules tab). Seed the rule
-    # from any legacy config so existing deployments keep alerting.
-    try:
-        from app.face_detection_rules import heal_legacy_unknown_alert_config
-        heal_legacy_unknown_alert_config()
-    except Exception as exc:
-        _logger.warning('Unknown-face alert config heal skipped: %s', exc)
     _state.detector = create_detector(effective_ai_config())
     _state.last_detector_error = getattr(_state.detector, 'unavailable_reason', None)
     from app.detector import create_face_detector
@@ -216,15 +198,15 @@ async def app_lifespan(_app: FastAPI):
     start_profile_monitor()
 
     def _run_periodic_retention() -> None:
-        from app.backup import purge_camera_diagnostics_by_policy, purge_recordings_by_policy
+        from app.backup import purge_recordings_by_policy
         try:
             purge_recordings_by_policy()
         except Exception:
             _logger.warning('Periodic recording retention failed', exc_info=True)
-        try:
-            purge_camera_diagnostics_by_policy()
-        except Exception:
-            _logger.warning('Periodic camera-log retention failed', exc_info=True)
+        # Expired sessions, old login attempts, camera-log rows and the
+        # face-recognition retention purges. Each step is best effort.
+        if _state.auth is not None:
+            _state.auth.cleanup_expired_sessions()
 
     _state.database.start_maintenance(callback=_run_periodic_retention)
     apply_sound_settings()

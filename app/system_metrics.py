@@ -301,7 +301,7 @@ def _cached_nvidia_smi_devices() -> list[dict] | None:
 
 
 def reset_gpu_snapshot_cache() -> None:
-    """Drop the cached nvidia-smi snapshot (tests / after a driver change)."""
+    """Drop the cached nvidia-smi snapshot (test isolation hook)."""
     global _gpu_snapshot, _gpu_snapshot_valid, _gpu_snapshot_refreshing
     with _gpu_snapshot_lock:
         _gpu_snapshot = None

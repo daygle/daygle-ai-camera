@@ -60,18 +60,6 @@ const WEB_SHARED_GLOBALS = {
   // and lazy images are released and restored by a shared observer.
   observeMediaLifecycle: 'readonly',
   renderIncrementally: 'readonly',
-  // web/utils.js - request cancellation/coalescing/backoff helpers (Item 14).
-  // Polling pages use createRequestCoalescer to enforce "latest wins" and
-  // backoffDelayMs to back off after a network error; REQUEST_SUPERSEDED is the
-  // sentinel a superseded call resolves with.
-  REQUEST_SUPERSEDED: 'readonly',
-  backoffDelayMs: 'readonly',
-  createRequestCoalescer: 'readonly',
-  isAbortError: 'readonly',
-  // web/utils.js - isPageLeavingError reports a rejection that is just the
-  // browser cancelling in-flight fetches while the document unloads, so a
-  // polling page does not flash an unreadable error toast on the way out.
-  isPageLeavingError: 'readonly',
   cameraLabel: 'readonly',
   collectRecordingFaceIdentities: 'readonly',
   continuousPill: 'readonly',
@@ -89,7 +77,6 @@ const WEB_SHARED_GLOBALS = {
   escapeHtml: 'readonly',
   eventFaceIdentities: 'readonly',
   faceIdentityPills: 'readonly',
-  fetchAllCursorPages: 'readonly',
   formatDate: 'readonly',
   formatDateTime: 'readonly',
   formatLogTime: 'readonly',
@@ -182,7 +169,6 @@ const WEB_SHARED_GLOBALS = {
   formatMotionShare: 'readonly',
   liveEls: 'readonly',
   motionZoneMeterHtml: 'readonly',
-  normalizeLabelList: 'readonly',
   normalizePoint: 'readonly',
   refreshDetectionStatus: 'readonly',
   refreshFrame: 'readonly',

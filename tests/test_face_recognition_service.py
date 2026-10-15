@@ -212,7 +212,6 @@ def test_service_only_matches_active_model():
         embedder=_StubEmbedder([1, 0, 0, 0]),
     )
     assert svc.recognize(np.zeros((112, 112, 3), dtype=np.uint8)) is None
-    assert svc.enrolled_count == 0
 
 
 def test_status_payload_reports_counts_and_availability():

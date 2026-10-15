@@ -140,7 +140,6 @@ def _install_validator_dependencies(
     build_stream_url=None,
     normalize_label_list=None,
     normalize_monitoring_zones=None,
-    _migrate_legacy_camera_motion=None,
     normalize_camera_recording_settings=None,
     normalize_camera_ptz_settings=None,
     effective_recording_config=None,
@@ -187,9 +186,6 @@ def _install_validator_dependencies(
         )
     if normalize_monitoring_zones is None:
         normalize_monitoring_zones = lambda raw: list(raw) if isinstance(raw, list) else []
-    if _migrate_legacy_camera_motion is None:
-        def _migrate_legacy_camera_motion_stub(detection): pass
-        _migrate_legacy_camera_motion = _migrate_legacy_camera_motion_stub
     if normalize_camera_recording_settings is None:
         normalize_camera_recording_settings = lambda raw: dict(raw or {})
     if normalize_camera_ptz_settings is None:
@@ -224,7 +220,6 @@ def _install_validator_dependencies(
     monkeypatch.setattr(pv, 'build_stream_url', build_stream_url)
     monkeypatch.setattr(pv, 'normalize_label_list', normalize_label_list)
     monkeypatch.setattr(pv, 'normalize_monitoring_zones', normalize_monitoring_zones)
-    monkeypatch.setattr(pv, '_migrate_legacy_camera_motion', _migrate_legacy_camera_motion)
     monkeypatch.setattr(pv, 'normalize_camera_recording_settings', normalize_camera_recording_settings)
     monkeypatch.setattr(pv, 'normalize_camera_ptz_settings', normalize_camera_ptz_settings)
 
@@ -806,17 +801,10 @@ def test_validate_camera_settings_clamps_dimensions_to_min_max(monkeypatch, pv):
     assert 'fps must be between 1 and 120' in exc_info.value.detail
 
 
-def test_validate_camera_settings_threads_detection_through_migration(monkeypatch, pv):
-    """The cluster reaches 5 main.* call sites for detection/recording/ptz
-    normalization AND threads the detection dict through
-    ``main._migrate_legacy_camera_motion`` -- verify BOTH the call count
-    AND the state-side-effect on the detection dict.
-
-    The migration stub sets ``detection['migrated'] = True`` so a
-    regression where the cluster replaces the call with a bare-name
-    function or skips it entirely will be detectable (the assertion
-    on ``out['detection']['migrated'] is True`` would fail)."""
-    calls: dict = {'label': 0, 'zones': 0, 'motion_migrate': 0, 'recording': 0, 'ptz': 0}
+def test_validate_camera_settings_threads_detection_through_normalizers(monkeypatch, pv):
+    """The cluster reaches its main.* call sites for detection/recording/ptz
+    normalization once each."""
+    calls: dict = {'label': 0, 'zones': 0, 'recording': 0, 'ptz': 0}
 
     def _record_labels(raw):
         calls['label'] += 1
@@ -825,12 +813,6 @@ def test_validate_camera_settings_threads_detection_through_migration(monkeypatc
     def _record_zones(raw):
         calls['zones'] += 1
         return list(raw) if isinstance(raw, list) else []
-
-    def _record_motion(detection):
-        calls['motion_migrate'] += 1
-        # Side-effect marker so the post-call state assertion can verify
-        # the cluster actually invoked the cross-module helper.
-        detection['migrated'] = True
 
     def _record_recording(raw):
         calls['recording'] += 1
@@ -844,7 +826,6 @@ def test_validate_camera_settings_threads_detection_through_migration(monkeypatc
         monkeypatch,
         normalize_label_list=_record_labels,
         normalize_monitoring_zones=_record_zones,
-        _migrate_legacy_camera_motion=_record_motion,
         normalize_camera_recording_settings=_record_recording,
         normalize_camera_ptz_settings=_record_ptz,
         build_stream_url=lambda settings: 'rtsp://ok',
@@ -852,13 +833,9 @@ def test_validate_camera_settings_threads_detection_through_migration(monkeypatc
     out = pv.validate_camera_settings({'detection': {'object_labels': ['car']}, 'zones': [], 'recording': {}, 'ptz': {}})
     assert calls['label'] == 1
     assert calls['zones'] == 1
-    assert calls['motion_migrate'] == 1
     assert calls['recording'] == 1
     assert calls['ptz'] == 1
-    # State-side-effect: the migration stub set 'migrated' on the
-    # detection dict, and the cluster re-uses that same dict for the
-    # returned camera settings -- so we observe the side-effect downstream.
-    assert out['detection']['migrated'] is True
+    assert out['detection']['object_labels'] == ['car']
 
 
 def test_validate_camera_settings_preserves_password_when_empty(monkeypatch, pv):

@@ -66,11 +66,7 @@ DEFAULT_AI_VERIFICATION_SETTINGS: dict[str, Any] = {
     # Cameras with AI tag alert rules always get what their rules match on.
     'describe_alerts': 'off',
     'describe_other_events': 'off',
-    # Before the two settings above: 'off', 'alerts' or 'all'. Still read
-    # from older stored settings and API clients; see _resolve_content.
-    'describe_events': 'off',
 }
-DESCRIBE_MODES = ('off', 'alerts', 'all')
 DESCRIBE_CONTENTS = ('off', 'tags', 'description', 'both')
 MAX_DESCRIPTION_CHARS = 300
 
@@ -259,19 +255,9 @@ def _build_effective_settings() -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - a settings read must not break alerts
             stored = None
     if isinstance(stored, dict):
-        # Keys from before verification moved to the alert rules (enabled,
-        # labels, skip_above_confidence) are ignored.
+        # Only known keys are read; anything else stored is ignored.
         settings.update({key: value for key, value in stored.items() if key in DEFAULT_AI_VERIFICATION_SETTINGS})
-        if 'describe_alerts' not in stored and 'describe_other_events' not in stored:
-            _content_from_legacy(settings)
     return settings
-
-
-def _content_from_legacy(settings: dict[str, Any]) -> None:
-    """Map the old single ``describe_events`` mode onto the two settings."""
-    legacy = str(settings.get('describe_events') or 'off').strip().lower()
-    settings['describe_alerts'] = 'both' if legacy in ('alerts', 'all') else 'off'
-    settings['describe_other_events'] = 'both' if legacy == 'all' else 'off'
 
 
 def _bad(detail: str) -> HTTPException:
@@ -339,22 +325,11 @@ def validate_ai_verification_settings(payload: dict[str, Any]) -> dict[str, Any]
         raise _bad('timeout_seconds must be an integer between 3 and 120.')
     settings['timeout_seconds'] = timeout
 
-    describe = str(settings['describe_events'] or 'off').strip().lower()
-    if describe not in DESCRIBE_MODES:
-        raise _bad("describe_events must be 'off', 'alerts' or 'all'.")
-    settings['describe_events'] = describe
-    if 'describe_events' in payload and not {'describe_alerts', 'describe_other_events'} & set(payload):
-        # An older client that only knows the single mode.
-        _content_from_legacy(settings)
     for key in ('describe_alerts', 'describe_other_events'):
         content = str(settings[key] or 'off').strip().lower()
         if content not in DESCRIBE_CONTENTS:
             raise _bad(f"{key} must be 'off', 'tags', 'description' or 'both'.")
         settings[key] = content
-    # Kept in step for anything still reading the single mode; reset first
-    # so describe_mode reads only the two settings.
-    settings['describe_events'] = 'off'
-    settings['describe_events'] = describe_mode(settings)
 
     settings['camera_ids'] = _string_list(settings['camera_ids'], 'camera_ids')
     return settings
@@ -366,21 +341,9 @@ def _camera_in_scope(camera_id: Any, settings: dict[str, Any]) -> bool:
 
 
 def _resolve_content(settings: dict[str, Any], key: str) -> str:
-    """One of DESCRIBE_CONTENTS for ``key``.
-
-    With both new settings off, the old ``describe_events`` mode decides
-    (it is kept equal to describe_mode on save, so this only matters for a
-    settings dict that sets the old mode alone).
-    """
-    def value(name: str) -> str:
-        content = str(settings.get(name) or 'off').strip().lower()
-        return content if content in DESCRIBE_CONTENTS else 'off'
-
-    if value('describe_alerts') == 'off' and value('describe_other_events') == 'off':
-        legacy = dict(settings)
-        _content_from_legacy(legacy)
-        return legacy[key]
-    return value(key)
+    """One of DESCRIBE_CONTENTS for ``key`` (anything unrecognised is 'off')."""
+    content = str(settings.get(key) or 'off').strip().lower()
+    return content if content in DESCRIBE_CONTENTS else 'off'
 
 
 def describe_mode(settings: dict[str, Any]) -> str:
@@ -788,11 +751,8 @@ SMALL_OBJECT_FRACTION = 0.2
 
 
 def _shrink_for_model(image_bytes: bytes) -> bytes:
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        return image_bytes
+    import cv2
+    import numpy as np
     frame = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         return image_bytes
@@ -862,11 +822,8 @@ def focus_image(image_bytes: bytes, detections: list[dict[str, Any]], label: str
     box = _label_box(detections, label)
     if box is None:
         return image_bytes
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        return image_bytes
+    import cv2
+    import numpy as np
     frame = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         return image_bytes

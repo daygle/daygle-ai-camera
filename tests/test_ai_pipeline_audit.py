@@ -9,6 +9,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from tests.support import add_event
+
 
 @pytest.fixture
 def av():
@@ -155,7 +157,7 @@ def test_backfill_filters_camera_and_alert_scope_before_limit(av, monkeypatch):
         {'id': 1, 'metadata': {'camera_id': 'cam'}, 'alert_triggered': True},
     ]
     monkeypatch.setattr(av, 'effective_ai_verification_settings', lambda: {**av.DEFAULT_AI_VERIFICATION_SETTINGS,
-                                                                       'describe_events': 'alerts', 'camera_ids': ['cam']})
+                                                                       'describe_alerts': 'both', 'camera_ids': ['cam']})
     monkeypatch.setattr(av, '_undescribed_events', lambda _: iter(events))
     monkeypatch.setattr(av, '_backfill_state', {'running': False})
     captured = []
@@ -204,7 +206,7 @@ def test_catch_up_thread_failure_resets_running_flag(av, monkeypatch):
 def test_late_recording_links_inherit_ai_tags(tmp_path):
     from app.database import EventDatabase
     db = EventDatabase(str(tmp_path / 'db.sqlite3'))
-    event_id = db.add_event('2026-10-02T01:00:00+00:00', 'rtsp', None, [])
+    event_id = add_event(db, '2026-10-02T01:00:00+00:00', 'rtsp', None, [])
     db.set_event_description(event_id, {'text': 'A ladder.', 'tags': ['ladder']})
     def recording(link):
         return db.add_recording(event_id=link, camera_id='cam', started_at='2026-10-02T01:00:00+00:00',

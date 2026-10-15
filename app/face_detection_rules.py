@@ -8,7 +8,7 @@ Stored under the ``face_detection_rules`` key in the settings database as::
 
     {"rules": [<rule>, ...]}
 
-The live pipeline reads rules via :func:`enabled_rules_for_label` and
+The live pipeline reads rules via :func:`enabled_rule_for_person` and
 :func:`effective_face_detection_rules` - both reach ``app.state.database``
 at call time to avoid stale caches.
 """
@@ -33,7 +33,6 @@ _DEFAULT_RULES: dict[str, Any] = {'rules': []}
 # The synthetic id for the "unknown person" system rule that covers
 # faces not matching any enrolled person.
 UNKNOWN_RULE_ID = '_unknown'
-
 
 
 def effective_face_detection_rules() -> dict[str, Any]:
@@ -81,21 +80,12 @@ def _coerce_detection_confidence(value: Any) -> float:
 
 
 def _normalize_recipients_field(value: Any) -> str:
-    """Normalise ``email_recipients`` to a clean comma-separated string.
-
-    Handles: list, comma-separated string, or a corrupted Python repr string
-    like ``"['glen@daygle.net']"`` that was stored when ``str()`` was called
-    on a list before the array-to-string fix.
-    """
+    """Normalise ``email_recipients`` (a list or comma-separated string) to a
+    clean comma-separated string."""
     if isinstance(value, list):
         parts = value
     elif isinstance(value, str):
-        stripped = value.strip()
-        if stripped.startswith('['):
-            # Corrupted Python list repr - strip brackets and quotes
-            parts = [s.strip().strip("'\"") for s in stripped.strip('[]').split(',')]
-        else:
-            parts = stripped.split(',')
+        parts = value.split(',')
     else:
         parts = []
     return ', '.join(
@@ -116,8 +106,7 @@ def _validate_rule(rule: dict[str, Any]) -> dict[str, Any]:
         'email_recipients': _normalize_recipients_field(rule.get('email_recipients')),
         'min_confidence': _coerce_optional_float(rule.get('min_confidence')),
         # Optional scoping (People card on the Zones page). Empty means the
-        # legacy global behaviour: the rule applies on every camera / any
-        # zone. A zone-scoped unknown rule uses an id of ``_unknown:<zone>``
+        # rule applies on every camera / any zone. A zone-scoped unknown rule uses an id of ``_unknown:<zone>``
         # so multiple zones can each carry their own stranger-alert config.
         'camera_id': str(rule.get('camera_id') or '').strip(),
         'zone_id': str(rule.get('zone_id') or '').strip(),
@@ -166,99 +155,30 @@ def validate_face_detection_rules(payload: dict[str, Any]) -> dict[str, Any]:
     return {'rules': validated}
 
 
-def enabled_unknown_rule() -> dict[str, Any] | None:
-    """Return the ``_unknown`` system rule when it is enabled, else ``None``.
-
-    The ``_unknown`` rule is the single place unknown-person alerting is
-    configured (enable/disable, email + push toggles, recipients).
-    It replaced the legacy ``alert_unknown`` / ``alert_unknown_email``
-    face-recognition settings, which the Face Rules tab superseded. Returns
-    ``None`` when the rule is absent or disabled, so the unknown-face alert
-    path (and email/push dispatch) can treat "no rule" as "don't alert".
-    """
-    rules = effective_face_detection_rules().get('rules') or []
-    for rule in rules:
-        if str(rule.get('id') or '') == UNKNOWN_RULE_ID:
-            return rule if _coerce_bool(rule.get('enabled'), False) else None
-    return None
-
-
-def heal_legacy_unknown_alert_config() -> bool:
-    """Migrate legacy unknown-face alert settings into an ``_unknown`` rule.
-
-    Before the Face Rules tab could configure unknown-person alerts, they were
-    governed by ``alert_unknown`` / ``alert_unknown_email`` on the
-    face-recognition Settings form. Those keys are being removed, so an
-    existing deployment that enabled them would silently stop alerting; this
-    one-time heal copies the old configuration into an ``_unknown`` rule (when
-    none exists yet) so behaviour is preserved across the migration. Returns
-    ``True`` when a rule was seeded, ``False`` when nothing needed doing.
-    """
-    fr = effective_face_recognition_config()
-    legacy_unknown = _coerce_bool(fr.get('alert_unknown'), False)
-    legacy_email = str(fr.get('alert_unknown_email') or '').strip()
-    if not legacy_unknown and not legacy_email:
-        return False
-    if _state.database is None:
-        return False
-    stored = effective_face_detection_rules()
-    rules = stored.get('rules') or []
-    if any(str(rule.get('id') or '') == UNKNOWN_RULE_ID for rule in rules):
-        return False
-    seeded = {
-        'id': UNKNOWN_RULE_ID,
-        'person_id': None,
-        'name': 'Unknown Person',
-        # Legacy ``alert_unknown`` governed both alert generation and push;
-        # email additionally needed recipients to be set.
-        'enabled': legacy_unknown,
-        'email_enabled': bool(legacy_email),
-        'push_enabled': legacy_unknown,
-        'email_recipients': legacy_email,
-    }
-    from app.auth import utc_now
-
-    _state.database.set_setting('face_detection_rules', {'rules': rules + [seeded]}, utc_now())
-    logger.warning(
-        'Healed legacy unknown-face alert config: seeded the _unknown system '
-        'rule (enabled=%s, email=%s, push=%s) from the removed '
-        'alert_unknown/alert_unknown_email settings.',
-        legacy_unknown, bool(legacy_email), legacy_unknown,
-    )
-    return True
-
-
-def enabled_rules_for_label(
-    label: str, camera_id: str = '', zone_id: str = '', *, person_id: Any = None,
+def enabled_rule_for_person(
+    person_id: Any, camera_id: str = '', zone_id: str = '',
 ) -> dict[str, Any] | None:
-    """Return the first enabled rule matching this recognised person.
+    """Return the first enabled rule for this recognised person.
 
-    A rule that names a ``person_id`` matches that enrolled person only, so
-    renaming someone keeps their rule working and two people who share a name
-    never trigger each other's rules. A legacy rule without a ``person_id``
-    falls back to a case-insensitive match of *label*, the ``person_name``
-    annotation stamped by ``annotate_face_identities`` (e.g. ``"Alice"``).
+    Rules match on ``person_id`` only, so renaming someone keeps their rule
+    working and two people who share a name never trigger each other's rules.
     Unknown-person system rules never match a recognised face.
 
     ``camera_id`` / ``zone_id`` scope the lookup: rules carrying a camera/zone
-    value only match detections stamped with that same camera/zone (legacy
-    unscoped rules match everywhere). Returns ``None`` when no enabled rule
-    matches.
+    value only match detections stamped with that same camera/zone (unscoped
+    rules match everywhere). Returns ``None`` when no enabled rule matches.
     """
-    rules = effective_face_detection_rules().get('rules') or []
-    label_lower = label.strip().lower()
     wanted_person = str(person_id).strip() if person_id not in (None, '') else ''
+    if not wanted_person:
+        return None
+    rules = effective_face_detection_rules().get('rules') or []
     for rule in rules:
         if not _coerce_bool(rule.get('enabled'), False):
             continue
         if is_unknown_rule(rule):
             continue
         rule_person = rule.get('person_id')
-        rule_person = str(rule_person).strip() if rule_person not in (None, '') else ''
-        if rule_person:
-            if rule_person != wanted_person:
-                continue
-        elif str(rule.get('name') or '').strip().lower() != label_lower:
+        if rule_person in (None, '') or str(rule_person).strip() != wanted_person:
             continue
         if not rule_scope_matches(rule, camera_id, zone_id):
             continue
@@ -298,17 +218,14 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
             continue
         if not detection.get('recognized'):
             continue
-        # Use the person_name as the rule lookup key; falls back to
-        # the synthetic UNKNOWN_RULE_ID if the name is missing.
         person_name = str(detection.get('person_name') or '').strip() or None
         if person_name is None:
             # Unknown face - handled by unknown_face_alerts(), skip here
             continue
         # Zone-scoped rules only fire inside their zone: the live pipeline
         # stamps face detections with their containing zone before calling.
-        rule = enabled_rules_for_label(
-            person_name,
-            person_id=detection.get('person_id'),
+        rule = enabled_rule_for_person(
+            detection.get('person_id'),
             camera_id=camera_id,
             zone_id=str(detection.get('zone_id') or ''),
         )
