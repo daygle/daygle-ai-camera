@@ -120,6 +120,38 @@ def test_direct_camera_without_ingest_stream_is_monitored(monkeypatch):
     assert recorded == [('cam-direct', '8')]
 
 
+def test_turning_continuous_recording_off_stops_it(monkeypatch):
+    """The monitor loop starts continuous chunking while a camera's
+    ``continuous`` flag is on and stops it once the flag is turned off, rather
+    than leaving the ingest recording until the next restart."""
+    calls: list[tuple[str, str]] = []
+
+    class _Recorder:
+        def prime_rtsp_prebuffer(self, **_kwargs):
+            return None
+
+        def start_continuous_chunk_recording(self, *, camera_id, **_kwargs):
+            calls.append(('start', camera_id))
+
+        def stop_continuous_chunk_recording(self, camera_id):
+            calls.append(('stop', camera_id))
+
+    recording = {'continuous': True}
+    monkeypatch.setattr(live_monitor, '_camera_has_live_alert_stream', lambda _cfg: True)
+    monkeypatch.setattr(live_monitor, 'build_stream_url', lambda _cfg: 'rtsp://cam/stream')
+    monkeypatch.setattr(_state, 'recording_service', _Recorder(), raising=False)
+    monkeypatch.setattr(_state, 'camera_event_recording_config', lambda _cfg: dict(recording), raising=False)
+    monkeypatch.setattr(_state, 'cameras_config', [{'id': 'cam-1', 'name': 'One'}])
+    _install_capturing_scheduler(monkeypatch)
+    settings = {'background_detection_enabled': False}
+
+    live_monitor.run_live_alert_monitor_once(settings)
+    recording['continuous'] = False
+    live_monitor.run_live_alert_monitor_once(settings)
+
+    assert calls == [('start', 'cam-1'), ('stop', 'cam-1')]
+
+
 def test_each_scheduled_job_uses_its_own_camera_config(monkeypatch):
     recorded: list[tuple[str, str]] = []
 

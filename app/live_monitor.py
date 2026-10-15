@@ -540,6 +540,11 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config)
             if cam_rec_config.get('continuous'):
                 _state.recording_service.start_continuous_chunk_recording(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config, on_chunk_complete=_make_continuous_chunk_callback(camera_id))
+            else:
+                # Continuous recording switched off (or never on): drop the
+                # camera's continuous entry so its ingest reconnects without
+                # chunking. A no-op when nothing was recording.
+                _state.recording_service.stop_continuous_chunk_recording(camera_id)
         # The camera's Day/Night profile value when set, else the global one
         # (effective_camera_live_settings merges them), so a camera can be
         # switched on while the global default is off as well as the reverse.

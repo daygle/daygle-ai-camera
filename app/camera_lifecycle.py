@@ -247,6 +247,13 @@ def _cleanup_camera_runtime_state(removed_ids: set[str]) -> None:
             reset_camera_identities(cam_id)
         except Exception:  # pragma: no cover - defensive; cache cleanup must not block the apply
             logger.debug('Face identity cache cleanup failed for removed camera %s', cam_id, exc_info=True)
+        try:
+            # PTZ auto-tracking: a re-added camera must not resume chasing (or
+            # stay paused for) the previous instance's target.
+            from app.ptz_tracking import reset_auto_tracking
+            reset_auto_tracking(cam_id)
+        except Exception:  # pragma: no cover - defensive; cache cleanup must not block the apply
+            logger.debug('PTZ tracking cleanup failed for removed camera %s', cam_id, exc_info=True)
 
 
 def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
