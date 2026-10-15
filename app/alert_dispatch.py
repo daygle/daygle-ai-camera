@@ -15,8 +15,7 @@ This module owns the five helpers that previously lived inline on
   orchestrator that delegates to email + push.
 
 Alert work is submitted to a bounded notification pool in
-``app.postprocess_pool``. The legacy thread-list state remains available for
-compatibility, but new dispatch does not create one thread per event.
+``app.postprocess_pool``; dispatch never creates one thread per event.
 
 **Pool-A rebind (in ``app/main.py``):** every helper is re-bound as
 ``main.<orig_name>``. The two originally-underscored names
@@ -390,8 +389,8 @@ def deliver_email_alerts(
     detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
     rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
     # Check if any triggered alerts have email enabled via zone rules.
-    # Rule names remain unchanged for legacy schedules; expanded schedules use
-    # a unique name and resolve their delivery fields from the schedule entry.
+    # A single-schedule rule keeps its plain name; multi-schedule rules use a
+    # unique name per schedule and resolve delivery fields from that entry.
     any_email_enabled = any(
         (
             (rule := rules_by_name.get(str(alert.get('rule_name')), {})).get('email_enabled')

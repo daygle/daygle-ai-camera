@@ -1291,7 +1291,7 @@ def _resolve_confidence_only_nms(value: Any) -> bool:
     - ``'on'`` / truthy: skip the NMS pass (same effect as auto today).
     - ``'off'`` / falsy: always run the class-aware NMS dedupe.
 
-    Legacy persisted bools are honoured (``True`` -> skip, ``False`` -> run).
+    A bool is also accepted (``True`` -> skip, ``False`` -> run).
     """
     if value is None:
         return True

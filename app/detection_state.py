@@ -23,7 +23,7 @@ working unchanged:
 
 - :mod:`app.zone_detection` derives zone-pixel geometry from each returned
   mask's shape.
-  The constants remain on ``app.state`` as legacy defaults for standalone
+  The constants remain on ``app.state`` as defaults for standalone
   callers; live cycles carry the camera-local size into the engine.
 - ``tests/test_api.py`` reaches ``main.live_detection_history`` /
   ``main.deque`` / ``main.build_track_from_live_history`` -
@@ -687,7 +687,7 @@ def _mog2_available() -> bool:
 
     Cached on the module after the first probe. When False (a headless build
     compiled without ``bgsegm``/video), ``detect_frame_motion`` transparently
-    falls back to the legacy adaptive-diff engine so motion never goes dark.
+    falls back to the adaptive-diff engine so motion never goes dark.
     """
     global _MOG2_AVAILABLE
     if _MOG2_AVAILABLE is not None:
@@ -740,7 +740,7 @@ _MOG2_VAR_THRESHOLD_MAX = 255.0
 def _resolve_motion_frame_size(frame_size: tuple[int, int] | None) -> tuple[int, int]:
     """Resolve a caller-supplied thumbnail size without consulting shared state.
 
-    Live cameras may have different Day/Night motion profiles.  The legacy
+    Live cameras may have different Day/Night motion profiles.  The
     ``_MOTION_FRAME_W/H`` values remain the fallback for standalone callers and
     benchmarks, but a live cycle passes its camera-local size explicitly so
     concurrent camera profiles cannot resize one another's models or masks.
@@ -792,7 +792,7 @@ def _resolve_shadow_suppression(value: Any, thumbnail: Any) -> bool:
       decision uses the mean brightness of the BGR ``thumbnail`` against
       ``_MOTION_NIGHT_BRIGHTNESS``; a dark (night/IR) frame disables shadow
       rejection so MOG2's shadow class does not swallow a genuine subject.
-    - ``'on'`` / ``'off'`` (and legacy ``True`` / ``False``) -> honoured directly.
+    - ``'on'`` / ``'off'`` (or ``True`` / ``False``) -> honoured directly.
     """
     if isinstance(value, str) and value.strip().lower() == 'auto':
         try:
@@ -820,23 +820,23 @@ def _detect_frame_motion_mog2(
     """MOG2 (Gaussian-mixture) background-subtraction motion gate.
 
     Returns ``(has_motion, confidence, diff_mask, raw_fraction)`` with exactly
-    the same contract as the legacy engine, so every downstream consumer (zone
+    the same contract as the diff engine, so every downstream consumer (zone
     pixel fraction, zone motion box, the confirmation gate) is unchanged.
 
-    Key behaviours preserved from the legacy engine:
+    Key behaviours shared with the diff engine:
 
     - **Freeze-on-motion.** The mask is computed with ``learningRate=0`` (no
       model update); the model only learns the frame when the change is below
       the gate. A subject that stops moving is therefore NOT absorbed into the
       background within seconds -- the reported "motion recording stops after
-      the first second" failure the legacy freeze also guarded against.
+      the first second" failure the diff engine's freeze also guards against.
     - **Scene-reset guard.** A change of >=50% of the frame (exposure jump,
       reconnect, IR cut) rebuilds the model against the new scene and reports no
       motion, so a camera-wide transition cannot become a persistent 100%
       recording.
     - **Fail-closed.** Handled by the caller's ``except`` wrapper.
 
-    Improvements over the legacy engine: multi-modal backgrounds (swaying
+    Improvements over the diff engine: multi-modal backgrounds (swaying
     foliage, flickering screens) are modelled instead of smeared into one mean,
     gradual illumination drift is tracked, and cast shadows are rejected when
     ``shadow_suppression`` is set."""
@@ -848,7 +848,7 @@ def _detect_frame_motion_mog2(
     # Resolve the tri-state shadow setting to a concrete on/off for this frame.
     # 'auto' rejects shadows only while the scene is bright (day); once the frame
     # darkens (night/IR) it stops, because MOG2's shadow class then swallows real
-    # subjects. 'on'/'off' (and legacy True/False) are honoured directly.
+    # subjects. 'on'/'off' (or True/False) are honoured directly.
     shadow_on = _resolve_shadow_suppression(shadow_suppression, resized)
     var_threshold = float(
         max(_MOG2_VAR_THRESHOLD_MIN, min(_MOG2_VAR_THRESHOLD_MAX, pixel_threshold))
@@ -882,8 +882,8 @@ def _detect_frame_motion_mog2(
         meta = _state._frame_motion_mog2_meta.get(camera_id)
         if subtractor is None or meta != signature:
             # First frame for this camera, or a tuning/size change: (re)build the
-            # model and report no motion for this seed frame (mirrors the legacy
-            # first-frame contract).
+            # model and report no motion for this seed frame (the same
+            # first-frame contract as the diff engine).
             _state._frame_motion_mog2[camera_id] = _new_subtractor()
             _state._frame_motion_mog2_meta[camera_id] = signature
             _state._frame_motion_error_cameras.discard(camera_id)
@@ -970,14 +970,14 @@ def detect_frame_motion(
     """Per-camera motion gate. Returns ``(has_motion, confidence, diff_mask, raw_fraction)``.
 
     Dispatches to the MOG2 (Gaussian-mixture) engine by default and to the
-    legacy adaptive-diff engine when ``algorithm='diff'`` or the OpenCV build
+    adaptive-diff engine when ``algorithm='diff'`` or the OpenCV build
     lacks MOG2. All tuning parameters default to the module-level ``_MOTION_*``
     constants on :mod:`app.state`, resolved at call time (the same lazy-default
     pattern the diff engine uses), so callers that pass explicit kwargs -- the
     live monitor -- are unaffected.
 
     ``frame_size`` is camera-local when supplied by the live monitor.  Standalone
-    callers and the benchmark retain the legacy global defaults.  On any
+    callers and the benchmark use the global defaults.  On any
     decode/processing error the gate fails closed -- a broken frame is not evidence
     of motion and must not satisfy a motion rule."""
     if pixel_threshold is None:
@@ -1040,10 +1040,9 @@ def detect_frame_motion(
 
 
 def _detect_frame_motion_diff(camera_id: str, image: Any, *, pixel_threshold: float | None=None, gate_fraction: float | None=None, scale_fraction: float | None=None, background_alpha: float | None=None, frame_size: tuple[int, int] | None = None) -> tuple[bool, float, Any, float]:
-    """Legacy single-frame adaptive-background motion gate. Returns (has_motion, confidence 0-1, diff_mask).
+    """Single-frame adaptive-background motion gate (``motion_algorithm='diff'``). Returns (has_motion, confidence 0-1, diff_mask).
 
-    ``image`` may be a BGR numpy array (from ``read_frame``) or JPEG bytes
-    (legacy callers).  When a numpy array is provided the PIL decode is
+    ``image`` may be a BGR numpy array (from ``read_frame``) or JPEG bytes.  When a numpy array is provided the PIL decode is
     skipped, saving ~5-15 ms per cycle.
 
     Threshold parameters default to module-level constants on ``app.main``

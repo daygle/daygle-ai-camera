@@ -177,8 +177,8 @@ def _explicit_mode(value: Any) -> str | None:
 def normalize_object_settings(value: Any) -> dict[str, Any]:
     """Validate + canonicalise a raw ``objects`` setting dict.
 
-    Tolerates ``None`` (returns the defaults), a partial dict, legacy string
-    modes, and junk labels; every returned mode is one of ``any`` /
+    Tolerates ``None`` (returns the defaults), a partial dict, unknown mode
+    strings, and junk labels; every returned mode is one of ``any`` /
     ``moving`` / ``still``.
     """
     if not isinstance(value, dict):

@@ -12,8 +12,6 @@ public path:
 - ``_zone_pixel_motion_fraction`` -- numpy slice + points-only fallback.
 - ``zone_motion_detections`` -- enabled/disabled zones, motion rule
   threshold, default-arg lazy resolution.
-- ``detection_label_allowed_for_zone`` -- zone allow-list vs camera
-  allow-list fall-through.
 - ``filter_detections_for_camera_zones`` -- per-monitor-key dispatch,
   empty-zones camera-labels fallback, require_zones=True.
 - ``filter_detections_for_camera`` -- object_detection_enabled=False
@@ -417,34 +415,28 @@ def test_zone_motion_detections_box_uses_zone_rect_without_mask(zd):
 
 
 # ---------------------------------------------------------------------------
-# detection_label_allowed_for_zone -- zone allow-list vs camera allow-list
+# zone allow-list vs camera allow-list
 # ---------------------------------------------------------------------------
 
-def test_detection_label_allowed_for_zone_zones_label_match():
+def test_filter_for_camera_zones_zone_without_labels_uses_camera_labels():
+    """A zone with its own ``object_labels`` filters by them; one without
+    falls back to the camera's allow-list."""
     from app import zone_detection as zd
-    zone = {'object_labels': ['person', 'cat']}
-    assert zd.detection_label_allowed_for_zone({'label': 'cat'}, zone, set()) is True
-    assert zd.detection_label_allowed_for_zone({'label': 'dog'}, zone, set()) is False
+    box = {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}
+    detections = [{'label': label, 'box': dict(box)} for label in ('cat', 'dog', 'bird')]
 
+    def labels_for(zone_labels):
+        settings = {'detection': {'object_labels': ['cat', 'dog'], 'zones': [{
+            'id': 'z', 'enabled': True, 'monitor_objects': True,
+            'x': 0, 'y': 0, 'width': 1, 'height': 1, 'object_labels': zone_labels,
+        }]}}
+        kept = zd.filter_detections_for_camera_zones(
+            [dict(d) for d in detections], settings, zone_monitor_key='monitor_objects',
+        )
+        return [d['label'] for d in kept]
 
-def test_detection_label_allowed_for_zone_human_alised_to_person():
-    from app import zone_detection as zd
-    zone = {'object_labels': ['person']}
-    assert zd.detection_label_allowed_for_zone({'label': 'human'}, zone, set()) is True
-
-
-def test_detection_label_allowed_for_zone_camera_fallback():
-    from app import zone_detection as zd
-    # No zone allow-list; falls back to camera_labels
-    zone = {'object_labels': []}
-    assert zd.detection_label_allowed_for_zone({'label': 'cat'}, zone, {'cat', 'dog'}) is True
-    assert zd.detection_label_allowed_for_zone({'label': 'bird'}, zone, {'cat', 'dog'}) is False
-
-
-def test_detection_label_allowed_for_zone_no_allow_list_returns_true():
-    from app import zone_detection as zd
-    # Both empty -- everyone allowed (no filter)
-    assert zd.detection_label_allowed_for_zone({'label': 'anything'}, {}, set()) is True
+    assert labels_for(['cat']) == ['cat']
+    assert labels_for([]) == ['cat', 'dog']
 
 
 # ---------------------------------------------------------------------------
@@ -531,7 +523,7 @@ def test_filter_for_camera_zones_no_zones_camera_labels_fallback(monkeypatch):
 
 def test_filter_for_camera_zones_no_zones_fallback_aliases_detection_labels():
     """The zone-less camera-label fallback must alias detection labels exactly
-    like the zones path (``detection_label_allowed_for_zone``): a camera with
+    like the zones path: a camera with
     ``object_labels: ['person']`` should accept a detection labeled 'human'.
 
     Regression: the fallback previously compared the RAW lowercase label
@@ -1013,7 +1005,7 @@ def test_zone_motion_record_on_detect_finds_motion_rule():
         'detection': {
             'zones': [
                 {
-                    'enabled': True, 'monitor_motion': True, 'monitor_objects': False,
+                    'id': 'z', 'enabled': True, 'monitor_motion': True, 'monitor_objects': False,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
                         {'label': 'motion', 'enabled': True, 'record_on_detect': True},
@@ -1022,7 +1014,8 @@ def test_zone_motion_record_on_detect_finds_motion_rule():
             ],
         },
     }
-    assert zd.zone_motion_record_on_detect(settings) is True
+    assert zd.zone_motion_record_on_detect(settings, 'z') is True
+    assert zd.zone_motion_record_on_detect(settings, 'other') is False, 'per-zone only'
 
 
 def test_zone_motion_record_on_detect_false_when_no_motion_rule():
@@ -1032,7 +1025,7 @@ def test_zone_motion_record_on_detect_false_when_no_motion_rule():
         'detection': {
             'zones': [
                 {
-                    'enabled': True, 'monitor_motion': True, 'monitor_objects': False,
+                    'id': 'z', 'enabled': True, 'monitor_motion': True, 'monitor_objects': False,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
                         {'label': 'person', 'enabled': True, 'record_on_detect': True},
@@ -1041,7 +1034,7 @@ def test_zone_motion_record_on_detect_false_when_no_motion_rule():
             ],
         },
     }
-    assert zd.zone_motion_record_on_detect(settings) is False
+    assert zd.zone_motion_record_on_detect(settings, 'z') is False
 
 
 def test_zone_motion_record_on_detect_skips_monitor_objects_zones():
@@ -1052,7 +1045,7 @@ def test_zone_motion_record_on_detect_skips_monitor_objects_zones():
         'detection': {
             'zones': [
                 {
-                    'enabled': True, 'monitor_motion': False, 'monitor_objects': True,
+                    'id': 'z', 'enabled': True, 'monitor_motion': False, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
                         {'label': 'motion', 'enabled': True, 'record_on_detect': True},
@@ -1061,7 +1054,7 @@ def test_zone_motion_record_on_detect_skips_monitor_objects_zones():
             ],
         },
     }
-    assert zd.zone_motion_record_on_detect(settings) is False
+    assert zd.zone_motion_record_on_detect(settings, 'z') is False
 
 
 # ---------------------------------------------------------------------------
@@ -1170,21 +1163,6 @@ def test_get_camera_instance_missing_raises_404(monkeypatch, zd):
 # ---------------------------------------------------------------------------
 # Umbrella label groups end-to-end through the zone matching pipeline
 # ---------------------------------------------------------------------------
-
-def test_detection_label_allowed_for_zone_group_matches_member(zd):
-    zone = {'object_labels': ['animal']}
-    assert zd.detection_label_allowed_for_zone({'label': 'cat'}, zone, set()) is True
-    assert zd.detection_label_allowed_for_zone({'label': 'dog'}, zone, set()) is True
-    # person is not in the animal group
-    assert zd.detection_label_allowed_for_zone({'label': 'person'}, zone, set()) is False
-
-
-def test_detection_label_allowed_for_zone_concrete_label_still_exclusive(zd):
-    # Regression: a concrete 'cat' allow-list must not leak to 'dog'.
-    zone = {'object_labels': ['cat']}
-    assert zd.detection_label_allowed_for_zone({'label': 'cat'}, zone, set()) is True
-    assert zd.detection_label_allowed_for_zone({'label': 'dog'}, zone, set()) is False
-
 
 def test_filter_for_camera_zones_group_camera_label_fallback(zd):
     settings = {'id': 'cam-1', 'detection': {'object_labels': ['pet']}}

@@ -277,13 +277,13 @@ class RecordingService:
         config = recording_config or self.recording_config
         labels = [label for label in (str(detection.get('label') or '').strip().lower() for detection in detections) if label]
 
-        def preferred_label(candidates: list[dict[str, Any]], *, allow_motion: bool = False) -> str | None:
+        def preferred_label(candidates: list[dict[str, Any]]) -> str | None:
             sorted_candidates = sorted(candidates, key=lambda detection: float(detection.get('confidence') or 0), reverse=True)
             for candidate in sorted_candidates:
                 label = str(candidate.get('label') or '').strip().lower()
                 if not label:
                     continue
-                if not allow_motion and label in GENERIC_TRIGGER_LABELS:
+                if label in GENERIC_TRIGGER_LABELS:
                     continue
                 return label
             return None
@@ -440,7 +440,7 @@ class RecordingService:
         # forgets to pass an explicit value can't silently regress to a tight
         # 2s join that masks a still-running ffmpeg. Callers should always
         # pass the worker-appropriate constant explicitly; this fallback is
-        # only here for safety on legacy / monkeypatched call paths.
+        # only here for safety on monkeypatched call paths.
         if join_timeout is None:
             join_timeout = RecordingService.CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS
         stop_event = worker.get('stop_event')
@@ -1214,7 +1214,7 @@ class RecordingService:
 
     @staticmethod
     def _camera_key(camera_id: str) -> str:
-        # Keep the legacy class-level API while sharing the pure key helper
+        # Class-level entry point sharing the pure key helper
         # with camera configuration without importing this service there.
         return camera_storage_key(camera_id)
 

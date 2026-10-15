@@ -139,7 +139,7 @@ def test_parse_tile_grid():
     assert rd.parse_tile_grid(None) is None
     assert rd.parse_tile_grid('3x3') == (3, 3)
     assert rd.parse_tile_grid('3x2') == (3, 2)
-    assert rd.parse_tile_grid(True) == (2, 2)      # legacy bool
+    assert rd.parse_tile_grid(True) is None        # only 'CxR' strings
     assert rd.parse_tile_grid('1x1') is None       # no actual tiling
     assert rd.parse_tile_grid('99x99') is None     # out of range
     assert rd.parse_tile_grid('junk') is None

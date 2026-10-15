@@ -1015,7 +1015,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # override resolved below alongside the numeric thresholds).
     _algorithm = str(live_settings.get('motion_algorithm', getattr(_state, '_MOTION_ALGORITHM', 'mog2')) or 'mog2').strip().lower()
     _denoise = normalize_bool_setting(live_settings.get('motion_denoise'), getattr(_state, '_MOTION_DENOISE', True))
-    # Tri-state ('on'/'off'/'auto', legacy bool tolerated) resolved per-frame in
+    # Tri-state ('on'/'off'/'auto'; a bool is also accepted) resolved per-frame in
     # the engine, so pass the raw value through rather than coercing to a bool.
     _shadow_suppression = live_settings.get('motion_shadow_suppression', getattr(_state, '_MOTION_SHADOW_SUPPRESSION', 'on'))
     # Clamp to the SAME bounds validate_live_settings enforces (40-640 x
@@ -1925,7 +1925,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # zones move at once.
     for _mot in motion_detections:
         _motion_zone_key = str(_mot.get('zone_id') or _mot.get('zone_name') or '')
-        _motion_record = zone_motion_record_on_detect(settings, _motion_zone_key) if _motion_zone_key else zone_motion_record_on_detect(settings)
+        _motion_record = zone_motion_record_on_detect(settings, _motion_zone_key)
         # alert_triggered tracks ONLY the motion rule's own Record flag: an
         # enabled Email/Push alert on the motion rule must not silently force a
         # recording when Record is off. The alert itself still fires via

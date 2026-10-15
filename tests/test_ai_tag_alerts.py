@@ -241,7 +241,7 @@ def test_evaluate_never_raises(ata, monkeypatch):
 def test_tag_rule_cameras_are_always_described(monkeypatch):
     av = importlib.import_module('app.ai_verification')
     ata = importlib.import_module('app.ai_tag_alerts')
-    settings = {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'describe_events': 'off', 'camera_ids': ['other']}
+    settings = {**av.DEFAULT_AI_VERIFICATION_SETTINGS, 'describe_alerts': 'off', 'camera_ids': ['other']}
     monkeypatch.setattr(ata, 'camera_has_rules', lambda camera_id: camera_id == 'cam')
     assert av.camera_describe_mode('cam', settings) == 'all'
     assert av.camera_describe_mode('elsewhere', settings) == 'off'

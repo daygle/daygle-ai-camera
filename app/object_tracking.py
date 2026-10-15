@@ -181,8 +181,7 @@ def _recent_displacement(track: dict[str, Any]) -> float | None:
     Returns ``0.0`` when the two halves disagree about box SHAPE while one box
     sits inside the other: the same object drawn at two extents has not moved
     (see ``box_geometry.ASPECT_DRIFT``). ``None`` when the track has not accumulated
-    enough history yet (brand-new track, or a legacy track rebuilt after a
-    restart).
+    enough history yet (brand-new track, or one rebuilt after a restart).
 
     The scale term is not optional: a person walking toward the camera (or a
     car driving away from it) translates very little in image space while its

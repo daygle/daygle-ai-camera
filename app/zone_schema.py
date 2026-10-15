@@ -26,9 +26,8 @@ Cluster membership:
 - ``_LABEL_ALIASES`` -- module-private dict (e.g. ``{'human': 'person'}``)
   used exclusively by ``normalize_label_list``. Moved alongside the
   helper to eliminate a cross-module Pool C reach; main.py's Pool A
-  rebind keeps the 4 main.py-internal usages (e.g.
-  ``detection_label_allowed_for_zone``, ``filter_detections_for_camera_zones``)
-  resolving via a bare-name.
+  rebind keeps main.py-internal usages (e.g.
+  ``filter_detections_for_camera_zones``) resolving via a bare-name.
 
 - ``normalize_label_list`` -- accepts a string (comma-separated), a
   list, or other (returns ``[]``). Splits, lowercases + strips, applies
@@ -99,10 +98,8 @@ _normalize_hhmm = normalize_hhmm
 
 # Module-private label canonicalization: maps alternative spellings of the
 # same detection label to a single canonical form. Used exclusively by
-# ``normalize_label_list`` below. main.py keeps a Pool A rebind so its 4
-# bare-name references (``detection_label_allowed_for_zone`` L799,
-# ``filter_detections_for_camera_zones`` L815 + L911 + L919) still resolve
-# to this dict after the Phase-21 splice.
+# ``normalize_label_list`` below. main.py keeps a Pool A rebind so its
+# bare-name references still resolve to this dict after the Phase-21 splice.
 _LABEL_ALIASES: dict[str, str] = {
     'human': 'person',
     'people': 'person',

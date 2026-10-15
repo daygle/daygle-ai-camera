@@ -63,18 +63,13 @@ Cluster membership (21 helpers, 290 lines original):
   share clears its motion rule's trigger (``zone_motion_trigger_fraction``).
 
 - ``filter_detections_for_camera_zones`` -- the per-zone filter
-  combining ``detection_matches_zone`` + ``detection_label_allowed_for_zone``.
-  When no zones match the monitor key, falls back to the camera-level
+  combining ``detection_matches_zone`` with each zone's label allow-list
+  (its ``object_labels``, else the camera's). When no zones match the monitor key, falls back to the camera-level
   ``object_labels`` allow-list (so a camera with NO zones still filters
   by its labels) -- unless ``require_zones=True`` was requested.
 
 - ``filter_detections_for_camera`` -- thin wrapper that calls
   ``filter_detections_for_camera_zones`` with ``zone_monitor_key='monitor_objects'``.
-
-- ``detection_label_allowed_for_zone`` -- checks ``zone['object_labels']``
-  (call ``normalize_label_list`` from Phase-21 + ``_LABEL_ALIASES``)
-  against the detection label, falling back to the full camera label
-  set when the zone has no allow-list.
 
 - ``zone_object_rule_matches`` -- returns ``[(zone, rule)]`` pairs
   matching the detection label + confidence at or above the rule's
@@ -107,10 +102,9 @@ Cluster membership (21 helpers, 290 lines original):
 
 - ``zone_motion_record_on_detect`` -- the motion-axis counterpart:
   checks the ``monitor_motion=True`` zone(s) for a motion rule with
-  ``record_on_detect=True``. With the optional ``zone_id`` only that
-  zone is considered (per-zone recording: motion in a record-off zone
-  cannot piggyback on a record-on rule elsewhere); without it any
-  matching zone counts (legacy callers/tests). Intentionally separate
+  ``record_on_detect=True`` in the given zone only (per-zone recording:
+  motion in a record-off zone cannot piggyback on a record-on rule
+  elsewhere). Intentionally separate
   from ``zone_record_on_detect`` which filters on
   ``monitor_objects=True``.
 
@@ -134,7 +128,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 - ``main.HTTPException`` (``get_camera_instance`` -- re-exported from
   ``fastapi`` at the top of main.py)
 - ``app.state._MOTION_FRAME_W`` / ``app.state._MOTION_FRAME_H`` remain only
-  as legacy defaults for standalone motion callers. Live camera profiles pass a
+  as defaults for standalone motion callers. Live camera profiles pass a
   local size to ``detect_frame_motion``; zone scoring uses the returned mask
   shape and does not read those globals.
 - ``app.state._MOTION_SCALE_FRACTION`` (``zone_motion_detections``
@@ -170,7 +164,6 @@ from app.zone_schema import (
     detection_label_in_allowed,
     detection_within_box_limits,
     label_matches,
-    normalize_label_list,
     zone_motion_confirm_cycles,
     zone_motion_trigger_fraction,
 )
@@ -369,8 +362,8 @@ def _zone_pixel_motion_fraction(
     """Return the fraction of pixels inside a zone's bounding box that changed.
 
     ``diff_mask`` is the boolean (H×W) array from ``detect_frame_motion``.  The
-    live monitor supplies the camera-local expected shape; direct legacy callers
-    retain the process-default shape check.
+    live monitor supplies the camera-local expected shape; direct callers
+    without one get the process-default shape check.
     """
     zone_id = str(zone.get('id') or zone.get('name') or id(zone))
     try:
@@ -533,18 +526,6 @@ def _has_enabled_face_rule(zone: dict[str, Any]) -> bool:
     )
 
 
-def detection_label_allowed_for_zone(detection: dict[str, Any], zone: dict[str, Any], camera_labels: set[str]) -> bool:
-    zone_labels = set(normalize_label_list(zone.get('object_labels', [])))
-    allowed_labels = zone_labels or camera_labels
-    if not allowed_labels:
-        return True
-    # ``detection_label_in_allowed`` canonicalizes the detection label AND
-    # expands any umbrella group in the allow-list (e.g. ``animal`` matches a
-    # ``cat`` detection), so a group configured on a zone/camera works the same
-    # way a concrete label does.
-    return detection_label_in_allowed(detection.get('label'), allowed_labels)
-
-
 def filter_detections_for_camera_zones(
     detections: list[dict[str, Any]],
     settings: dict[str, Any],
@@ -568,11 +549,11 @@ def filter_detections_for_camera_zones(
     # rule (including face-only zones with ``monitor_objects`` off), a ``face``
     # detection must land geometrically inside one of them -- its confidence
     # window is enforced later by the matching rule. When no zone carries a
-    # face rule, faces follow the exact legacy path below.
+    # face rule, faces follow the same path as every other label below.
     face_scope_zones = tuple(policy.face_zones) if zone_monitor_key == 'monitor_objects' else ()
 
     def _face_allowed(detection: dict[str, Any]) -> bool | None:
-        """None = no face scoping configured (legacy path); True/False = scoped."""
+        """None = no face scoping configured; True/False = scoped."""
         if not face_scope_zones or canonical_label(detection.get('label')) != 'face':
             return None
         return any(_detection_matches_compiled_zone(detection, zone) for zone in face_scope_zones)
@@ -581,7 +562,7 @@ def filter_detections_for_camera_zones(
         if not require_zones and face_scope_zones:
             # Every zone is face-only: the object axis has no zones, but
             # face scoping must still bite while non-face detections keep
-            # the legacy camera-label / accept-all fallbacks.
+            # the camera-label / accept-all fallbacks.
             kept: list[dict[str, Any]] = []
             for detection in detections:
                 verdict = _face_allowed(detection)
@@ -597,7 +578,7 @@ def filter_detections_for_camera_zones(
             return kept
         if zone_monitor_key == 'monitor_objects' and camera_labels and (not require_zones):
             # Canonicalise the detection label through ``_LABEL_ALIASES`` exactly
-            # like ``detection_label_allowed_for_zone`` does on the zones path.
+            # like the zones path below does.
             # ``camera_labels`` was already aliased by ``normalize_label_list``
             # ('human' -> 'person'), so a raw comparison here would silently drop
             # a 'human' detection that the same camera accepts once a zone is
@@ -607,7 +588,7 @@ def filter_detections_for_camera_zones(
                 for detection in detections
                 if detection_label_in_allowed(detection.get('label'), camera_labels)
             ]  # dict pass-through carries track_id
-        # No zones and no camera labels: keep legacy "accept all" behavior so a
+        # No zones and no camera labels: accept everything so a
         # camera with object detection enabled but unconfigured still records
         # and alerts. Log the fallback once per call to aid debugging.
         if not camera_labels and not require_zones:
@@ -615,7 +596,7 @@ def filter_detections_for_camera_zones(
         return [] if require_zones else detections
     # Pre-compute each zone's allow-list once instead of re-parsing
     # ``zone['object_labels']`` for every (detection, zone) pair on the ~4 Hz
-    # hot path. Empty sets preserve the legacy "no allow-list anywhere ->
+    # hot path. Empty sets keep the "no allow-list anywhere ->
     # accept all" behavior of ``detection_label_allowed_for_zone``.
     need_labels = zone_monitor_key == 'monitor_objects'
     zones_with_labels = [
@@ -923,24 +904,23 @@ def zone_record_on_detect(detection: dict[str, Any], settings: dict[str, Any]) -
     return bool(zone_object_rule_matches(settings, detection, action='record'))
 
 
-def zone_motion_record_on_detect(settings: dict[str, Any], zone_id: str | None = None) -> bool:
+def zone_motion_record_on_detect(settings: dict[str, Any], zone_id: str) -> bool:
     """Return True if the motion rule covering ``zone_id`` has record_on_detect=True.
 
     zone_record_on_detect / zone_object_rule_matches filter by monitor_objects=True and therefore
     skip motion-only zones (monitor_objects=False, monitor_motion=True). This helper checks the
     correct monitor_motion axis so motion-only zones are not silently excluded from recording.
 
-    When ``zone_id`` is provided only that zone is considered, so the recording
-    decision is per-zone: motion in a record-off zone cannot piggyback on a
-    record-on rule in a different zone. Without ``zone_id`` (legacy callers,
-    tests) any matching zone counts.
+    Only ``zone_id`` is considered, so the recording decision is per-zone:
+    motion in a record-off zone cannot piggyback on a record-on rule in a
+    different zone.
     """
     detection_settings = settings.get('detection') or {}
     for zone in detection_settings.get('zones', []):
         if not zone.get('enabled', True) or not zone.get('monitor_motion', True):
             continue
         zone_key = str(zone.get('id') or zone.get('name') or id(zone))
-        if zone_id is not None and zone_key != str(zone_id):
+        if zone_key != str(zone_id):
             continue
         for rule in zone.get('object_rules') or []:
             if not rule.get('enabled', True):
