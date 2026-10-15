@@ -1020,8 +1020,8 @@ class OnnxYoloDetector:
 
         n_labels = len(self.labels)
         # Pose/keypoint head (e.g. a YOLO-face export): columns are
-        # ``4 bbox + nc class scores + keypoint_count*3`` landmark values, with
-        # no objectness column. The trailing landmark columns carry pixel
+        # ``4 bbox + nc class scores + keypoint_count*3`` landmark values. The
+        # trailing landmark columns carry pixel
         # coordinates, not class logits, so they must be sliced off the class
         # block explicitly -- otherwise a single-class ``face`` model would
         # argmax across keypoint coordinates and mislabel (and mis-score) every
@@ -1030,23 +1030,10 @@ class OnnxYoloDetector:
         # for the model) falls through to the plain-detection heuristic below.
         keypoint_count = getattr(self, '_keypoint_count', 0)
         if keypoint_count > 0 and n_labels > 0 and n_cols >= 4 + n_labels:
-            objectness = None
             class_scores = predictions[:, 4:4 + n_labels]
         else:
-            # Detect model format: YOLOv5 has an explicit objectness column at
-            # index 4 (total = 4 bbox + 1 obj + N classes = N+5 cols); YOLOv8
-            # goes straight from bbox to class scores (total = 4 + N = N+4
-            # cols).  Use exact equality so an extra trailing column from some
-            # export tools doesn't trigger a false-positive.  Requires a labels
-            # file; without one we can't distinguish formats and default to
-            # YOLOv8 (no objectness) which is the safer guess.
-            has_objectness = n_labels > 0 and n_cols == n_labels + 5
-            if has_objectness:
-                objectness = predictions[:, 4]
-                class_scores = predictions[:, 5:]
-            else:
-                objectness = None
-                class_scores = predictions[:, 4:]
+            # YOLOv8 / YOLO11 grid head: 4 bbox columns, then one score per class.
+            class_scores = predictions[:, 4:]
 
         # Reject malformed model rows before argmax/scaling. NaN/Inf values can
         # otherwise survive vectorized post-processing and leak into normalized
@@ -1057,12 +1044,9 @@ class OnnxYoloDetector:
             return []
         predictions = predictions[finite_rows]
         class_scores = class_scores[finite_rows]
-        if objectness is not None:
-            objectness = objectness[finite_rows]
 
         class_ids = np.argmax(class_scores, axis=1)
-        raw_scores = class_scores[np.arange(len(class_ids)), class_ids]
-        scores = raw_scores * objectness if objectness is not None else raw_scores
+        scores = class_scores[np.arange(len(class_ids)), class_ids]
 
         conf_mask = scores >= confidence
         if not np.any(conf_mask):
