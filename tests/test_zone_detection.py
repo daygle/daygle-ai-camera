@@ -300,92 +300,6 @@ def test_zone_motion_detections_disabled_zone_skipped(zd):
     assert zd.zone_motion_detections(settings, 0.9, diff_mask=None) == []
 
 
-def test_zone_motion_detections_per_zone_gate_override():
-    """A zone's own gate_fraction override wins over the camera/global gate, so
-    a sensitive zone can fire even when the camera gate is set insensitive (and
-    vice versa)."""
-    np = pytest.importorskip('numpy')
-    from app import zone_detection as zd
-    import app.state as st
-    mask = np.zeros((st._MOTION_FRAME_H, st._MOTION_FRAME_W), dtype=bool)
-    # Change ~10% of the RIGHT-HALF zone: a thin band of columns inside it, so
-    # the zone fraction (~0.1) sits between the two gate values under test.
-    half = st._MOTION_FRAME_W // 2
-    band = max(1, int(0.1 * (st._MOTION_FRAME_W - half)))
-    mask[:, half:half + band] = True
-    base_rule = {'label': 'motion', 'enabled': True, 'min_confidence': 0.01}
-    settings = {
-        'detection': {'zones': [{
-            'id': 'z', 'name': 'Z', 'enabled': True, 'monitor_motion': True,
-            'x': 0.5, 'y': 0.0, 'width': 0.5, 'height': 1.0,
-            'object_rules': [dict(base_rule)],
-        }]},
-    }
-    zone = settings['detection']['zones'][0]
-
-    # Insensitive per-zone gate (0.5) suppresses even with a low camera gate.
-    zone['object_rules'][0]['gate_fraction'] = 0.5
-    assert zd.zone_motion_detections(settings, 0.9, diff_mask=mask, gate_fraction=0.005, scale_fraction=0.03) == []
-
-    # Sensitive per-zone gate fires even with an insensitive camera gate (0.9).
-    zone['object_rules'][0]['gate_fraction'] = 0.0005
-    fired = zd.zone_motion_detections(settings, 0.9, diff_mask=mask, gate_fraction=0.9, scale_fraction=0.03)
-    assert len(fired) == 1
-
-
-def test_zone_motion_detections_threshold_filters_low_confidence():
-    from app import zone_detection as zd
-    settings = {
-        'id': 'cam-1',
-        'name': 'Cam 1',
-        'detection': {
-            'zones': [
-                {
-                    'id': 'z',
-                    'enabled': True,
-                    'monitor_motion': True,
-                    'x': 0,
-                    'y': 0,
-                    'width': 1,
-                    'height': 1,
-                    'object_rules': [{'label': 'motion', 'min_confidence': 0.9}],
-                },
-            ],
-        },
-    }
-    # frame_motion_confidence=0.5 -> below zone threshold of 0.9 -> filtered
-    assert zd.zone_motion_detections(settings, 0.5, diff_mask=None) == []
-
-
-def test_zone_motion_detections_filters_above_max_confidence():
-    """A motion rule's ``max_confidence`` upper bound gates the motion
-    detection at its source, so an over-max motion never reaches the alert OR
-    the recording path (both derive from ``zone_motion_detections``)."""
-    from app import zone_detection as zd
-    settings = {
-        'id': 'cam-1',
-        'name': 'Cam 1',
-        'detection': {
-            'zones': [
-                {
-                    'id': 'z',
-                    'enabled': True,
-                    'monitor_motion': True,
-                    'x': 0,
-                    'y': 0,
-                    'width': 1,
-                    'height': 1,
-                    'object_rules': [{'label': 'motion', 'min_confidence': 0.2, 'max_confidence': 0.6}],
-                },
-            ],
-        },
-    }
-    # 0.9 is above the 0.6 max -> dropped entirely.
-    assert zd.zone_motion_detections(settings, 0.9, diff_mask=None) == []
-    # 0.5 sits inside [0.2, 0.6] -> kept.
-    assert len(zd.zone_motion_detections(settings, 0.5, diff_mask=None)) == 1
-
-
 def test_zone_motion_detections_stamps_zone_name_and_id():
     """Motion pseudo-detections must carry the zone name so the playback cards
     can render a Zone row for motion-triggered events."""
@@ -437,60 +351,6 @@ def test_zone_motion_detections_zone_name_falls_back_to_id():
     }
     result = zd.zone_motion_detections(settings, 0.9, diff_mask=None)
     assert result[0]['zone_name'] == 'z1'
-
-
-def test_zone_motion_detections_default_gate_fraction_resolves_via_state(
-    monkeypatch, zd
-):
-    """gate_fraction=None must resolve to ``_state._MOTION_GATE_FRACTION`` at call time.
-
-    Ensures the actual gate value is read from app.state by raising
-    ``_state._MOTION_GATE_FRACTION`` past the diff_mask fraction and verifying
-    the function THEN returns [].
-    """
-    import app.state as _state
-    np = pytest.importorskip('numpy')
-    settings = {
-        'id': 'cam-1',
-        'name': 'Cam 1',
-        'detection': {
-            'zones': [
-                {
-                    'id': 'z',
-                    'enabled': True,
-                    'monitor_motion': True,
-                    'x': 0,
-                    'y': 0,
-                    'width': 1,
-                    'height': 1,
-                    'object_rules': [{'label': 'motion', 'min_confidence': 0.0}],
-                },
-            ],
-        },
-    }
-    mask = np.zeros((240, 320), dtype=bool)
-    mask[20:220, 20:300] = True  # ~73% of pixels changed
-
-    # Default resolution: gate is _state._MOTION_GATE_FRACTION (0.005) -> zone fires.
-    original = _state._MOTION_GATE_FRACTION
-    try:
-        result_default = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)
-        assert len(result_default) == 1
-
-        # Crank the gate up so the SAME mask is below threshold.
-        monkeypatch.setattr(_state, '_MOTION_GATE_FRACTION', 0.99)
-        result_filtered = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)
-        assert result_filtered == [], (
-            'gate_fraction must resolve from _state._MOTION_GATE_FRACTION at call time; '
-            'cranking the state constant past the diff_mask fraction should filter the zone out'
-        )
-
-        # And back to original: zone fires again.
-        monkeypatch.setattr(_state, '_MOTION_GATE_FRACTION', original)
-        result_restored = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)
-        assert len(result_restored) == 1
-    finally:
-        monkeypatch.setattr(_state, '_MOTION_GATE_FRACTION', original)
 
 
 def test_zone_motion_detections_box_tightens_to_changed_pixels(zd):
@@ -746,8 +606,7 @@ def _one_person_zone_settings():
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
-                        {'label': 'person', 'enabled': True, 'email_enabled': True,
-                         'min_confidence': 0.5, 'record_on_detect': True},
+                        {'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'record_on_detect': True, 'alert_schedules': [{'email_enabled': True}]},
                     ],
                 },
             ],
@@ -807,7 +666,7 @@ def test_zone_object_rule_matches_label_aliases_human_to_person():
                 {
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -828,7 +687,7 @@ def test_zone_object_rule_matches_below_confidence_excluded():
                 {
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.95}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.95, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -852,10 +711,7 @@ def test_zone_object_rule_matches_above_max_confidence_excluded():
                 {
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{
-                        'label': 'person', 'enabled': True, 'email_enabled': True,
-                        'min_confidence': 0.4, 'max_confidence': 0.7,
-                    }],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.4, 'max_confidence': 0.7, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -882,10 +738,7 @@ def test_zone_object_rule_matches_default_max_confidence_is_no_upper_limit():
                 {
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{
-                        'label': 'person', 'enabled': True, 'email_enabled': True,
-                        'min_confidence': 0.5,
-                    }],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -914,7 +767,7 @@ def test_zone_object_rule_matches_action_alert_requires_notify():
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     # rule with NO email/push -- alert action filters it out
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': False, 'push_enabled': False, 'min_confidence': 0.5}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': False, 'push_enabled': False}]}],
                 },
             ],
         },
@@ -943,7 +796,7 @@ def test_zone_object_alert_rules_includes_motion_rules_from_motion_only_zones():
                     'id': 'porch', 'name': 'Porch',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
-                        {'label': 'motion', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.45, 'cooldown_seconds': 30},
+                        {'label': 'motion', 'enabled': True, 'min_confidence': 0.45, 'cooldown_seconds': 30, 'alert_schedules': [{'email_enabled': True}]},
                     ],
                 },
             ],
@@ -1011,7 +864,7 @@ def test_zone_object_alert_rules_keeps_object_rules_inert_in_motion_only_zones()
                     'id': 'porch', 'name': 'Porch',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
-                        {'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5},
+                        {'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]},
                     ],
                 },
             ],
@@ -1031,11 +884,7 @@ def test_zone_object_alert_rules_email_recipients_cleaned(monkeypatch):
                     'enabled': True, 'monitor_objects': True, 'id': 'zon', 'name': 'Zone',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
                     'object_rules': [
-                        {
-                            'label': 'person', 'enabled': True, 'email_enabled': True,
-                            'email_recipients': ['admin@example.com', 'BadEntry'],
-                            'push_enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 60,
-                        },
+                        {'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 60, 'alert_schedules': [{'email_enabled': True, 'email_recipients': ['admin@example.com', 'BadEntry'], 'push_enabled': True}]},
                     ],
                 },
             ],
@@ -1101,7 +950,7 @@ def test_zone_alert_detections_stamps_once_per_zone_index():
                 {
                     'enabled': True, 'monitor_objects': True, 'id': 'porch', 'name': 'Porch',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -1130,7 +979,7 @@ def test_zone_name_for_detection_returns_first_matching_zone_name():
                 {
                     'enabled': True, 'monitor_objects': True, 'id': 'porch', 'name': 'Porch',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5, 'record_on_detect': True}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'record_on_detect': True, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -1229,7 +1078,7 @@ def test_zone_detection_alert_rule_names_returns_set():
                 {
                     'enabled': True, 'monitor_objects': True, 'id': 'porch', 'name': 'Porch',
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5}],
+                    'object_rules': [{'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },
@@ -1358,7 +1207,7 @@ def test_zone_object_rule_matches_group_rule_matches_member(zd):
                 {
                     'enabled': True, 'monitor_objects': True,
                     'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'object_rules': [{'label': 'animal', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.3}],
+                    'object_rules': [{'label': 'animal', 'enabled': True, 'min_confidence': 0.3, 'alert_schedules': [{'email_enabled': True}]}],
                 },
             ],
         },

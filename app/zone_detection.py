@@ -26,11 +26,6 @@ these are extracted using the **hybrid-pattern template**:
   (in the existing rebind section) so that the eager-evaluation
   order at module load has ``main.<name>`` wired correctly before
   any sibling body references it as a bare name.
-- Default-value expressions (``gate_fraction`` / ``scale_fraction``
-  in ``zone_motion_detections``) bind to ``main._MOTION_GATE_FRACTION``
-  / ``main._MOTION_SCALE_FRACTION`` at module-load time of this
-  module. Both constants are defined on ``app.main`` BEFORE the rebind
-  block executes, so they are populated when the function is defined.
 
 Cluster membership (21 helpers, 290 lines original):
 
@@ -64,11 +59,8 @@ Cluster membership (21 helpers, 290 lines original):
   so polygon-only zones can still be measured.
 
 - ``zone_motion_detections`` -- per-camera motion-to-detection
-  converter. Reads each zone's motion rule (``zone_motion_min_confidence``
-  from Phase-21) and emits a pseudo-detection with the zone footprint
-  when motion clears the gate. Default values ``gate_fraction`` /
-  ``scale_fraction`` bind to ``main._MOTION_GATE_FRACTION`` /
-  ``main._MOTION_SCALE_FRACTION`` at module-load time.
+  converter. Emits a pseudo-detection for each zone whose changed-pixel
+  share clears its motion rule's trigger (``zone_motion_trigger_fraction``).
 
 - ``filter_detections_for_camera_zones`` -- the per-zone filter
   combining ``detection_matches_zone`` + ``detection_label_allowed_for_zone``.
@@ -145,13 +137,10 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
   as legacy defaults for standalone motion callers. Live camera profiles pass a
   local size to ``detect_frame_motion``; zone scoring uses the returned mask
   shape and does not read those globals.
-- ``main._MOTION_GATE_FRACTION`` / ``main._MOTION_SCALE_FRACTION``
-  (``zone_motion_detections`` -- bound to default-arg expressions at
-  module-load time of this module; both constants are populated on
-  ``app.main`` before this rebind block fires)
+- ``app.state._MOTION_SCALE_FRACTION`` (``zone_motion_detections``
+  default scale)
 - ``main.normalize_label_list`` (Phase-21 rebind, called 2x)
 - ``main._LABEL_ALIASES`` (Phase-21 dict rebind, used 3x)
-- ``main.zone_motion_min_confidence`` (Phase-21 rebind, called 1x)
 - ``main.normalize_email_recipients`` (still on main.py, called 1x)
 - ``main.normalize_bool_setting`` (still on main.py, called 2x)
 """
@@ -183,11 +172,6 @@ from app.zone_schema import (
     label_matches,
     normalize_label_list,
     zone_motion_confirm_cycles,
-    zone_motion_effective_trigger,
-    zone_motion_gate_fraction,
-    zone_motion_max_confidence,
-    zone_motion_min_confidence,
-    zone_motion_scale_fraction,
     zone_motion_trigger_fraction,
 )
 
@@ -434,7 +418,6 @@ def zone_motion_detections(
     frame_motion_confidence: float = 0.5,
     *,
     diff_mask: Any = None,
-    gate_fraction: float | None = None,
     scale_fraction: float | None = None,
     frame_size: tuple[int, int] | None = None,
     levels: list[dict[str, Any]] | None = None,
@@ -446,9 +429,10 @@ def zone_motion_detections(
     fired, so the live page can show how close each zone is to its trigger
     in the same units the operator set it in. ``fraction`` is ``None`` when
     there is no usable diff mask this cycle.
+
+    ``scale_fraction`` only converts a zone's changed-pixel share into the
+    detection's 0-1 ``confidence``; firing is decided by the zone's trigger.
     """
-    if gate_fraction is None:
-        gate_fraction = _state._MOTION_GATE_FRACTION
     if scale_fraction is None:
         scale_fraction = _state._MOTION_SCALE_FRACTION
     expected_shape = None if frame_size is None else (int(frame_size[1]), int(frame_size[0]))
@@ -462,20 +446,11 @@ def zone_motion_detections(
         zone_id = str(zone.get('id') or zone.get('name') or id(zone))
         if zone_id in seen_zones:
             continue
-        # Per-zone sensitivity: a zone may override the camera/global gate and
-        # scale on its motion rule so a sensitive doorway and a noisy tree-line
-        # can coexist on one camera. ``None`` inherits the passed-in value.
-        zone_gate = zone_motion_gate_fraction(zone)
-        if zone_gate is None:
-            zone_gate = gate_fraction
-        zone_scale = zone_motion_scale_fraction(zone)
-        if zone_scale is None:
-            zone_scale = scale_fraction
-        # "Trigger when X% of this zone moves" replaces the gate / scale /
-        # Sensitivity trio when set; otherwise the legacy maths below runs
-        # unchanged, so zones saved before the trigger existed fire exactly
-        # as they did.
+        # "Trigger when X% of this zone moves". A zone without an enabled
+        # motion rule has no trigger and never fires.
         trigger = zone_motion_trigger_fraction(zone)
+        if trigger is None:
+            continue
         zone_fraction = -1.0
         if diff_mask is not None:
             zone_fraction = _zone_pixel_motion_fraction(diff_mask, zone, expected_shape=expected_shape)
@@ -484,39 +459,23 @@ def zone_motion_detections(
                 'zone_id': zone_id,
                 'zone_name': zone.get('name') or zone_id,
                 'fraction': round(zone_fraction, 6) if zone_fraction >= 0 else None,
-                'trigger': round(zone_motion_effective_trigger(zone, gate_fraction, scale_fraction), 6),
+                'trigger': round(trigger, 6),
             })
         if diff_mask is not None:
-            if zone_fraction < (zone_gate if trigger is None else trigger):
+            if zone_fraction < trigger:
                 continue
-            zone_confidence = round(min(1.0, zone_fraction / max(zone_scale, 1e-09)), 3)
+            zone_confidence = round(min(1.0, zone_fraction / max(scale_fraction, 1e-09)), 3)
         else:
+            # Without a mask (first frame, fail-open, forced scan) there is
+            # nothing zone-local to compare, so fall back to the frame-wide
+            # confidence at 0.45 -- a forced scan's zero confidence never fires.
             zone_confidence = frame_motion_confidence
-        # A trigger zone already gated on its own pixels above. Without a mask
-        # (first frame, fail-open, forced scan) there is nothing zone-local to
-        # compare, so it falls back to the frame-wide confidence at the
-        # canonical 0.45 default -- a forced scan's zero confidence never fires.
-        conf_threshold = zone_motion_min_confidence(zone) if trigger is None else 0.45
-        if (trigger is None or diff_mask is None) and zone_confidence < conf_threshold:
-            logger.debug(
-                'Motion zone %r: zone_fraction=%.4f zone_confidence=%.3f below conf_threshold=%.3f (scale_fraction=%.4f)',
-                zone_id, zone_fraction, zone_confidence, conf_threshold, zone_scale,
-            )
-            continue
-        # Upper bound of the motion rule's [min, max] window. Dropping the
-        # detection HERE -- the single source of truth for motion, before it is
-        # appended to alert_detections/recording_detections in live_monitor --
-        # keeps alerts AND recordings consistent with the window (the
-        # AlertEngine gate alone only suppressed the notification, not the
-        # zone_motion_record_on_detect recording path). Defaults to 1.0, so
-        # zones without a configured max are unaffected.
-        max_threshold = zone_motion_max_confidence(zone)
-        if trigger is None and zone_confidence > max_threshold:
-            logger.debug(
-                'Motion zone %r: zone_confidence=%.3f above max_confidence=%.3f -- ignored',
-                zone_id, zone_confidence, max_threshold,
-            )
-            continue
+            if zone_confidence < 0.45:
+                logger.debug(
+                    'Motion zone %r: no diff mask and frame confidence %.3f below 0.45',
+                    zone_id, zone_confidence,
+                )
+                continue
         seen_zones.add(zone_id)
         # Shrink the box to the changed-pixel region when the diff mask is
         # available so overlays point at where movement actually happened;
@@ -553,6 +512,17 @@ def motion_zone_confirm_cycles(settings: dict[str, Any]) -> dict[str, int]:
         for zone in detection_settings.get('zones', [])
         if zone.get('enabled', True) and zone.get('monitor_motion', True)
     }
+
+
+def _rule_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]:
+    """A zone rule's alert schedules (``normalize_zone_alert_schedules`` always
+    gives a normalized rule at least one)."""
+    schedules = rule.get('alert_schedules')
+    return [schedule for schedule in schedules if isinstance(schedule, dict)] if isinstance(schedules, list) else []
+
+
+def _schedule_delivers(schedule: dict[str, Any]) -> bool:
+    return bool(schedule.get('email_enabled') or schedule.get('push_enabled'))
 
 
 def _has_enabled_face_rule(zone: dict[str, Any]) -> bool:
@@ -739,12 +709,7 @@ def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict
             if not rule.get('enabled', True):
                 continue
             if action == 'alert':
-                schedules = rule.get('alert_schedules')
-                deliverable = any(
-                    isinstance(schedule, dict) and (schedule.get('email_enabled') or schedule.get('push_enabled'))
-                    for schedule in schedules
-                ) if isinstance(schedules, list) and schedules else (rule.get('email_enabled') or rule.get('push_enabled'))
-                if not deliverable:
+                if not any(_schedule_delivers(schedule) for schedule in _rule_schedules(rule)):
                     continue
             if action == 'record' and (not rule.get('record_on_detect', True)):
                 continue
@@ -857,14 +822,7 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
         label_totals: dict[str, int] = {}
         for _rule in zone.get('object_rules') or []:
             _label = str(_rule.get('label') or '').strip().lower()
-            has_delivery = any(
-                isinstance(_schedule, dict) and (_schedule.get('email_enabled') or _schedule.get('push_enabled'))
-                for _schedule in (
-                    _rule.get('alert_schedules')
-                    if isinstance(_rule.get('alert_schedules'), list) and _rule.get('alert_schedules')
-                    else [_rule]
-                )
-            )
+            has_delivery = any(_schedule_delivers(_schedule) for _schedule in _rule_schedules(_rule))
             _monitored = (
                 zone.get('monitor_objects', True)
                 or (_label == 'motion' and zone.get('monitor_motion', True))
@@ -886,12 +844,11 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
             # add dead rules to the engine's list.
             if not zone.get('monitor_objects', True) and label not in ('motion', 'face'):
                 continue
-            raw_schedules = rule.get('alert_schedules')
-            schedules = raw_schedules if isinstance(raw_schedules, list) and raw_schedules else [rule]
+            schedules = _rule_schedules(rule)
             deliverable_schedules = [
                 (schedule_index, schedule)
                 for schedule_index, schedule in enumerate(schedules, start=1)
-                if isinstance(schedule, dict) and (schedule.get('email_enabled') or schedule.get('push_enabled'))
+                if _schedule_delivers(schedule)
             ]
             if not deliverable_schedules:
                 continue
@@ -907,8 +864,8 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                     'object': label,
                     'zone_id': zone_id,
                     # Motion's and face's canonical confidence default is 0.45
-                    # (see zone_motion_min_confidence / the Face Confidence
-                    # setting); object classes default to 0.5. Matching the
+                    # (the Face Confidence setting); object classes default to
+                    # 0.5. Normalized motion rules carry 0 (trigger-gated). Matching the
                     # detection axis here keeps a rule missing min_confidence
                     # gating alerts at the same threshold that produced the
                     # detection in the first place.
@@ -1002,14 +959,7 @@ def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[st
             candidate for candidate in zone.get('object_rules') or []
             if candidate.get('enabled', True)
             and str(candidate.get('label') or '').strip().lower() == label
-            and any(
-                isinstance(schedule, dict) and (schedule.get('email_enabled') or schedule.get('push_enabled'))
-                for schedule in (
-                    candidate.get('alert_schedules')
-                    if isinstance(candidate.get('alert_schedules'), list) and candidate.get('alert_schedules')
-                    else [candidate]
-                )
-            )
+            and any(_schedule_delivers(schedule) for schedule in _rule_schedules(candidate))
         ]
         if len(same_label_rules) > 1:
             rule_position = next((index for index, candidate in enumerate(same_label_rules, start=1) if candidate is rule), 1)
@@ -1017,12 +967,9 @@ def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[st
         else:
             suffix = ''
         base_name = zone_rule_name(settings, zone, rule) + suffix
-        schedules = rule.get('alert_schedules')
-        schedules = schedules if isinstance(schedules, list) and schedules else [rule]
+        schedules = _rule_schedules(rule)
         for schedule_index, schedule in enumerate(schedules, start=1):
-            if not isinstance(schedule, dict) or not (
-                schedule.get('email_enabled') or schedule.get('push_enabled')
-            ):
+            if not _schedule_delivers(schedule):
                 continue
             names.add(f'{base_name} [Schedule {schedule_index}]' if len(schedules) > 1 else base_name)
     return names

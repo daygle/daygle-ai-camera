@@ -32,7 +32,7 @@ def _person(width, height, confidence=0.8, frame_aspect=None):
 
 
 def _settings(**limits):
-    rule = {'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5, **limits}
+    rule = {'label': 'person', 'enabled': True, 'alert_schedules': [{'email_enabled': True}], 'min_confidence': 0.5, **limits}
     zones = normalize_monitoring_zones([{
         'id': 'yard', 'name': 'Yard', 'enabled': True, 'monitor_objects': True,
         'x': 0, 'y': 0, 'width': 1, 'height': 1, 'object_rules': [rule],

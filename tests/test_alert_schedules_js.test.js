@@ -22,29 +22,16 @@ vm.runInContext(`${source.slice(start, end)}; globalThis.ensureAlertSchedules = 
 const ensureAlertSchedules = sandbox.ensureAlertSchedules;
 const rehome = (value) => JSON.parse(JSON.stringify(value));
 
-test('legacy singular alert fields migrate into one schedule without data loss', () => {
-  const rule = {
-    email_enabled: true,
-    push_enabled: false,
-    email_recipients: 'day@example.com, backup@example.com',
-    active_start: '06:00',
-    active_end: '18:00',
-    notify_start: '07:00',
-    notify_end: '17:00',
-  };
+test('a rule without schedules gets one empty schedule; rule-level fields are ignored', () => {
+  const rule = { email_enabled: true, email_recipients: 'day@example.com', active_start: '06:00' };
 
   const [schedule] = ensureAlertSchedules(rule);
-  assert.deepEqual(rehome(schedule), {
-    id: 'schedule-1',
-    email_enabled: true,
-    push_enabled: false,
-    email_recipients: ['day@example.com', 'backup@example.com'],
-    active_start: '06:00',
-    active_end: '18:00',
-    notify_start: '07:00',
-    notify_end: '17:00',
-  });
-  assert.deepEqual(rehome(ensureAlertSchedules(rule)[0]), rehome(schedule));
+  assert.match(schedule.id, /^schedule-/);
+  assert.equal(schedule.email_enabled, false);
+  assert.deepEqual(rehome(schedule.email_recipients), []);
+  assert.equal(schedule.active_start, null);
+  assert.equal(rule.email_enabled, false, 'summary is derived from the schedules');
+  assert.equal(ensureAlertSchedules(rule).length, 1);
 });
 
 test('explicit schedules retain separate channels, windows, and recipients', () => {

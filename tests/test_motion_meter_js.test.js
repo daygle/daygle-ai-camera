@@ -3,9 +3,8 @@
 //
 // Each motion zone is reported as the share of ITS OWN pixels that changed,
 // next to the trigger it was set to, so the bar and the setting use the same
-// units. The editor folds the old gate / scale / Sensitivity trio into one
-// "trigger when X% of this area moves" value that matches what the backend
-// effectively ran at, so converting a zone never changes when it fires.
+// units. The editor sets one "trigger when X% of this area moves" value per
+// zone, defaulting to Normal (2%) like the backend.
 //
 // The helpers are sliced out of the page scripts and run in a vm (both
 // scripts touch the DOM at load).
@@ -34,18 +33,16 @@ function slice(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-function loadHelpers({ live = {}, camera = null } = {}) {
+function loadHelpers() {
   const sandbox = {
-    window: { daygleLiveConfig: live },
-    selectedCamera: camera,
     clamp: (value, min, max) => Math.min(max, Math.max(min, value)),
     escapeHtml: (value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
   };
   vm.createContext(sandbox);
   const meter = slice(liveSource, 'const MOTION_QUIET_FRACTION', '// True when the camera has at least one enabled motion zone');
-  const tuning = slice(zonesSource, 'const DEFAULT_MOTION_GATE_FRACTION', '// "Trigger when X% of this zone moves" presets.');
+  const fraction = slice(zonesSource, 'function optionalFraction', '// "Trigger when X% of this zone moves" presets.');
   const trigger = slice(zonesSource, '// "Trigger when X% of this zone moves" presets.', '// Update only the label text on the Draw polygon button');
-  vm.runInContext(`${meter}\n${tuning}\n${trigger}\nthis.api = { formatMotionShare, overallMotionZoneState, motionZoneMeterHtml, effectiveMotionTrigger, setMotionTrigger, motionTriggerPreset, motionConfirmCycles };`, sandbox);
+  vm.runInContext(`${meter}\n${fraction}\n${trigger}\nthis.api = { formatMotionShare, overallMotionZoneState, motionZoneMeterHtml, effectiveMotionTrigger, setMotionTrigger, motionTriggerPreset, motionConfirmCycles };`, sandbox);
   return sandbox.api;
 }
 
@@ -92,31 +89,20 @@ test('the lane state is the loudest zone', () => {
   assert.equal(overallMotionZoneState([{ state: 'quiet' }]), 'quiet');
 });
 
-test('an older zone shows the trigger it effectively ran at', () => {
-  const { effectiveMotionTrigger, motionTriggerPreset } = loadHelpers({ live: { motion_gate_fraction: 0.005, motion_scale_fraction: 0.03 } });
-  // max(gate, Sensitivity x scale) = max(0.5%, 0.45 x 3%) = 1.35%
-  assert.equal(effectiveMotionTrigger({ label: 'motion', min_confidence: 0.45 }), 0.0135);
-  assert.equal(motionTriggerPreset(0.0135), null, 'not a preset, so it shows as Custom');
-  // A per-zone gate override still wins, as on the backend.
-  assert.equal(effectiveMotionTrigger({ label: 'motion', min_confidence: 0.1, gate_fraction: 0.01 }), 0.01);
-  assert.equal(motionTriggerPreset(0.01).label, 'Sensitive');
+test('a zone uses its stored trigger, else the Normal default', () => {
+  const { effectiveMotionTrigger, motionTriggerPreset } = loadHelpers();
   assert.equal(effectiveMotionTrigger({ label: 'motion', trigger_fraction: 0.04 }), 0.04);
-});
-
-test('a camera override feeds the converted trigger', () => {
-  const { effectiveMotionTrigger } = loadHelpers({
-    live: { motion_gate_fraction: 0.005, motion_scale_fraction: 0.03 },
-    camera: { motion_gate_fraction: 0.02, motion_scale_fraction: 0.03 },
-  });
   assert.equal(effectiveMotionTrigger({ label: 'motion', min_confidence: 0.45 }), 0.02);
+  assert.equal(effectiveMotionTrigger(null), 0.02);
+  assert.equal(motionTriggerPreset(0.02).label, 'Normal');
 });
 
-test('setting a trigger retires the old knobs', () => {
+test('setting a trigger opens the confidence window', () => {
   const { setMotionTrigger } = loadHelpers();
-  const rule = { label: 'motion', min_confidence: 0.6, max_confidence: 0.9, gate_fraction: 0.01, scale_fraction: 0.05, confirm_cycles: 3 };
+  const rule = { label: 'motion', min_confidence: 0.6, max_confidence: 0.9, confirm_cycles: 3 };
   setMotionTrigger(rule, 0.04);
   assert.equal(JSON.stringify(rule), JSON.stringify({
-    label: 'motion', min_confidence: 0, max_confidence: 1, gate_fraction: null, scale_fraction: null, confirm_cycles: 3, trigger_fraction: 0.04,
+    label: 'motion', min_confidence: 0, max_confidence: 1, confirm_cycles: 3, trigger_fraction: 0.04,
   }));
   setMotionTrigger(rule, 9);
   assert.equal(rule.trigger_fraction, 0.5, 'clamped to the backend maximum');

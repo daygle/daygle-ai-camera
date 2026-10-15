@@ -53,9 +53,7 @@ def dispatch(tmp_path, monkeypatch):
     )
 
     def use_rules(*rules):
-        unknown = next((rule for rule in rules if rule['id'] == '_unknown'), None)
         monkeypatch.setattr(fdr, 'effective_face_detection_rules', lambda: {'rules': list(rules)})
-        monkeypatch.setattr(fdr, 'enabled_unknown_rule', lambda: unknown)
 
     return ad, use_rules
 

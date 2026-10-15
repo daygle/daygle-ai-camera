@@ -386,15 +386,7 @@ def _email_alert_capture(main, monkeypatch):
 def _zone_camera_settings_with_email(label: str):
     """Full-frame zone with a single alert+email rule for the given object label."""
     return _zone_camera_settings([
-        {
-            'label': label,
-            'record_on_detect': True,
-            'alert_on_detect': True,
-            'min_confidence': 0.5,
-            'cooldown_seconds': 0,
-            'email_enabled': True,
-            'email_recipients': ['glenbday82@gmail.com'],
-        },
+        {'label': label, 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0, 'alert_schedules': [{'email_enabled': True, 'email_recipients': ['glenbday82@gmail.com']}]},
     ])
 
 __all__ = [

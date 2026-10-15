@@ -107,8 +107,7 @@ function defaultAlertSchedule() {
 }
 
 function ensureAlertSchedules(rule) {
-  const hasSchedules = Array.isArray(rule.alert_schedules) && rule.alert_schedules.length;
-  const raw = hasSchedules ? rule.alert_schedules : [rule];
+  const raw = Array.isArray(rule.alert_schedules) ? rule.alert_schedules : [];
   const seenIds = new Set();
   rule.alert_schedules = raw.filter((schedule) => schedule && typeof schedule === 'object').map((schedule, index) => {
     const baseId = String(schedule.id || `schedule-${index + 1}`);
@@ -129,17 +128,6 @@ function ensureAlertSchedules(rule) {
     };
   });
   if (!rule.alert_schedules.length) rule.alert_schedules = [defaultAlertSchedule()];
-  // Mirror legacy singular fields only when upgrading an older stored policy;
-  // once explicit schedules exist their per-entry values are authoritative.
-  if (!hasSchedules) {
-    const legacy = rule.alert_schedules[0];
-    legacy.email_enabled = rule.email_enabled === true;
-    legacy.push_enabled = rule.push_enabled === true;
-    legacy.email_recipients = normalizeEmailList(rule.email_recipients);
-    for (const key of ['active_start', 'active_end', 'notify_start', 'notify_end']) {
-      legacy[key] = rule[key] || null;
-    }
-  }
   rule.email_enabled = rule.alert_schedules.some((schedule) => schedule.email_enabled);
   rule.push_enabled = rule.alert_schedules.some((schedule) => schedule.push_enabled);
   rule.email_recipients = [...new Set(rule.alert_schedules.flatMap((schedule) => schedule.email_recipients))];

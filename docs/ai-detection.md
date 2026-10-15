@@ -82,8 +82,7 @@ come with it: the catalog input size is 768, so per-frame cost is higher than
 the 640 of a YOLO11 export (fewer detections per second, better small/distant
 recall), and NMS-free heads are excluded from runtime INT8 quantization, so a
 CPU-only host that needs INT8 should install a YOLO11 or YOLOv8 export instead.
-The recommendation is declared once, in `app.ai_settings._DEFAULT_MODEL`, and is
-also the model the legacy-face repair falls back to.
+The recommendation is declared once, in `app.ai_settings._DEFAULT_MODEL`.
 
 Models are stored under `models/` alongside the label file `models/coco.names`
 (the 80 standard COCO classes).
@@ -309,7 +308,7 @@ missing alert does not necessarily mean ONNX missed the object. The audit of
   a raw box before it reaches the live pipeline. Region/tile merging adds only
   the documented class-aware IoU deduplication; no threshold was changed in
   this audit.
-- **Zone/rule filtering:** normalized box geometry, zone center/overlap, camera
+- **Zone/rule filtering:** normalized box geometry, zone box-centre test, camera
   or zone label allow-lists, and per-rule minimum confidence can remove a
   detector result from alerting while it remains visible in live status. The
   status path reports detected labels and a below-threshold reason where

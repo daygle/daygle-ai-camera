@@ -84,8 +84,6 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
   via Phase-21 zone_schema rebind
 - ``main.normalize_monitoring_zones`` (validate_camera_settings) --
   reaches via Phase-21 zone_schema rebind
-- ``main._migrate_legacy_camera_motion`` (validate_camera_settings) --
-  reaches via Phase-19 recording_settings rebind
 - ``main.normalize_camera_recording_settings`` (validate_camera_settings)
 - ``main.normalize_camera_ptz_settings`` (validate_camera_settings)
 - ``main.effective_recording_config`` (validate_recording_settings)
@@ -122,7 +120,6 @@ from app.config_facades import (
     effective_system_config,
 )
 from app.recording_settings import (
-    _migrate_legacy_camera_motion,
     apply_active_camera_detection_profile,
     normalize_camera_profiles_with_legacy,
     normalize_camera_ptz_settings,
@@ -414,7 +411,6 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
             detection.pop('labels_path', None)
         else:
             detection['labels_path'] = _labels_path
-    _migrate_legacy_camera_motion(detection)
     updated['detection'] = detection
     existing_recording = current.get('recording') if isinstance(current.get('recording'), dict) else {}
     payload_recording = payload.get('recording') if isinstance(payload.get('recording'), dict) else {}
@@ -422,27 +418,15 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     existing_ptz = current.get('ptz') if isinstance(current.get('ptz'), dict) else {}
     payload_ptz = payload.get('ptz') if isinstance(payload.get('ptz'), dict) else {}
     updated['ptz'] = normalize_camera_ptz_settings({**existing_ptz, **payload_ptz})
-    # Per-camera motion overrides. Accept flat motion_* keys (current UI format)
-    # or the legacy nested motion dict (old format). Always persist flat motion_*
-    # keys so the naming convention matches global live settings.
-    #
-    # Resolution order for each key:
-    #   1. Flat key present in payload with a non-None value → use it
-    #   2. Flat key present in payload as None (explicit clear) → omit the key
-    #   3. Legacy nested motion dict in payload with a non-None value → use it
-    #   4. Existing flat key in stored config → carry it forward (preserve)
-    #   5. Existing nested motion dict in stored config → carry it forward
-    _payload_motion_nest = payload.get('motion') if isinstance(payload.get('motion'), dict) else {}
-    _cur_motion_nest = current.get('motion') if isinstance(current.get('motion'), dict) else {}
+    # Per-camera motion overrides (flat motion_* keys, matching the global
+    # live settings). Resolution order for each key:
+    #   1. Key present in payload with a value -> use it
+    #   2. Key present in payload as None (explicit clear) -> omit the key
+    #   3. No motion keys in the payload at all -> carry the stored value forward
     _flat_keys = ('motion_pixel_threshold', 'motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha')
-    _flat_in_payload = any(k in payload for k in _flat_keys) or bool(_payload_motion_nest)
+    _flat_in_payload = any(k in payload for k in _flat_keys)
 
-    for _flat_key, _short_key in (
-        ('motion_pixel_threshold', 'pixel_threshold'),
-        ('motion_gate_fraction', 'gate_fraction'),
-        ('motion_scale_fraction', 'scale_fraction'),
-        ('motion_background_alpha', 'background_alpha'),
-    ):
+    for _flat_key in _flat_keys:
         if _flat_key in payload:
             # Explicit send from UI: None means "clear override", value means "set"
             _v = payload[_flat_key]
@@ -452,16 +436,9 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
                 updated[_flat_key] = _coerce_camera_motion_override(_flat_key, _v)
             except (TypeError, ValueError):
                 pass  # Ignore malformed explicit motion overrides.
-        elif _payload_motion_nest.get(_short_key) is not None:
-            # Legacy nested dict in payload
-            _v = _payload_motion_nest[_short_key]
-            try:
-                updated[_flat_key] = _coerce_camera_motion_override(_flat_key, _v)
-            except (TypeError, ValueError):
-                pass  # Ignore malformed legacy motion overrides.
         elif not _flat_in_payload:
             # Payload has no motion keys at all - preserve stored override
-            _cur_v = current.get(_flat_key) if current.get(_flat_key) is not None else _cur_motion_nest.get(_short_key)
+            _cur_v = current.get(_flat_key)
             if _cur_v is not None:
                 try:
                     updated[_flat_key] = _coerce_camera_motion_override(_flat_key, _cur_v)
@@ -469,7 +446,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
                     pass  # Preserve the stored value when it is malformed.
 
     # Per-camera background-engine overrides (motion_algorithm / motion_denoise /
-    # motion_shadow_suppression). These newer keys have no legacy nested form.
+    # motion_shadow_suppression).
     # Semantics per key: present with a value -> set; present but empty/None ->
     # clear (omit, inherit global); absent -> preserve any stored override.
     def _is_clear(_value: Any) -> bool:

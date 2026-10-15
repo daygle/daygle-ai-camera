@@ -402,11 +402,9 @@ def deliver_email_alerts(
     )
     # Unknown-face alerts (rule_name == 'Unknown face') are governed by the
     # ``_unknown`` system face-detection rule (Face Rules tab), which carries
-    # its own email recipients -- replacing the removed ``alert_unknown_email``
-    # recognition setting.
+    # its own email recipients.
     from app.face_detection_rules import (
         _coerce_bool,
-        enabled_unknown_rule,
         effective_face_detection_rules,
         face_rule_email_recipients,
         face_rule_notify_active_now as _face_rule_active,
@@ -414,13 +412,11 @@ def deliver_email_alerts(
     # Face detection rules: per-person alerts with their own email recipients.
     _face_rules_list = effective_face_detection_rules().get('rules') or []
     _face_rules_by_id = {str(r.get('id')): r for r in _face_rules_list}
-    _face_rules_by_name = {str(r.get('name')): r for r in _face_rules_list}
 
     def _resolve_face_rule(alert: dict) -> dict:
-        """Prefer the exact rule id stamped on the alert (zone-scoped rules can
-        share a person name); fall back to the legacy name lookup."""
-        by_id = _face_rules_by_id.get(str(alert.get('face_rule_id') or ''))
-        return by_id or _face_rules_by_name.get(str(alert.get('rule_name')), {}) or {}
+        """The rule whose id is stamped on the alert (zone-scoped rules can
+        share a person name, so the id is the only reliable key)."""
+        return _face_rules_by_id.get(str(alert.get('face_rule_id') or ''), {})
 
     def _face_rule_emails(rule: dict) -> bool:
         """A face rule emails only with its Email toggle on (mirroring the push
@@ -429,21 +425,14 @@ def deliver_email_alerts(
         return bool(rule) and _coerce_bool(rule.get('email_enabled'), False) and _face_rule_active(rule)
 
     def _unknown_email_recipients_for(alert: dict) -> list[str]:
-        """Union the recipients of the scoped unknown rule(s) that fired.
-
-        Legacy alerts without ``face_rule_ids`` fall back to the global
-        ``_unknown`` rule, preserving pre-scoping behaviour.
-        """
-        fired_ids = alert.get('face_rule_ids')
-        if isinstance(fired_ids, list) and fired_ids:
-            wanted = {str(rid) for rid in fired_ids}
-            recips: list[str] = []
-            for r in _face_rules_list:
-                if str(r.get('id')) in wanted and _face_rule_emails(r):
-                    recips.extend(face_rule_email_recipients(r))
-            return sorted(set(recips))
-        _legacy = enabled_unknown_rule()
-        return face_rule_email_recipients(_legacy) if _legacy and _face_rule_emails(_legacy) else []
+        """Union the recipients of the scoped unknown rule(s) that fired, in
+        configured order."""
+        wanted = {str(rid) for rid in alert.get('face_rule_ids') or []}
+        recips: list[str] = []
+        for r in _face_rules_list:
+            if str(r.get('id')) in wanted and _face_rule_emails(r):
+                recips.extend(face_rule_email_recipients(r))
+        return list(dict.fromkeys(recips))
 
     has_unknown_face_alerts = any(str(alert.get('rule_name') or '') == 'Unknown face' for alert in triggered)
     if has_unknown_face_alerts and any(
@@ -580,28 +569,21 @@ def deliver_push_notifications(
     # case in ``deliver_email_alerts``.
     from app.face_detection_rules import (
         effective_face_detection_rules as _face_rules_fn,
-        enabled_unknown_rule as _unknown_push_rule_fn,
         face_rule_notify_active_now as _face_rule_active,
     )
     _face_rules_list_push = _face_rules_fn().get('rules') or []
     _face_rules_by_id_push = {str(r.get('id')): r for r in _face_rules_list_push}
-    _face_rules_by_name = {str(r.get('name')): r for r in _face_rules_list_push}
 
     def _resolve_face_rule_push(alert: dict) -> dict:
-        by_id = _face_rules_by_id_push.get(str(alert.get('face_rule_id') or ''))
-        return by_id or _face_rules_by_name.get(str(alert.get('rule_name')), {}) or {}
+        return _face_rules_by_id_push.get(str(alert.get('face_rule_id') or ''), {})
 
     def _unknown_push_active_for(alert: dict) -> bool:
-        fired_ids = alert.get('face_rule_ids')
-        if isinstance(fired_ids, list) and fired_ids:
-            wanted = {str(rid) for rid in fired_ids}
-            return any(
-                _face_rule_active(r) and r.get('push_enabled')
-                for r in _face_rules_list_push
-                if str(r.get('id')) in wanted
-            )
-        _legacy = _unknown_push_rule_fn()
-        return bool(_legacy and _face_rule_active(_legacy) and _legacy.get('push_enabled'))
+        wanted = {str(rid) for rid in alert.get('face_rule_ids') or []}
+        return any(
+            _face_rule_active(r) and r.get('push_enabled')
+            for r in _face_rules_list_push
+            if str(r.get('id')) in wanted
+        )
     all_triggered_labels = sorted(
         {
             str(alert.get('label') or '').strip()

@@ -544,7 +544,7 @@ def test_one_cat_event_per_recording_and_a_person_still_fires(tmp_path, monkeypa
         'id': 'yard', 'name': 'Yard', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
         'monitor_motion': False, 'monitor_objects': True,
         'object_rules': [
-            {'label': label, 'enabled': True, 'record_on_detect': True, 'push_enabled': True, 'min_confidence': 0.5}
+            {'label': label, 'enabled': True, 'record_on_detect': True, 'min_confidence': 0.5, 'alert_schedules': [{'push_enabled': True}]}
             for label in ('cat', 'person')
         ],
     }]}}
@@ -624,8 +624,8 @@ def test_dropped_detections_are_kept_with_their_reason_for_the_detection_log(tmp
     # JPEG-byte frames carry no diff mask, so every detection reads still.
     main.database.set_setting('objects', {'default_mode': 'moving', 'labels': {'person': 'any'}}, main.utc_now())
     settings = _zone_camera_settings([
-        {'label': 'person', 'enabled': True, 'push_enabled': True, 'min_confidence': 0.65},
-        {'label': 'car', 'enabled': True, 'push_enabled': True, 'min_confidence': 0.5},
+        {'label': 'person', 'enabled': True, 'min_confidence': 0.65, 'alert_schedules': [{'push_enabled': True}]},
+        {'label': 'car', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'push_enabled': True}]},
     ])
     main._state.live_detection_history.pop('camera-1', None)
     before = time.time() - 1
@@ -760,7 +760,7 @@ def test_dwell_alert_keeps_its_zone_rule_alert_for_delivery(tmp_path, monkeypatc
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
     main.database.set_setting('objects', {'default_mode': 'any', 'still_alerts': {'person': 5}}, main.utc_now())
     settings = _zone_camera_settings([
-        {'label': 'person', 'enabled': True, 'push_enabled': True, 'min_confidence': 0.5},
+        {'label': 'person', 'enabled': True, 'min_confidence': 0.5, 'alert_schedules': [{'push_enabled': True}]},
     ])
 
     def run():

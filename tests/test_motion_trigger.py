@@ -1,11 +1,10 @@
 """Plain-language motion settings: one trigger per zone, "Must last: N
 checks", and the per-zone live meter.
 
-A zone's trigger ("trigger when 2% of this zone moves") replaces the old gate /
-scale / Sensitivity trio. Zones saved before it existed must keep firing at
-exactly the same point, and the live meter must report each zone in the same
-units as its trigger, with a Quiet / Moving / Triggered state and a ten-minute
-peak.
+A zone fires when its trigger share of pixels changes ("trigger when 2% of this
+zone moves"; a motion rule without one gets the 2% default), and the live meter
+reports each zone in the same units as its trigger, with a Quiet / Moving /
+Triggered state and a ten-minute peak.
 """
 
 from __future__ import annotations
@@ -17,9 +16,10 @@ from app.detection_state import confirm_motion_detections
 from app.motion_levels import PEAK_WINDOW_SECONDS, forget_camera, motion_zone_levels
 from app.zone_detection import motion_zone_confirm_cycles, zone_motion_detections
 from app.zone_schema import (
+    DEFAULT_MOTION_TRIGGER,
     normalize_zone_object_rules,
     zone_motion_confirm_cycles,
-    zone_motion_effective_trigger,
+    zone_motion_trigger_fraction,
 )
 
 FRAME = (100, 100)  # (width, height) of the motion mask
@@ -43,7 +43,7 @@ def _mask(share: float) -> np.ndarray:
 def _detect(zones: list[dict], share: float, levels: list | None = None, **kwargs) -> list[dict]:
     return zone_motion_detections(
         {'detection': {'zones': zones}}, diff_mask=_mask(share), frame_size=FRAME,
-        gate_fraction=kwargs.get('gate', 0.005), scale_fraction=kwargs.get('scale', 0.03), levels=levels,
+        scale_fraction=kwargs.get('scale', 0.03), levels=levels,
     )
 
 
@@ -57,27 +57,29 @@ def test_normalised_trigger_opens_the_confidence_window():
     assert (rule['min_confidence'], rule['max_confidence']) == (0.0, 1.0)
     assert rule['confirm_cycles'] == 5, 'clamped to the maximum'
 
-    [legacy] = normalize_zone_object_rules({'object_rules': [{'label': 'motion', 'min_confidence': 0.6}]})
-    assert legacy['trigger_fraction'] is None
-    assert legacy['min_confidence'] == 0.6, 'legacy rules keep their Sensitivity'
-    assert legacy['confirm_cycles'] == 2, 'two checks was the old hard-coded rule'
+    [untriggered] = normalize_zone_object_rules({'object_rules': [{'label': 'motion', 'min_confidence': 0.6}]})
+    assert untriggered['trigger_fraction'] == DEFAULT_MOTION_TRIGGER
+    assert (untriggered['min_confidence'], untriggered['max_confidence']) == (0.0, 1.0)
+    assert untriggered['confirm_cycles'] == 2
+    assert 'gate_fraction' not in untriggered and 'scale_fraction' not in untriggered
 
     [person] = normalize_zone_object_rules({'object_rules': [{'label': 'person', 'trigger_fraction': 0.04}]})
     assert person['trigger_fraction'] is None and person['confirm_cycles'] is None
 
 
-def test_legacy_zone_effective_trigger_matches_the_old_maths():
-    zone = _zone({'min_confidence': 0.45})
-    # max(gate, Sensitivity x scale) = max(0.005, 0.45 * 0.03) = 1.35%
-    assert abs(zone_motion_effective_trigger(zone, 0.005, 0.03) - 0.0135) < 1e-9
-    assert abs(zone_motion_effective_trigger(_zone({'min_confidence': 0.1}), 0.005, 0.03) - 0.005) < 1e-9
-    assert zone_motion_effective_trigger(_zone({'trigger_fraction': 0.02}), 0.005, 0.03) == 0.02
+def test_zone_trigger_defaults_and_requires_a_motion_rule():
+    assert zone_motion_trigger_fraction(_zone({'trigger_fraction': 0.04})) == 0.04
+    assert zone_motion_trigger_fraction(_zone({'min_confidence': 0.45})) == DEFAULT_MOTION_TRIGGER
+    assert zone_motion_trigger_fraction(_zone({'enabled': False})) is None
+    no_rule = {**_zone({}), 'object_rules': []}
+    assert zone_motion_trigger_fraction(no_rule) is None
+    assert _detect([no_rule], 0.9) == [], 'a zone without a motion rule never fires'
 
 
-def test_legacy_zone_fires_exactly_as_before():
-    zone = _zone({'min_confidence': 0.45})  # effective trigger 1.35%
-    assert _detect([zone], 0.012) == []
-    assert [item['zone_id'] for item in _detect([zone], 0.014)] == ['drive']
+def test_untriggered_zone_fires_at_the_default():
+    zone = _zone({'min_confidence': 0.45})  # no trigger -> 2%
+    assert _detect([zone], 0.019) == []
+    assert [item['zone_id'] for item in _detect([zone], 0.021)] == ['drive']
 
 
 def test_trigger_zone_fires_at_its_trigger_whatever_the_scale():
@@ -103,7 +105,7 @@ def test_levels_report_every_motion_zone_in_trigger_units():
     _detect(zones, 0.004, levels=levels)
     assert levels == [
         {'zone_id': 'drive', 'zone_name': 'Drive', 'fraction': 0.004, 'trigger': 0.02},
-        {'zone_id': 'path', 'zone_name': 'Path', 'fraction': 0.004, 'trigger': 0.0135},
+        {'zone_id': 'path', 'zone_name': 'Path', 'fraction': 0.004, 'trigger': DEFAULT_MOTION_TRIGGER},
     ]
 
 

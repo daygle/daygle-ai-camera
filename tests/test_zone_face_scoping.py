@@ -47,9 +47,9 @@ def _face_zone(**overrides) -> dict:
         'enabled': True,
         'monitor_objects': True,
         'object_rules': [
-            # email_enabled=True so the rule is reachable on the alert action
+            # An email schedule so the rule is reachable on the alert action
             # (zone_object_rule_matches skips inert rules for alerts).
-            {'label': 'face', 'enabled': True, 'min_confidence': 0.6, 'max_confidence': 1.0, 'email_enabled': True},
+            {'label': 'face', 'enabled': True, 'min_confidence': 0.6, 'max_confidence': 1.0, 'alert_schedules': [{'email_enabled': True}]},
         ],
     }
     zone.update(overrides)
@@ -103,9 +103,7 @@ def test_zone_object_rule_matches_gates_confidence_window():
 def test_alert_rules_expose_face_rule_with_contacts():
     zone = _face_zone()
     zone['object_rules'][0].update({
-        'email_enabled': True,
-        'email_recipients': ['a@example.com'],
-        'push_enabled': True,
+        'alert_schedules': [{'email_enabled': True, 'email_recipients': ['a@example.com'], 'push_enabled': True}],
         'cooldown_seconds': 30,
     })
     settings = _settings([zone])
@@ -120,7 +118,7 @@ def test_alert_rules_expose_face_rule_with_contacts():
 
 def test_engine_fires_zone_face_alert_with_geometry_stamp():
     zone = _face_zone()
-    zone['object_rules'][0].update({'email_enabled': True})
+    zone['object_rules'][0].update({'alert_schedules': [{'email_enabled': True}]})
     settings = _settings([zone])
     engine = AlertEngine(zone_object_alert_rules(settings))
     stamped = {**_face(0.25, 0.5), 'zone_id': 'door', 'zone_name': 'Door'}
