@@ -91,13 +91,6 @@ MODE_STILL = 'still'    # only when the object's pixels are not changing
 
 VALID_MODES: frozenset[str] = frozenset({MODE_ANY, MODE_MOVING, MODE_STILL})
 
-DEFAULT_OBJECT_SETTINGS: dict[str, Any] = {
-    'default_mode': MODE_MOVING,
-    'labels': {},
-    'group_modes': {},
-    'still_alerts': {},
-}
-
 # Still-dwell alert bounds (minutes). A value below the floor is treated as
 # off; the cap keeps a silly 10,000-minute streak from being persisted.
 _STILL_ALERT_MIN_MINUTES = 1
@@ -518,12 +511,6 @@ def _step_components(detection: dict[str, Any]) -> tuple[float, float] | None:
     if mean_size <= 0.0 or size_change < _TRACK_MIN_SIZE_STEP:
         return center_step, 0.0
     return center_step, (size_change / mean_size) * _TRACK_SIZE_REFERENCE
-
-
-def _two_point_step(detection: dict[str, Any]) -> float | None:
-    """Largest single-cycle change in a track's box (see ``_step_components``)."""
-    components = _step_components(detection)
-    return max(components) if components is not None else None
 
 
 def classify_motion_state(

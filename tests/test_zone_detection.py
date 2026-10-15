@@ -8,7 +8,6 @@ public path:
 - ``point_in_polygon`` -- 0/1/3+ point cases, even-odd parity check.
 - ``point_on_segment`` -- colinear + straddling + off-segment cases.
 - ``detection_center_in_zone`` -- polygon vs rectangle dispatch.
-- ``detection_overlap_ratio_with_zone_rect`` -- partial, full, disjoint.
 - ``detection_matches_zone`` -- center + rect overlap paths.
 - ``_zone_pixel_motion_fraction`` -- numpy slice + points-only fallback.
 - ``zone_motion_detections`` -- enabled/disabled zones, motion rule
@@ -30,8 +29,6 @@ public path:
 - ``zone_motion_record_on_detect`` -- motion-axis (monitor_motion=True)
   finding rule with record_on_detect=True.
 - ``zone_detection_alert_rule_names`` -- set of matched names.
-- ``detection_has_matching_record_rule`` -- label/confidence coverage,
-  cooldown ignored, motion min_conf=0 default branch.
 - ``normalize_detection_boxes_for_frame`` -- pixel->normalized,
   already-normalized pass-through, missing dimensions pass-through.
 - ``get_camera_instance`` -- 404 raise, camera_instances lookup,
@@ -112,7 +109,7 @@ def test_point_on_segment_off_segment(zd):
 
 
 # ---------------------------------------------------------------------------
-# detection_center_in_zone + detection_overlap_ratio_with_zone_rect
+# detection_center_in_zone + detection_matches_zone
 # ---------------------------------------------------------------------------
 
 def test_detection_center_in_zone_polygon_vs_rectangle(zd):
@@ -127,47 +124,21 @@ def test_detection_center_in_zone_polygon_vs_rectangle(zd):
     assert zd.detection_center_in_zone(outside_detection, rect_zone) is False
 
 
-def test_detection_overlap_ratio_disjoint_returns_zero(zd):
-    detection = {'box': {'x': 5, 'y': 5, 'width': 0.1, 'height': 0.1}}
-    zone = {'x': 0, 'y': 0, 'width': 1, 'height': 1}
-    assert zd.detection_overlap_ratio_with_zone_rect(detection, zone) == 0.0
-
-
-def test_detection_overlap_ratio_fully_inside_returns_one(zd):
-    detection = {'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}
-    zone = {'x': 0, 'y': 0, 'width': 1, 'height': 1}
-    assert zd.detection_overlap_ratio_with_zone_rect(detection, zone) == pytest.approx(1.0)
-
-
-def test_detection_overlap_ratio_partial(zd):
-    # Half-and-half overlap: detection [0..0.5], zone [0.25..0.75] in width-height 1x1 square
-    detection = {'box': {'x': 0, 'y': 0, 'width': 0.5, 'height': 0.5}}
-    zone = {'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5}
-    # Intersection is 0.25 x 0.25 = 0.0625; detection area is 0.25; ratio = 0.25
-    assert zd.detection_overlap_ratio_with_zone_rect(detection, zone) == pytest.approx(0.25)
-
-
-def test_detection_overlap_ratio_zero_dim_returns_zero(zd):
-    detection = {'box': {'x': 0, 'y': 0, 'width': 0, 'height': 0}}
-    zone = {'x': 0, 'y': 0, 'width': 1, 'height': 1}
-    assert zd.detection_overlap_ratio_with_zone_rect(detection, zone) == 0.0
-
-
-def test_detection_matches_zone_center_overrides_overlap(zd):
-    # In rectangle zone by center but slight overlap < 0.2
+def test_detection_matches_zone_center_inside_rect(zd):
     detection = {'box': {'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}}
     zone = {'x': 0, 'y': 0, 'width': 1, 'height': 1}
     assert zd.detection_matches_zone(detection, zone) is True
 
 
-def test_detection_matches_zone_rect_min_overlap_threshold(zd):
-    # Center outside rectangle [0..1]x[0..1]; detection {x:0.85, w:0.5} -> center 1.1 OUT,
-    # overlap = [0.85..1]x[0.85..1] = 0.0225, detection area = 0.25, ratio = 0.09 (below 0.2).
-    detection = {'box': {'x': 0.85, 'y': 0.85, 'width': 0.5, 'height': 0.5}}
-    zone = {'x': 0, 'y': 0, 'width': 1, 'height': 1}
-    assert zd.detection_matches_zone(detection, zone, min_overlap_ratio=0.2) is False
-    # Lowered threshold accepts
-    assert zd.detection_matches_zone(detection, zone, min_overlap_ratio=0.01) is True
+def test_detection_matches_zone_rect_is_centre_only(zd):
+    # Rectangle zones match by centre exactly like polygons: a box that mostly
+    # overlaps the zone but whose centre (0.65, 0.65) is outside it does not match.
+    detection = {'box': {'x': 0.3, 'y': 0.3, 'width': 0.7, 'height': 0.7}}
+    zone = {'x': 0, 'y': 0, 'width': 0.6, 'height': 0.6}
+    assert zd.detection_matches_zone(detection, zone) is False
+    assert zd.detection_matches_zone(detection, {'points': [
+        {'x': 0, 'y': 0}, {'x': 0.6, 'y': 0}, {'x': 0.6, 'y': 0.6}, {'x': 0, 'y': 0.6},
+    ]}) is False
 
 
 def test_detection_matches_zone_polygon_center_only(zd):
@@ -181,15 +152,15 @@ def test_detection_matches_zone_polygon_center_only(zd):
 
 def test_detection_matches_zone_memoizes_per_detection(zd, monkeypatch):
     """The verdict is cached per (zone, box) so repeated tests within a cycle
-    compute the geometry once; a box change (or a different ratio) recomputes."""
+    compute the geometry once; a box change recomputes."""
     detection = {'box': {'x': 0.0, 'y': 0.0, 'width': 0.1, 'height': 0.1}}
     zone = {'id': 'z1', 'x': 0, 'y': 0, 'width': 1, 'height': 1}
     calls = {'n': 0}
     real = zd._detection_matches_zone_uncached
 
-    def counting(det, z, ratio):
+    def counting(det, z):
         calls['n'] += 1
-        return real(det, z, ratio)
+        return real(det, z)
     monkeypatch.setattr(zd, '_detection_matches_zone_uncached', counting)
 
     assert zd.detection_matches_zone(detection, zone) is True
@@ -206,20 +177,16 @@ def test_detection_matches_zone_memoizes_per_detection(zd, monkeypatch):
     zd.detection_matches_zone(moved, zone)
     assert calls['n'] == 2
 
-    # A non-default overlap ratio never uses the memo.
-    zd.detection_matches_zone(detection, zone, min_overlap_ratio=0.01)
-    assert calls['n'] == 3
-
 
 def test_detection_matches_zone_memo_matches_uncached(zd):
     """Memoized result is identical to the uncached geometry for both a rect
-    (overlap path) and a polygon (centre path) zone."""
+    and a polygon zone."""
     for zone in ({'id': 'r', 'x': 0, 'y': 0, 'width': 1, 'height': 1},
                  {'id': 'p', 'points': SQUARE}):
         for box in ({'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1},
                     {'x': 0.9, 'y': 0.9, 'width': 0.4, 'height': 0.4}):
             det = {'box': dict(box)}
-            expected = zd._detection_matches_zone_uncached(det, zone, 0.2)
+            expected = zd._detection_matches_zone_uncached(det, zone)
             assert zd.detection_matches_zone({'box': dict(box)}, zone) is expected
 
 
@@ -1028,7 +995,6 @@ def test_zone_object_alert_rules_expands_schedules_with_independent_windows(monk
     assert [alert['rule_name'] for alert in engine.process([detection])] == [rules[1]['name']]
 
 
-
 def test_zone_object_alert_rules_keeps_object_rules_inert_in_motion_only_zones():
     """An OBJECT rule inside a motion-only zone stays out of the alert list:
     object detections are filtered through the monitor_objects axis and can
@@ -1250,7 +1216,7 @@ def test_zone_motion_record_on_detect_skips_monitor_objects_zones():
 
 
 # ---------------------------------------------------------------------------
-# zone_detection_alert_rule_names / detection_has_matching_record_rule
+# zone_detection_alert_rule_names
 # ---------------------------------------------------------------------------
 
 def test_zone_detection_alert_rule_names_returns_set():
@@ -1271,44 +1237,6 @@ def test_zone_detection_alert_rule_names_returns_set():
     detection = {'label': 'person', 'confidence': 0.9, 'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}}
     names = zd.zone_detection_alert_rule_names(settings, detection)
     assert names == {'Front Yard / Porch / person'}
-
-
-def test_detection_has_matching_record_rule_emits_alias_match():
-    """Human detection matches a 'person' rule via _LABEL_ALIASES."""
-    from app import zone_detection as zd
-    rules = [
-        {'enabled': True, 'object': 'person', 'min_confidence': 0.5},
-    ]
-    assert zd.detection_has_matching_record_rule({'label': 'human', 'confidence': 0.8}, rules) is True
-
-
-def test_detection_has_matching_record_rule_motion_min_zero():
-    from app import zone_detection as zd
-    rules = [{'enabled': True, 'object': 'motion', 'min_confidence': 0.0}]
-    # Motion default min_confidence is 0.0: any non-falsy confidence matches (`>=`).
-    assert zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.0}, rules) is True
-    assert zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.3}, rules) is True
-    # Negative coverage: with min_confidence > 0, a confidence below the floor is excluded.
-    strict = [{'enabled': True, 'object': 'motion', 'min_confidence': 0.5}]
-    assert zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.3}, strict) is False
-
-
-def test_detection_has_matching_record_rule_disabled_skipped():
-    from app import zone_detection as zd
-    rules = [{'enabled': False, 'object': 'person', 'min_confidence': 0.5}]
-    assert zd.detection_has_matching_record_rule({'label': 'person', 'confidence': 0.9}, rules) is False
-
-
-def test_detection_has_matching_record_rule_empty_label_returns_false():
-    from app import zone_detection as zd
-    rules = [{'enabled': True, 'object': 'person', 'min_confidence': 0.5}]
-    assert zd.detection_has_matching_record_rule({'label': '', 'confidence': 0.9}, rules) is False
-
-
-def test_detection_has_matching_record_rule_unmatched_label_returns_false():
-    from app import zone_detection as zd
-    rules = [{'enabled': True, 'object': 'car', 'min_confidence': 0.5}]
-    assert zd.detection_has_matching_record_rule({'label': 'cat', 'confidence': 0.9}, rules) is False
 
 
 # ---------------------------------------------------------------------------
@@ -1440,14 +1368,6 @@ def test_zone_object_rule_matches_group_rule_matches_member(zd):
     assert len(zd.zone_object_rule_matches(settings, {'label': 'dog', 'confidence': 0.8, 'box': box}, action='alert')) == 1
     # person is outside the animal group -> no match
     assert zd.zone_object_rule_matches(settings, {'label': 'person', 'confidence': 0.8, 'box': box}, action='alert') == []
-
-
-def test_detection_has_matching_record_rule_group_rule(zd):
-    rules = [{'enabled': True, 'object': 'pet', 'min_confidence': 0.3}]
-    assert zd.detection_has_matching_record_rule({'label': 'cat', 'confidence': 0.8}, rules) is True
-    assert zd.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.8}, rules) is True
-    # horse is an animal but not a 'pet'
-    assert zd.detection_has_matching_record_rule({'label': 'horse', 'confidence': 0.8}, rules) is False
 
 
 def test_rule_rejection_reason_names_the_failed_check():

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from app.alerts import AlertEngine
 from app.zone_detection import (
-    camera_face_zone_keys,
     filter_detections_for_camera,
     zone_object_alert_rules,
     zone_object_rule_matches,
@@ -55,11 +54,6 @@ def _face_zone(**overrides) -> dict:
     }
     zone.update(overrides)
     return zone
-
-
-def test_face_zone_keys_reports_scoped_zones():
-    settings = _settings([_face_zone(), {'id': 'yard', 'name': 'Yard', 'x': 0.5, 'y': 0.0, 'width': 0.5, 'height': 1.0}])
-    assert camera_face_zone_keys(settings) == {'door'}
 
 
 def test_face_inside_face_zone_passes_outside_dropped():

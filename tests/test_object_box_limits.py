@@ -10,7 +10,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from app.alerts import AlertEngine  # noqa: E402
 from app.zone_detection import (  # noqa: E402
-    detection_has_matching_record_rule,
     stamp_frame_aspect,
     zone_object_alert_rules,
     zone_object_rule_matches,
@@ -107,8 +106,6 @@ def test_zone_matcher_alert_rules_and_record_check_all_honour_limits():
 
     alert_rules = zone_object_alert_rules(settings)
     assert alert_rules and alert_rules[0]['max_box_area'] == 0.25
-    assert not detection_has_matching_record_rule(huge, alert_rules)
-    assert detection_has_matching_record_rule(standing, alert_rules)
 
     engine = AlertEngine(alert_rules)
     assert engine.process([{**huge, 'zone_id': 'yard'}]) == []

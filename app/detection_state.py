@@ -11,8 +11,7 @@ in-memory bookkeeping** that runs once per active camera:
   ``_MOTION_GATE_FRACTION`` / ``_MOTION_SCALE_FRACTION`` /
   ``_MOTION_BACKGROUND_ALPHA``) and the two frame-size constants
   (``app.state._MOTION_FRAME_W`` / ``app.state._MOTION_FRAME_H``) as fallback-only
-  defaults; live camera cycles pass an explicit camera-local size,
-- the misc detection-label helper (``detection_label_set``).
+  defaults; live camera cycles pass an explicit camera-local size.
 
 State PRIMITIVES themselves STAY on ``app.main`` (and continue to be
 mutated there by the monitor loop + admin handlers); the new module
@@ -32,8 +31,8 @@ working unchanged:
   tests continue to work without import edits.
 
 **Pool-A rebind (in ``app/main.py``):** ``detect_frame_motion``,
-``record_live_detection_history``, ``build_track_from_live_history``,
-``detection_label_set`` are re-bound as ``main.<name>``.
+``record_live_detection_history`` and ``build_track_from_live_history``
+are re-bound as ``main.<name>``.
 
 **Pool-C reach into ``main`` (resolved at call time):**
 
@@ -251,10 +250,6 @@ def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts
 
 def _history_sample_ts(item: tuple[float, Any]) -> float:
     return item[0]
-
-
-def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
-    return {str(detection.get('label') or '').strip().lower() for detection in detections if str(detection.get('label') or '').strip()}
 
 
 # A high fraction of changed pixels across the whole thumbnail is a useful,

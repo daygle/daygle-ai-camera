@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 import app.state as _state
 from app.camera_id import camera_storage_key
-from app.detection_status import json_safe_detections
+from app.detection_status import GENERIC_TRIGGER_LABELS, json_safe_detections
 from app.media_utils import hevc_mp4_tag_args, newest_video_file
 from app.frame_capture_clock import (
     FrameCaptureClock,
@@ -40,7 +40,6 @@ class RecordingService:
     """Event recording facade with policy selection and generated test footage."""
 
     PLAYBACK_FORMAT = 'mp4'
-    GENERIC_TRIGGER_LABELS = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
     # A prebuffer render is "degenerate" when it produced far less video than the
     # window we asked for - a sign the source segments held no usable continuous
     # footage (sparse keyframes / corrupt stream). It surfaces as a near-still
@@ -284,7 +283,7 @@ class RecordingService:
                 label = str(candidate.get('label') or '').strip().lower()
                 if not label:
                     continue
-                if not allow_motion and label in self.GENERIC_TRIGGER_LABELS:
+                if not allow_motion and label in GENERIC_TRIGGER_LABELS:
                     continue
                 return label
             return None

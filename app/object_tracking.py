@@ -83,10 +83,7 @@ TRACK_SIZE_REFERENCE = TRACK_STILL_DISPLACEMENT / TRACK_SIZE_JITTER_FRACTION
 # a genuinely translating object separates its boxes (low containment), and a
 # subject approaching the camera scales its box uniformly (stable aspect).
 # The extent-instability test is shared with the detection-confirmation gate,
-# so it lives in app.box_geometry. These aliases keep the tracker's own names
-# (and the tests that read them) unchanged.
-TRACK_ASPECT_DRIFT = box_geometry.ASPECT_DRIFT
-TRACK_EXTENT_CONTAINMENT = box_geometry.EXTENT_CONTAINMENT
+# so it lives in app.box_geometry (``ASPECT_DRIFT`` / ``EXTENT_CONTAINMENT``).
 _box_tuple = box_geometry.box_tuple
 _extent_unstable = box_geometry.extent_unstable
 
@@ -183,7 +180,7 @@ def _recent_displacement(track: dict[str, Any]) -> float | None:
 
     Returns ``0.0`` when the two halves disagree about box SHAPE while one box
     sits inside the other: the same object drawn at two extents has not moved
-    (see ``TRACK_ASPECT_DRIFT``). ``None`` when the track has not accumulated
+    (see ``box_geometry.ASPECT_DRIFT``). ``None`` when the track has not accumulated
     enough history yet (brand-new track, or a legacy track rebuilt after a
     restart).
 
@@ -246,7 +243,7 @@ def _recent_displacement(track: dict[str, Any]) -> float | None:
     # The same object drawn at two different extents is not motion. Without
     # this, a roof-only box nested inside a whole-vehicle box moves both the
     # centre and the size enough to clear the threshold, and a parked car is
-    # classified moving. See TRACK_ASPECT_DRIFT.
+    # classified moving. See box_geometry.ASPECT_DRIFT.
     if _extent_unstable(older_box, newer_box):
         return 0.0
 

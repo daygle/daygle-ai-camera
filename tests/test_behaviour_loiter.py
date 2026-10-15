@@ -31,14 +31,14 @@ class WelfordStatsTests(unittest.TestCase):
     def test_empty_baseline_is_zeroed(self) -> None:
         base = bb.new_dwell_baseline()
         self.assertEqual(base['count'], 0.0)
-        self.assertEqual(bb.baseline_mean(base), 0.0)
+        self.assertEqual(base['mean'], 0.0)
         self.assertEqual(bb.baseline_std(base), 0.0)
 
     def test_mean_and_std_match_numpy_free_reference(self) -> None:
         samples = [4, 5, 6, 5, 4, 6, 5, 5]
         base = _train(samples)
         self.assertEqual(base['count'], len(samples))
-        self.assertAlmostEqual(bb.baseline_mean(base), sum(samples) / len(samples), places=9)
+        self.assertAlmostEqual(base['mean'], sum(samples) / len(samples), places=9)
         # Sample variance (n-1) reference.
         mean = sum(samples) / len(samples)
         var = sum((s - mean) ** 2 for s in samples) / (len(samples) - 1)
@@ -46,7 +46,7 @@ class WelfordStatsTests(unittest.TestCase):
 
     def test_single_sample_has_zero_std(self) -> None:
         base = _train([7])
-        self.assertEqual(bb.baseline_mean(base), 7.0)
+        self.assertEqual(base['mean'], 7.0)
         self.assertEqual(bb.baseline_std(base), 0.0)
 
     def test_update_ignores_invalid_and_out_of_range(self) -> None:
@@ -60,7 +60,7 @@ class WelfordStatsTests(unittest.TestCase):
     def test_corrupted_persisted_baseline_is_coerced(self) -> None:
         base = bb.update_dwell_baseline({'count': 'bad', 'mean': None, 'm2': -5}, 10)
         self.assertEqual(base['count'], 1.0)
-        self.assertEqual(bb.baseline_mean(base), 10.0)
+        self.assertEqual(base['mean'], 10.0)
 
 
 class DwellThresholdTests(unittest.TestCase):

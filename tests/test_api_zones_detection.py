@@ -594,28 +594,6 @@ def test_zone_label_aliases_match_configured_rules(tmp_path, monkeypatch):
     assert matches[0][1]['label'] == 'person'
 
 
-def test_detection_has_matching_record_rule(tmp_path, monkeypatch):
-    _load_app(tmp_path, monkeypatch)
-    import app.zone_detection as _zd
-
-    rules = [
-        {'name': 'Person alert', 'object': 'person', 'min_confidence': 0.5, 'enabled': True},
-        {'name': 'Dog alert', 'object': 'dog', 'min_confidence': 0.7, 'enabled': True},
-        {'name': 'Disabled cat', 'object': 'cat', 'min_confidence': 0.5, 'enabled': False},
-        {'name': 'Motion alert', 'object': 'motion', 'min_confidence': 0.3, 'enabled': True},
-    ]
-
-    assert _zd.detection_has_matching_record_rule({'label': 'person', 'confidence': 0.8}, rules) is True
-    assert _zd.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.7}, rules) is True
-    assert _zd.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.69}, rules) is False
-    assert _zd.detection_has_matching_record_rule({'label': 'car', 'confidence': 0.9}, rules) is False
-    assert _zd.detection_has_matching_record_rule({'label': 'cat', 'confidence': 0.9}, rules) is False
-    assert _zd.detection_has_matching_record_rule({'label': 'human', 'confidence': 0.8}, rules) is True
-    assert _zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.4}, rules) is True
-    assert _zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.1}, rules) is False
-    assert _zd.detection_has_matching_record_rule({'label': '', 'confidence': 0.9}, rules) is False
-
-
 def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, monkeypatch):
     """Cat with record_on_detect=True but no email/push (record only) must not be silently
     dropped when another label has an alert rule (which makes zone_rules non-empty and triggers

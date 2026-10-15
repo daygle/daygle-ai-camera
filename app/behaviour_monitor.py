@@ -131,12 +131,6 @@ def reset_behavioural_state(camera_id: str) -> None:
         logger.debug('Activity-spike state reset failed for %s: %s', key, exc)
 
 
-def behaviour_paused(camera_id: str) -> bool:
-    """Whether the behavioural engines are currently suppressed for this camera."""
-    with _behaviour_pause_lock:
-        return bool(_behaviour_pause.get(str(camera_id), False))
-
-
 def clear_behavioural_state(camera_id: str) -> None:
     """Forget a camera entirely (deletion / config prune).
 
