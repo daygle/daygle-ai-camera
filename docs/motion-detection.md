@@ -541,6 +541,26 @@ detection interval. Raise it to `3` for very noisy scenes.
 
 ---
 
+### Skip Confirmation Above
+
+A detection scoring at least this confidence counts on its first sighting,
+without waiting for Confirm Frames. Borderline detections still have to be seen
+again. False detections (a shadow read as a person, foliage read as a cat) are
+almost always borderline, while a real person or car in clear view usually
+scores well above 80%, so a clear sighting no longer waits a check, and an
+object only in view for one check (a fast car) still counts.
+
+- **0** (default) turns it off: every detection is confirmed.
+- **0.80** is a good starting value. If something wrong gets through, raise it.
+- Only applies when Confirm Frames is above `1`.
+- It only changes confirmation. Second Look, zones, Moving Only / Still Only and
+  AI verification all still apply: an alert from a rule with AI verification is
+  still checked by the vision model before you are notified.
+- In a recording's **Detection Log**, an object let through this way reads
+  *confirmed by confidence*.
+
+---
+
 ### Confirm Location (IoU)
 
 An optional *spatial* requirement layered on top of Confirm Frames. By default

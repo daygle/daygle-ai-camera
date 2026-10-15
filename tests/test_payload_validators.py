@@ -1277,7 +1277,7 @@ def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
         'motion_frame_width', 'motion_frame_height', 'ingest_frame_fps',
         'snapshot_quality', 'video_decode', 'periodic_scan_interval_seconds',
         'detection_confirm_frames', 'detection_confirm_window',
-        'detection_confirm_iou',
+        'detection_confirm_iou', 'detection_confirm_skip_confidence',
     }
 
 

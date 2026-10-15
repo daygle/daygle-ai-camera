@@ -55,6 +55,7 @@ const FIELD_LABELS = {
   detection_confirm_frames: 'Confirm Frames',
   detection_confirm_window: 'Confirm Window',
   detection_confirm_iou: 'Confirm Location (IoU)',
+  detection_confirm_skip_confidence: 'Skip Confirmation Above',
   detection_history_minutes: 'Detection History (min)',
   background_detection_enabled: 'Background Detection',
   periodic_scan_interval_seconds: 'Periodic Scan Interval (s)',
@@ -172,7 +173,7 @@ function syncLiveFieldDependencies() {
   setFieldInactive(form.elements.periodic_scan_interval_seconds, alwaysRun,
     'Not used while Always Run Object Detection is Enabled: every check already runs object detection.');
   const confirmFrames = Number.parseInt(form.elements.detection_confirm_frames?.value || '1', 10) || 1;
-  for (const name of ['detection_confirm_window', 'detection_confirm_iou']) {
+  for (const name of ['detection_confirm_window', 'detection_confirm_iou', 'detection_confirm_skip_confidence']) {
     setFieldInactive(form.elements[name], confirmFrames <= 1, 'Only used when Confirm Frames is above 1.');
   }
   // The legacy Simple Difference model stays selectable only while it is the
@@ -231,6 +232,7 @@ const FORM_DEFAULTS = {
     detection_confirm_frames: 1,
     detection_confirm_window: 1,
     detection_confirm_iou: 0,
+    detection_confirm_skip_confidence: 0,
     background_detection_enabled: 'true',
     always_run_object_detection: 'true',
     adaptive_detection_enabled: 'true',
@@ -343,7 +345,7 @@ const FIELD_TYPES = {
   number: new Set([
     'detection_interval_seconds', 'face_detection_interval_seconds', 'motion_object_grace_seconds', 'detection_history_minutes',
     'motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha',
-    'detection_confirm_iou',
+    'detection_confirm_iou', 'detection_confirm_skip_confidence',
     'session_timeout_hours',
   ]),
   csv: new Set(['vehicle_labels', 'trusted_proxies']),

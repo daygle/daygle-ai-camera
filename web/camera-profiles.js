@@ -91,7 +91,7 @@ function syncProfileEditorDependencies(form) {
   setFieldInactive(form.elements.profile_periodic_scan_interval_seconds, alwaysRun,
     'Not used while Always Run Object Detection is Enabled.');
   const frames = Number.parseInt(effective('detection_confirm_frames'), 10) || 1;
-  for (const key of ['detection_confirm_window', 'detection_confirm_iou']) {
+  for (const key of ['detection_confirm_window', 'detection_confirm_iou', 'detection_confirm_skip_confidence']) {
     setFieldInactive(form.elements[`profile_${key}`], frames <= 1, 'Only used when Confirm Frames is above 1.');
   }
 }

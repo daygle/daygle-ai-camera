@@ -120,3 +120,11 @@ test('dropped boxes on the video carry their tracker id and a title-case tag', (
   assert.equal(log.droppedBoxLabel({ label: 'car', confidence: 0.77, track_id: 176 }), 'Car 77% · #176 · Dropped');
   assert.equal(log.droppedBoxLabel({ label: 'car', confidence: 0.4 }), 'Car 40% · Dropped');
 });
+
+test('kept detections that skipped confirmation say so', () => {
+  const log = load();
+  assert.equal(
+    log.describeKeptDetection({ label: 'person', motion_state: 'moving', motion_basis: 'mask', track_id: 9, track_age: 1, confirmed_by: 'confidence' }),
+    'moving (mask) · #9 · seen 1x · confirmed by confidence',
+  );
+});

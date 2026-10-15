@@ -1554,6 +1554,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         camera_id, object_detections,
         required_frames=_confirm_frames, window_frames=_confirm_window,
         location_iou=_confirm_iou,
+        skip_confidence=live_settings.get('detection_confirm_skip_confidence', 0.0),
     )
     try:
         _confirm_spatial = float(_confirm_iou or 0) > 0

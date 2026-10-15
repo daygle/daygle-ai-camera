@@ -116,6 +116,9 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     # wind-blown foliage, whose false detections jump around the frame each
     # cycle; try ``0.2``.
     'detection_confirm_iou': 0.0,
+    # A detection at or above this confidence skips the confirmation gate and
+    # counts on first sight; 0 (default) = every detection is confirmed.
+    'detection_confirm_skip_confidence': 0.0,
     'background_detection_enabled': True,
     # When True (default), object (YOLO) inference runs every detection cycle
     # regardless of the motion gate -- maximum recall (a still/slow/low-contrast

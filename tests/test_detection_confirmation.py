@@ -221,3 +221,17 @@ def test_a_tracked_object_confirms_on_sightings_the_gate_never_saw(ds):
     first = {**_det_at('car', 0.10, 0.6), 'track_id': 402, 'track_age': 1}
     assert ds.confirm_object_detections('cam2', [first], **kwargs) == []
     assert ds.confirm_object_detections('cam3', [{**_det_at('car', 0.1, 0.6), 'track_age': 5}], **kwargs) == []
+
+
+def test_a_confident_detection_skips_confirmation_and_is_marked(ds):
+    kwargs = dict(required_frames=2, window_frames=3, location_iou=0.05, skip_confidence=0.8)
+    clear = {**_det_at('person', 0.4, 0.4), 'confidence': 0.91}
+    kept = ds.confirm_object_detections('cam-skip', [clear], **kwargs)
+    assert len(kept) == 1 and kept[0]['confirmed_by'] == 'confidence'
+    # Borderline detections still wait for a second sighting.
+    faint = {**_det_at('cat', 0.1, 0.7), 'confidence': 0.55}
+    assert ds.confirm_object_detections('cam-skip2', [faint], **kwargs) == []
+    second = ds.confirm_object_detections('cam-skip2', [{**faint}], **kwargs)
+    assert len(second) == 1 and 'confirmed_by' not in second[0]
+    # 0 (the default) is off.
+    assert ds.confirm_object_detections('cam-skip3', [{**clear}], required_frames=2, window_frames=3) == []

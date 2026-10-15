@@ -14,7 +14,7 @@ test('settings page dims Periodic Scan and the confirm fields when they cannot a
   const source = read('settings.js');
   assert.match(source, /function syncLiveFieldDependencies\(\)/);
   assert.match(source, /setFieldInactive\(form\.elements\.periodic_scan_interval_seconds, alwaysRun/);
-  assert.match(source, /\['detection_confirm_window', 'detection_confirm_iou'\]/);
+  assert.match(source, /\['detection_confirm_window', 'detection_confirm_iou', 'detection_confirm_skip_confidence'\]/);
   // Re-run after every programmatic fill, not only on user edits.
   assert.equal((source.match(/syncLiveFieldDependencies\(\);/g) || []).length, 2);
   // The legacy model is only listed while it is the saved value.
