@@ -231,23 +231,19 @@ FAINT_LOG_FLOOR = 0.20
 FAINT_LOG_MAX = 5
 
 
-def _faint_log_floor(detect_floor: float | None) -> float | None:
+def _faint_log_floor(detect_floor: float) -> float:
     """Confidence to ask the detector for: the log floor, unless the real one is lower."""
-    if detect_floor is None:
-        return None
     return min(float(detect_floor), FAINT_LOG_FLOOR)
 
 
 def _split_faint_detections(
-    detections: list[dict[str, Any]], detect_floor: float | None,
+    detections: list[dict[str, Any]], detect_floor: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """``(kept, faint)``: faint detections scored under ``detect_floor``.
 
     Kept detections are exactly what a detector asked at ``detect_floor``
     returns, so everything downstream behaves as before.
     """
-    if detect_floor is None:
-        return detections, []
     floor = float(detect_floor)
     kept: list[dict[str, Any]] = []
     faint: list[dict[str, Any]] = []
@@ -1294,7 +1290,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             # Second look (opt-in): the full-frame pass runs at a lower floor so
             # near-misses survive long enough to be re-checked at higher
             # resolution below; anything still unconfirmed is dropped there.
-            _second_look = min_conf is not None and second_look_enabled(live_settings)
+            _second_look = second_look_enabled(live_settings)
             _inference_started = time.perf_counter()
             _detect_floor = second_look_floor(min_conf) if _second_look else min_conf
             # Ask down to the detection-log floor, then split anything under the

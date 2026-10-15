@@ -7,14 +7,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from app.utils import normalize_bool_setting
 
 logger = logging.getLogger('daygle.ai')
-
-try:
-    import numpy as np
-except ImportError:  # pragma: no cover - exercised in minimal installs without ONNX support
-    np = None  # type: ignore[assignment]
 
 
 class DetectorUnavailableError(RuntimeError):
@@ -59,14 +56,7 @@ def load_labels(labels_path: str | Path | None, fallback: list[str] | None = Non
     return fallback or []
 
 
-def _require_numpy():
-    if np is None:
-        raise DetectorUnavailableError("numpy is not installed. Install requirements.txt or run pip install numpy.")
-    return np
-
-
 def non_max_suppression(boxes: np.ndarray, scores: np.ndarray, classes: np.ndarray, iou_threshold: float) -> list[int]:
-    np = _require_numpy()
     if boxes.size == 0:
         return []
 
@@ -235,10 +225,6 @@ class OnnxYoloDetector:
 
         if not self.model_path.exists():
             self.unavailable_reason = f"ONNX model not found: {self.model_path}"
-            return
-
-        if np is None:
-            self.unavailable_reason = "numpy is not installed. Install requirements.txt or run pip install numpy."
             return
 
         try:
@@ -705,7 +691,6 @@ class OnnxYoloDetector:
         return [ort_value.numpy() for ort_value in io.get_outputs()]
 
     def _decode_image(self, image_bytes: bytes) -> np.ndarray:
-        np = _require_numpy()
         try:
             import cv2
         except ImportError as exc:
