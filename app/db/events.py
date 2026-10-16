@@ -299,9 +299,10 @@ class EventsMixin:
         applies the viewer's recording scope in SQL so a full page is never shortened
         after privacy filtering (which would look like the end of the list).
         """
+        conditions = []
+        params: list[Any] = []
         if with_recording:
             conditions.append(f'EXISTS (SELECT 1 FROM recordings r WHERE {_EVENT_RECORDING_LINKS})')
-        params: list[Any] = []
         return self._event_list_page(
             conditions, params,
             label=label, limit=limit, alerted_only=alerted_only, since=since, until=until,
