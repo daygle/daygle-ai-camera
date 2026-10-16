@@ -352,7 +352,8 @@ class EmailAlertService:
         finally:
             if smtp is not None:
                 try:
-                    smtp.quit()                    except Exception as exc:
+                    smtp.quit()
+                except Exception as exc:
                     logger.debug(
                         'SMTP session close failed (resource already gone?): %s: %s',
                         type(exc).__name__, exc,
@@ -401,7 +402,8 @@ class EmailAlertService:
             # Best-effort quit the dead socket so we don't leak the
             # file descriptor while we open a fresh session below.
             try:
-                smtp.quit()                except Exception as quit_exc:
+                smtp.quit()
+            except Exception as quit_exc:
                 logger.debug(
                     'SMTP dead-socket close failed: %s: %s',
                     type(quit_exc).__name__, quit_exc,
