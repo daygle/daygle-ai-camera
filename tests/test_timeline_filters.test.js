@@ -17,7 +17,8 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const read = (name) => readFileSync(path.resolve(here, '../web', name), 'utf8');
+// Normalise line endings so regexes written with \n also match Windows CRLF checkouts.
+const read = (name) => readFileSync(path.resolve(here, '../web', name), 'utf8').replace(/\r\n/g, '\n');
 
 function element() {
   return {

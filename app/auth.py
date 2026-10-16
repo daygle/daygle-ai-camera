@@ -412,13 +412,6 @@ class AuthService:
             ).fetchone()
             return dict(row) if row else None
 
-    def _active_admin_count(self) -> int:
-        with self.connect() as db:
-            row = db.execute(
-                "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1"
-            ).fetchone()
-            return int(row["count"])
-
     def update_user(
         self,
         user_id: int,

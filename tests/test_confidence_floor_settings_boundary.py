@@ -84,6 +84,10 @@ class _FakeRequest:
         # The routes parse bodies strictly via ``read_json_body`` (raw bytes).
         return json.dumps(self._payload).encode('utf-8')
 
+    async def stream(self):
+        # ``read_json_body`` enforces its size cap while streaming the body.
+        yield await self.body()
+
 
 class _FakeDB:
     """Database double with the real settings-generation attribute.

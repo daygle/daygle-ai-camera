@@ -59,6 +59,8 @@ FULL_BACKUP_FORMAT = 'daygle-full-backup'
 FULL_BACKUP_VERSION = 2
 SUPPORTED_FULL_BACKUP_VERSIONS = {1, FULL_BACKUP_VERSION}
 FULL_BACKUP_MAX_MANIFEST_BYTES = 1024 * 1024
+# Module-level so tests can point backups at a temporary models directory.
+MODELS_ROOT = (Path(__file__).resolve().parent.parent / 'models').resolve(strict=False)
 FULL_BACKUP_MAX_MEMBERS = 200_000
 FULL_BACKUP_MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024 * 1024
 
@@ -254,7 +256,7 @@ def create_full_backup(prefix: str = 'daygle-full') -> Path:
     recordings_root = _resolve_storage_root(storage_config, 'recordings_dir')
     snapshots_root = _resolve_storage_root(storage_config, 'snapshots_dir')
     events_root = _resolve_storage_root(storage_config, 'events_dir')
-    models_root = (Path(__file__).resolve().parent.parent / 'models').resolve(strict=False)
+    models_root = MODELS_ROOT
     archive_path = backup_directory() / f'{prefix}-{safe_backup_timestamp()}-{secrets.token_hex(4)}.zip'
     db_filename = Path(str(_state.database.database_path)).name
     db_snapshot = Path(str(_state.database.database_path)).parent / f'.full-backup-{secrets.token_hex(4)}.sqlite3'
@@ -539,7 +541,7 @@ def restore_full_backup(path: Path) -> dict[str, Any]:
             'recordings': _resolve_storage_root(target_storage, 'recordings_dir'),
             'snapshots': _resolve_storage_root(target_storage, 'snapshots_dir'),
             'events': _resolve_storage_root(target_storage, 'events_dir'),
-            'models': (Path(__file__).resolve().parent.parent / 'models').resolve(strict=False),
+            'models': MODELS_ROOT,
         }
         # Copy media BEFORE overwriting the live database. The tree copies are
         # additive and idempotent, so failing halfway leaves extra files that a

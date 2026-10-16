@@ -135,6 +135,18 @@ def _sanitize_error_body(body: str) -> str:
     return _USERINFO_RE.sub(r'\1***@', body)
 
 
+# Camera SOAP replies are a few KiB. The device controls the body size, so cap it
+# rather than letting a misbehaving or spoofed endpoint stream into memory.
+_MAX_ONVIF_RESPONSE_BYTES = 1024 * 1024
+
+
+def _read_onvif_response(resp) -> str:
+    data = resp.read(_MAX_ONVIF_RESPONSE_BYTES + 1)
+    if len(data) > _MAX_ONVIF_RESPONSE_BYTES:
+        raise OSError(f'ONVIF response exceeds {_MAX_ONVIF_RESPONSE_BYTES} bytes.')
+    return data.decode('utf-8', errors='replace')
+
+
 def _soap(url: str, body: str, username: str, password: str) -> str:
     header = _wssec_header(username, password) if username else '<s:Header/>'
     envelope = (
@@ -155,7 +167,7 @@ def _soap(url: str, body: str, username: str, password: str) -> str:
     safe_url = _safe_url_for_error(url)  # computed once so every branch can reuse it
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.read().decode('utf-8', errors='replace')
+            return _read_onvif_response(resp)
     except urllib.error.HTTPError as exc:
         # Camera returned a 4xx/5xx status; read up to 512 bytes of body for
         # diagnostics, scrub any embedded userinfo URLs, then re-raise with
@@ -204,7 +216,7 @@ def _soap_soap11(url: str, body: str, username: str, password: str) -> str:
     safe_url = _safe_url_for_error(url)
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.read().decode('utf-8', errors='replace')
+            return _read_onvif_response(resp)
     except urllib.error.HTTPError as exc:
         body_bytes = exc.read(512) if exc.fp else b''
         detail = _sanitize_error_body(body_bytes.decode(errors='replace')[:120])

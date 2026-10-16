@@ -64,7 +64,8 @@ test('the Alerts page calls recognised-face policies Face, not Person', () => {
 
 test('the Faces page says when recognition is enabled but not actually running', async () => {
   const vm = await import('node:vm');
-  const source = readFileSync(path.resolve(here, '../web/face-recognition.js'), 'utf8');
+  // Normalise CRLF so the '\n}\n' function-end search works on Windows checkouts.
+  const source = readFileSync(path.resolve(here, '../web/face-recognition.js'), 'utf8').replace(/\r\n/g, '\n');
   const start = source.indexOf('function renderRuntimeStatus(');
   const end = source.indexOf('\n}\n', start) + 2;
   const el = { textContent: '', hidden: true, classes: new Set(), classList: { toggle(name, on) { if (on) el.classes.add(name); else el.classes.delete(name); } } };

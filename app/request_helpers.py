@@ -26,6 +26,11 @@ from app.database import EventDatabase
 # POST so an unauthenticated client can never force an unbounded allocation.
 MAX_FORM_BYTES: int = 64 * 1024
 
+# JSON bodies carry camera, zone, and settings documents, never media. Without
+# a cap ``request.body()`` buffers whatever the client sends before any
+# validation runs, so a 1 MiB ceiling bounds the allocation for every JSON route.
+MAX_JSON_BYTES: int = 1024 * 1024
+
 # Audit-log redactor: any key whose lowercase name matches one of these
 # patterns has its value replaced by ``***`` so credentials never reach
 # SQLite (and therefore never reach DB backups, ops copies, or sysadmin
@@ -93,6 +98,33 @@ def _parse_finite_float(raw: str) -> float:
     return value
 
 
+async def _read_bounded_body(request: Request, limit: int, label: str) -> bytes:
+    """Read the whole request body, refusing anything over ``limit`` bytes.
+
+    The declared Content-Length is checked before any bytes are read. The
+    streamed total is checked too, so a client that omits or understates the
+    header (chunked encoding) still cannot force an oversized allocation.
+    """
+    declared_length = request.headers.get('content-length')
+    if declared_length is not None:
+        try:
+            if int(declared_length) > limit:
+                raise HTTPException(status_code=413, detail=f'{label} exceeds {limit} bytes.')
+        except ValueError:
+            # Malformed Content-Length -> fall through to the streaming cap below.
+            pass
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail=f'{label} exceeds {limit} bytes.')
+        chunks.append(chunk)
+    return b''.join(chunks)
+
+
 async def read_json_body(request: Request) -> Any:
     """Parse the request body as strict JSON, or raise ``HTTPException(400)``.
 
@@ -100,10 +132,11 @@ async def read_json_body(request: Request) -> Any:
     non-standard ``NaN`` / ``Infinity`` / ``-Infinity`` literals. Those pass
     ``<``/``>`` range checks (every comparison with NaN is False) and crash
     ``int()`` with OverflowError, so they are rejected here, once, for every
-    settings payload.
+    settings payload. The body is size-capped at ``MAX_JSON_BYTES`` (413).
     """
+    body = await _read_bounded_body(request, MAX_JSON_BYTES, 'JSON body')
     try:
-        return json.loads(await request.body(), parse_constant=_reject_non_finite, parse_float=_parse_finite_float)
+        return json.loads(body, parse_constant=_reject_non_finite, parse_float=_parse_finite_float)
     except (ValueError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=400, detail='Request body must be valid JSON.') from exc
 
@@ -132,31 +165,9 @@ async def form_data(request: Request) -> dict[str, str]:
     handful of fields; 64 KiB is a generous ceiling. Mirrors the streaming
     upload cap pattern used by ``_read_uploaded_image``.
     """
-    declared_length = request.headers.get('content-length')
-    if declared_length is not None:
-        try:
-            if int(declared_length) > MAX_FORM_BYTES:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f'Form body exceeds {MAX_FORM_BYTES} bytes.',
-                )
-        except ValueError:
-            # Malformed Content-Length -> fall through to the streaming cap below.
-            pass
-    chunks: list[bytes] = []
-    total = 0
-    async for chunk in request.stream():
-        if not chunk:
-            continue
-        total += len(chunk)
-        if total > MAX_FORM_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=f'Form body exceeds {MAX_FORM_BYTES} bytes.',
-            )
-        chunks.append(chunk)
+    body_bytes = await _read_bounded_body(request, MAX_FORM_BYTES, 'Form body')
     try:
-        body = b''.join(chunks).decode('utf-8')
+        body = body_bytes.decode('utf-8')
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=400, detail='Form body must be valid UTF-8.') from exc
     return {key: values[-1] for key, values in parse_qs(body, keep_blank_values=True).items()}

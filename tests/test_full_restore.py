@@ -85,6 +85,8 @@ def test_full_restore_remaps_database_paths_and_restores_media(tmp_path, monkeyp
     _make_database(target_db, media_root=target_root, snapshot_root=target_snapshots)
 
     monkeypatch.setattr(state, "database", SimpleNamespace(database_path=source_db))
+    # Keep backup/restore away from the repository's real models/ directory.
+    monkeypatch.setattr(backup_module, "MODELS_ROOT", tmp_path / "models")
     monkeypatch.setattr(
         backup_module,
         "effective_storage_config",
