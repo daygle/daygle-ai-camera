@@ -275,15 +275,20 @@ def test_size_retention_streams_compact_rows_and_skips_age_expired_file_stats(tm
 def test_database_maintenance_schema_has_target_indexes_and_wal(tmp_path) -> None:
     database = EventDatabase(str(tmp_path / 'maintenance.sqlite3'))
     expected_indexes = {
-        'idx_events_dismissed_created',
         'idx_detections_event_label',
         'idx_alert_history_event_id',
         'idx_alert_history_recording',
-        'idx_alert_history_dismissed_created',
         'idx_recordings_camera_started',
         'idx_recording_labels_label_recording',
         'idx_unknown_faces_status_created',
     }
+    # The events/alert_history dismissed columns survive in the schema for
+    # legacy rows, but their filters and indexes were dropped as dead code
+    # (see commit 11fe169) - nothing dismisses events or alerts any more.
+    # Assertion documents that the stale indexes must not quietly return:
+    # with no dismissed predicate left in any query they would only cost
+    # writes on every alert insert.
+    removed_indexes = {'idx_events_dismissed_created', 'idx_alert_history_dismissed_created'}
 
     database.maintain()
     with database.connect() as connection:
@@ -292,10 +297,6 @@ def test_database_maintenance_schema_has_target_indexes_and_wal(tmp_path) -> Non
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'index'").fetchall()
         }
         journal_mode = connection.execute('PRAGMA journal_mode').fetchone()[0]
-        alert_plan = connection.execute(
-            'EXPLAIN QUERY PLAN SELECT * FROM alert_history '
-            'WHERE dismissed = 0 ORDER BY created_at DESC LIMIT 25',
-        ).fetchall()
         recording_plan = connection.execute(
             'EXPLAIN QUERY PLAN SELECT * FROM recordings '
             'WHERE camera_id = ? ORDER BY started_at DESC, id DESC LIMIT 25',
@@ -303,6 +304,6 @@ def test_database_maintenance_schema_has_target_indexes_and_wal(tmp_path) -> Non
         ).fetchall()
 
     assert expected_indexes <= indexes
+    assert not removed_indexes & indexes
     assert journal_mode.lower() == 'wal'
-    assert any('idx_alert_history_dismissed_created' in row[3] for row in alert_plan)
     assert any('idx_recordings_camera_started' in row[3] for row in recording_plan)

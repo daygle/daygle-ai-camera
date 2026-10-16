@@ -58,19 +58,19 @@ def test_motion_stats_count_only_pure_motion_events(tmp_path):
     assert database.stats()['motion_detection_events'] == 5
 
 
-def test_motion_stats_respect_dismissed_and_since(tmp_path):
+def test_motion_stats_respect_since(tmp_path):
+    # The events table's dismissed column survives in the schema for legacy
+    # rows, but its filtering was dropped as dead code (see commit 11fe169):
+    # no UI or API dismisses events any more, so a legacy dismissed=1 row now
+    # counts like any other event. Guards here stick to behaviour that still
+    # exists: the since bound.
     database = EventDatabase(str(tmp_path / 'motion-bounds.sqlite3'))
 
     _add_event(database, [_det('motion')], created_at='2026-08-01T10:00:00+00:00')
-    dismissed = _add_event(database, [_det('motion')], created_at='2026-08-01T11:00:00+00:00')
+    _add_event(database, [_det('motion')], created_at='2026-08-01T11:00:00+00:00')
     _add_event(database, [_det('motion')], created_at='2026-08-02T11:00:00+00:00')
 
-    # Rows dismissed by an older version stay hidden.
-    with database.connect() as db:
-        db.execute('UPDATE events SET dismissed = 1 WHERE id = ?', (dismissed,))
-
-    # The dismissed row drops out of every card, not just this one.
-    assert database.stats()['motion_detection_events'] == 2
+    assert database.stats()['motion_detection_events'] == 3
 
     # since bounds the same way it bounds total_events.
     assert database.stats(since='2026-08-02')['motion_detection_events'] == 1
