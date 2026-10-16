@@ -535,17 +535,17 @@ def normalize_zone_tripwire(zone: dict[str, Any]) -> dict[str, Any] | None:
     except (TypeError, ValueError):
         cooldown = 30
     return {
-        'enabled': bool(raw.get('enabled', True)),
+        'enabled': normalize_bool_setting(raw.get('enabled'), True),
         'name': str(raw.get('name') or 'Tripwire').strip() or 'Tripwire',
         'a': point_a,
         'b': point_b,
         'direction': direction,
         'labels': normalize_label_list(raw.get('labels')),
         'cooldown_seconds': cooldown,
-        'record_on_detect': bool(raw.get('record_on_detect', True)),
-        'email_enabled': bool(raw.get('email_enabled', False)),
+        'record_on_detect': normalize_bool_setting(raw.get('record_on_detect'), True),
+        'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
-        'push_enabled': bool(raw.get('push_enabled', False)),
+        'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
         # Optional quiet-hours window for notifications (HH:MM, lexically
         # compared by _rule_notify_active_now). None = notify any time. The
         # crossing itself is always detected/recorded when enabled; this only
@@ -604,16 +604,16 @@ def normalize_zone_loiter(zone: dict[str, Any]) -> dict[str, Any] | None:
     except (TypeError, ValueError):
         cooldown = 120
     return {
-        'enabled': bool(raw.get('enabled', True)),
+        'enabled': normalize_bool_setting(raw.get('enabled'), True),
         'name': str(raw.get('name') or 'Loitering').strip() or 'Loitering',
         'labels': normalize_label_list(raw.get('labels')),
         'min_dwell_seconds': min_dwell,
         'sensitivity': round(sensitivity, 3),
         'cooldown_seconds': cooldown,
-        'record_on_detect': bool(raw.get('record_on_detect', True)),
-        'email_enabled': bool(raw.get('email_enabled', False)),
+        'record_on_detect': normalize_bool_setting(raw.get('record_on_detect'), True),
+        'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
-        'push_enabled': bool(raw.get('push_enabled', False)),
+        'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
         # Optional quiet-hours window for notifications (HH:MM, gates email/push
         # only; the anomaly is still detected/recorded when enabled), matching
         # the tripwire and object/sound alert schedules.
@@ -664,15 +664,15 @@ def normalize_zone_time(zone: dict[str, Any]) -> dict[str, Any] | None:
     except (TypeError, ValueError):
         cooldown = 1800
     return {
-        'enabled': bool(raw.get('enabled', True)),
+        'enabled': normalize_bool_setting(raw.get('enabled'), True),
         'name': str(raw.get('name') or 'Unusual Time').strip() or 'Unusual Time',
         'labels': normalize_label_list(raw.get('labels')),
         'threshold': round(threshold, 4),
         'cooldown_seconds': cooldown,
-        'record_on_detect': bool(raw.get('record_on_detect', True)),
-        'email_enabled': bool(raw.get('email_enabled', False)),
+        'record_on_detect': normalize_bool_setting(raw.get('record_on_detect'), True),
+        'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
-        'push_enabled': bool(raw.get('push_enabled', False)),
+        'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
         'notify_start': normalize_hhmm(raw.get('notify_start')),
         'notify_end': normalize_hhmm(raw.get('notify_end')),
     }
@@ -721,16 +721,16 @@ def normalize_zone_activity(zone: dict[str, Any]) -> dict[str, Any] | None:
     except (TypeError, ValueError):
         cooldown = 900
     return {
-        'enabled': bool(raw.get('enabled', True)),
+        'enabled': normalize_bool_setting(raw.get('enabled'), True),
         'name': str(raw.get('name') or 'Activity Spike').strip() or 'Activity Spike',
         'labels': normalize_label_list(raw.get('labels')),
         'min_count': min_count,
         'sensitivity': round(sensitivity, 3),
         'cooldown_seconds': cooldown,
-        'record_on_detect': bool(raw.get('record_on_detect', True)),
-        'email_enabled': bool(raw.get('email_enabled', False)),
+        'record_on_detect': normalize_bool_setting(raw.get('record_on_detect'), True),
+        'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
-        'push_enabled': bool(raw.get('push_enabled', False)),
+        'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
         'notify_start': normalize_hhmm(raw.get('notify_start')),
         'notify_end': normalize_hhmm(raw.get('notify_end')),
     }
@@ -857,9 +857,9 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             'width': round(width, 4),
             'height': round(height, 4),
             'points': points,
-            'enabled': bool(zone.get('enabled', True)),
+            'enabled': normalize_bool_setting(zone.get('enabled'), True),
             'monitor_motion': monitor_motion,
-            'monitor_objects': bool(zone.get('monitor_objects', True)),
+            'monitor_objects': normalize_bool_setting(zone.get('monitor_objects'), True),
             # ``object_labels`` feeds OBJECT allow-lists only -- motion and
             # face are their own detection axes, not object classes, so they
             # never belong in the allow-list derivation.

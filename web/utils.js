@@ -1672,17 +1672,17 @@ function normalizeTripwire(raw) {
     ? [...new Set(raw.labels.map((label) => String(label).trim().toLowerCase()).filter(Boolean))]
     : [];
   return {
-    enabled: raw.enabled !== false,
+    enabled: normalizeRuleBoolean(raw.enabled, true),
     name: String(raw.name || 'Tripwire').trim() || 'Tripwire',
     a: { x: roundTripwireCoord(a.x), y: roundTripwireCoord(a.y) },
     b: { x: roundTripwireCoord(b.x), y: roundTripwireCoord(b.y) },
     direction,
     labels,
     cooldown_seconds: cooldown,
-    record_on_detect: raw.record_on_detect !== false,
-    email_enabled: raw.email_enabled === true,
+    record_on_detect: normalizeRuleBoolean(raw.record_on_detect, true),
+    email_enabled: normalizeRuleBoolean(raw.email_enabled, false),
     email_recipients: normalizeEmailList(raw.email_recipients),
-    push_enabled: raw.push_enabled === true,
+    push_enabled: normalizeRuleBoolean(raw.push_enabled, false),
     // Notify quiet-hours window (edited on the Alerts page). Preserved here so
     // a Zones save can't drop delivery settings made on Alerts; the backend
     // re-normalises to zero-padded HH:MM.
@@ -1694,6 +1694,12 @@ function normalizeTripwire(raw) {
 // Coerce an HH:MM time to a canonical zero-padded string, or null. Kept lenient
 // (the backend's normalize_hhmm is authoritative on save); rejects anything
 // that isn't hours 0-23 and minutes 0-59.
+function normalizeRuleBoolean(value, defaultValue) {
+  if (value == null) return defaultValue;
+  if (typeof value === 'boolean') return value;
+  return ['1', 'true', 'yes', 'on', 'enabled'].includes(String(value).trim().toLowerCase());
+}
+
 function tripwireHhmm(value) {
   const match = /^(\d{1,2}):(\d{2})$/.exec(String(value == null ? '' : value).trim());
   if (!match) return null;
@@ -1723,16 +1729,16 @@ function normalizeLoiter(raw) {
     ? [...new Set(raw.labels.map((label) => String(label).trim().toLowerCase()).filter(Boolean))]
     : [];
   return {
-    enabled: raw.enabled !== false,
+    enabled: normalizeRuleBoolean(raw.enabled, true),
     name: String(raw.name || 'Loitering').trim() || 'Loitering',
     labels,
     min_dwell_seconds: minDwell,
     sensitivity,
     cooldown_seconds: cooldown,
-    record_on_detect: raw.record_on_detect !== false,
-    email_enabled: raw.email_enabled === true,
+    record_on_detect: normalizeRuleBoolean(raw.record_on_detect, true),
+    email_enabled: normalizeRuleBoolean(raw.email_enabled, false),
     email_recipients: normalizeEmailList(raw.email_recipients),
-    push_enabled: raw.push_enabled === true,
+    push_enabled: normalizeRuleBoolean(raw.push_enabled, false),
     notify_start: tripwireHhmm(raw.notify_start),
     notify_end: tripwireHhmm(raw.notify_end),
   };
@@ -1754,15 +1760,15 @@ function normalizeTime(raw) {
     ? [...new Set(raw.labels.map((label) => String(label).trim().toLowerCase()).filter(Boolean))]
     : [];
   return {
-    enabled: raw.enabled !== false,
+    enabled: normalizeRuleBoolean(raw.enabled, true),
     name: String(raw.name || 'Unusual Time').trim() || 'Unusual Time',
     labels,
     threshold,
     cooldown_seconds: cooldown,
-    record_on_detect: raw.record_on_detect !== false,
-    email_enabled: raw.email_enabled === true,
+    record_on_detect: normalizeRuleBoolean(raw.record_on_detect, true),
+    email_enabled: normalizeRuleBoolean(raw.email_enabled, false),
     email_recipients: normalizeEmailList(raw.email_recipients),
-    push_enabled: raw.push_enabled === true,
+    push_enabled: normalizeRuleBoolean(raw.push_enabled, false),
     notify_start: tripwireHhmm(raw.notify_start),
     notify_end: tripwireHhmm(raw.notify_end),
   };
@@ -1786,16 +1792,16 @@ function normalizeActivity(raw) {
     ? [...new Set(raw.labels.map((label) => String(label).trim().toLowerCase()).filter(Boolean))]
     : [];
   return {
-    enabled: raw.enabled !== false,
+    enabled: normalizeRuleBoolean(raw.enabled, true),
     name: String(raw.name || 'Activity Spike').trim() || 'Activity Spike',
     labels,
     min_count: minCount,
     sensitivity,
     cooldown_seconds: cooldown,
-    record_on_detect: raw.record_on_detect !== false,
-    email_enabled: raw.email_enabled === true,
+    record_on_detect: normalizeRuleBoolean(raw.record_on_detect, true),
+    email_enabled: normalizeRuleBoolean(raw.email_enabled, false),
     email_recipients: normalizeEmailList(raw.email_recipients),
-    push_enabled: raw.push_enabled === true,
+    push_enabled: normalizeRuleBoolean(raw.push_enabled, false),
     notify_start: tripwireHhmm(raw.notify_start),
     notify_end: tripwireHhmm(raw.notify_end),
   };

@@ -360,6 +360,43 @@ class AuthService:
             raise AuthError("Username already exists.") from exc
         return self.get_user(user_id)  # type: ignore[return-value]
 
+    def create_initial_admin(
+        self,
+        username: str,
+        password: str,
+        *,
+        first_name: str = "",
+        last_name: str = "",
+        email: str = "",
+    ) -> dict[str, Any]:
+        """Create the first administrator exactly once across concurrent requests."""
+        username = username.strip()
+        if not username:
+            raise AuthError("Username is required.")
+        errors = self.validate_password_complexity(password)
+        if errors:
+            raise AuthError(" ".join(errors))
+        password_hash = self.hash_password(password)
+        now = utc_now()
+        try:
+            with self.connect() as db:
+                # Serialize the empty-database check and insert across every
+                # AuthService instance/process sharing this SQLite database.
+                db.execute("BEGIN IMMEDIATE")
+                if db.execute("SELECT 1 FROM users LIMIT 1").fetchone():
+                    raise AuthError("Initial administrator setup is already complete.")
+                cursor = db.execute(
+                    """
+                    INSERT INTO users (username, password_hash, role, is_active, first_name, last_name, email, created_at, updated_at)
+                    VALUES (?, ?, 'admin', 1, ?, ?, ?, ?, ?)
+                    """,
+                    (username, password_hash, (first_name or '').strip(), (last_name or '').strip(), (email or '').strip(), now, now),
+                )
+                user_id = int(cursor.lastrowid)
+        except sqlite3.IntegrityError as exc:
+            raise AuthError("Username already exists.") from exc
+        return self.get_user(user_id)  # type: ignore[return-value]
+
     def list_users(self) -> list[dict[str, Any]]:
         with self.connect() as db:
             rows = db.execute(
@@ -413,27 +450,10 @@ class AuthService:
                 raise AuthError(f"{field_name.capitalize()} must be text.")
         if is_active is not None and not isinstance(is_active, bool):
             raise AuthError("Account status must be true or false.")
-        username_changed = (
-            username is not None and username.strip() != str(existing.get("username") or "")
-        )
         if username is not None:
             username = username.strip()
             if not username:
                 raise AuthError("Username is required.")
-        role_will_change = role is not None and role != existing.get("role")
-        # Last-admin protection: refuse an update that would remove the only
-        # remaining ACTIVE administrator -- by demotion (role -> viewer) or
-        # deactivation (is_active -> False). Without this an admin can lock
-        # every admin-only function (user management, settings, updates) out of
-        # the whole deployment with no UI recovery path.
-        new_role = role if role is not None else str(existing.get("role") or "")
-        new_active = bool(is_active) if is_active is not None else bool(existing.get("is_active"))
-        was_active_admin = str(existing.get("role") or "") == "admin" and bool(existing.get("is_active"))
-        will_be_active_admin = new_role == "admin" and new_active
-        if was_active_admin and not will_be_active_admin and self._active_admin_count() <= 1:
-            raise AuthError(
-                "Cannot remove the last active administrator. Promote another user to admin first."
-            )
         updates: list[str] = []
         params: list[Any] = []
         if username is not None:
@@ -469,8 +489,35 @@ class AuthService:
         updates.append("updated_at = ?")
         params.append(utc_now())
         params.append(user_id)
+        username_changed = False
         try:
             with self.connect() as db:
+                # The last-admin check and its update must share a write lock.
+                # Otherwise concurrent demotions can both observe two active
+                # admins and leave the deployment with none.
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute(
+                    "SELECT role, is_active, username FROM users WHERE id = ?",
+                    (user_id,),
+                ).fetchone()
+                if current is None:
+                    raise AuthError("User not found.")
+                role_will_change = role is not None and role != current["role"]
+                username_changed = (
+                    username is not None and username != str(current["username"] or "")
+                )
+                new_role = role if role is not None else str(current["role"] or "")
+                new_active = bool(is_active) if is_active is not None else bool(current["is_active"])
+                was_active_admin = str(current["role"] or "") == "admin" and bool(current["is_active"])
+                will_be_active_admin = new_role == "admin" and new_active
+                if was_active_admin and not will_be_active_admin:
+                    active_admins = db.execute(
+                        "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1"
+                    ).fetchone()[0]
+                    if int(active_admins) <= 1:
+                        raise AuthError(
+                            "Cannot remove the last active administrator. Promote another user to admin first."
+                        )
                 cursor = db.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
                 if cursor.rowcount == 0:
                     raise AuthError("User not found.")

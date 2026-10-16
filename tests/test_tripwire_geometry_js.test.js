@@ -98,6 +98,18 @@ test('a valid tripwire round-trips with defaults filled in', () => {
   assert.equal(wire.notify_end, null);
 });
 
+test('string boolean values are normalized like the backend', () => {
+  const wire = normalizeTripwire({
+    a: { x: 0, y: 0 }, b: { x: 1, y: 0 },
+    enabled: 'false', record_on_detect: 'false',
+    email_enabled: 'false', push_enabled: 'false',
+  });
+  assert.equal(wire.enabled, false);
+  assert.equal(wire.record_on_detect, false);
+  assert.equal(wire.email_enabled, false);
+  assert.equal(wire.push_enabled, false);
+});
+
 test('notify quiet-hours are preserved and coerced to HH:MM (or null)', () => {
   // These are edited on the Alerts page; normalizeTripwire (used by the Zones
   // save path) must keep them so a Zones save never wipes delivery settings.
