@@ -33,7 +33,11 @@ class AlertsMixin:
         # failure mode ``RecordingsMixin.list_recordings_page`` guards against.
         since = _normalize_iso_to_utc(since) if since else None
         with self.connect() as db:
-            since_clause = "AND ah.created_at >= ?" if since else ""
+            # Dropping the ``dismissed`` pre-filter left this query with no
+            # other predicate, so the since bound must open the WHERE itself.
+            # An AND-shaped fragment here would bind into the LEFT JOIN's ON
+            # condition and silently stop filtering anything.
+            since_where = "WHERE ah.created_at >= ?" if since else ""
             params: tuple[Any, ...] = (since, limit) if since else (limit,)
             rows = db.execute(
                 f"""
@@ -44,7 +48,7 @@ class AlertsMixin:
                 FROM alert_history ah
                 LEFT JOIN events e ON e.id = ah.event_id
                 LEFT JOIN recordings r ON r.id = ah.recording_id
-                {since_clause}
+                {since_where}
                 ORDER BY ah.created_at DESC
                 LIMIT ?
                 """,

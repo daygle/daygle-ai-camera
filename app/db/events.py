@@ -395,11 +395,16 @@ class EventsMixin:
             conditions.append(f"(e.created_at, e.id) {'<' if descending else '>'} (?, ?)")
             params.extend((cursor[0], int(cursor[1])))
         order = 'DESC' if descending else 'ASC'
+        # An unfiltered page (no label/window/camera/query/face/alert/cursor and
+        # no viewer scope) can legitimately leave ``conditions`` empty, so the
+        # WHERE fragment must be dropped entirely instead of emitting a bare
+        # "... FROM events e WHERE ORDER BY ..." syntax error.
+        where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         with self.connect() as db:
             rows = db.execute(
                 f"""
                 SELECT e.* FROM events e
-                WHERE {' AND '.join(conditions)}
+                {where_sql}
                 ORDER BY e.created_at {order}, e.id {order}
                 LIMIT ?
                 """,
@@ -482,7 +487,10 @@ class EventsMixin:
                 'AND r.owner_user_id != ?)'
             )
             params.append(int(owner_user_id))
-        scope = f"SELECT e.id FROM events e WHERE {' AND '.join(conditions)}"
+        # Same empty-out safety as _event_list_page: with no window and no
+        # viewer scope every event is in scope for the facet counts.
+        conditions_sql = ' AND '.join(conditions) if conditions else '1 = 1'
+        scope = f"SELECT e.id FROM events e WHERE {conditions_sql}"
         with self.connect() as db:
             label_rows = db.execute(
                 f'''SELECT d.label AS label, COUNT(DISTINCT d.event_id) AS count
@@ -624,6 +632,10 @@ class EventsMixin:
         since = _normalize_iso_to_utc(since) if since else None
         with self.connect() as db:
             since_clause = "AND e.created_at >= ?" if since else ""
+            # ``total_events`` has no other predicate, so unlike the queries
+            # below (which all open with WHERE and share the AND-shaped
+            # ``since_clause``) it builds its own full where-clause.
+            events_since_where = "WHERE e.created_at >= ?" if since else ""
             since_clause_ah = "AND ah.created_at >= ?" if since else ""
             since_clause_det = "AND e.created_at >= ?" if since else ""
 
@@ -632,7 +644,7 @@ class EventsMixin:
                 return base + ((since,) if since else ())
 
             total_events = db.execute(
-                f"SELECT COUNT(*) AS count FROM events e {since_clause}", 
+                f"SELECT COUNT(*) AS count FROM events e {events_since_where}",
                 _params(),
             ).fetchone()["count"]
             # ``alert_history`` has no other predicate, so the shared
