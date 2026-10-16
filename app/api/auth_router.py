@@ -190,10 +190,9 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
     if data.get('password') != data.get('confirm_password'):
         return setup_page(request, 'Passwords do not match.', auth=auth, auth_enabled=auth_enabled)
     try:
-        auth.create_user(
+        auth.create_initial_admin(
             data.get('username', ''),
             data.get('password', ''),
-            role='admin',
             first_name=data.get('first_name', ''),
             last_name=data.get('last_name', ''),
             email=data.get('email', ''),
