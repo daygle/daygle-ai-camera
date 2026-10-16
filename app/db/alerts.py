@@ -44,7 +44,6 @@ class AlertsMixin:
                 FROM alert_history ah
                 LEFT JOIN events e ON e.id = ah.event_id
                 LEFT JOIN recordings r ON r.id = ah.recording_id
-                WHERE ah.dismissed = 0
                 {since_clause}
                 ORDER BY ah.created_at DESC
                 LIMIT ?

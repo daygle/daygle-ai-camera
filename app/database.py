@@ -291,15 +291,12 @@ class EventDatabase(
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
-                CREATE INDEX IF NOT EXISTS idx_events_dismissed_created ON events(dismissed, created_at DESC, id DESC);
                 CREATE INDEX IF NOT EXISTS idx_events_recording ON events(recording_id);
                 CREATE INDEX IF NOT EXISTS idx_detections_label ON detections(label);
                 CREATE INDEX IF NOT EXISTS idx_detections_event ON detections(event_id);
                 CREATE INDEX IF NOT EXISTS idx_detections_event_label ON detections(event_id, label);
                 CREATE INDEX IF NOT EXISTS idx_alert_history_event_id ON alert_history(event_id, id);
                 CREATE INDEX IF NOT EXISTS idx_alert_history_recording ON alert_history(recording_id);
-                CREATE INDEX IF NOT EXISTS idx_alert_history_dismissed_created ON alert_history(dismissed, created_at DESC, id DESC);
-
                 CREATE TABLE IF NOT EXISTS recordings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     event_id INTEGER,

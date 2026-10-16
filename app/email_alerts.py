@@ -19,12 +19,6 @@ class EmailAlertError(Exception):
     pass
 
 
-# LOW fix (round-8): module-level logger so SMTP cleanup failures don't
-# disappear silently. The module is intentionally logger-light - only the
-# session-level except-pass swallow sites in ``_create_smtp_session`` and
-# ``_send_via`` get ``logger.warning`` calls so an operator chasing
-# "why does my batch break at recipient 3 of 10" can see the disconnect
-# trace in app.log without redeploying.
 logger = logging.getLogger('daygle.notifications')
 
 
@@ -347,8 +341,6 @@ class EmailAlertService:
                 smtp.login(username, password)
             yield smtp
         except EmailAlertError as exc:
-            # LOW fix (round-8): log the underlying exception chain step
-            # before re-raising so the root cause is visible in app.log.
             logger.warning('SMTP session setup failed: %s', exc)
             raise
         except Exception as exc:  # pragma: no cover - depends on external mail servers
@@ -360,16 +352,7 @@ class EmailAlertService:
         finally:
             if smtp is not None:
                 try:
-                    smtp.quit()
-                except Exception as exc:
-                    # LOW fix (round-8): keep the resource-cleanup
-                    # best-effort semantics (original code was ``except
-                    # Exception: pass``) but log WHY the close failed so a
-                    # "the SMTP connection leaked" suspicion has a paper
-                    # trail. ``smtplib.SMTP.quit`` raises after the
-                    # transport is already torn down on the server side,
-                    # so this is normally ``smtplib.SMTPNotSupportedError``
-                    # / ``OSError`` - both safe to ignore AFTER logging.
+                    smtp.quit()                    except Exception as exc:
                     logger.debug(
                         'SMTP session close failed (resource already gone?): %s: %s',
                         type(exc).__name__, exc,
@@ -418,13 +401,7 @@ class EmailAlertService:
             # Best-effort quit the dead socket so we don't leak the
             # file descriptor while we open a fresh session below.
             try:
-                smtp.quit()
-            except Exception as quit_exc:
-                # LOW fix (round-8): log the dead-socket close failure so
-                # a real TLS / EOF issue doesn't masquerade as "just
-                # disconnected" in app.log. See companion block in
-                # ``_create_smtp_session`` for the rationale on why this
-                # stays ``pass``-equivalent after logging.
+                smtp.quit()                except Exception as quit_exc:
                 logger.debug(
                     'SMTP dead-socket close failed: %s: %s',
                     type(quit_exc).__name__, quit_exc,

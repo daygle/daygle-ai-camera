@@ -299,9 +299,8 @@ class EventsMixin:
         applies the viewer's recording scope in SQL so a full page is never shortened
         after privacy filtering (which would look like the end of the list).
         """
-        conditions = ['e.dismissed = 0']
-        params: list[Any] = []
-        if with_recording:
+        conditions = []
+        params: list[Any] = []            if with_recording:
             conditions.append(f'EXISTS (SELECT 1 FROM recordings r WHERE {_EVENT_RECORDING_LINKS})')
         return self._event_list_page(
             conditions, params,
@@ -326,7 +325,6 @@ class EventsMixin:
     ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
         """Return a stable snapshot page (newest first by default) and its next raw cursor."""
         conditions = [
-            'e.dismissed = 0',
             'e.snapshot_path IS NOT NULL',
             "e.snapshot_path != ''",
         ]
@@ -467,7 +465,7 @@ class EventsMixin:
                     entry['ai'] = False
             return {'labels': sorted(labels.values(), key=lambda item: item['value']), 'faces': faces}
 
-        conditions = ['e.dismissed = 0']
+        conditions = []
         if kind == 'snapshots':
             conditions.extend(['e.snapshot_path IS NOT NULL', "e.snapshot_path != ''"])
         if since:
@@ -633,7 +631,7 @@ class EventsMixin:
                 return base + ((since,) if since else ())
 
             total_events = db.execute(
-                f"SELECT COUNT(*) AS count FROM events e WHERE e.dismissed = 0 {since_clause}",
+                f"SELECT COUNT(*) AS count FROM events e {since_clause}", 
                 _params(),
             ).fetchone()["count"]
             # ``alert_history`` has no other predicate, so the shared
@@ -645,7 +643,7 @@ class EventsMixin:
                 _params(),
             ).fetchone()["count"]
             sound_detection_events = db.execute(
-                f"SELECT COUNT(*) AS count FROM events e WHERE e.source = 'sound' AND e.dismissed = 0 {since_clause}",
+                f"SELECT COUNT(*) AS count FROM events e WHERE e.source = 'sound' {since_clause}",
                 _params(),
             ).fetchone()["count"]
             # Motion-only events, mirroring the frontend's isMotionOnlyEvent():
@@ -666,9 +664,7 @@ class EventsMixin:
             generic_placeholders = ', '.join('?' for _ in generic_labels)
             motion_sql = f"""
                 SELECT COUNT(*) AS count
-                FROM events e
-                WHERE e.dismissed = 0
-                  AND e.source != 'sound'
+                FROM events e                WHERE e.source != 'sound'
                   AND EXISTS (
                     SELECT 1 FROM detections d
                     WHERE d.event_id = e.id
@@ -693,7 +689,6 @@ class EventsMixin:
                 JOIN events e ON e.id = d.event_id
                 WHERE d.label != 'motion'
                   AND e.source != 'sound'
-                  AND e.dismissed = 0
                   AND (
                       EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)
                       OR EXISTS (
@@ -735,7 +730,6 @@ class EventsMixin:
                 SELECT d.label, COUNT(*) AS count, MAX(d.confidence) AS max_confidence
                 FROM detections d
                 JOIN events e ON e.id = d.event_id
-                WHERE e.dismissed = 0
                 {since_clause_det}
                 GROUP BY d.label
                 ORDER BY count DESC
