@@ -237,6 +237,20 @@ def _detection_matches_zone_uncached(detection: dict[str, Any], zone: dict[str, 
     return detection_center_in_zone(detection, zone)
 
 
+# Key under which a memo records the object it was computed for. A string key
+# cannot collide with the tuple keys that hold the memoised verdicts.
+_MEMO_OWNER = '__memo_owner__'
+
+
+def _memo_for(detection: dict[str, Any], field: str, owner: Any) -> dict[Any, Any]:
+    """Return the detection's memo for ``field``, reset unless it was built for ``owner``."""
+    memo = detection.get(field)
+    if memo is None or memo.get(_MEMO_OWNER) is not owner:
+        memo = {_MEMO_OWNER: owner}
+        detection[field] = memo
+    return memo
+
+
 def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any]) -> bool:
     """Whether a detection's box centre falls inside a zone.
 
@@ -255,10 +269,9 @@ def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any]) -> b
     if zone_id is None or not isinstance(detection, dict) or not isinstance(box, dict):
         return _detection_matches_zone_uncached(detection, zone)
     key = (zone_id, box.get('x'), box.get('y'), box.get('width'), box.get('height'))
-    memo = detection.get('_zone_match_memo')
-    if memo is None:
-        memo = {}
-        detection['_zone_match_memo'] = memo
+    # Anchored to the zone object itself: a zone edited under the same id has
+    # new geometry, and an ``id()`` could be reused after the old zone is freed.
+    memo = _memo_for(detection, '_zone_match_memo', zone)
     cached = memo.get(key)
     if cached is not None:
         return cached
@@ -639,8 +652,8 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
     ``zone_detection_alert_rule_names`` all funnel through here. The result is a
     pure function of the settings, the action, and the detection's label /
     confidence / box, so it is memoised on the detection under those exact keys.
-    ``id(settings)`` keys the (per-cycle stable) settings object so a different
-    settings dict recomputes; the ``_rule_match_memo`` field is internal and
+    The memo is anchored to the (per-cycle stable) settings object, so a different
+    settings dict resets it; the ``_rule_match_memo`` field is internal and
     dropped by history / event serialisation. Callers only read the returned
     list, so returning the cached list is safe.
     """
@@ -650,14 +663,11 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
     if not isinstance(box, dict):
         return _zone_object_rule_matches_uncached(settings, detection, action)
     key = (
-        id(settings), action, canonical_label(detection.get('label')),
+        action, canonical_label(detection.get('label')),
         round(float(detection.get('confidence') or 0), 4),
         box.get('x'), box.get('y'), box.get('width'), box.get('height'),
     )
-    memo = detection.get('_rule_match_memo')
-    if memo is None:
-        memo = {}
-        detection['_rule_match_memo'] = memo
+    memo = _memo_for(detection, '_rule_match_memo', settings)
     if key in memo:
         return memo[key]
     result = _zone_object_rule_matches_uncached(settings, detection, action)

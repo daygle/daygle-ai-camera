@@ -192,6 +192,15 @@ def test_detection_matches_zone_memo_matches_uncached(zd):
 # _zone_pixel_motion_fraction -- numpy slice + polygon-points fallback
 # ---------------------------------------------------------------------------
 
+def test_detection_matches_zone_memo_follows_zone_geometry(zd):
+    """A zone edited under the same id must not reuse the verdict for its old shape."""
+    detection = {'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}}
+    wide = {'id': 'z1', 'x': 0, 'y': 0, 'width': 1, 'height': 1}
+    moved = {'id': 'z1', 'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}
+    assert zd.detection_matches_zone(detection, wide) is True
+    assert zd.detection_matches_zone(detection, moved) is False
+
+
 def test_zone_pixel_motion_fraction_with_rect(zd):
     np = pytest.importorskip('numpy')
     # Mask matches the default thumbnail geometry (240 rows x 320 cols, the
@@ -647,6 +656,19 @@ def test_zone_object_rule_matches_memoizes_per_detection(monkeypatch):
     # A different settings object recomputes.
     zd.zone_object_rule_matches(_one_person_zone_settings(), det, action='alert')
     assert calls['n'] == 4
+
+
+def test_zone_object_rule_matches_memo_is_not_fooled_by_settings_id_reuse(monkeypatch):
+    """CPython can hand a freed settings dict's ``id`` to a new one. A memo keyed
+    on ``id(settings)`` would then return the old settings' verdict; the memo must
+    be anchored to the settings object itself."""
+    from app import zone_detection as zd
+    det = {'label': 'person', 'confidence': 0.8, 'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}}
+    monkeypatch.setattr(zd, 'id', lambda _obj: 4242, raising=False)  # force the collision
+    assert len(zd.zone_object_rule_matches(_one_person_zone_settings(), det, action='alert')) == 1
+    other = _one_person_zone_settings()
+    other['detection']['zones'][0]['object_rules'][0]['label'] = 'car'
+    assert zd.zone_object_rule_matches(other, det, action='alert') == []
 
 
 def test_zone_object_rule_matches_label_aliases_human_to_person():

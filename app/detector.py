@@ -731,7 +731,11 @@ class OnnxYoloDetector:
         # values either way - bit-equivalent output, ~4x less memory bandwidth on
         # the transpose pass.
         chw = np.transpose(canvas, (2, 0, 1))
-        tensor = (chw.astype(np.float32) / 255.0)[None, ...]
+        # Scale the float32 copy in place: one allocation instead of two, with the
+        # same arithmetic (bit-identical output).
+        tensor = chw.astype(np.float32)
+        tensor /= 255.0
+        tensor = tensor[None, ...]
         # Normalise in float32 (better precision than dividing in half) then
         # cast to the model's declared input dtype so FP16 models get a
         # tensor(float16) input instead of an ORT type-mismatch error.

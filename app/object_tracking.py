@@ -157,6 +157,13 @@ REVIVE_SECONDS = 600.0
 REVIVE_MAX_TRACKS = 32
 
 
+def _median(values: list[float]) -> float:
+    """Median of a non-empty list: the middle value, or the mean of the two middle values."""
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2.0
+
+
 def _center_of(box: dict[str, Any]) -> tuple[float, float] | None:
     """Return the normalized center ``(cx, cy)`` of a detection box, or None."""
     try:
@@ -230,10 +237,6 @@ def _recent_displacement(track: dict[str, Any]) -> float | None:
         # Per-axis median, not mean: one outlying sighting (a glare-inflated or
         # half-occluded box) cannot drag a half's summary across the threshold,
         # while sustained translation or growth still separates the halves.
-        def _median(values: list[float]) -> float:
-            ordered = sorted(values)
-            middle = len(ordered) // 2
-            return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2.0
         return tuple(_median([item[axis] for item in group]) for axis in range(4))
 
     older_box = _median_box(older)
@@ -449,10 +452,6 @@ def _anchored_displacement(
         if track["still_streak"] >= ANCHOR_STILL_CYCLES:
             boxes = [b for b in (track.get("boxes") or [])[-TRACK_DISPLACEMENT_HISTORY:] if len(b) >= 4]
             if boxes:
-                def _median(values: list[float]) -> float:
-                    ordered = sorted(values)
-                    middle = len(ordered) // 2
-                    return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2.0
                 track["anchor"] = tuple(_median([float(b[axis]) for b in boxes]) for axis in range(4))
                 track["anchor_breaks"] = 0
     else:
