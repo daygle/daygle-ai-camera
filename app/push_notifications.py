@@ -14,11 +14,9 @@ class PushNotificationError(Exception):
     pass
 
 
-# LOW fix (round-8): module-level logger so ntfy delivery failures don't
-# disappear into PushNotificationError without a paper trail. The alert
-# dispatch path raises the error AND logs the original cause here so an
-# operator whose ntfy-config is misconfigured can debug from app.log
-# without redeploying with extra logging.
+# Failures are logged here with their cause, not only raised as
+# PushNotificationError, so a misconfigured ntfy server can be diagnosed from
+# app.log.
 logger = logging.getLogger('daygle.notifications')
 
 # ntfy tag carrying the triggering event's id on alert pushes, e.g.
@@ -91,7 +89,9 @@ class PushNotificationService:
         username = str(self.settings.get("username") or "").strip()
         password = str(self.settings.get("password") or "").strip()
 
-        url = f"{server_url}/{topic}"
+        # Percent-encode the topic: a space or reserved character would otherwise
+        # produce an invalid request line that http.client rejects.
+        url = f"{server_url}/{urllib.parse.quote(topic, safe='')}"
         headers: dict[str, str] = {
             "Title": _encode_ntfy_header(title),
             "Priority": priority,
@@ -113,15 +113,10 @@ class PushNotificationService:
                 url, exc.code, exc.reason,
             )
             raise PushNotificationError(f"ntfy server returned {exc.code}: {exc.reason}") from exc
-        # LOW fix (round-8): narrow the catch to the network-layer exception
-        # triple. ``Exception`` was hiding ``KeyError`` / ``TypeError`` /
-        # ``AttributeError`` programmer errors under a misleading
-        # "ntfy delivery failed" headline. Network-layer issues
-        # (``URLError``, ``socket.timeout``-as-``TimeoutError``,
-        # ``OSError`` covering DNS / connect failures) are exactly what
-        # belongs in this except. ``HTTPError`` is a ``URLError``
-        # subclass so it's already covered by the explicit handler above.
-        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        # Network-layer failures only (DNS, connect, timeout, TLS), so programming
+        # errors are not reported as "ntfy delivery failed". HTTPError is a
+        # URLError subclass and is handled above first.
+        except (urllib.error.URLError, OSError) as exc:
             logger.warning(
                 'ntfy push delivery failed: server=%s exc=%s: %s',
                 url, type(exc).__name__, exc,

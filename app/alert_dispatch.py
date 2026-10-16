@@ -1,71 +1,22 @@
-"""Live-alert delivery cluster extracted from ``app/main.py`` (Phase-28).
+"""Live-alert delivery: email, push and sound-rule notifications.
 
-This module owns the five helpers that previously lived inline on
-``app/main.py``:
+* ``deliver_alert_notifications`` - runs email and push delivery for a
+  triggered event.
+* ``deliver_email_alerts`` / ``deliver_push_notifications`` - per-channel
+  delivery built on ``app.email_alerts`` and ``app.push_notifications``.
+* ``deliver_sound_alert_notifications`` - the same two channels for a sound rule.
+* ``submit_alert_notification`` / ``submit_sound_alert_notification`` - queue one
+  delivery on the bounded pool in ``app.postprocess_pool`` without blocking the
+  detection callback. Dispatch never creates a thread per event.
+* ``wait_for_pending_alert_notifications`` - test barrier that waits for queued
+  deliveries to finish.
 
-* ``wait_for_pending_alert_notifications`` - sync barrier for tests,
-  blocks until queued/running email and push deliveries complete.
-* ``deliver_alert_notifications`` - the main orchestrator that runs
-  email + push delivery for a triggered event.
-* ``deliver_email_alerts`` - email-side delivery (uses
-  ``app.email_alerts.EmailAlertService``).
-* ``deliver_push_notifications`` - push-side delivery (uses
-  ``app.push_notifications.PushNotificationService``).
-* ``deliver_sound_alert_notifications`` - sound-rule specific
-  orchestrator that delegates to email + push.
+The event row is loaded once per dispatch and shared by the channels that
+deliver. A channel called directly loads it itself.
 
-Alert work is submitted to a bounded notification pool in
-``app.postprocess_pool``; dispatch never creates one thread per event.
-
-**Pool-A rebind (in ``app/main.py``):** every helper is re-bound as
-``main.<orig_name>``. The two originally-underscored names
-(``_deliver_alert_notifications`` and ``_deliver_sound_alert_notifications``)
-are aliased back to their underscored public names in the rebind
-block so existing ``main.py`` body callers keep working without
-modification (the new module exposes them as clean public APIs:
-``deliver_alert_notifications`` and ``deliver_sound_alert_notifications``).
-
-**Pool-C reach sites used by this module (each resolved lazily via
-``import app.main as main``):**
-
-* ``app.postprocess_pool.notification_pool`` - bounded worker dispatch for
-  asynchronous alert delivery.
-* ``_state.database`` - the singleton DB handle via ``app.state``.
-* ``_state.auth`` - the AuthService singleton via ``app.state``
-  (used by ``_alert_datetime_prefs``).
-* ``main._rule_notify_active_now(...)``,
-  ``main.compute_minimum_rule_confidence()`` - helpers on ``main.py``
-  (reached via ``from app.main import ...`` inside function bodies).
-* ``_format_alert_datetime`` and ``_alert_datetime_prefs`` are LOCAL
-  to this module (not Pool C).
-* ``main.render_live_snapshot_jpeg_overlay(...)`` - Phase-25 rebind
-  from ``app.live_snapshot``.
-* ``main.EmailAlertService``, ``main.EmailAlertError``,
-  ``main.PushNotificationService``, ``main.PushNotificationError``
-  - service classes + exception types reached via Pool A so tests can
-  monkeypatch ``main.<ServiceName>`` consistently (mirrors the Pool-A
-  contract documented in :mod:`app.api.__init__` and the proven
-  pattern in :mod:`app.detection_state`, :mod:`app.event_debounce`,
-  :mod:`app.detection_status`). Replaces the previous direct
-  top-of-module imports (see commit history - the bypass produced a
-  single failing pytest case post-Phase-28, fixed by restoring the
-  Pool-A reach).
-
-**Logger acquisition:** the module uses its OWN child logger via
-``logging.getLogger('daygle.ai')`` (matching the Phase-26
-``app.detection_state`` precedent - same name, same logging tree.
-Not reached via ``main.logger``.
-
-**Bare-name internal calls.** ``deliver_alert_notifications`` and
-``deliver_sound_alert_notifications`` invoke ``deliver_email_alerts``
-and ``deliver_push_notifications`` as bare names. Because all five
-helpers live in this module, those bare names resolve to the local
-module namespace and do NOT require Pool A rebind interruption.
-
-**Default-arg safety.** No function-default expressions evaluate
-``main.<name>`` at module-load time, so the Phase-28 rebind loop can
-fire BEFORE the body of this module is interpreted (everything is
-resolved at call time only).
+Dependencies that tests replace are imported into this module's namespace
+(``EmailAlertService``, ``PushNotificationService``, ``effective_*_settings``),
+so patch them on ``app.alert_dispatch``.
 """
 
 from __future__ import annotations
@@ -306,6 +257,44 @@ def _format_alert_datetime(iso_str: str) -> str:
     return f'{date_str} {time_str} {tz_label}'
 
 
+def _all_triggered_labels(triggered: list[dict[str, Any]]) -> list[str]:
+    """Sorted, de-duplicated labels across every triggered alert."""
+    return sorted(
+        {
+            str(alert.get('label') or '').strip()
+            for alert in triggered
+            if str(alert.get('label') or '').strip()
+        }
+    )
+
+
+def _event_for_channels(
+    triggered: list[dict[str, Any]],
+    event_id: int,
+    *,
+    email: bool,
+    push: bool,
+) -> dict[str, Any] | None:
+    """Load the event once for the channels that will actually deliver.
+
+    Email and push both read the same event row. Loading it here, and only when
+    a requested channel is globally enabled, avoids one ``get_event`` per alert.
+    Returns ``None`` when nothing needs it or the read fails, so each channel
+    loads the event itself and keeps its own error handling.
+    """
+    if not triggered:
+        return None
+    email_on = email and bool(effective_email_alert_settings().get('enabled'))
+    push_on = push and bool(effective_push_notification_settings().get('enabled'))
+    if not (email_on or push_on):
+        return None
+    try:
+        return _state.database.get_event(event_id) or {}
+    except Exception as exc:
+        logger.warning('Could not load event %s for alert delivery: %s', event_id, exc)
+        return None
+
+
 def wait_for_pending_alert_notifications(timeout: float = 10.0) -> None:
     """Wait until queued and in-flight alert email/push deliveries finish."""
     pool = notification_pool_if_created()
@@ -361,12 +350,13 @@ def deliver_alert_notifications(
     event_id: int,
     rules: list[dict[str, Any]] | None,
 ) -> None:
+    event = _event_for_channels(triggered, event_id, email=True, push=True)
     try:
-        deliver_email_alerts(triggered, event_id, rules=rules)
+        deliver_email_alerts(triggered, event_id, rules=rules, event=event)
     except Exception as exc:
         logger.warning('Email alert delivery failed for event %s: %s', event_id, exc)
     try:
-        deliver_push_notifications(triggered, event_id, rules=rules)
+        deliver_push_notifications(triggered, event_id, rules=rules, event=event)
     except Exception as exc:
         logger.warning('Push notification delivery failed for event %s: %s', event_id, exc)
 
@@ -375,6 +365,7 @@ def deliver_email_alerts(
     triggered: list[dict[str, Any]],
     event_id: int,
     rules: list[dict[str, Any]] | None = None,
+    event: dict[str, Any] | None = None,
 ) -> None:
     if not triggered:
         return
@@ -382,7 +373,8 @@ def deliver_email_alerts(
     if not email_settings.get('enabled'):
         logger.debug('Email alerts disabled globally; skipping event %s', event_id)
         return
-    event = _state.database.get_event(event_id) or {}
+    if event is None:
+        event = _state.database.get_event(event_id) or {}
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     created_at_raw = str(event.get('created_at') or '').strip()
@@ -433,8 +425,7 @@ def deliver_email_alerts(
                 recips.extend(face_rule_email_recipients(r))
         return list(dict.fromkeys(recips))
 
-    has_unknown_face_alerts = any(str(alert.get('rule_name') or '') == 'Unknown face' for alert in triggered)
-    if has_unknown_face_alerts and any(
+    if any(
         _unknown_email_recipients_for(alert)
         for alert in triggered
         if str(alert.get('rule_name') or '') == 'Unknown face'
@@ -496,13 +487,7 @@ def deliver_email_alerts(
                 kind, event_id, alert.get('rule_name'), exc,
             )
 
-    all_triggered_labels = sorted(
-        {
-            str(alert.get('label') or '').strip()
-            for alert in triggered
-            if str(alert.get('label') or '').strip()
-        }
-    )
+    all_triggered_labels = _all_triggered_labels(triggered)
     for alert in triggered:
         rule_name_str = str(alert.get('rule_name') or '')
         rule = rules_by_name.get(rule_name_str)
@@ -540,13 +525,13 @@ def deliver_email_alerts(
                 _face_recips = face_rule_email_recipients(_face_rule)
                 if _face_recips:
                     _send_rule_email(_face_recips, alert, 'face-rule')
-            continue
 
 
 def deliver_push_notifications(
     triggered: list[dict[str, Any]],
     event_id: int,
     rules: list[dict[str, Any]] | None = None,
+    event: dict[str, Any] | None = None,
 ) -> None:
     if not triggered:
         return
@@ -554,7 +539,8 @@ def deliver_push_notifications(
     if not push_settings.get('enabled'):
         logger.debug('Push notifications disabled globally; skipping event %s', event_id)
         return
-    event = _state.database.get_event(event_id) or {}
+    if event is None:
+        event = _state.database.get_event(event_id) or {}
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
@@ -583,13 +569,7 @@ def deliver_push_notifications(
             for r in _face_rules_list_push
             if str(r.get('id')) in wanted
         )
-    all_triggered_labels = sorted(
-        {
-            str(alert.get('label') or '').strip()
-            for alert in triggered
-            if str(alert.get('label') or '').strip()
-        }
-    )
+    all_triggered_labels = _all_triggered_labels(triggered)
     for alert in triggered:
         rule_name = str(alert.get('rule_name') or '')
         rule = rules_by_name.get(rule_name)
@@ -654,16 +634,22 @@ def deliver_sound_alert_notifications(
     event_id: int,
     rule: dict[str, Any],
 ) -> None:
+    event = _event_for_channels(
+        triggered,
+        event_id,
+        email=bool(rule.get('email_enabled')),
+        push=bool(rule.get('push_enabled')),
+    )
     if rule.get('email_enabled'):
         try:
-            deliver_email_alerts(triggered, event_id, rules=[rule])
+            deliver_email_alerts(triggered, event_id, rules=[rule], event=event)
         except Exception as exc:
             logger.warning(
                 'Sound alert email delivery failed for event %s: %s', event_id, exc,
             )
     if rule.get('push_enabled'):
         try:
-            deliver_push_notifications(triggered, event_id, rules=[rule])
+            deliver_push_notifications(triggered, event_id, rules=[rule], event=event)
         except Exception as exc:
             logger.warning(
                 'Sound alert push delivery failed for event %s: %s', event_id, exc,

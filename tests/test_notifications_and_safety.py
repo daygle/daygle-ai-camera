@@ -51,6 +51,68 @@ class PushNotificationsLoggerTests(unittest.TestCase):
         self.assertEqual(logger.name, 'daygle.notifications')
 
 
+class PushTopicEncodingTests(unittest.TestCase):
+    """The topic is percent-encoded into the request URL."""
+
+    def test_topic_with_space_is_percent_encoded(self) -> None:
+        from app.push_notifications import PushNotificationService
+        svc = PushNotificationService({
+            'enabled': True,
+            'server_url': 'https://ntfy.example.invalid/',
+            'topic': 'daygle alerts',
+        })
+        urls = []
+
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *_a): return False
+
+        def fake_urlopen(request, timeout=10):
+            urls.append(request.full_url)
+            return FakeResponse()
+
+        with patch('app.push_notifications.urllib.request.urlopen', side_effect=fake_urlopen):
+            svc._deliver('Title', 'Body')
+        self.assertEqual(urls, ['https://ntfy.example.invalid/daygle%20alerts'])
+
+
+class AlertEventLoadOnceTests(unittest.TestCase):
+    """Email and push share one event read per dispatch."""
+
+    def _dispatch(self, *, email_enabled: bool, push_enabled: bool) -> list[int]:
+        import app.alert_dispatch as dispatch
+        import app.state as state
+        loads: list[int] = []
+
+        class FakeDatabase:
+            def get_event(self, event_id):
+                loads.append(event_id)
+                return {'metadata': {}, 'created_at': '', 'snapshot_path': ''}
+
+        class FakeService:
+            def __init__(self, *_args, **_kwargs): pass
+            def send_alert(self, *_args, **_kwargs): pass
+
+        triggered = [{'rule_name': 'Rule', 'label': 'person', 'confidence': 0.9, 'message': 'm'}]
+        with patch.object(state, 'database', FakeDatabase()), \
+                patch.object(dispatch, 'effective_email_alert_settings', lambda: {'enabled': email_enabled}), \
+                patch.object(dispatch, 'effective_push_notification_settings', lambda: {'enabled': push_enabled}), \
+                patch.object(dispatch, 'EmailAlertService', FakeService), \
+                patch.object(dispatch, 'PushNotificationService', FakeService), \
+                patch('app.face_detection_rules.effective_face_detection_rules', lambda: {'rules': []}):
+            dispatch.deliver_alert_notifications(triggered, 7, [])
+        return loads
+
+    def test_event_read_once_when_both_channels_enabled(self) -> None:
+        self.assertEqual(self._dispatch(email_enabled=True, push_enabled=True), [7])
+
+    def test_event_read_once_when_only_one_channel_enabled(self) -> None:
+        self.assertEqual(self._dispatch(email_enabled=False, push_enabled=True), [7])
+
+    def test_no_event_read_when_both_channels_disabled(self) -> None:
+        self.assertEqual(self._dispatch(email_enabled=False, push_enabled=False), [])
+
+
 class PushNotificationsNarrowExceptTests(unittest.TestCase):
     """``PushNotificationService._deliver`` wraps only network-layer errors."""
 
