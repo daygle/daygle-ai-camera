@@ -85,6 +85,13 @@ def filter_object_priority_detections(
 
 SNAPSHOT_THUMB_MAX_WIDTH = 416
 
+# Overlay palette, written as RGB hex values to match the web overlay
+# (web/overlay.js MOTION_OVERLAY_COLOR / OVERLAY_LABEL_BACKGROUND) but converted
+# to BGR, because cv2 interprets color tuples as (blue, green, red) on the BGR
+# frames this module draws on.
+_OVERLAY_BOX_BGR = (163, 230, 73)  # #49e6a3 teal accent
+_OVERLAY_LABEL_BG_BGR = (19, 11, 7)  # #070b13 dark navy
+
 
 def overlay_detection_rows(detections: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Normalize detections into the shape the JPEG overlay draws.
@@ -179,24 +186,31 @@ def render_live_snapshot_jpeg_overlay(
         )
         height, width = image.shape[:2]
     for detection in detections:
+        if not isinstance(detection, dict):
+            continue
         if detection.get('alert_matched') is False and detection.get('alert_triggered') is False:
             continue
-        box = detection.get('box') or {}
-        x = int(max(0, min(1, float(box.get('x') or 0))) * width)
-        y = int(max(0, min(1, float(box.get('y') or 0))) * height)
-        box_width = int(max(0.001, min(1, float(box.get('width') or 0))) * width)
-        box_height = int(max(0.001, min(1, float(box.get('height') or 0))) * height)
-        x2 = min(width - 1, x + box_width)
-        y2 = min(height - 1, y + box_height)
-        # Same underscore-strip as the SVG renderer so snapshot JPEG labels
-        # match the email/push title case (``Cat_Meow`` -> ``Cat Meow``).
-        label = escape(str(detection.get('label') or 'object').replace('_', ' ').title())
-        confidence = round(float(detection.get('confidence') or 0) * 100)
+        try:
+            box = detection.get('box') or {}
+            x = int(max(0, min(1, float(box.get('x') or 0))) * width)
+            y = int(max(0, min(1, float(box.get('y') or 0))) * height)
+            box_width = int(max(0.001, min(1, float(box.get('width') or 0))) * width)
+            box_height = int(max(0.001, min(1, float(box.get('height') or 0))) * height)
+            x2 = min(width - 1, x + box_width)
+            y2 = min(height - 1, y + box_height)
+            # Same underscore-strip as the SVG renderer so snapshot JPEG labels
+            # match the email/push title case (``Cat_Meow`` -> ``Cat Meow``).
+            label = escape(str(detection.get('label') or 'object').replace('_', ' ').title())
+            confidence = round(float(detection.get('confidence') or 0) * 100)
+        except (AttributeError, TypeError, ValueError):
+            # One malformed row (junk confidence, non-numeric box) must not turn
+            # the whole snapshot render into a 500 - skip just that box.
+            continue
         text = f'{label} {confidence}%'
-        cv2.rectangle(image, (x, y), (x2, y2), (73, 230, 163), 2)
+        cv2.rectangle(image, (x, y), (x2, y2), _OVERLAY_BOX_BGR, 2)
         text_y = max(22, y - 8)
         (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.62, 2)
-        cv2.rectangle(image, (x, text_y - text_height - 8), (min(width - 1, x + text_width + 10), text_y + 4), (7, 11, 19), -1)
-        cv2.putText(image, text, (x + 5, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (73, 230, 163), 2, cv2.LINE_AA)
+        cv2.rectangle(image, (x, text_y - text_height - 8), (min(width - 1, x + text_width + 10), text_y + 4), _OVERLAY_LABEL_BG_BGR, -1)
+        cv2.putText(image, text, (x + 5, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, _OVERLAY_BOX_BGR, 2, cv2.LINE_AA)
     ok, encoded = cv2.imencode('.jpg', image, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
     return encoded.tobytes() if ok else image_bytes

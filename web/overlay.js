@@ -122,6 +122,9 @@ function _measureTextWidth(ctx, text) {
   let w = _textWidthCache.get(text);
   if (w === undefined) {
     w = ctx.measureText(text).width;
+    // Track-id tags ('#231') are unique per id, so the cache needs a hard cap
+    // to stay bounded on tracks that churn ids over a long clip.
+    if (_textWidthCache.size >= 256) _textWidthCache.clear();
     _textWidthCache.set(text, w);
   }
   return w;
@@ -207,10 +210,18 @@ function matchDetection(candidates, target) {
       continue;
     }
     const iou = boxIoU(candidate.box, targetBox);
-    if (iou > bestIoU || (hasTrackMatch && !bestHasTrackMatch)) {
+    // Track match outranks overlap entirely: without this ordering a same-label
+    // detection that carries no id but overlaps better can steal the match from
+    // the target's own track, which is exactly the cross-object jump the id
+    // guard exists to prevent. Ties break on IoU within each class.
+    if (hasTrackMatch && !bestHasTrackMatch) {
       bestIoU = iou;
       best = candidate;
-      bestHasTrackMatch = Boolean(hasTrackMatch);
+      bestHasTrackMatch = true;
+    } else if ((hasTrackMatch || !bestHasTrackMatch) && iou > bestIoU) {
+      bestIoU = iou;
+      best = candidate;
+      bestHasTrackMatch = hasTrackMatch;
     }
     const dx = (candidate.box.x + candidate.box.width / 2) - (targetBox.x + targetBox.width / 2);
     const dy = (candidate.box.y + candidate.box.height / 2) - (targetBox.y + targetBox.height / 2);
@@ -464,7 +475,12 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
     ctx.strokeRect(dx, dy, dw, dh);
     ctx.globalAlpha = previousAlpha;
 
-    const confidence = Math.round(Number(detection.confidence || 0) * 100);
+    // A malformed confidence ('junk', NaN) must not print "NaN%"; clamp to
+    // the plausible [0,1] range like normalizeDetectionBox does for boxes.
+    const rawConfidence = Number(detection.confidence);
+    const confidence = Math.round(
+      (Number.isFinite(rawConfidence) ? Math.min(1, Math.max(0, rawConfidence)) : 0) * 100,
+    );
     // Labels are stored lowercase (e.g. "person", "traffic light") for matching;
     // title-case them for display so the overlay reads "Person 79%", consistent
     // with the detection pills and label filter. Reuses the shared titleCase

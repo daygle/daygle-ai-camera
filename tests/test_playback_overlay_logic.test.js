@@ -93,6 +93,17 @@ test('matchDetection keeps same-class objects attached to their stable track id'
 });
 
 
+test('matchDetection does not let a higher-overlap no-id box steal an id match', () => {
+  // Regression: the target's own track overlaps only slightly, while an
+  // untracked same-label detection (junk/stale row with no id) overlaps more.
+  // The stable id wins regardless of IoU.
+  const own = { label: 'person', track_id: 9, box: box(0.70) };
+  const unknown = { label: 'person', confidence: 0.9, box: box(0.72) };
+  const target = { label: 'person', track_id: 9, box: box(0.79) };
+  assert.equal(sandbox.matchDetection([own, unknown], target).track_id, 9);
+});
+
+
 test('sampleTrackAtTime stops drawing after the track hold window', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sampleTrackAtTime(track, 5.1))), []);
 });
