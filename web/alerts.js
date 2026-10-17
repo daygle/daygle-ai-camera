@@ -87,7 +87,11 @@ function policyStatus(rule, type, now = new Date(), timezone = window.daygleAuth
   if (type !== 'object' && type !== 'sound') return { className: 'is-enabled', label: 'Enabled', title: 'This policy is enabled.' };
   const schedules = type === 'object' ? ensureAlertSchedules(rule) : [rule];
   const nowHm = clockInTimezone(now, timezone);
-  const active = schedules.some((schedule) => isWithinDetectWindow(schedule.active_start, schedule.active_end, nowHm, type !== 'sound'));
+  // Equal start/end windows mean "any time" on every backend gate
+  // (AlertEngine._is_active_now, alert_dispatch._rule_notify_active_now),
+  // including sound rules - so the badge must not show "Outside schedule"
+  // for the 1439 minutes an equal window does not literally match.
+  const active = schedules.some((schedule) => isWithinDetectWindow(schedule.active_start, schedule.active_end, nowHm));
   return active
     ? { className: 'is-in-schedule', label: 'In schedule', title: 'Enabled and currently within a detect window.' }
     : { className: 'is-out-of-schedule', label: 'Outside schedule', title: 'Enabled, but outside all detect windows.' };
