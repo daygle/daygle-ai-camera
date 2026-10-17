@@ -12,6 +12,7 @@ config.yaml
 .pytest_cache/
 .pytest-cache-local/
 .pytest-cache-local-api/
+test-results/
 .coverage
 htmlcov/
 .agents/

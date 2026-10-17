@@ -505,6 +505,14 @@ async function loadEvents({ quiet = false } = {}) {
   // A quiet re-check (see scheduleEventRefresh) leaves the painted rows in
   // place while the refresh is in flight.
   if (els.eventFeed && !quiet) els.eventFeed.innerHTML = '<p class="muted">Loading events…</p>';
+  // Restore scroll after the full re-render below (renderList() replaces
+  // innerHTML and resets scroll to the top). A quiet refresh still re-renders,
+  // so the guard covers both paths.
+  let scrollTop = 0;
+  if (els.eventFeed && typeof els.eventFeed.getBoundingClientRect === 'function') {
+    const wrap = els.eventFeed.closest('.cameras-table-wrap');
+    if (wrap) scrollTop = wrap.scrollTop;
+  }
   eventsLoadSession += 1;
   const session = eventsLoadSession;
   const query = eventsQueryString(filters ? filters.query() : libraryDefaultQuery());
@@ -535,6 +543,11 @@ async function loadEvents({ quiet = false } = {}) {
   if (session !== eventsLoadSession) return;
   renderStats();
   renderList();
+  // Restore the vertical scroll the user had before the refresh.
+  if (els.eventFeed && typeof els.eventFeed.getBoundingClientRect === 'function') {
+    const wrap = els.eventFeed.closest('.cameras-table-wrap');
+    if (wrap) wrap.scrollTop = scrollTop;
+  }
 }
 
 // Re-render the custom-range time pickers when Profile > Time Format changes

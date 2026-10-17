@@ -983,6 +983,13 @@ async function loadRecordings() {
   const queryString = params.toString();
   recordingsPager = createCursorPager(`/api/recordings${queryString ? `?${queryString}` : ''}`, RECORDINGS_PAGE_SIZE);
   currentRecordings = [];
+  // Restore scroll after the full re-render below (renderRecordings() replaces
+  // innerHTML and resets scroll to the top).
+  let scrollTop = 0;
+  if (els.recordings && typeof els.recordings.getBoundingClientRect === 'function') {
+    const wrap = els.recordings.closest('.cameras-table-wrap');
+    if (wrap) scrollTop = wrap.scrollTop;
+  }
   // One streamed batch first (up to a screenful of VISIBLE rows, so a sparse
   // post-filter still paints something); the rest arrives on demand.
   let recordings;
@@ -997,6 +1004,11 @@ async function loadRecordings() {
   if (session !== recordingsLoadSession) return currentRecordings;
   filters?.setNote('');
   renderRecordings(recordings);
+  // Restore the vertical scroll the user had before the refresh.
+  if (els.recordings && typeof els.recordings.getBoundingClientRect === 'function') {
+    const wrap = els.recordings.closest('.cameras-table-wrap');
+    if (wrap) wrap.scrollTop = scrollTop;
+  }
   return recordings;
 }
 
