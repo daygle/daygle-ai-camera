@@ -54,6 +54,7 @@ def _clock_with_segment(tmp_path, *, segment_end_stream_t, segment_mtime):
     return clock, write_fd
 
 
+@pytest.mark.skipif(os.name != 'posix', reason='stream_frame_stats_supported short-circuits on non-POSIX before the probe/cache path')
 def test_failed_probe_is_not_cached(monkeypatch):
     import app.frame_capture_clock as clock_module
 

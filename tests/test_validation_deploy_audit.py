@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -271,6 +272,7 @@ def test_systemd_unit_loads_nvidia_uvm_before_starting():
     assert 'ExecStartPre=+-/bin/sh ${APP_DIR}/scripts/prepare_gpu.sh' in update
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='runs /bin/sh - Windows hosts cannot exec it directly')
 def test_prepare_gpu_never_fails_without_an_nvidia_gpu():
     import subprocess
     script = Path(__file__).resolve().parents[1] / 'scripts' / 'prepare_gpu.sh'

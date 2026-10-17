@@ -5,6 +5,7 @@ storage contract (persists through camera saves), and the assign / switch /
 unassign endpoints. The shared harness (LocalClient, _load_app, _server,
 _login, _setup_admin, …) lives in tests/support.py.
 """
+import os
 import uuid
 
 from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
@@ -46,6 +47,7 @@ def test_normalize_camera_model_path_rules():
         normalize_camera_labels_path('models/face.names', strict=True)
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='creates a symlink; Windows needs symlink privilege')
 def test_models_path_validation_is_lexical_and_lookup_is_listing_based(tmp_path, monkeypatch):
     """``models/`` paths are validated as strings, and existence is resolved
     by walking a directory listing - so a request-supplied path is never

@@ -56,7 +56,7 @@ class LocalClient:
         data: bytes | None = None,
         headers: dict[str, str] | None = None,
         follow_redirects: bool = True,
-        timeout: float = 5,
+        timeout: float = 30,
     ):
         request_data = data
         request_headers = dict(headers or {})
@@ -66,6 +66,11 @@ class LocalClient:
         if json_body is not None:
             request_data = json.dumps(json_body).encode("utf-8")
             request_headers["Content-Type"] = "application/json"
+        # The 30s default absorbs cold detector/model reloads triggered by an
+        # assign or settings PUT: on a slow dev host such a reload can take
+        # several seconds of wall time before the route responds (observed
+        # >5s under full-suite load), while a genuinely hung server still
+        # fails fast enough to keep the suite bounded.
         # Simulate a real browser: send a same-origin ``Origin`` header so the
         # middleware's same-origin CSRF defence (which rejects mutating /api
         # requests that carry no Origin/Referer) sees a matching origin.
@@ -207,10 +212,17 @@ def _server(app):
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    deadline = time.time() + 5
+    # Full-suite runs (tests + coverage over ~23k app LOC) can push uvicorn
+    # startup past 5s; a too-short deadline makes tests flake on slower hosts
+    # (see the intermittent test_ai_descriptions_search failures). 15s is
+    # still bounded so a genuinely broken server fails fast with a clear
+    # message instead of hanging the suite.
+    deadline = time.time() + 15
     while not server.started and time.time() < deadline:
+        if not thread.is_alive():
+            break
         time.sleep(0.05)
-    assert server.started
+    assert server.started, "uvicorn test server failed to start within 15s"
     return server, thread, f"http://127.0.0.1:{port}"
 
 def _m():
