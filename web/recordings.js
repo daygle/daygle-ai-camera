@@ -38,7 +38,6 @@ function showListError(message) {
 // setApiAuth() (loaded from web/utils.js). Date/time display preferences are
 // also global (window.daygleDatePrefs) and are populated by nav.js from
 // /api/auth/me - no page-local state to maintain.
-let recordingRefreshTimer = null;
 let activeRecording = null;
 let overlayResizeObserver;
 // RECORDINGS_OVERLAY_TOGGLE_KEY (and its siblings TIMELINE_OVERLAY_TOGGLE_KEY
@@ -363,17 +362,6 @@ function wireRecordingLoadMore() {
   setLoadMoreSentinel('recordings', (recordingsPager && !recordingsPager.done) ? sentinel : null, loadMoreRecordings);
 }
 
-// Preparing clips keep the 3s auto-refresh armed; anything else disarms it.
-function scheduleRecordingRefresh() {
-  if (currentRecordings.some((recording) => recording.media_ready === false)) {
-    clearTimeout(recordingRefreshTimer);
-    recordingRefreshTimer = setTimeout(() => loadRecordings(), 3000);
-  } else {
-    clearTimeout(recordingRefreshTimer);
-    recordingRefreshTimer = null;
-  }
-}
-
 // Append one streamed page's visible rows to the painted table. Falls back to
 // a full repaint when appending is unsafe: a custom column sort must re-order
 // the whole loaded set, the empty state has no <tbody>, and a half-painted
@@ -393,7 +381,6 @@ function appendRecordingRows(rows) {
     },
   });
   wireRecordingLoadMore();
-  scheduleRecordingRefresh();
 }
 
 async function loadMoreRecordings() {
@@ -469,7 +456,6 @@ function renderRecordings(recordings) {
       },
     },
   );
-  scheduleRecordingRefresh();
   bindSortHeaders();
   wireRecordingLoadMore();
 }

@@ -4,8 +4,9 @@
 // /api/events describes the clip each row links to in event.recordings, whose
 // media_ready flag is the same one the recordings page disables its Play button
 // on. The row must therefore show the recordings page's disabled
-// "Preparing..." action instead of a link that lands on an unplayable clip, and
-// the feed re-checks on a quiet 3s timer so the action enables itself.
+// "Preparing..." action instead of a link that lands on an unplayable clip.
+// (The 3s auto-refresh that used to re-check the feed was removed, as on the
+// recordings page: it rebuilt the whole list and reset streamed pages.)
 //
 // The page script is evaluated in a vm context with the utils.js helpers it
 // calls stubbed out (as tests/test_clip_timeline.test.js does), so the branch
@@ -135,58 +136,22 @@ test('an event with no recording gets neither action', () => {
   assert.doesNotMatch(html, /Preparing|activity-item-action-play/);
 });
 
-test('the feed re-checks on a quiet 3s timer only while a clip is preparing', async () => {
+test('the feed no longer schedules a re-check timer', () => {
   const sandbox = loadPage();
   sandbox.state.page = { items: [event(21425, false)] };
   setLoadedEvents(sandbox, [event(21425, false)]);
-  vm.runInContext('scheduleEventRefresh();', sandbox);
-  assert.equal(sandbox.timers.length, 1, 'a preparing clip arms the timer');
-  assert.equal(sandbox.timers[0].ms, 3000);
-  assert.equal(vm.runInContext('eventsRefreshTimer !== null', sandbox), true);
-
-  // The timer's callback is the quiet re-check: it refreshes the rows without
-  // blanking them first.
-  await sandbox.timers[0].fn();
-  assert.ok(sandbox.state.pagerUrls.length, 'the re-check re-queries /api/events');
-  assert.ok(
-    !sandbox.feedWrites.some((html) => String(html).includes('Loading events')),
-    'the timer must re-check quietly',
-  );
-
-  // Once every loaded clip is ready the timer disarms. (The quiet reload above
-  // re-armed one, because the page it fetched was still preparing.)
-  const armed = sandbox.timers.length;
-  setLoadedEvents(sandbox, [event(21425, true)]);
-  vm.runInContext('scheduleEventRefresh();', sandbox);
-  assert.equal(sandbox.timers.length, armed, 'a ready-only list schedules nothing');
-  assert.equal(vm.runInContext('eventsRefreshTimer', sandbox), null);
+  // Regression guard: the removal of the 3s preparing-clip auto-refresh (which
+  // rebuilt the whole list and reset streamed pages under the user) must stay
+  // removed - neither the function nor its timer state may reappear.
+  assert.doesNotMatch(source, /scheduleEventRefresh/);
+  assert.doesNotMatch(source, /EVENTS_PREPARING_REFRESH_MS/);
+  assert.equal(sandbox.timers.length, 0, 'no page timer was armed');
 });
 
-test('a quiet reload repaints the rows without the loading placeholder', async () => {
+test('a user-driven load repaints the rows with the loading placeholder', async () => {
   const sandbox = loadPage();
-  sandbox.state.page = { items: [event(21425, false)] };
-  await vm.runInContext('loadEvents({ quiet: true });', sandbox);
-  const quietWrites = sandbox.feedWrites;
-  assert.ok(quietWrites.length, 'the quiet reload still painted');
-  assert.ok(
-    !quietWrites.some((html) => String(html).includes('Loading events')),
-    'a background re-check must not blank the list',
-  );
-  assert.match(String(quietWrites[quietWrites.length - 1]), /<table class="rule-table activity-table"/);
-  assert.ok(
-    sandbox.state.renderedRows.some((html) => html.includes('Preparing...')),
-    'the re-check painted the (still preparing) row',
-  );
-
-  // The user-driven load still shows its placeholder.
-  const sandbox2 = loadPage();
-  sandbox2.state.page = { items: [event(21425, true)] };
-  await vm.runInContext('loadEvents();', sandbox2);
-  assert.match(String(sandbox2.feedWrites[0]), /Loading events/);
-  assert.ok(sandbox2.state.renderedRows.some((html) => html.includes('href="/recordings/21425"')));
-});
-
-test('the events script reads readiness from the payload instead of refetching a clip', () => {
-  assert.match(source, /recording\.media_ready === false/);
-  assert.match(source, /EVENTS_PREPARING_REFRESH_MS = 3000/);
+  sandbox.state.page = { items: [event(21425, true)] };
+  await vm.runInContext('loadEvents();', sandbox);
+  assert.match(String(sandbox.feedWrites[0]), /Loading events/);
+  assert.ok(sandbox.state.renderedRows.some((html) => html.includes('href="/recordings/21425"')));
 });

@@ -48,11 +48,11 @@ let eventsMoreLoading = false;
 // render completed; anything else repaints the whole loaded set instead.
 let eventsRowsReady = false;
 // A clip still being written has no playable media yet. As on the recordings
-// page, the Play action stays disabled ("Preparing...") until the file lands
-// and the feed quietly re-checks on a timer while any loaded event's clip is
-// still preparing, so the action enables itself without a manual reload.
-const EVENTS_PREPARING_REFRESH_MS = 3000;
-let eventsRefreshTimer = null;
+// page, the Play action stays disabled ("Preparing...") until the file lands;
+// reloading the page or changing a filter picks up newly ready clips.
+// (The 3s auto-refresh that used to re-query the feed while a clip was
+// preparing was removed along with the recordings page's: it rebuilt the
+// whole list and reset streamed pages while the user was reading.)
 
 // Click-to-sort column headers re-order the currently loaded list
 // client-side. `null` means the server order (newest first) applies;
@@ -332,17 +332,6 @@ function wireLoadMore() {
   setLoadMoreSentinel('events', (eventsPager && !eventsPager.done) ? sentinel : null, loadMoreEvents);
 }
 
-// While a loaded event's clip is still being prepared, quietly re-fetch the
-// first page every 3s (as the recordings page does) so the disabled Play action
-// becomes a link on its own. The quiet load repaints the rows without the
-// "Loading events…" placeholder or a failure toast.
-function scheduleEventRefresh() {
-  clearTimeout(eventsRefreshTimer);
-  eventsRefreshTimer = allEvents.some(eventRecordingPreparing)
-    ? setTimeout(() => loadEvents({ quiet: true }), EVENTS_PREPARING_REFRESH_MS)
-    : null;
-}
-
 // Append one streamed page's visible rows to the painted table. Falls back to
 // a full repaint when appending is unsafe: a custom column sort must re-order
 // the whole loaded set, the empty state has no <tbody>, and a half-painted
@@ -362,7 +351,6 @@ function appendEventRows(rows) {
     },
   });
   wireLoadMore();
-  scheduleEventRefresh();
 }
 
 async function loadMoreEvents() {
@@ -402,7 +390,6 @@ function renderList() {
       </div>${renderListFooter()}`;
     eventsRowsReady = false;
     wireLoadMore();
-    scheduleEventRefresh();
     return;
   }
   const ordered = eventsSortState
@@ -434,7 +421,6 @@ function renderList() {
   });
   bindSortHeaders();
   wireLoadMore();
-  scheduleEventRefresh();
 }
 
 // ─── Plain-English (AI) search ──────────────────────────────────────────────
@@ -500,14 +486,11 @@ function eventsQueryString(query) {
   return params.toString();
 }
 
-async function loadEvents({ quiet = false } = {}) {
+async function loadEvents() {
   filters?.setNote('');
-  // A quiet re-check (see scheduleEventRefresh) leaves the painted rows in
-  // place while the refresh is in flight.
-  if (els.eventFeed && !quiet) els.eventFeed.innerHTML = '<p class="muted">Loading events…</p>';
+  if (els.eventFeed) els.eventFeed.innerHTML = '<p class="muted">Loading events…</p>';
   // Restore scroll after the full re-render below (renderList() replaces
-  // innerHTML and resets scroll to the top). A quiet refresh still re-renders,
-  // so the guard covers both paths.
+  // innerHTML and resets scroll to the top).
   let scrollTop = 0;
   if (els.eventFeed && typeof els.eventFeed.getBoundingClientRect === 'function') {
     const wrap = els.eventFeed.closest('.cameras-table-wrap');
@@ -526,13 +509,6 @@ async function loadEvents({ quiet = false } = {}) {
     allEvents = page.items;
   } catch (_err) {
     if (session !== eventsLoadSession) return;
-    if (quiet) {
-      // A background re-check must not blank or toast over the list the user is
-      // reading - it just stops re-arming.
-      clearTimeout(eventsRefreshTimer);
-      eventsRefreshTimer = null;
-      return;
-    }
     allEvents = [];
     // The failed stream must not leave the old sentinel wired to a dead pager.
     setLoadMoreSentinel('events', null, loadMoreEvents);
