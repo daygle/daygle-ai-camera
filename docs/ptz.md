@@ -75,7 +75,10 @@ How it behaves:
   right after one the object is looked for where the pan should have put it
   (most of the way to the centre), further afield than usual; otherwise a fast
   camera lost it after every pan and sat still until it was found again.
-  Zones are ignored while following,
+  An object picked through a group (Animal, Pet) is followed under any of the
+  group's labels: an IR-lit cat read as a bird and then a dog stays one
+  target. An object picked by its own label (Person, or Cat on its own) is
+  only followed under that label. Zones are ignored while following,
   because they stop lining up with the scene once the camera has moved.
 - **Steering.** When the object is outside the dead zone, the camera moves
   towards it in a pulse. Both the speed and the length of the pulse grow with

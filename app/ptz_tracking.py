@@ -314,7 +314,7 @@ def _area(detection: dict[str, Any]) -> float:
 
 class _CameraState:
     __slots__ = (
-        'target_label', 'target_track_id', 'last_center', 'last_seen',
+        'target_label', 'target_group', 'target_track_id', 'last_center', 'last_seen',
         'next_command_at', 'paused_until', 'moved_since_home', 'busy', 'state',
         'zoom_in_seconds', 'boost', 'last_error', 'edge_pushes', 'last_steer_at',
         'frame_aspect', 'thumbnail', 'settle', 'steered_since_seen',
@@ -322,6 +322,9 @@ class _CameraState:
 
     def __init__(self) -> None:
         self.target_label: str | None = None
+        # The followed group (``animal``) the target was picked through, if
+        # any: an IR-lit cat read as ``bird`` and then ``dog`` is one target.
+        self.target_group: str | None = None
         self.target_track_id: Any = None
         self.last_center: tuple[float, float] | None = None
         self.last_seen = 0.0
@@ -355,6 +358,7 @@ class _CameraState:
 
     def drop_target(self) -> None:
         self.target_label = None
+        self.target_group = None
         self.target_track_id = None
         self.last_center = None
         self.steered_since_seen = False
@@ -498,13 +502,36 @@ def _move_note(pan: float, tilt: float, zoom: float, duration: float) -> dict[st
     return {'pan': round(pan, 3), 'tilt': round(tilt, 3), 'zoom': round(zoom, 3), 'seconds': round(duration, 2)}
 
 
-def _follow(state: _CameraState, visible: list[dict[str, Any]], *, max_jump: float = MAX_FOLLOW_JUMP) -> dict[str, Any] | None:
+def _follow_group(label: str, labels: list[str]) -> str | None:
+    """The followed group (``animal``) that covers ``label``, if any."""
+    from app.label_groups import cached_label_groups
     from app.zone_schema import canonical_label
 
+    groups = cached_label_groups()
+    for configured in labels:
+        group = canonical_label(configured)
+        if group != label and label in groups.get(group, ()):
+            return group
+    return None
+
+
+def _set_target_label(state: _CameraState, target: dict[str, Any], labels: list[str]) -> None:
+    from app.zone_schema import canonical_label
+
+    state.target_label = canonical_label(target.get('label'))
+    state.target_group = _follow_group(state.target_label, labels)
+
+
+def _follow(state: _CameraState, visible: list[dict[str, Any]], *, max_jump: float = MAX_FOLLOW_JUMP) -> dict[str, Any] | None:
+    from app.zone_schema import canonical_label, label_matches
+
+    # The target's own label, or any label of the group it was picked
+    # through: the detector's label for one animal can change every cycle.
     same_label = [
         det for det in visible
         if isinstance(det, dict)
-        and canonical_label(det.get('label')) == state.target_label
+        and (canonical_label(det.get('label')) == state.target_label
+             or (state.target_group is not None and label_matches(det.get('label'), state.target_group)))
         and _center(det) is not None
     ]
     if state.target_track_id is not None:
@@ -592,8 +619,7 @@ def update_auto_tracking(
         if target is None and state.target_label is None:
             target = _pick_new_target(candidates, settings['labels'])
             if target is not None:
-                from app.zone_schema import canonical_label
-                state.target_label = canonical_label(target.get('label'))
+                _set_target_label(state, target, settings['labels'])
                 note['acquired'] = True
                 logger.info('PTZ auto-track on %s following %s (track %s)', camera_id, state.target_label, target.get('track_id'))
         elif target is not None and target.get('motion_state') == 'still':
@@ -604,8 +630,7 @@ def update_auto_tracking(
                 settings['labels'],
             )
             if mover_target is not None:
-                from app.zone_schema import canonical_label
-                state.target_label = canonical_label(mover_target.get('label'))
+                _set_target_label(state, mover_target, settings['labels'])
                 state.reset_steering()
                 note['acquired'] = True
                 logger.info('PTZ auto-track on %s switched from a still %s to a moving %s (track %s)',
@@ -618,6 +643,10 @@ def update_auto_tracking(
                 # (the same object re-identified, or another one nearby).
                 note['switched_from'] = state.target_track_id
             state.target_track_id = target.get('track_id')
+            if state.target_group is not None:
+                # Its latest label, so status and the loss log name what it was last seen as.
+                from app.zone_schema import canonical_label
+                state.target_label = canonical_label(target.get('label'))
             state.last_center = _center(target)
             state.last_seen = now
             state.state = 'tracking'
