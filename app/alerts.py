@@ -148,6 +148,11 @@ class AlertEngine:
                     'confidence': confidence,
                     'message': f'Alert triggered: {label} detected ({confidence:.2%})'
                 }
+                # A group rule (``animal``) names itself on the notification's
+                # Rule line; the alert keeps the detector's label (``bird``).
+                rule_label = canonical_label(rule.get('object'))
+                if rule_label != label_key and rule_label in cached_label_groups():
+                    alert_entry['rule_label'] = rule_label
                 # Carry the moving/still classification onto the alert so email
                 # and push notifications can report it (see app.alert_formatting).
                 if state in ('moving', 'still'):
@@ -161,9 +166,8 @@ class AlertEngine:
                     # not the detector's label: an IR-lit cat read as ``bird``
                     # is a real animal but not a real bird, and must not be
                     # filtered for the detector's mistake.
-                    group = canonical_label(rule.get('object'))
-                    if group != label_key and group in cached_label_groups():
-                        alert_entry['ai_verify_label'] = group
+                    if 'rule_label' in alert_entry:
+                        alert_entry['ai_verify_label'] = alert_entry['rule_label']
                 alerts.append(alert_entry)
 
         # Evaluate generic motion after all concrete object detections. This

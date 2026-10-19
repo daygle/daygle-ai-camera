@@ -251,6 +251,11 @@ def test_group_rule_verifies_the_group_not_the_misread_label(av, default_groups)
     alerts = AlertEngine(rules).process([{'label': 'bird', 'confidence': 0.8, 'zone_id': 'yard'}], rules)
     by_rule = {alert['rule_name'].rsplit('/', 1)[-1].strip(): alert for alert in alerts}
     assert by_rule['animal']['label'] == 'bird' and by_rule['animal']['ai_verify_label'] == 'animal'
+    # The notification names the rule that fired, not the detector's guess.
+    from app.alert_formatting import build_alert_content
+    assert build_alert_content(by_rule['animal'], event_id=1).rule_display == 'Animal'
+    assert build_alert_content(by_rule['bird'], event_id=1).rule_display == 'Bird'
+    assert 'rule_label' not in by_rule['bird']
     # A rule for the label itself still asks about that label.
     assert 'ai_verify_label' not in by_rule['bird']
     assert av.labels_to_verify(alerts) == ['animal', 'bird']
