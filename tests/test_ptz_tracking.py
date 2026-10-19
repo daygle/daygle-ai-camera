@@ -506,3 +506,40 @@ def test_a_target_that_turns_out_still_is_dropped_for_one_that_moves():
     walker = {**_det('person', 0.8, 0.5, track_id=2), 'motion_state': 'moving'}
     status = _step(camera, 11.0, candidates=[{**car, 'motion_state': 'still'}, walker], mover=mover)
     assert status['label'] == 'person' and status['track_id'] == 2 and status['switched_from'] == 1
+
+
+@pytest.fixture
+def default_groups(monkeypatch):
+    import app.label_groups as label_groups
+    import app.zone_schema as zone_schema
+
+    groups = dict(label_groups.DEFAULT_LABEL_GROUPS)
+    monkeypatch.setattr(label_groups, 'cached_label_groups', lambda: groups)
+    monkeypatch.setattr(zone_schema, 'cached_label_groups', lambda: groups)
+
+
+def test_a_group_target_is_kept_when_its_label_changes(default_groups):
+    # An IR-lit cat read as bird, then dog (recording 26881): following
+    # ``animal`` keeps it as one target instead of losing the bird.
+    mover = _Mover()
+    camera = _camera(labels=['animal', 'person'])
+    status = _step(camera, 10.0, candidates=[_det('bird', 0.8, 0.5, track_id=1)], mover=mover)
+    assert status['label'] == 'bird'
+    status = _step(camera, 11.2, candidates=[], visible=[_det('dog', 0.75, 0.5, track_id=2)], mover=mover)
+    assert status['state'] == 'tracking' and status['track_id'] == 2 and status['label'] == 'dog'
+
+
+def test_a_concrete_target_never_switches_label(default_groups):
+    mover = _Mover()
+    camera = _camera(labels=['cat'])
+    _step(camera, 10.0, candidates=[_det('cat', 0.8, 0.5, track_id=1)], mover=mover)
+    status = _step(camera, 11.2, candidates=[], visible=[_det('dog', 0.75, 0.5, track_id=2)], mover=mover)
+    assert status['track_id'] == 1 and status['label'] == 'cat'
+
+
+def test_a_person_target_never_turns_into_an_animal(default_groups):
+    mover = _Mover()
+    camera = _camera(labels=['animal', 'person'])
+    _step(camera, 10.0, candidates=[_det('person', 0.8, 0.5, track_id=1)], mover=mover)
+    status = _step(camera, 11.2, candidates=[], visible=[_det('bird', 0.75, 0.5, track_id=2)], mover=mover)
+    assert status['track_id'] == 1 and status['label'] == 'person'

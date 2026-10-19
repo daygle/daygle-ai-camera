@@ -121,7 +121,8 @@ def build_alert_content(
             label_val = parts[-1].strip()
     if not label_val:
         label_val = detection_type
-    rule_display = label_val.replace('_', ' ').title()
+    # A group rule (``animal``) fired by a ``bird`` reads "Rule: Animal".
+    rule_display = (str(alert.get('rule_label') or '').strip() or label_val).replace('_', ' ').title()
 
     # Moving/still classification of the alert's detection (see
     # app.object_settings): the state is stamped on the alert by the live
