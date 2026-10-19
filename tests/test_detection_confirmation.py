@@ -62,9 +62,9 @@ def test_two_of_three_confirms_on_second_consecutive_cycle(ds):
 def test_transient_single_frame_label_is_suppressed(ds):
     # A one-off blip that never repeats within the window is never confirmed.
     assert ds.confirm_object_detections('cam-1', [_det('cat')], required_frames=2, window_frames=2) == []
-    # Next cycle sees a DIFFERENT label; the stale 'cat' rolls out of the 2-wide
-    # window and is never confirmed.
-    assert ds.confirm_object_detections('cam-1', [_det('dog')], required_frames=2, window_frames=2) == []
+    # Next cycle sees a DIFFERENT label (not in a group with it); the stale
+    # 'cat' rolls out of the 2-wide window and is never confirmed.
+    assert ds.confirm_object_detections('cam-1', [_det('car')], required_frames=2, window_frames=2) == []
 
 
 def test_labels_are_independent(ds):
@@ -235,3 +235,41 @@ def test_a_confident_detection_skips_confirmation_and_is_marked(ds):
     assert len(second) == 1 and 'confirmed_by' not in second[0]
     # 0 (the default) is off.
     assert ds.confirm_object_detections('cam-skip3', [{**clear}], required_frames=2, window_frames=3) == []
+
+
+@pytest.fixture
+def default_groups(ds, monkeypatch):
+    from app.label_groups import DEFAULT_LABEL_GROUPS
+    monkeypatch.setattr(ds, 'cached_label_groups', lambda: dict(DEFAULT_LABEL_GROUPS))
+
+
+def test_a_cat_read_as_another_animal_confirms_as_one_object(ds, default_groups):
+    # At night an IR-lit cat reads as bird on one cycle and dog on the next
+    # (recording 26881): no label repeats, but it is one animal in one place.
+    assert ds.confirm_object_detections(
+        'cam-1', [_det_at('bird', 0.66, 0.72, 0.05, 0.12)], required_frames=2, window_frames=3) == []
+    out = ds.confirm_object_detections(
+        'cam-1', [_det_at('dog', 0.665, 0.73, 0.04, 0.12)], required_frames=2, window_frames=3)
+    assert [d['label'] for d in out] == ['dog']
+    assert out[0]['confirmed_by'] == 'group'
+    assert ds._history_entry(out[0])['confirmed_by'] == 'group'
+
+
+def test_group_mates_elsewhere_in_the_frame_do_not_confirm(ds, default_groups):
+    # Overlap is required even with the spatial lever off: a bird in one corner
+    # is not the dog in the other.
+    ds.confirm_object_detections('cam-1', [_det_at('bird', 0.0, 0.0)], required_frames=2, window_frames=3)
+    assert ds.confirm_object_detections(
+        'cam-1', [_det_at('dog', 0.8, 0.8)], required_frames=2, window_frames=3) == []
+
+
+def test_labels_outside_a_shared_group_never_confirm_each_other(ds, default_groups):
+    # person is in no group with cat, so a misread person never confirms a cat.
+    ds.confirm_object_detections('cam-1', [_det('person')], required_frames=2, window_frames=3)
+    assert ds.confirm_object_detections('cam-1', [_det('cat')], required_frames=2, window_frames=3) == []
+
+
+def test_no_groups_keeps_labels_independent(ds, monkeypatch):
+    monkeypatch.setattr(ds, 'cached_label_groups', lambda: {})
+    ds.confirm_object_detections('cam-1', [_det('bird')], required_frames=2, window_frames=3)
+    assert ds.confirm_object_detections('cam-1', [_det('dog')], required_frames=2, window_frames=3) == []

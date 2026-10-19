@@ -84,6 +84,7 @@ function describeKeptDetection(detection) {
   if (Number.isInteger(detection?.track_id) && detection.track_id > 0) parts.push(`#${detection.track_id}`);
   if (Number.isInteger(detection?.track_age) && detection.track_age > 0) parts.push(`seen ${detection.track_age}x`);
   if (detection?.confirmed_by === 'confidence') parts.push('confirmed by confidence');
+  if (detection?.confirmed_by === 'group') parts.push('confirmed by label group');
   return parts.join(' · ');
 }
 

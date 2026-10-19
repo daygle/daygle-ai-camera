@@ -41,6 +41,7 @@ from fastapi import HTTPException
 import app.state as _state
 from app.detection_status import GENERIC_TRIGGER_LABELS
 from app.runtime_config import cached_snapshot
+from app.zone_schema import label_matches
 
 logger = logging.getLogger('daygle.ai')
 
@@ -446,6 +447,12 @@ def _is_verifiable(alert: dict[str, Any]) -> bool:
     return not (skip_above < 1.0 and confidence >= skip_above)
 
 
+def _verify_label(alert: dict[str, Any]) -> str:
+    """What the model is asked about for this alert: the rule's group
+    (``animal``) when a group rule matched, else the detected label."""
+    return str(alert.get('ai_verify_label') or alert.get('label') or '').strip().lower()
+
+
 def _alert_confidence(alert: dict[str, Any]) -> float:
     try:
         value = float(alert.get('confidence') or 0.0)
@@ -462,7 +469,7 @@ def labels_to_verify(triggered: list[dict[str, Any]]) -> list[str]:
     )
     labels: list[str] = []
     for alert in ordered:
-        label = str(alert.get('label') or '').strip().lower()
+        label = _verify_label(alert)
         if label not in labels:
             labels.append(label)
     return labels[:MAX_LABELS_PER_EVENT]
@@ -474,11 +481,13 @@ def labels_to_verify(triggered: list[dict[str, Any]]) -> list[str]:
 
 def build_prompt(label: str, camera_name: str = '', source: str = 'An object detector') -> str:
     where = f' from the camera "{camera_name}"' if camera_name else ''
+    # "an animal", not "a animal": a group rule asks about ``animal``.
+    article = 'an' if label[:1].lower() in ('a', 'e', 'i', 'o', 'u') else 'a'
     return (
-        f'{source} reported a "{label}" in this security camera image{where}. '
+        f'{source} reported {article} "{label}" in this security camera image{where}. '
         f'Is a real {label} actually visible? It is NOT a real {label} if it is only a shadow, '
         f'reflection, picture, poster, statue, toy, plant, rubbish bin, or another object that '
-        f'looks like a {label}, or if the image shows nothing clear. '
+        f'looks like {article} {label}, or if the image shows nothing clear. '
         'Reply with JSON exactly like {"present": true, "reason": "short reason"} '
         'with "present" true or false and a reason of at most 15 words.'
     )
@@ -786,13 +795,21 @@ def _note_model_timeout() -> None:
 def model_cooling_down() -> bool:
     return time.monotonic() < _model_cooldown_until
 
+
+def _shows_label(detection: dict[str, Any], label: str) -> bool:
+    """Whether a detection is one of ``label``: the label itself, or a
+    member when ``label`` is a group a rule verifies (``animal``)."""
+    name = str(detection.get('label') or '').strip().lower()
+    return name == label or label_matches(name, label)
+
+
 def _label_box(detections: list[dict[str, Any]], label: str | None) -> tuple[float, float, float, float] | None:
     """Union of this label's boxes (every object's when ``label`` is None),
     in normalized [0, 1] coordinates. Motion boxes are never objects."""
     boxes = []
     for detection in detections or []:
         name = str(detection.get('label') or '').strip().lower()
-        if (label is not None and name != label) or (label is None and name in ('', 'motion')):
+        if (label is not None and not _shows_label(detection, label)) or (label is None and name in ('', 'motion')):
             continue
         try:
             x, y = float(detection['x']), float(detection['y'])
@@ -888,7 +905,7 @@ def _check_image(
     """
     if not settings.get('focus_crop', True):
         return image, False
-    wanted = [d for d in detections if str(d.get('label') or '').strip().lower() in labels]
+    wanted = [d for d in detections if any(_shows_label(d, label) for label in labels)]
     union_crops = _crops(_label_box(wanted, None))
     if not union_crops and any(_crops(_label_box(detections, label)) for label in labels):
         return None
@@ -1213,7 +1230,7 @@ def _verify_and_forward(
         rejected = {label for label, result in record['labels'].items() if result.get('present') is False}
         kept = [
             alert for alert in triggered
-            if not (_is_verifiable(alert) and str(alert.get('label') or '').strip().lower() in rejected)
+            if not (_is_verifiable(alert) and _verify_label(alert) in rejected)
         ]
         # 'filtered' means some label was rejected; whether any alert still
         # went out decides whether the event is described as an alert or as

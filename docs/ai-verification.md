@@ -82,6 +82,13 @@ Alerts at or above this detector confidence are sent without asking the
 model, so it only checks borderline ones. `1`, the default, checks every
 alert. For example, `0.85` checks only alerts below 85%.
 
+An alert from a group rule (`animal`, `pet` or one of your own groups) is
+checked against the group: the model is asked whether a real animal is
+visible, not whether the class the detector reported is. An IR-lit cat that
+the detector read as `bird` is a real animal but not a real bird, so a group
+rule keeps it where a `bird` rule would filter it. A rule for a single class
+still asks about that class.
+
 Dwell ("still for N minutes") alerts are not verified.
 
 ### Model settings

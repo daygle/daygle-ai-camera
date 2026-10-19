@@ -115,6 +115,12 @@ changes the behavior of your existing per-class rules. Pick a group from the
 dropdown lists your current groups by name. Renaming a group also renames it in
 every zone rule, line-crossing rule and Objects-page mode override that uses it.
 
+A group rule with **AI Verify** ticked asks the vision model about the group,
+not the class the detector gave: *"is a real animal visible?"* rather than
+*"is a real bird visible?"* for a cat misread as a bird. Readings of classes in
+the same group, in the same place, also count towards each other for
+[Confirm Frames](motion-detection.md#confirm-frames--confirm-window).
+
 ---
 
 ## Settings

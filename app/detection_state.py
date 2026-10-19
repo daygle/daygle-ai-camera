@@ -82,6 +82,7 @@ from typing import Any
 import app.state as _state
 from app.box_geometry import box_tuple, extent_unstable
 from app.config_facades import effective_live_config
+from app.label_groups import cached_label_groups
 from app.zone_schema import canonical_label
 
 
@@ -122,7 +123,7 @@ def _history_entry(detection: dict[str, Any]) -> dict[str, Any]:
         **({'motion_basis': detection['motion_basis']} if isinstance(detection.get('motion_basis'), str) else {}),
         **({'track_age': detection['track_age']} if isinstance(detection.get('track_age'), int) else {}),
         **({'track_displacement': round(float(detection['track_displacement']), 4)} if isinstance(detection.get('track_displacement'), (int, float)) else {}),
-        **({'confirmed_by': detection['confirmed_by']} if detection.get('confirmed_by') == 'confidence' else {}),
+        **({'confirmed_by': detection['confirmed_by']} if detection.get('confirmed_by') in ('confidence', 'group') else {}),
     }
 
 
@@ -415,6 +416,24 @@ def _box_iou(box_a: Any, box_b: Any) -> float:
     return intersection / union if union > 0 else 0.0
 
 
+# How much a sighting under a different label of the same group (``animal``)
+# must overlap a box to count as the same object for confirmation. Different
+# labels never share a tracker id, so overlap is the only evidence; it is
+# required even when the spatial lever is off, so a bird in one corner never
+# confirms a dog in another.
+GROUP_MATE_MIN_IOU = 0.3
+
+
+def _group_mates(label: str) -> frozenset[str]:
+    """Labels sharing a label group with ``label`` (``cat`` -> dog, bird...)."""
+    mates: set[str] = set()
+    for members in cached_label_groups().values():
+        if label in members:
+            mates.update(members)
+    mates.discard(label)
+    return frozenset(mates)
+
+
 def confirm_object_detections(
     camera_id: str,
     detections: list[dict[str, Any]],
@@ -462,6 +481,14 @@ def confirm_object_detections(
     when the object is only in view for one). It is still recorded in the
     history, and borderline detections are gated as before. A detection let
     through only by it is marked ``confirmed_by: 'confidence'`` for the log.
+
+    Sightings of the same object under another label of one of its label
+    groups count too: at night an IR-lit cat can read as ``person``, then
+    ``bird``, then ``dog`` on successive cycles, and no single label repeats.
+    Such a sighting counts only when its box overlaps this one by
+    ``GROUP_MATE_MIN_IOU`` (or ``location_iou`` if higher) or is the same
+    object drawn at another extent. The detection keeps its own label, and
+    one confirmed only this way is marked ``confirmed_by: 'group'``.
     """
     try:
         skip_at = float(skip_confidence or 0.0)
@@ -564,8 +591,42 @@ def confirm_object_detections(
                         break
         return streak >= required
 
+    def _confirmed_with_mates(label: str, box: Any) -> bool:
+        """How many recent cycles hold this object under its own label or
+        an overlapping one of a label that shares a group with it."""
+        if not isinstance(box, dict):
+            return False
+        mates = _group_mates(label)
+        if not mates:
+            return False
+        current = box_tuple(box)
+        mate_iou = max(loc_iou, GROUP_MATE_MIN_IOU)
+        streak = 0
+        for cycle_labels in history_cycles:
+            matched = False
+            for name, prior_boxes in cycle_labels.items():
+                if name != label and name not in mates:
+                    continue
+                need = loc_iou if name == label else mate_iou
+                for prior in prior_boxes:
+                    previous = box_tuple(prior) if current is not None else None
+                    if _box_iou(box, prior) >= need or (
+                        previous is not None and extent_unstable(current, previous)
+                    ):
+                        matched = True
+                        break
+                if matched:
+                    break
+            if matched:
+                streak += 1
+        return streak >= required
+
     def _keep(detection: dict[str, Any]) -> bool:
         if _gate(detection):
+            return True
+        label = canonical_label(detection.get('label'))
+        if label != 'face' and _confirmed_with_mates(label, detection.get('box')):
+            detection['confirmed_by'] = 'group'
             return True
         if skip_at > 0.0:
             try:
