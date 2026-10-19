@@ -7,6 +7,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import app.state as _state
+from app.label_groups import cached_label_groups
 from app.zone_schema import canonical_label, detection_within_box_limits, label_matches
 
 ALERT_DATETIME_PREFS_TTL_SECONDS = 30.0
@@ -156,6 +157,13 @@ class AlertEngine:
                 if rule.get('ai_verify'):
                     alert_entry['ai_verify'] = True
                     alert_entry['ai_verify_skip_above'] = float(rule.get('ai_verify_skip_above', 1.0))
+                    # A group rule (``animal``) asks the model about the group,
+                    # not the detector's label: an IR-lit cat read as ``bird``
+                    # is a real animal but not a real bird, and must not be
+                    # filtered for the detector's mistake.
+                    group = canonical_label(rule.get('object'))
+                    if group != label_key and group in cached_label_groups():
+                        alert_entry['ai_verify_label'] = group
                 alerts.append(alert_entry)
 
         # Evaluate generic motion after all concrete object detections. This

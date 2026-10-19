@@ -128,3 +128,11 @@ test('kept detections that skipped confirmation say so', () => {
     'moving (mask) · #9 · seen 1x · confirmed by confidence',
   );
 });
+
+test('kept detections confirmed through a label group say so', () => {
+  const log = load();
+  assert.equal(
+    log.describeKeptDetection({ label: 'dog', motion_state: 'moving', motion_basis: 'mask', track_id: 12, track_age: 1, confirmed_by: 'group' }),
+    'moving (mask) · #12 · seen 1x · confirmed by label group',
+  );
+});

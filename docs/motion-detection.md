@@ -534,6 +534,17 @@ example a fast car whose first box was judged still and dropped by Moving
 Only). A car that crosses the frame in three checks would otherwise lose one
 of them and could go unconfirmed.
 
+Sightings of the same object under another label of a shared
+[label group](ai-detection.md#umbrella-group-labels) count towards each other. At night an IR-lit cat can read as
+`person`, then `bird`, then `dog` on successive checks, so no single label
+repeats. A `bird` and then a `dog` in the same place (boxes overlapping by at
+least 30%, or by Confirm Location if that is higher) now confirm as one object,
+because both are in the `animal` group. The detection keeps the label it
+was given on that check. Labels that share no group (a `person` and a `cat`)
+never count towards each other, and a group member elsewhere in the frame
+never counts. In a recording's **Detection Log**, an object confirmed this way
+reads *confirmed by label group*.
+
 **Default: `1` / `1`** (single-frame response). This minimizes first-alert latency
 for people entering view. Set Confirm Frames to `2` and Confirm Window to `3` to
 filter one-frame false positives; that adds roughly 0.5-1s at the default

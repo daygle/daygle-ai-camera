@@ -223,6 +223,47 @@ def test_ticked_rule_marks_the_alerts_it_fires(av):
     assert av.labels_to_verify(alerts) == ['person']
 
 
+@pytest.fixture
+def default_groups(monkeypatch):
+    import app.alerts as alerts
+    import app.zone_schema as zone_schema
+    from app.label_groups import DEFAULT_LABEL_GROUPS
+
+    for module in (alerts, zone_schema):
+        monkeypatch.setattr(module, 'cached_label_groups', lambda: dict(DEFAULT_LABEL_GROUPS))
+
+
+def test_group_rule_verifies_the_group_not_the_misread_label(av, default_groups):
+    # An IR-lit cat read as "bird" (recording 26881) is a real animal but not
+    # a real bird: an ``animal`` rule must ask about animals.
+    from app.alerts import AlertEngine
+    from app.zone_detection import zone_object_alert_rules
+
+    def rule(label):
+        return {'label': label, 'min_confidence': 0.3, 'cooldown_seconds': 0, 'ai_verify': True,
+                'alert_schedules': [{'email_enabled': True}]}
+
+    settings = {'id': 'cam', 'name': 'Cam', 'detection': {'zones': [{
+        'id': 'yard', 'name': 'Yard', 'enabled': True, 'monitor_objects': True,
+        'object_rules': [rule('animal'), rule('bird')],
+    }]}}
+    rules = zone_object_alert_rules(settings)
+    alerts = AlertEngine(rules).process([{'label': 'bird', 'confidence': 0.8, 'zone_id': 'yard'}], rules)
+    by_rule = {alert['rule_name'].rsplit('/', 1)[-1].strip(): alert for alert in alerts}
+    assert by_rule['animal']['label'] == 'bird' and by_rule['animal']['ai_verify_label'] == 'animal'
+    # A rule for the label itself still asks about that label.
+    assert 'ai_verify_label' not in by_rule['bird']
+    assert av.labels_to_verify(alerts) == ['animal', 'bird']
+
+
+def test_group_prompt_and_close_up_use_the_group(av, default_groups):
+    assert 'an "animal"' in av.build_prompt('animal') and 'like an animal' in av.build_prompt('animal')
+    assert 'a "person"' in av.build_prompt('person')
+    detections = [{'label': 'dog', 'x': 0.6, 'y': 0.7, 'width': 0.04, 'height': 0.12},
+                  {'label': 'car', 'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.3}]
+    assert av._label_box(detections, 'animal') == pytest.approx((0.6, 0.7, 0.64, 0.82))
+
+
 # ---------------------------------------------------------------------------
 # Verify-and-forward flow
 # ---------------------------------------------------------------------------
@@ -840,3 +881,18 @@ def test_client_check_sends_one_request(av):
             {'person': (True, 'walking')}, ('', ['bag']))
     assert len(server.requests) == 1
     assert '"checks"' in server.requests[0]['messages'][1]['content'][0]['text']
+
+
+def test_group_alert_is_kept_when_the_group_is_confirmed(av, flow, default_groups, monkeypatch):
+    configure, forwarded = flow
+    answers = {'animal': (True, 'a cat beside the van'), 'bird': (False, 'it is a cat')}
+    db = configure(answers)
+    monkeypatch.setattr(av.VisionVerifier, 'check',
+                        lambda _self, _image, labels, *_a, **_k: ({label: answers[label] for label in labels}, None))
+    animal = _alert('bird', 0.8, ai_verify_label='animal', rule_name='A')
+    bird = _alert('bird', 0.8, rule_name='B')
+    av.verify_and_forward([animal, bird], 10, [], 'Driveway')
+    # Each alert is judged by its own question.
+    assert forwarded == [[animal]]
+    labels = db.metadata[10]['ai_verification']['labels']
+    assert labels['animal']['present'] is True and labels['bird']['present'] is False
