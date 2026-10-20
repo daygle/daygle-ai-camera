@@ -26,6 +26,11 @@ Rising above one object of a key must hold for
 two boxes on one cat for a single frame does not alert a "second cat". The
 first object fires on first sight (the detector's own confirmation, if
 enabled, already applied).
+
+An object whose alert AI verification rejected gets one re-check while it stays
+on record (``reopen_rejected``): the first frame of a person at the edge of the view can
+be too poor for the model, and without a re-check the rejected verdict would
+cover everything of that type for the rest of the clip.
 """
 from __future__ import annotations
 
@@ -94,6 +99,32 @@ def observe_presence(
                 entry['pending_cycles'] = 0
                 new.add(key)
     return new
+
+
+def reopen_rejected(camera_id: str, labels: set[str], *, recording_id: int | None = None) -> set[str]:
+    """Let keys whose alert AI verification rejected raise one more event.
+
+    The next sighting of such a key is new again, so it opens its own event and
+    is verified on a fresh frame. Each key is reopened once while it stays on
+    record: a second rejection stands, so a bush the detector keeps calling a
+    person costs one extra check, not one per cycle. ``recording_id`` is the
+    rejected event's clip; a key now tied to another clip is a later sighting
+    with its own event and is left alone. Returns the keys reopened.
+    """
+    reopened: set[str] = set()
+    with _state.live_event_presence_lock:
+        scope = _state.live_event_presence.get(camera_id) or {}
+        for key in labels:
+            entry = scope.get(key)
+            if entry is None or entry.get('reopened'):
+                continue
+            if recording_id is not None and entry.get('recording_id') not in (None, recording_id):
+                continue
+            entry['high'] = 0
+            entry['pending_cycles'] = 0
+            entry['reopened'] = True
+            reopened.add(key)
+    return reopened
 
 
 def drop_covered_motion(camera_id: str, new: set[str]) -> set[str]:

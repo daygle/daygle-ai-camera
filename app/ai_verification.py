@@ -1242,6 +1242,8 @@ def _verify_and_forward(
                 'AI verification filtered event %s (%s): %s', event_id, ', '.join(sorted(rejected)),
                 '; '.join(f"{label}: {record['labels'][label].get('reason') or 'not present'}" for label in sorted(rejected)),
             )
+        if rejected and camera_id is not None:
+            _reopen_rejected(camera_id, triggered, kept, event)
         for label, result in record['labels'].items():
             if result.get('error'):
                 logger.warning('AI verification unavailable for event %s (%s): %s; alert delivered unverified.',
@@ -1262,6 +1264,27 @@ def _verify_and_forward(
             # now and the catch-up tags the event once the model is idle.
             start_description_catch_up()
     _forward(kept, event_id, rules)
+
+
+def _reopen_rejected(camera_id: Any, triggered: list[dict[str, Any]], kept: list[dict[str, Any]],
+                     event: dict[str, Any]) -> None:
+    """Give the rejected objects one re-check: their next sighting opens a new
+    event instead of being covered by this filtered one."""
+    from app.event_presence import reopen_rejected
+
+    def detected(alerts: list[dict[str, Any]]) -> set[str]:
+        return {str(alert.get('label') or '').strip().lower() for alert in alerts} - {''}
+
+    # The presence gate counts detected labels, not a group rule's label.
+    labels = detected([alert for alert in triggered if alert not in kept]) - detected(kept)
+    try:
+        reopened = reopen_rejected(str(camera_id), labels, recording_id=event.get('recording_id'))
+    except Exception:  # noqa: BLE001 - the verdict is recorded; a re-check is optional
+        logger.exception('Could not reopen rejected labels for event %s', event.get('id'))
+        return
+    if reopened:
+        logger.info('AI verification will re-check %s on its next sighting on camera %s',
+                    ', '.join(sorted(reopened)), camera_id)
 
 
 def describe_only(event_id: int, camera_name: str = '', camera_id: Any = None) -> None:

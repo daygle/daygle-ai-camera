@@ -307,6 +307,11 @@ same events in search as in the Events list.
 - Each event checks at most three distinct labels, strongest alert first.
 - If the model rejects one label but confirms another, only the rejected
   label's alerts are dropped. Face alerts on the same event are always sent.
+- A rejected label gets one re-check: its next sighting, even in the same
+  clip, opens a new event and is verified on that frame. This catches a real
+  person whose first detection was a poor frame (a small box at the edge of
+  the view). If the re-check is also rejected, the label stays covered until
+  it leaves the view, so a persistent false positive costs one extra check.
 - If a job waits in the queue longer than `max(60 s, 3 × timeout)`, it is sent
   unverified. Late alerts are not delayed further.
 - The verdict is stored in the event's metadata under `ai_verification`, with
