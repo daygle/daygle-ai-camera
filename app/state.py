@@ -203,6 +203,10 @@ _frame_motion_mog2_meta: dict = {}
 # scene change; see ``_MOTION_SCENE_RESET_FRAMES``.
 # codeql[py/unused-global-variable]
 _frame_motion_scene_streak: dict = {}
+# Per-camera shadow-inclusive MOG2 mask for the frame just measured, set only
+# when shadow suppression is on (see ``shadow_inclusive_motion_mask``).
+# codeql[py/unused-global-variable]
+_frame_motion_shadow_mask: dict = {}
 # PTZ / camera-motion state. ``command_until`` covers movement initiated by the
 # application; ``auto_until`` is refreshed by the frame-wide motion heuristic so
 # cameras that auto-track independently of the application are covered too.

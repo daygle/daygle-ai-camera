@@ -198,6 +198,7 @@ def _cleanup_camera_runtime_state(removed_ids: set[str]) -> None:
             _state._frame_motion_mog2.pop(cam_id, None)
             _state._frame_motion_mog2_meta.pop(cam_id, None)
             _state._frame_motion_scene_streak.pop(cam_id, None)
+            _state._frame_motion_shadow_mask.pop(cam_id, None)
             _state._frame_motion_error_cameras.discard(cam_id)
     # Also drop the per-camera motion-gate log throttle so a deleted camera
     # cannot leak its entry (and its timestamp) for the life of the process.

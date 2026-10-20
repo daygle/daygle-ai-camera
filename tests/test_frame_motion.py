@@ -406,6 +406,38 @@ def test_mog2_shadow_suppression_drops_cast_shadow_but_not_brightness_change():
     assert foreground_mask is not None and np.any(foreground_mask)
 
 
+def test_shadow_inclusive_mask_keeps_what_shadow_suppression_drops():
+    """A dark subject over a lighter background reads as MOG2 shadow, so
+    suppression drops it from the motion mask. The shadow-inclusive mask kept
+    beside it still holds those pixels (for continuing an active clip); it is
+    only set when suppression applied, and cleared on every other frame."""
+    cam = "mog2-shadow-inclusive"
+    for state in (st._frame_motion_mog2, st._frame_motion_mog2_meta,
+                  st._frame_motion_scene_streak, st._frame_motion_shadow_mask):
+        state.pop(cam, None)
+    base = np.full((240, 320, 3), 200, dtype=np.uint8)
+    dark_car = base.copy()
+    dark_car[60:190, 50:260] = 105
+    for _ in range(5):
+        ds.detect_frame_motion(cam, base, denoise=False, shadow_suppression='on')
+
+    _has, _conf, mask, fraction = ds.detect_frame_motion(
+        cam, dark_car, denoise=False, shadow_suppression='on',
+    )
+    assert fraction == 0.0 and not np.any(mask)
+    shadow_mask = ds.shadow_inclusive_motion_mask(cam)
+    assert shadow_mask is not None and float(np.mean(shadow_mask)) > 0.05
+
+    # Suppression off: the regular mask already is the whole signal.
+    ds.detect_frame_motion(cam, dark_car, denoise=False, shadow_suppression='off')
+    assert ds.shadow_inclusive_motion_mask(cam) is None
+    # The diff engine has no shadow class and never leaves a stale mask.
+    ds.detect_frame_motion(cam, dark_car, algorithm='diff')
+    assert ds.shadow_inclusive_motion_mask(cam) is None
+    ds.clear_frame_motion_state(cam)
+    assert cam not in st._frame_motion_shadow_mask
+
+
 def test_mog2_denoise_removes_isolated_speckle():
     """With denoise on, a lone single-pixel change is erased from the mask;
     with denoise off the same speckle survives. Proves the morphological open

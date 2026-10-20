@@ -10,6 +10,8 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from app.motion_object_priority import MotionObjectArbiter, object_zone_keys
 from tests.support import _load_app, _m
 
@@ -188,6 +190,63 @@ def test_motion_beside_a_lingering_car_makes_no_motion_event(tmp_path, monkeypat
     cycle(9.0, motion=spill)      # tail-light glow as it leaves
     cycle(13.0)
     assert [event['id'] for event in main.database.search_events(limit=10)] == [event_id]
+
+
+def _shadow_motion_only(mods, monkeypatch):
+    """Motion the regular mask lost to shadow suppression: only the
+    shadow-inclusive mask clears the zone trigger."""
+    shadow_mask = object()
+    monkeypatch.setattr(mods.live_monitor, 'shadow_inclusive_motion_mask', lambda _cam: shadow_mask)
+    monkeypatch.setattr(mods.live_monitor, 'detect_frame_motion', lambda *_a, **_k: (False, 0.0, 'mask', 0.0))
+
+    def zone_motion(_settings, _confidence, *, diff_mask=None, **_kwargs):
+        return [dict(MOTION)] if diff_mask is shadow_mask else []
+
+    monkeypatch.setattr(mods.live_monitor, 'zone_motion_detections', zone_motion)
+
+
+def test_shadow_classed_motion_continues_an_active_clip(tmp_path, monkeypatch):
+    # Recording 27613: a dark-blue van reversing down a grey driveway was
+    # classed as shadow, so the motion mask lost it a second after it started
+    # moving and the clip ended 30s after that, with the van still in view.
+    from datetime import datetime, timezone
+
+    main, cycle, _labels, base = _pipeline(tmp_path, monkeypatch)
+    mods = _m()
+    config = {'pre_event_seconds': 5, 'post_event_seconds': 30,
+              'extension_step_seconds': 45, 'max_clip_seconds': 300}
+    monkeypatch.setattr(main._state, 'camera_event_recording_config', lambda _settings: config)
+    recording_id = main.database.add_recording(
+        event_id=None, camera_id='cam-night',
+        started_at=datetime.fromtimestamp(base - 10, timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(base + 10, timezone.utc).isoformat(),
+        duration_seconds=20, file_path=str(tmp_path / 'active.mp4'),
+        thumbnail_path=None, source='rtsp', created_at=main.utc_now(),
+    )
+    main._state.active_rtsp_recordings['cam-night'] = {
+        'recording_id': recording_id,
+        'start_capture_ts': base - 10,
+        'capture_deadline_ts': base + 10,
+        'max_capture_deadline_ts': base + 300,
+        'original_deadline_ts': base + 10,
+        'extension_runs': [],
+    }
+    _shadow_motion_only(mods, monkeypatch)
+
+    assert cycle(11.8) is None
+    session = main._state.active_rtsp_recordings['cam-night']
+    assert session['capture_deadline_ts'] == pytest.approx(base + 41.8)
+    assert [run['reason'] for run in session['extension_runs']] == ['motion']
+    assert main.database.search_events(limit=10) == []
+
+
+def test_shadow_classed_motion_never_starts_a_clip_or_event(tmp_path, monkeypatch):
+    main, cycle, _labels, _base = _pipeline(tmp_path, monkeypatch)
+    _shadow_motion_only(_m(), monkeypatch)
+    for offset in (0.0, 1.0, 4.0, 8.0):
+        assert cycle(offset) is None
+    assert 'cam-night' not in main._state.active_rtsp_recordings
+    assert main.database.search_events(limit=10) == []
 
 
 def test_shipped_default_holds_motion_for_three_seconds():

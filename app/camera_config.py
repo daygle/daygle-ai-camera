@@ -210,6 +210,7 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
             '_frame_motion_mog2',
             '_frame_motion_mog2_meta',
             '_frame_motion_scene_streak',
+            '_frame_motion_shadow_mask',
         ):
             mapping = getattr(_state, mapping_name)
             if old_id in mapping:

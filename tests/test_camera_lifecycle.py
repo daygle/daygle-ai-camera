@@ -111,6 +111,7 @@ def test_cleanup_camera_runtime_state_removes_all_dicts(state):
     state._frame_motion_mog2['cam-old'] = 'mog2'
     state._frame_motion_mog2_meta['cam-old'] = ('sig',)
     state._frame_motion_scene_streak['cam-old'] = 3
+    state._frame_motion_shadow_mask['cam-old'] = object()
     state._frame_motion_error_cameras.add('cam-old')
     with state._live_backoff_lock:
         state.live_detection_retry_after['cam-old'] = 999.0
@@ -145,6 +146,7 @@ def test_cleanup_camera_runtime_state_removes_all_dicts(state):
     assert 'cam-old' not in state._frame_motion_mog2
     assert 'cam-old' not in state._frame_motion_mog2_meta
     assert 'cam-old' not in state._frame_motion_scene_streak
+    assert 'cam-old' not in state._frame_motion_shadow_mask
     assert 'cam-old' not in state._frame_motion_error_cameras
     assert 'cam-old' not in state.live_detection_retry_after
     assert 'cam-old' not in state.live_detection_failure_count
