@@ -863,6 +863,66 @@ def test_unreachable_model_is_not_asked_again_per_label(av, combined):
     assert db.metadata[24]['ai_verification']['status'] == 'error'
 
 
+def test_unavailable_model_is_not_asked_to_describe_either(av, combined):
+    """A timed-out check must not hold the alert for a second timeout on the
+    description: it goes out now and the catch-up describes the event."""
+    configure, forwarded, calls, catch_ups = combined
+    db = configure(check=av.ModelUnavailableError('model did not answer within 20s (busy or slow)'),
+                   describe_alerts='both')
+    triggered = [_alert('person', 0.6)]
+    av.verify_and_forward(triggered, 27, [], '', camera_id='cam')
+    assert calls == [('check', ('person',), 'both')]
+    assert forwarded == [triggered] and catch_ups == [True]
+    assert '_model_unavailable' not in db.metadata[27]['ai_verification']
+
+
+def _far_apart(av, monkeypatch, answers):
+    """Two small objects at opposite edges: each label is asked on its own."""
+    monkeypatch.setattr(av, '_read_snapshot', lambda _event: b'jpeg')
+    monkeypatch.setattr(av, 'focus_image', lambda image, _detections, _label: image)
+    asked: list[str] = []
+
+    class Verifier:
+        def ask(self, _image, label, _camera=''):
+            asked.append(label)
+            answer = answers[label]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+    event = {'snapshot_path': 'x.jpg', 'detections': [
+        {'label': 'person', 'x': 0.0, 'y': 0.4, 'width': 0.05, 'height': 0.1},
+        {'label': 'car', 'x': 0.95, 'y': 0.4, 'width': 0.05, 'height': 0.1},
+    ]}
+    record, _ = av.verify_and_describe_event(event, ['person', 'car'], _settings(av), verifier=Verifier())
+    return record, asked
+
+
+def test_per_label_checks_stop_once_the_model_is_unavailable(av, monkeypatch):
+    record, asked = _far_apart(av, monkeypatch, {
+        'person': av.ModelUnavailableError('model did not answer within 20s (busy or slow)'),
+        'car': (True, 'a car'),
+    })
+    assert asked == ['person']
+    assert record['labels']['car'] == {'present': None, 'error': 'model did not answer within 20s (busy or slow)'}
+    assert record['status'] == 'error' and record['_model_unavailable'] is True
+
+
+def test_per_label_checks_go_on_after_an_unparseable_reply(av, monkeypatch):
+    record, asked = _far_apart(av, monkeypatch, {
+        'person': av.VerificationError("unrecognised model reply: 'maybe'"),
+        'car': (False, 'a shadow'),
+    })
+    assert asked == ['person', 'car']
+    assert record['status'] == 'filtered' and '_model_unavailable' not in record
+
+
+def test_reply_with_braces_in_trailing_prose_is_still_read(av):
+    reply = '{"checks": {"person": {"present": false, "reason": "a coat"}}} Note: {uncertain}'
+    verdicts, _ = av.parse_check_reply(reply, ['person'])
+    assert verdicts == {'person': (False, 'a coat')}
+
+
 def test_all_rejected_in_alerts_mode_stores_no_description(av, combined):
     configure, forwarded, calls, _ = combined
     db = configure(check=({'person': (False, 'shadow')}, ('Nothing notable.', [])), describe_alerts='both')
