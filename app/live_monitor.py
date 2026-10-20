@@ -114,6 +114,7 @@ from app.event_debounce import (
     schedule_live_camera_backoff,
 )
 from app.event_presence import absence_seconds, bind_presence_recording, drop_covered_motion, observe_presence
+from app.overlap_suppression import drop_people_boxed_as_animals, overlap_reason
 from app.recording_extension import (
     _make_continuous_chunk_callback,
     active_recording_id,
@@ -1534,6 +1535,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Unwatched labels are filtered out of the log below, so a drop here that
     # reaches the log is a watched object outside the zones watching it.
     _note_dropped(detections, object_detections, lambda det: f"Outside the zones watching {det.get('label')}")
+    # A person box drawn on an animal the detector also boxed is that animal:
+    # drop it before it can be confirmed or alert. Every box this cycle is the
+    # evidence, so an animal no zone watches still explains it.
+    _before_overlap = object_detections
+    object_detections = drop_people_boxed_as_animals(object_detections, detections)
+    _note_dropped(_before_overlap, object_detections, lambda det: overlap_reason(det, detections))
     _telemetry_candidates['after_camera_filter'] = len(object_detections)
     _telemetry_rejected[REJECT_CAMERA_SCOPE] = max(
         0, _camera_scope_input - len(object_detections),

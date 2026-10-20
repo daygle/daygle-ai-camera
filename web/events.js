@@ -201,7 +201,7 @@ function aiVerificationBadge(event) {
   const record = (event.metadata || {}).ai_verification;
   if (!record || (record.status !== 'filtered' && record.status !== 'confirmed')) return '';
   const details = Object.entries(record.labels || {})
-    .map(([label, value]) => `${label}: ${value.present === false ? 'not present' : value.present ? 'confirmed' : 'unchecked'}${value.reason ? ` (${value.reason})` : ''}`)
+    .map(([label, value]) => `${label}: ${value.present === false ? 'not present' : value.present ? 'confirmed' : 'unchecked'}${value.reason ? ` (${value.reason})` : ''}${value.instead ? `, looks like a ${value.instead}` : ''}`)
     .join('; ');
   const filtered = record.status === 'filtered';
   // A filtered event can still notify when another of its alerts passed.

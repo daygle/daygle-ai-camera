@@ -1003,3 +1003,140 @@ def test_group_alert_is_kept_when_the_group_is_confirmed(av, flow, default_group
     assert forwarded == [[animal]]
     labels = db.metadata[10]['ai_verification']['labels']
     assert labels['animal']['present'] is True and labels['bird']['present'] is False
+
+
+# ---------------------------------------------------------------------------
+# AI relabel: a rejected alert's object raises the alert it really is
+# ---------------------------------------------------------------------------
+
+_YARD_RULES = [
+    {'name': 'Yard / person', 'object': 'person', 'zone_id': 'yard', 'enabled': True, 'push_enabled': True,
+     'ai_verify': True},
+    {'name': 'Yard / cat', 'object': 'cat', 'zone_id': 'yard', 'enabled': True, 'push_enabled': True},
+    {'name': 'Yard / dog (no delivery)', 'object': 'dog', 'zone_id': 'yard', 'enabled': True},
+    {'name': 'Gate / bird', 'object': 'bird', 'zone_id': 'gate', 'enabled': True, 'push_enabled': True},
+]
+
+
+def test_relabel_question_is_asked_only_with_candidates(av):
+    assert 'instead' not in av.build_prompt('person')
+    prompt = av.build_prompt('person', candidates=['cat', 'dog'])
+    assert '"instead": "none"' in prompt and '"cat", "dog"' in prompt
+    assert 'instead' in av.build_check_prompt(['person', 'car'], candidates=['cat'])
+    assert 'instead' not in av.build_check_prompt(['person', 'car'])
+
+
+@pytest.mark.parametrize(('reply', 'expected'), [
+    ('{"present": false, "reason": "a cat", "instead": "Cat"}', (False, 'a cat', 'cat')),
+    ('{"present": false, "reason": "a shadow", "instead": "none"}', (False, 'a shadow', None)),
+    # Only a listed candidate, and only on a rejection.
+    ('{"present": false, "reason": "a fox", "instead": "fox"}', (False, 'a fox', None)),
+    ('{"present": true, "reason": "a person", "instead": "cat"}', (True, 'a person', None)),
+    ('No, it is a cat.', (False, 'it is a cat.', None)),
+])
+def test_verdict_reads_the_relabel(av, reply, expected):
+    assert av.parse_verdict(reply, ['cat', 'dog']) == expected
+    assert av.parse_verdict(reply)[:2] == expected[:2] and len(av.parse_verdict(reply)) == 2
+
+
+def test_combined_reply_reads_the_relabel_per_label(av):
+    reply = ('{"checks": {"person": {"present": false, "reason": "a cat", "instead": "cat"},'
+             ' "car": {"present": false, "reason": "a bin", "instead": "cat"}}}')
+    verdicts, _ = av.parse_check_reply(reply, ['person', 'car'], candidates={'person': ['cat']})
+    assert verdicts == {'person': (False, 'a cat', 'cat'), 'car': (False, 'a bin')}
+
+
+def test_candidates_are_the_other_notifying_rules_in_the_alerts_zone(av):
+    from app.ai_relabel import relabel_candidates
+    triggered = [_alert('person', 0.6, rule_name='Yard / person')]
+    assert relabel_candidates(triggered, ['person'], _YARD_RULES) == {'person': ['cat']}
+    assert relabel_candidates(triggered, ['person'], _YARD_RULES[:1]) == {}
+
+
+@pytest.fixture
+def relabel(av, monkeypatch):
+    dispatch = importlib.import_module('app.alert_dispatch')
+    forwarded: list[list[dict]] = []
+    monkeypatch.setattr(dispatch, 'submit_alert_notification',
+                        lambda _fn, triggered, _event_id, _rules: forwarded.append(list(triggered)) or True)
+    monkeypatch.setattr(av, '_read_snapshot', lambda _event: b'jpeg')
+    av._state.live_event_presence.clear()
+
+    class Db(_FakeDb):
+        def __init__(self, settings, detections):
+            super().__init__(settings)
+            self.detections = detections
+            self.alerts: list[dict] = []
+
+        def get_event(self, event_id):
+            return {'id': event_id, 'snapshot_path': 'x.jpg', 'detections': self.detections, 'recording_id': 5}
+
+        def add_alert(self, **row):
+            self.alerts.append(row)
+
+        def mark_event_alert_triggered(self, _event_id):
+            return True
+
+    def configure(answer, detections=None):
+        detections = detections if detections is not None else [
+            {'label': 'person', 'confidence': 0.43, 'x': 0.86, 'y': 0.61, 'width': 0.06, 'height': 0.07}]
+        db = Db(_settings(av), detections)
+        monkeypatch.setattr(av._state, 'database', db)
+        asked: list[list | None] = []
+
+        def ask(_self, _image, _label, _camera='', **kw):
+            asked.append(kw.get('candidates'))
+            return answer if kw.get('candidates') else answer[:2]
+
+        monkeypatch.setattr(av.VisionVerifier, 'ask', ask)
+        return db, asked
+
+    yield configure, forwarded
+    av._state.live_event_presence.clear()
+
+
+def test_rejected_person_the_model_calls_a_cat_fires_the_cat_rule(av, relabel):
+    configure, forwarded = relabel
+    db, asked = configure((False, 'a cat on the drive', 'cat'))
+    triggered = [_alert('person', 0.43, rule_name='Yard / person')]
+    av.verify_and_forward(triggered, 30, _YARD_RULES, 'Driveway', camera_id='cam')
+    assert asked == [['cat']]
+    [[alert]] = forwarded
+    assert alert['label'] == 'cat' and alert['rule_name'] == 'Yard / cat'
+    assert alert['ai_relabel_from'] == 'person' and alert['confidence'] == 0.43
+    assert [row['rule_name'] for row in db.alerts] == ['Yard / cat'] and db.alerts[0]['recording_id'] == 5
+    record = db.metadata[30]['ai_verification']
+    assert record['labels']['person']['instead'] == 'cat' and record['delivered'] is True
+    # Known to be a cat now: the person is not re-checked on its next sighting.
+    assert av._state.live_event_presence['cam']['cat']['high'] == 1
+
+
+def test_relabelled_cat_alerts_once_while_it_stays(av, relabel):
+    configure, forwarded = relabel
+    configure((False, 'a cat', 'cat'))
+    triggered = [_alert('person', 0.43, rule_name='Yard / person')]
+    av.verify_and_forward(triggered, 31, _YARD_RULES, '', camera_id='cam')
+    av.verify_and_forward(triggered, 32, _YARD_RULES, '', camera_id='cam')
+    assert [[alert['label'] for alert in batch] for batch in forwarded] == [['cat']]
+
+
+def test_no_relabel_when_the_detector_already_reported_it(av, relabel):
+    """The driveway snapshot: cat 85% and person 68% on one object. The cat's
+    own rules already ran; the relabel must not alert it a second time."""
+    configure, forwarded = relabel
+    db, _asked = configure((False, 'a cat', 'cat'), detections=[
+        {'label': 'cat', 'confidence': 0.85, 'x': 0.42, 'y': 0.46, 'width': 0.09, 'height': 0.04},
+        {'label': 'person', 'confidence': 0.68, 'x': 0.42, 'y': 0.46, 'width': 0.09, 'height': 0.06},
+    ])
+    av.verify_and_forward([_alert('person', 0.68, rule_name='Yard / person')], 33, _YARD_RULES, '',
+                          camera_id='cam')
+    assert forwarded == [] and db.alerts == []
+
+
+def test_relabel_to_none_filters_as_before(av, relabel):
+    configure, forwarded = relabel
+    db, _asked = configure((False, 'a shadow', None))
+    av.verify_and_forward([_alert('person', 0.43, rule_name='Yard / person')], 34, _YARD_RULES, '',
+                          camera_id='cam')
+    assert forwarded == [] and db.alerts == []
+    assert 'instead' not in db.metadata[34]['ai_verification']['labels']['person']
