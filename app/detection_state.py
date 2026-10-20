@@ -784,7 +784,18 @@ def clear_frame_motion_state(camera_id: str) -> None:
         _state._frame_motion_mog2.pop(camera_id, None)
         _state._frame_motion_mog2_meta.pop(camera_id, None)
         _state._frame_motion_scene_streak.pop(camera_id, None)
+        _state._frame_motion_shadow_mask.pop(camera_id, None)
         _state._frame_motion_error_cameras.discard(camera_id)
+
+
+def shadow_inclusive_motion_mask(camera_id: str) -> Any:
+    """The last frame's MOG2 mask with shadow-class pixels kept, or ``None``.
+
+    Only set when shadow suppression dropped pixels from that frame's mask, so
+    ``None`` means the regular diff mask already is the whole signal.
+    """
+    with frame_motion_lock(camera_id):
+        return _state._frame_motion_shadow_mask.get(camera_id)
 
 
 # MOG2 varThreshold is expressed on the squared Mahalanobis distance; keep it in
@@ -963,6 +974,15 @@ def _detect_frame_motion_mog2(
         if denoise:
             mask = _denoise_mask(mask)
         changed_fraction = float(np.mean(mask))
+        # The shadow test also matches a dark subject over a lighter background
+        # (a dark-blue car on grey concrete), so suppression can erase a car
+        # that is plainly moving. Keep the shadow-inclusive mask beside the
+        # regular one: it may continue a clip already recording, never start one.
+        shadow_inclusive = None
+        if shadow_on:
+            shadow_inclusive = raw >= 127
+            if denoise:
+                shadow_inclusive = _denoise_mask(shadow_inclusive)
 
         # A single >=50% frame is AMBIGUOUS: it could be a camera-wide light
         # change (exposure jump / IR cut / reconnect) OR a large object sweeping
@@ -992,6 +1012,8 @@ def _detect_frame_motion_mog2(
             # background in a frame or two because it is moving across pixels.
         else:
             _state._frame_motion_scene_streak[camera_id] = 0
+        if shadow_inclusive is not None:
+            _state._frame_motion_shadow_mask[camera_id] = shadow_inclusive
         _state._frame_motion_error_cameras.discard(camera_id)
 
     _now = time.monotonic()
@@ -1052,6 +1074,10 @@ def detect_frame_motion(
     if shadow_suppression is None:
         shadow_suppression = getattr(_state, '_MOTION_SHADOW_SUPPRESSION', 'on')
 
+    # Cleared every frame: only a MOG2 frame with shadow suppression sets it,
+    # so a seed, reset, error or diff-engine frame never leaves a stale mask.
+    with frame_motion_lock(camera_id):
+        _state._frame_motion_shadow_mask.pop(camera_id, None)
     use_mog2 = str(algorithm or 'mog2').strip().lower() != 'diff' and _mog2_available()
     if use_mog2:
         try:

@@ -29,6 +29,7 @@ from app.detection_state import (
     confirm_object_detections,
     detect_frame_motion,
     frame_motion_lock,
+    shadow_inclusive_motion_mask,
     update_camera_motion,
     record_live_detection_history,
 )
@@ -605,6 +606,7 @@ def _prune_frame_motion_state() -> None:
             | set(_state._frame_motion_mog2)
             | set(_state._frame_motion_mog2_meta)
             | set(_state._frame_motion_scene_streak)
+            | set(_state._frame_motion_shadow_mask)
             | set(_state._frame_motion_error_cameras)
         )
         stale = [cid for cid in tracked_ids if cid not in active_ids]
@@ -615,6 +617,7 @@ def _prune_frame_motion_state() -> None:
             _state._frame_motion_mog2.pop(cid, None)
             _state._frame_motion_mog2_meta.pop(cid, None)
             _state._frame_motion_scene_streak.pop(cid, None)
+            _state._frame_motion_shadow_mask.pop(cid, None)
             _state._frame_motion_error_cameras.discard(cid)
     for cid in stale:
         _state._periodic_scan_last_ts.pop(cid, None)
@@ -1187,6 +1190,16 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # allow camera motion to create a motion-only event or recording.
     if camera_motion['active']:
         motion_detections = []
+    # Shadow suppression also drops a dark subject over a lighter background (a
+    # dark car on grey concrete), so the motion mask can lose a car while it is
+    # still driving off. While a clip is recording, the shadow-inclusive mask
+    # at each zone's own trigger may continue it (continue_active_recording
+    # below); it never creates an event or starts a clip.
+    shadow_motion_detections: list[dict[str, Any]] = []
+    if diff_mask is not None and not camera_motion['active'] and active_recording_id(camera_id) is not None:
+        _shadow_mask = shadow_inclusive_motion_mask(camera_id)
+        if _shadow_mask is not None:
+            shadow_motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=_shadow_mask, scale_fraction=_scale_fraction, frame_size=(_frame_w, _frame_h))
     # Per-zone meter for the live page: each zone's moving share against its
     # own trigger, its state and its ten-minute peak.
     try:
@@ -1209,7 +1222,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Motion held for object priority must still be resolved this cycle (an
     # object may now be visible, or the hold may expire), so it keeps the
     # cycle running even on a quiet frame.
-    if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections) and (not always_run_object_detection) and (not _state.motion_object_arbiter.has_held(camera_id)):
+    if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections) and (not shadow_motion_detections) and (not always_run_object_detection) and (not _state.motion_object_arbiter.has_held(camera_id)):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         _telemetry_finish(MODE_SKIPPED_NO_MOTION)
         return None
@@ -1241,7 +1254,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     detector_ready = bool(detector_loaded and detector_method_available)
     # Held motion must still reach the arbiter so the hold can expire and
     # release: motion-only rules keep working without an object detector.
-    if not detector_ready and not motion_detections and not _state.motion_object_arbiter.has_held(camera_id):
+    if not detector_ready and not motion_detections and not shadow_motion_detections and not _state.motion_object_arbiter.has_held(camera_id):
         detector_reason = (
             ai_state['last_detector_error']
             or 'Live object detector is not loaded; motion-only rules can still run.'
@@ -1530,6 +1543,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # camera actually accepts; unrelated motion remains available for
     # motion-only rules and recordings.
     motion_detections = filter_motion_detections_by_objects(motion_detections, object_detections)
+    shadow_motion_detections = filter_motion_detections_by_objects(shadow_motion_detections, object_detections)
 
     # Temporal confirmation gate: require an object label to persist across
     # several detection cycles before it can raise an alert or a recording.
@@ -1817,7 +1831,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             continue_active_recording(
                 camera_id=camera_id,
                 frame_ts=frame_capture_ts,
-                motion_detections=motion_detections,
+                motion_detections=motion_detections or shadow_motion_detections,
                 still_detections=[d for d in _annotated_detections if d.get('motion_state') == 'still'],
                 recording_config=_state.camera_event_recording_config(settings),
             )
