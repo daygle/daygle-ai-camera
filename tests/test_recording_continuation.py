@@ -73,6 +73,36 @@ def test_nothing_happening_does_not_extend(clip):
     assert session['capture_deadline_ts'] == pytest.approx(now + 15)
 
 
+def test_each_subtrigger_motion_sample_resets_the_active_clip_post_event_timer(clip):
+    main, ext, session, now, recording_id = clip
+    weak_motion = [{'label': 'motion', 'zone_id': 'driveway', 'motion_fraction': 0.006}]
+
+    for offset in (20, 40, 56):
+        assert _continue(ext, now + offset, motion=weak_motion) == recording_id
+        assert session['capture_deadline_ts'] == pytest.approx(now + offset + 15)
+
+    # The clip keeps running for the full configured post-event interval after
+    # the last observed motion, rather than counting only from the initial hit.
+    assert session['capture_deadline_ts'] == pytest.approx(now + 71)
+    assert main.database.get_recording(recording_id)['duration_seconds'] == pytest.approx(81.0)
+
+
+def test_thirty_second_post_motion_window_reaches_thirty_seconds_after_last_movement(clip):
+    main, ext, session, now, recording_id = clip
+    config = {**CONFIG, 'post_event_seconds': 30}
+    weak_motion = [{'label': 'motion', 'zone_id': 'driveway', 'motion_fraction': 0.006}]
+
+    for offset in (37.7, 56.0):
+        assert ext.continue_active_recording(
+            camera_id='camera-1', frame_ts=now + offset,
+            motion_detections=weak_motion, still_detections=None,
+            recording_config=config,
+        ) == recording_id
+
+    assert session['capture_deadline_ts'] == pytest.approx(now + 86.0)
+    assert main.database.get_recording(recording_id)['duration_seconds'] == pytest.approx(96.0)
+
+
 def test_motion_never_starts_a_clip(clip):
     main, ext, _session, now, _rid = clip
     with main._state.active_rtsp_recordings_lock:

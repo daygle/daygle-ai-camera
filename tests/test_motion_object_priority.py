@@ -10,6 +10,8 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from app.motion_object_priority import MotionObjectArbiter, object_zone_keys
 from tests.support import _load_app, _m
 
@@ -188,6 +190,47 @@ def test_motion_beside_a_lingering_car_makes_no_motion_event(tmp_path, monkeypat
     cycle(9.0, motion=spill)      # tail-light glow as it leaves
     cycle(13.0)
     assert [event['id'] for event in main.database.search_events(limit=10)] == [event_id]
+
+
+def test_subtrigger_motion_extends_active_clip_without_creating_motion_event(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+
+    main, cycle, _labels, base = _pipeline(tmp_path, monkeypatch)
+    mods = _m()
+    config = {'pre_event_seconds': 5, 'post_event_seconds': 30,
+              'extension_step_seconds': 45, 'max_clip_seconds': 300}
+    monkeypatch.setattr(main._state, 'camera_event_recording_config', lambda _settings: config)
+
+    recording_id = main.database.add_recording(
+        event_id=None, camera_id='cam-night',
+        started_at=datetime.fromtimestamp(base - 10, timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(base + 10, timezone.utc).isoformat(),
+        duration_seconds=20, file_path=str(tmp_path / 'active.mp4'),
+        thumbnail_path=None, source='rtsp', created_at=main.utc_now(),
+    )
+    main._state.active_rtsp_recordings['cam-night'] = {
+        'recording_id': recording_id,
+        'start_capture_ts': base - 10,
+        'capture_deadline_ts': base + 10,
+        'max_capture_deadline_ts': base + 300,
+        'original_deadline_ts': base + 10,
+        'extension_runs': [],
+    }
+
+    def below_trigger_motion(_settings, _confidence, *, levels=None, **_kwargs):
+        if levels is not None:
+            levels.append({
+                'zone_id': 'drive', 'zone_name': 'Drive',
+                'fraction': 0.006, 'trigger': 0.02,
+            })
+        return []  # Below the motion rule's event/recording threshold.
+
+    monkeypatch.setattr(mods.live_monitor, 'zone_motion_detections', below_trigger_motion)
+    assert cycle(37.7) is None
+    assert main._state.active_rtsp_recordings['cam-night']['capture_deadline_ts'] == pytest.approx(base + 67.7)
+    assert cycle(56.0) is None
+    assert main._state.active_rtsp_recordings['cam-night']['capture_deadline_ts'] == pytest.approx(base + 86.0)
+    assert main.database.search_events(limit=10) == []
 
 
 def test_shipped_default_holds_motion_for_three_seconds():

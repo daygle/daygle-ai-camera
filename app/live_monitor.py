@@ -135,6 +135,7 @@ from app.zone_detection import (
     filter_detections_for_camera,
     filter_motion_detections_by_objects,
     motion_zone_confirm_cycles,
+    zone_motion_continuation_detections,
     camera_watches_label,
     normalize_detection_boxes_for_frame,
     rule_rejection_reason,
@@ -1199,6 +1200,23 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         ))
     except Exception as exc:  # noqa: BLE001 - a status meter must never break a cycle
         logger.debug('Motion zone levels failed for %s: %s', camera_id, exc)
+    # These weaker per-zone signals may continue an active clip only; they do
+    # not pass the event/recording trigger or its confirmation gate.
+    continuation_motion = (
+        zone_motion_continuation_detections(_motion_levels)
+        if not camera_motion['active'] else []
+    )
+    if continuation_motion:
+        try:
+            continue_active_recording(
+                camera_id=camera_id,
+                frame_ts=frame_capture_ts,
+                motion_detections=continuation_motion,
+                still_detections=None,
+                recording_config=_state.camera_event_recording_config(settings),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('Recording continuation failed on %s: %s', camera_id, exc)
     # ``always_run_object_detection`` decouples object (YOLO) inference from the
     # motion gate: when set, inference runs every cycle regardless of pixel
     # motion, so a still/slow/low-contrast subject is never hidden from the
@@ -1808,16 +1826,18 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         ],
         ptz=_ptz_tracking_status,
     )
-    # An active clip continues on what follows its object: a still object it
-    # already follows, or motion (see continue_active_recording). Only on cycles
-    # with no recordable object - those extend through the normal path below -
-    # and never during camera motion, when pixel change is not scene activity.
-    if not object_alert_detections and not record_only_detections and not camera_motion['active']:
+    # A still object this clip already follows can briefly extend its tail.
+    # Motion continuation was handled above, including on new-object cycles.
+    if (
+        not object_alert_detections and not record_only_detections
+        and not motion_detections and not continuation_motion
+        and not camera_motion['active']
+    ):
         try:
             continue_active_recording(
                 camera_id=camera_id,
                 frame_ts=frame_capture_ts,
-                motion_detections=motion_detections,
+                motion_detections=None,
                 still_detections=[d for d in _annotated_detections if d.get('motion_state') == 'still'],
                 recording_config=_state.camera_event_recording_config(settings),
             )

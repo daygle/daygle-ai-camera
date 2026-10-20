@@ -509,6 +509,45 @@ def zone_motion_detections(
     return result
 
 
+MOTION_CONTINUATION_TRIGGER_RATIO = 0.25
+MOTION_CONTINUATION_MIN_FRACTION = 0.0005
+
+
+def zone_motion_continuation_detections(levels: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return weaker per-zone motion signals for extending an active clip only.
+
+    The normal motion rule remains the threshold for creating an event or
+    starting a recording. Once a clip is active, however, movement below that
+    threshold should still reset its post-event countdown. Use one quarter of
+    the zone's configured trigger (with a small noise floor) as a continuation
+    signal; callers must never feed these detections to alerts or clip startup.
+    """
+    result: list[dict[str, Any]] = []
+    for level in levels:
+        zone_id = str(level.get('zone_id') or level.get('zone_name') or '').strip()
+        try:
+            fraction = float(level.get('fraction'))
+            trigger = float(level.get('trigger'))
+        except (TypeError, ValueError):
+            continue
+        if not zone_id or not math.isfinite(fraction) or not math.isfinite(trigger) or trigger <= 0:
+            continue
+        continuation_threshold = max(
+            MOTION_CONTINUATION_MIN_FRACTION,
+            trigger * MOTION_CONTINUATION_TRIGGER_RATIO,
+        )
+        if fraction < continuation_threshold:
+            continue
+        result.append({
+            'label': 'motion',
+            'confidence': round(min(1.0, fraction / trigger), 3),
+            'motion_fraction': fraction,
+            'zone_id': zone_id,
+            'zone_name': level.get('zone_name') or zone_id,
+        })
+    return result
+
+
 def motion_zone_confirm_cycles(settings: dict[str, Any]) -> dict[str, int]:
     """Each enabled motion zone's "Must last: N checks", keyed the same way
     ``zone_motion_detections`` keys its detections."""

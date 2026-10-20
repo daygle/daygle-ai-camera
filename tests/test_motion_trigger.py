@@ -14,7 +14,13 @@ import numpy as np
 import app.state as state
 from app.detection_state import confirm_motion_detections
 from app.motion_levels import PEAK_WINDOW_SECONDS, forget_camera, motion_zone_levels
-from app.zone_detection import motion_zone_confirm_cycles, zone_motion_detections
+from app.zone_detection import (
+    MOTION_CONTINUATION_MIN_FRACTION,
+    MOTION_CONTINUATION_TRIGGER_RATIO,
+    motion_zone_confirm_cycles,
+    zone_motion_continuation_detections,
+    zone_motion_detections,
+)
 from app.zone_schema import (
     DEFAULT_MOTION_TRIGGER,
     normalize_zone_object_rules,
@@ -97,6 +103,37 @@ def test_trigger_zone_without_a_mask_never_fires_on_a_zero_confidence_scan():
     settings = {'detection': {'zones': [_zone({'trigger_fraction': 0.01, 'min_confidence': 0.0})]}}
     assert zone_motion_detections(settings, 0.0, diff_mask=None) == []
     assert zone_motion_detections(settings, 0.9, diff_mask=None) != []
+
+
+def test_subtrigger_motion_can_continue_an_active_recording_without_triggering_a_rule():
+    zone = _zone({'trigger_fraction': 0.02}, 'drive')
+    levels: list = []
+    normal = zone_motion_detections(
+        {'detection': {'zones': [zone]}}, diff_mask=_mask(0.006), frame_size=FRAME,
+        scale_fraction=0.03, levels=levels,
+    )
+    assert normal == [], 'sub-trigger movement must not create an event or start a clip'
+
+    continuation = zone_motion_continuation_detections(levels)
+    assert len(continuation) == 1
+    assert continuation[0]['label'] == 'motion'
+    assert continuation[0]['zone_id'] == 'drive'
+    assert continuation[0]['motion_fraction'] == 0.006
+
+
+def test_continuation_motion_uses_a_noise_floor_and_drops_invalid_levels():
+    trigger = 0.02
+    threshold = max(MOTION_CONTINUATION_MIN_FRACTION, trigger * MOTION_CONTINUATION_TRIGGER_RATIO)
+    assert zone_motion_continuation_detections([
+        {'zone_id': 'below', 'fraction': threshold - 0.0001, 'trigger': trigger},
+        {'zone_id': 'at', 'fraction': threshold, 'trigger': trigger},
+        {'zone_id': 'missing', 'fraction': None, 'trigger': trigger},
+        {'zone_id': 'nan', 'fraction': float('nan'), 'trigger': trigger},
+        {'zone_id': 'invalid-trigger', 'fraction': 0.1, 'trigger': 0.0},
+    ]) == [{
+        'label': 'motion', 'confidence': 0.25, 'motion_fraction': threshold,
+        'zone_id': 'at', 'zone_name': 'at',
+    }]
 
 
 def test_levels_report_every_motion_zone_in_trigger_units():
