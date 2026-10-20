@@ -333,6 +333,48 @@ def test_all_rejected_sends_nothing(av, flow):
     assert db.metadata[8]['ai_verification']['delivered'] is False
 
 
+def test_rejected_alert_lets_the_next_sighting_alert(av, flow):
+    """Event #67665: a tiny 0.43 person box was rejected ("no person visible");
+    the clear person seconds later must open its own, verified event."""
+    from app.event_presence import observe_presence
+    configure, forwarded = flow
+    configure({'person': (False, 'No person visible; image shows car and ground.')})
+    av._state.live_event_presence.clear()
+    try:
+        assert observe_presence('camera-1', {'person': 1}, absence=45.0, now=0.0) == {'person'}
+        av.verify_and_forward([_alert('person', 0.431, rule_name='P')], 11, [], 'Driveway', camera_id='camera-1')
+        assert forwarded == []
+        assert observe_presence('camera-1', {'person': 1}, absence=45.0, now=10.0) == {'person'}
+    finally:
+        av._state.live_event_presence.clear()
+
+
+def test_group_rule_rejection_reopens_the_detected_label(av, flow):
+    configure, _forwarded = flow
+    configure({'animal': (False, 'a bag')})
+    av._state.live_event_presence.clear()
+    try:
+        from app.event_presence import observe_presence
+        observe_presence('camera-1', {'cat': 1}, absence=45.0, now=0.0)
+        av.verify_and_forward([_alert('cat', 0.5, ai_verify_label='animal')], 12, [], '', camera_id='camera-1')
+        assert observe_presence('camera-1', {'cat': 1}, absence=45.0, now=5.0) == {'cat'}
+    finally:
+        av._state.live_event_presence.clear()
+
+
+def test_confirmed_alert_keeps_the_object_covered(av, flow):
+    from app.event_presence import observe_presence
+    configure, _forwarded = flow
+    configure({'person': (True, 'person walking')})
+    av._state.live_event_presence.clear()
+    try:
+        observe_presence('camera-1', {'person': 1}, absence=45.0, now=0.0)
+        av.verify_and_forward([_alert('person', 0.8)], 13, [], '', camera_id='camera-1')
+        assert observe_presence('camera-1', {'person': 1}, absence=45.0, now=5.0) == set()
+    finally:
+        av._state.live_event_presence.clear()
+
+
 def test_confirmed_alert_is_sent(av, flow):
     configure, forwarded = flow
     db = configure({'person': (True, 'person walking')})

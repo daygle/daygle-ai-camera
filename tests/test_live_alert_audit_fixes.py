@@ -220,6 +220,28 @@ def test_presence_stays_covered_while_its_recording_captures(_clean_presence):
     assert _presence({'cat': 1}, now=301.0, recording_id=8) == {'cat'}
 
 
+def test_presence_rejected_object_is_rechecked_once(_clean_presence):
+    """A weak first sighting the AI rejected must not cover the real person
+    seconds later in the same clip: the next sighting is new again, once."""
+    reopen = _presence_module().reopen_rejected
+    assert _presence({'person': 1}, now=0.0, recording_id=7) == {'person'}
+    assert reopen('camera-1', {'person'}, recording_id=7) == {'person'}
+    assert _presence({'person': 1}, now=10.0, recording_id=7) == {'person'}, 'next sighting re-checks'
+    assert _presence({'person': 1}, now=11.0, recording_id=7) == set()
+    # A second rejection stands: a persistent false positive costs one re-check.
+    assert reopen('camera-1', {'person'}, recording_id=7) == set()
+    assert _presence({'person': 1}, now=12.0, recording_id=7) == set()
+
+
+def test_presence_reopen_leaves_other_keys_and_clips_alone(_clean_presence):
+    reopen = _presence_module().reopen_rejected
+    assert _presence({'person': 1, 'cat': 1}, now=0.0, recording_id=8) == {'person', 'cat'}
+    assert reopen('camera-1', {'person', 'dog'}, recording_id=7) == set(), 'person is on a later clip'
+    assert reopen('camera-2', {'person'}) == set()
+    assert reopen('camera-1', {'person'}, recording_id=8) == {'person'}
+    assert _presence({'person': 1, 'cat': 1}, now=5.0, recording_id=8) == {'person'}
+
+
 def test_presence_does_not_leak_across_cameras(_clean_presence):
     assert _presence({'cat': 1}, now=0.0, camera='camera-1') == {'cat'}
     assert _presence({'cat': 1}, now=0.0, camera='camera-2') == {'cat'}
