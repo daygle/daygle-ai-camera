@@ -291,6 +291,17 @@ Blank means no limit, and rules without limits behave exactly as before. Motion
 and face rules have no size limits. The limits are checked wherever a rule's
 confidence window is: the zone matcher, the alert engine and the record check.
 
+## Person boxes on animals
+
+A small, low-contrast animal can come back from the detector twice in one
+frame, for example as `cat` at 85% and `person` at 68% on the same spot. A
+person box that overlaps a more confident animal box (bird, cat, dog, horse,
+sheep, cow, elephant, bear, zebra, giraffe) by at least 50% intersection
+over union is dropped as the same object, before confirmation and alert
+rules. The animal counts even when no zone watches it. The detection log
+lists the dropped box as "Same object as cat (85%)". A person holding or
+walking an animal is kept: the animal's box is a small part of theirs.
+
 ## Low-light enhancement and second look
 
 Two opt-in Live Performance settings help the detector on hard frames; see

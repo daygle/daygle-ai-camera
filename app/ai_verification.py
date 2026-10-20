@@ -489,23 +489,35 @@ def labels_to_verify(triggered: list[dict[str, Any]]) -> list[str]:
 # Model client
 # ---------------------------------------------------------------------------
 
-def build_prompt(label: str, camera_name: str = '', source: str = 'An object detector') -> str:
+def _instead_clause(candidates: list[str] | None) -> str:
+    """The relabel question: what a rejected object really is, from ``candidates``."""
+    if not candidates:
+        return ''
+    names = ', '.join(f'"{name}"' for name in candidates)
+    return (f'"instead": when it is not real but is clearly one of {names}, that name exactly; '
+            'otherwise "none". ')
+
+
+def build_prompt(label: str, camera_name: str = '', source: str = 'An object detector',
+                 candidates: list[str] | None = None) -> str:
     where = f' from the camera "{camera_name}"' if camera_name else ''
     # "an animal", not "a animal": a group rule asks about ``animal``.
     article = 'an' if label[:1].lower() in ('a', 'e', 'i', 'o', 'u') else 'a'
+    example = '{"present": true, "reason": "short reason"' + (', "instead": "none"}' if candidates else '}')
     return (
         f'{source} reported {article} "{label}" in this security camera image{where}. '
         f'Is a real {label} actually visible? It is NOT a real {label} if it is only a shadow, '
         f'reflection, picture, poster, statue, toy, plant, rubbish bin, or another object that '
         f'looks like {article} {label}, or if the image shows nothing clear. '
-        'Reply with JSON exactly like {"present": true, "reason": "short reason"} '
-        'with "present" true or false and a reason of at most 15 words.'
-    )
+        f'Reply with JSON exactly like {example} '
+        'with "present" true or false and a reason of at most 15 words. '
+        f'{_instead_clause(candidates)}'
+    ).strip()
 
 
 def build_check_prompt(labels: list[str], camera_name: str = '', *, content: str | None = None,
                        detected: list[str] | None = None, close_up: bool = False,
-                       source: str = 'An object detector') -> str:
+                       source: str = 'An object detector', candidates: list[str] | None = None) -> str:
     """One request that verifies every label and, with ``content``, describes.
 
     Asking once instead of once per label plus once for the description
@@ -514,7 +526,8 @@ def build_check_prompt(labels: list[str], camera_name: str = '', *, content: str
     """
     where = f' from the camera "{camera_name}"' if camera_name else ''
     reported = ', '.join(f'"{label}"' for label in labels)
-    checks = ', '.join(f'"{label}": {{"present": true, "reason": "short reason"}}' for label in labels)
+    instead = ', "instead": "none"' if candidates else ''
+    checks = ', '.join(f'"{label}": {{"present": true, "reason": "short reason"{instead}}}' for label in labels)
     example = [f'"checks": {{{checks}}}']
     describe = ''
     if content:
@@ -535,18 +548,35 @@ def build_check_prompt(labels: list[str], camera_name: str = '', *, content: str
         f'Reply with JSON exactly like {{{", ".join(example)}}}. '
         '"checks": one entry for each reported object, keyed by its name as given, with "present" true or '
         'false and a reason of at most 15 words. '
+        f'{_instead_clause(candidates)}'
         f'{_describe_fields(content) if content else ""}'
     ).strip()
 
 
+def parse_instead(answer: dict[str, Any], candidates: list[str] | None) -> str | None:
+    """The relabel a rejecting answer gives, when it is one of ``candidates``."""
+    if not candidates or _present_value(answer.get('present')) is not False:
+        return None
+    name = ' '.join(str(answer.get('instead') or '').strip().lower().split())
+    return next((candidate for candidate in candidates if candidate.lower() == name), None)
+
+
+def _verdict(answer: dict[str, Any], present: bool, reason: str,
+             candidates: list[str] | None) -> tuple[Any, ...]:
+    # A third item (the relabel, or None) only when a relabel was asked for.
+    return (present, reason, parse_instead(answer, candidates)) if candidates else (present, reason)
+
+
 def parse_check_reply(
     text: str, labels: list[str], content: str | None = None,
-) -> tuple[dict[str, tuple[bool, str]], tuple[str, list[str]] | None]:
+    candidates: dict[str, list[str]] | None = None,
+) -> tuple[dict[str, tuple[Any, ...]], tuple[str, list[str]] | None]:
     """``(verdicts, description)`` from a combined reply.
 
     Never raises: a label the reply does not answer clearly is left out of
     ``verdicts`` and a missing or unusable description is None, so the caller
-    asks for just those parts separately.
+    asks for just those parts separately. With ``candidates`` (per label),
+    each verdict carries a third item: what a rejected object is instead.
     """
     data = _reply_object(text)
     if data is None:
@@ -561,7 +591,8 @@ def parse_check_reply(
                 continue
             present = _present_value(answer.get('present'))
             if present is not None:
-                verdicts[label] = (present, ' '.join(str(answer.get('reason') or '').split())[:200])
+                reason = ' '.join(str(answer.get('reason') or '').split())[:200]
+                verdicts[label] = _verdict(answer, present, reason, (candidates or {}).get(label))
     description = None
     if content:
         try:
@@ -579,12 +610,13 @@ def _present_value(value: Any) -> bool | None:
     return None
 
 
-def parse_verdict(text: str) -> tuple[bool, str]:
+def parse_verdict(text: str, candidates: list[str] | None = None) -> tuple[Any, ...]:
     """Parse the model reply into ``(present, reason)``.
 
     Accepts the requested JSON (also inside code fences or surrounding prose)
     and falls back to a leading yes/no. Raises VerificationError otherwise, so
-    an unusable reply fails open.
+    an unusable reply fails open. With ``candidates``, a third item is the
+    relabel a rejection names (None when it names none, or no JSON came back).
     """
     content = str(text or '').strip()
     for candidate in _JSON_OBJECT_RE.findall(content):
@@ -596,11 +628,12 @@ def parse_verdict(text: str) -> tuple[bool, str]:
             present = _present_value(data.get('present'))
             if present is not None:
                 reason = ' '.join(str(data.get('reason') or '').split())[:200]
-                return present, reason
+                return _verdict(data, present, reason, candidates)
     match = re.match(r'^\W*(yes|no|true|false)\b[\s.,:;-]*(.*)$', content, re.IGNORECASE | re.DOTALL)
     if match:
         present = match.group(1).lower() in {'yes', 'true'}
-        return present, ' '.join(match.group(2).split())[:200]
+        reason = ' '.join(match.group(2).split())[:200]
+        return (present, reason, None) if candidates else (present, reason)
     raise VerificationError(f'unrecognised model reply: {content[:120]!r}')
 
 
@@ -713,15 +746,16 @@ class VisionVerifier:
         return {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{encoded}'}}
 
     def ask(self, image_bytes: bytes, label: str, camera_name: str = '',
-            source: str = 'An object detector') -> tuple[bool, str]:
+            source: str = 'An object detector', candidates: list[str] | None = None) -> tuple[Any, ...]:
+        """``(present, reason)``; with ``candidates`` also what it is instead."""
         reply = self.chat([
             {'role': 'system', 'content': SYSTEM_PROMPT},
             {'role': 'user', 'content': [
-                {'type': 'text', 'text': build_prompt(label, camera_name, source)},
+                {'type': 'text', 'text': build_prompt(label, camera_name, source, candidates)},
                 self._image_part(image_bytes),
             ]},
-        ])
-        return parse_verdict(reply)
+        ], max_tokens=100 if candidates else 80)
+        return parse_verdict(reply, candidates)
 
     def describe(self, image_bytes: bytes, camera_name: str = '', *, detected: list[str] | None = None,
                  close_up: bool = False, content: str = 'both') -> tuple[str, list[str]]:
@@ -739,7 +773,8 @@ class VisionVerifier:
 
     def check(self, image_bytes: bytes, labels: list[str], camera_name: str = '', *,
               content: str | None = None, detected: list[str] | None = None,
-              close_up: bool = False) -> tuple[dict[str, tuple[bool, str]], tuple[str, list[str]] | None]:
+              close_up: bool = False, candidates: dict[str, list[str]] | None = None,
+              ) -> tuple[dict[str, tuple[Any, ...]], tuple[str, list[str]] | None]:
         """Verify every label (and describe, with ``content``) in one request.
 
         Raises VerificationError only when the model could not be asked
@@ -749,12 +784,24 @@ class VisionVerifier:
         reply = self.chat([
             {'role': 'system', 'content': SYSTEM_PROMPT},
             {'role': 'user', 'content': [
-                {'type': 'text', 'text': build_check_prompt(labels, camera_name, content=content,
-                                                            detected=detected, close_up=close_up)},
+                {'type': 'text', 'text': build_check_prompt(
+                    labels, camera_name, content=content, detected=detected, close_up=close_up,
+                    candidates=_all_candidates(candidates, labels),
+                )},
                 self._image_part(image_bytes),
             ]},
-        ], max_tokens=60 * len(labels) + (200 if content else 0))
-        return parse_check_reply(reply, labels, content)
+        ], max_tokens=(75 if candidates else 60) * len(labels) + (200 if content else 0))
+        return parse_check_reply(reply, labels, content, candidates)
+
+
+def _all_candidates(candidates: dict[str, list[str]] | None, labels: list[str]) -> list[str]:
+    """Every relabel candidate of ``labels``, once each, for one shared prompt."""
+    names: list[str] = []
+    for label in labels:
+        for name in (candidates or {}).get(label) or []:
+            if name not in names:
+                names.append(name)
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -971,8 +1018,12 @@ def verify_and_describe_event(
     content: str | None = None,
     camera_id: Any = None,
     verifier: VisionVerifier | None = None,
+    candidates: dict[str, list[str]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Verify each label and, with ``content``, describe the event.
+
+    ``candidates`` (per label) are what a rejected object may be instead: a
+    rejection that names one stores it as the label's ``instead``.
 
     Returns the ``ai_verification`` record and the description record (as
     describe_event builds it) or None when the event was not described here.
@@ -1005,6 +1056,7 @@ def verify_and_describe_event(
             verdicts, described = verifier.check(
                 plan[0], labels, camera_name, content=content,
                 detected=[label.replace('_', ' ') for label in _object_labels(detections)], close_up=plan[1],
+                **({'candidates': candidates} if candidates else {}),
             )
         except VerificationError as exc:
             # The model could not be asked at all: asking again per label
@@ -1018,8 +1070,8 @@ def verify_and_describe_event(
             verdicts, described = {}, None
             for label in labels:
                 record['labels'][label] = {'present': None, 'error': f'unexpected error: {exc}'[:200]}
-        for label, (present, reason) in verdicts.items():
-            record['labels'][label] = {'present': present, 'reason': reason}
+        for label, verdict in verdicts.items():
+            record['labels'][label] = _label_result(*verdict)
         record['combined'] = True
         if described is not None:
             description = _description_record(*described, detections, settings, started)
@@ -1031,8 +1083,10 @@ def verify_and_describe_event(
             continue
         try:
             focused = focus_image(image, detections, label) if settings.get('focus_crop', True) else image
-            present, reason = verifier.ask(focused, label, camera_name)
-            record['labels'][label] = {'present': present, 'reason': reason}
+            label_candidates = (candidates or {}).get(label)
+            verdict = verifier.ask(focused, label, camera_name,
+                                   **({'candidates': label_candidates} if label_candidates else {}))
+            record['labels'][label] = _label_result(*verdict)
         except VerificationError as exc:
             record['labels'][label] = {'present': None, 'error': str(exc)[:200]}
             if isinstance(exc, ModelUnavailableError):
@@ -1052,6 +1106,13 @@ def verify_and_describe_event(
         # Internal: tells the caller not to ask for a description now either.
         record['_model_unavailable'] = True
     return record, description
+
+
+def _label_result(present: bool, reason: str, instead: str | None = None) -> dict[str, Any]:
+    result: dict[str, Any] = {'present': present, 'reason': reason}
+    if instead:
+        result['instead'] = instead
+    return result
 
 
 def _forward(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None) -> None:
@@ -1247,9 +1308,15 @@ def _verify_and_forward(
     # An event that could not be read is checked against every tag rule.
     alert_content = camera_describe_content(camera_id, settings, alerted=True, event=event or None)
     if labels:
+        from app.ai_relabel import relabel_alerts, relabel_candidates
+
+        # Relabels raise alerts through the camera's presence gate, which a
+        # job without a camera cannot reach.
+        candidates = relabel_candidates(triggered, labels, rules) if camera_id is not None else {}
         record, described = verify_and_describe_event(
             event, labels, settings, camera_name=camera_name,
             content=alert_content if alert_content != 'off' else None, camera_id=camera_id,
+            candidates=candidates or None,
         )
         model_unavailable = bool(record.pop('_model_unavailable', False))
         rejected = {label for label, result in record['labels'].items() if result.get('present') is False}
@@ -1257,6 +1324,8 @@ def _verify_and_forward(
             alert for alert in triggered
             if not (_is_verifiable(alert) and _verify_label(alert) in rejected)
         ]
+        if rejected and candidates:
+            kept += relabel_alerts(triggered, record, rules, event, event_id, camera_id)
         # 'filtered' means some label was rejected; whether any alert still
         # went out decides whether the event is described as an alert or as
         # any other event.
@@ -1304,8 +1373,10 @@ def _reopen_rejected(camera_id: Any, triggered: list[dict[str, Any]], kept: list
     def detected(alerts: list[dict[str, Any]]) -> set[str]:
         return {str(alert.get('label') or '').strip().lower() for alert in alerts} - {''}
 
-    # The presence gate counts detected labels, not a group rule's label.
-    labels = detected([alert for alert in triggered if alert not in kept]) - detected(kept)
+    # The presence gate counts detected labels, not a group rule's label. A
+    # relabelled object is known for what it is, so it is not re-checked.
+    relabelled = {str(alert.get('ai_relabel_from') or '') for alert in kept}
+    labels = detected([alert for alert in triggered if alert not in kept]) - detected(kept) - relabelled
     try:
         reopened = reopen_rejected(str(camera_id), labels, recording_id=event.get('recording_id'))
     except Exception:  # noqa: BLE001 - the verdict is recorded; a re-check is optional

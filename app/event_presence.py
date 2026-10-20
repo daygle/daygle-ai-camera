@@ -127,6 +127,27 @@ def reopen_rejected(camera_id: str, labels: set[str], *, recording_id: int | Non
     return reopened
 
 
+def claim_presence(camera_id: str, key: str, *, recording_id: int | None = None,
+                   now: float | None = None) -> bool:
+    """Put ``key`` on record for an object found outside the detector.
+
+    AI verification can relabel a rejected box (the "person" was a cat). The
+    cat then alerts once, like any first sighting: True when ``key`` was not
+    on record yet (claimed now), False when it already was. Its later
+    sightings are covered and it is forgotten as usual (see observe_presence).
+    """
+    now = time.time() if now is None else now
+    with _state.live_event_presence_lock:
+        scope = _state.live_event_presence.setdefault(camera_id, {})
+        entry = scope.setdefault(key, {'high': 0, 'pending_cycles': 0})
+        if entry['high'] > 0:
+            return False
+        entry.update(high=1, pending_cycles=0, last_seen=now)
+        if recording_id is not None:
+            entry['recording_id'] = recording_id
+        return True
+
+
 def drop_covered_motion(camera_id: str, new: set[str]) -> set[str]:
     """Motion around something already on record (an object, a face) is that
     subject moving, not a new event: drop ``motion`` from ``new`` then."""

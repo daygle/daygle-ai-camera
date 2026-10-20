@@ -91,6 +91,24 @@ still asks about that class.
 
 Dwell ("still for N minutes") alerts are not verified.
 
+### Relabelling a rejected alert
+
+When the model rejects an alert, the same request also asks what the object
+is instead, chosen from the objects other alert rules in the same zone watch
+(only rules with Email or Push on). A "person" the model calls a cat then
+fires that zone's cat rules, just as a cat the detector had reported would:
+the event gets a cat alert row and the notification says it was an AI
+relabel. The Filtered badge's tooltip shows "looks like a cat".
+
+- It costs no extra model call; the question rides on the verification
+  request. A zone with no other rules asks nothing extra.
+- The relabelled alert skips the target rule's confidence window (the
+  detector's score was for the wrong label); its active hours, notify window
+  and size limits still apply.
+- It alerts once per object, like a first sighting: a cat already on record
+  for the camera, or one the detector also reported on the same event, is
+  not alerted again.
+
 ### Model settings
 
 Go to **Intelligence → AI** (admin only). The page has four sections: Model Server, Alert Verification, Descriptions & Search, and a pointer to AI Tag Alerts. One **Save AI Settings** button saves them all.
