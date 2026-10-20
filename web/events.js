@@ -204,8 +204,21 @@ function aiVerificationBadge(event) {
     .map(([label, value]) => `${label}: ${value.present === false ? 'not present' : value.present ? 'confirmed' : 'unchecked'}${value.reason ? ` (${value.reason})` : ''}`)
     .join('; ');
   const filtered = record.status === 'filtered';
-  const title = `${filtered ? 'Notification not sent: the AI model judged this a false alarm.' : 'The AI model confirmed this alert.'} ${details}`.trim();
+  // A filtered event can still notify when another of its alerts passed.
+  const summary = !filtered ? 'The AI model confirmed this alert.'
+    : record.delivered === false ? 'Notification not sent: the AI model judged this a false alarm.'
+      : 'The AI model rejected part of this alert; the rest was still sent.';
+  const title = `${summary} ${details}`.trim();
   return `<span class="detection ${filtered ? 'detection-ai-filtered' : 'detection-ai-verified'}" title="${escapeHtml(title)}">🤖 ${filtered ? 'Filtered' : 'Verified'}</span>`;
+}
+
+// An alert row is written when a rule matches; AI verification may then stop
+// the notification, which the Filtered badge beside it explains.
+function alertBadgeTitle(event) {
+  const record = (event.metadata || {}).ai_verification;
+  return record && record.delivered === false
+    ? 'An alert rule matched, but AI verification stopped the notification'
+    : 'An alert notification was fired for this event';
 }
 
 // The clip this event links to, as /api/events describes it: the row links to
@@ -236,7 +249,7 @@ function renderEventRow(event) {
     : 'Object Event';
   const alerted = Boolean(event.alert);
   const alertBadge = alerted
-    ? '<span class="detection detection-alert" title="An alert notification was fired for this event">🔔 Alert</span>'
+    ? `<span class="detection detection-alert" title="${alertBadgeTitle(event)}">🔔 Alert</span>`
     : '';
   const aiBadge = aiVerificationBadge(event);
   // AI tags join the detection pills in one row, so they read as a trailing

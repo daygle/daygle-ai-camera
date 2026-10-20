@@ -312,6 +312,10 @@ same events in search as in the Events list.
   person whose first detection was a poor frame (a small box at the edge of
   the view). If the re-check is also rejected, the label stays covered until
   it leaves the view, so a persistent false positive costs one extra check.
+- If the model times out, is unreachable or stays busy, the alert's remaining
+  questions (other labels, its description) are not asked: each would wait
+  out the same timeout. Unchecked alerts are sent unverified and the catch-up
+  describes the event once the model is idle.
 - If a job waits in the queue longer than `max(60 s, 3 × timeout)`, it is sent
   unverified. Late alerts are not delayed further.
 - The verdict is stored in the event's metadata under `ai_verification`, with

@@ -178,14 +178,16 @@ def clean_tags(raw: Any, exclude: set[str] | frozenset[str] = frozenset()) -> li
 def _reply_object(text: str) -> dict[str, Any] | None:
     """The outermost JSON object in a reply (also fenced or wrapped in prose)."""
     content = str(text or '')
-    start, end = content.find('{'), content.rfind('}')
-    if 0 <= start < end:
-        try:
-            data = json.loads(content[start:end + 1])
-        except ValueError:
-            return None
-        return data if isinstance(data, dict) else None
-    return None
+    start = content.find('{')
+    if start < 0:
+        return None
+    try:
+        # raw_decode stops at the object's end, so prose after it (even with
+        # a brace of its own) does not throw the whole answer away.
+        data, _end = json.JSONDecoder().raw_decode(content, start)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _description_from(data: dict[str, Any], content: str) -> tuple[str, list[str]] | None:
@@ -236,6 +238,14 @@ def clean_description(text: str) -> str:
 
 class VerificationError(RuntimeError):
     """The model could not produce a usable verdict."""
+
+
+class ModelUnavailableError(VerificationError):
+    """The model could not be asked at all (unreachable, timed out, busy).
+
+    Unlike a reply that could not be parsed, asking again at once would only
+    wait out the same timeout, so the alert path stops asking and delivers.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -631,10 +641,10 @@ class VisionVerifier:
                 # The server keeps working on a request we give up on, so the
                 # next one queues behind it: let background work back off.
                 _note_model_timeout()
-                raise VerificationError(
+                raise ModelUnavailableError(
                     f'model did not answer within {self.timeout:.0f}s (busy or slow)'
                 ) from exc
-            raise VerificationError(f'model server unreachable: {reason}') from exc
+            raise ModelUnavailableError(f'model server unreachable: {reason}') from exc
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise VerificationError('model server response too large')
         try:
@@ -662,7 +672,7 @@ class VisionVerifier:
             'messages': messages,
         }
         if not _model_request_lock.acquire(timeout=self.timeout):
-            raise VerificationError('model is busy with another request')
+            raise ModelUnavailableError('model is busy with another request')
         try:
             payload = self._chat_request(body)
         finally:
@@ -948,6 +958,7 @@ def verify_event(
     """Ask the model about each label; return the ``ai_verification`` record."""
     record, _description = verify_and_describe_event(event, labels, settings, camera_name=camera_name,
                                                      verifier=verifier)
+    record.pop('_model_unavailable', None)
     return record
 
 
@@ -983,6 +994,9 @@ def verify_and_describe_event(
     verifier = verifier or VisionVerifier(settings)
     detections = event.get('detections') or []
     description = None
+    # Set once the model could not be asked: later questions in this job
+    # would each wait out the same timeout, so they are not asked.
+    unavailable, unavailable_error = False, ''
     plan = None
     if len(labels) > 1 or (labels and content):
         plan = _check_image(image, detections, labels, settings, describing=bool(content), camera_id=camera_id)
@@ -996,6 +1010,7 @@ def verify_and_describe_event(
             # The model could not be asked at all: asking again per label
             # would only wait out the same timeout once more.
             verdicts, described = {}, None
+            unavailable, unavailable_error = isinstance(exc, ModelUnavailableError), str(exc)[:200]
             for label in labels:
                 record['labels'][label] = {'present': None, 'error': str(exc)[:200]}
         except Exception as exc:  # noqa: BLE001 - fail open on anything unexpected
@@ -1011,12 +1026,17 @@ def verify_and_describe_event(
     for label in labels:
         if label in record['labels']:
             continue
+        if unavailable:
+            record['labels'][label] = {'present': None, 'error': unavailable_error}
+            continue
         try:
             focused = focus_image(image, detections, label) if settings.get('focus_crop', True) else image
             present, reason = verifier.ask(focused, label, camera_name)
             record['labels'][label] = {'present': present, 'reason': reason}
         except VerificationError as exc:
             record['labels'][label] = {'present': None, 'error': str(exc)[:200]}
+            if isinstance(exc, ModelUnavailableError):
+                unavailable, unavailable_error = True, str(exc)[:200]
         except Exception as exc:  # noqa: BLE001 - fail open on anything unexpected
             logger.exception('AI verification failed unexpectedly for label %s', label)
             record['labels'][label] = {'present': None, 'error': f'unexpected error: {exc}'[:200]}
@@ -1028,6 +1048,9 @@ def verify_and_describe_event(
         record['status'] = 'confirmed'
     else:
         record['status'] = 'error'
+    if unavailable:
+        # Internal: tells the caller not to ask for a description now either.
+        record['_model_unavailable'] = True
     return record, description
 
 
@@ -1220,6 +1243,7 @@ def _verify_and_forward(
         event = {}
     kept = list(triggered)
     described = None
+    model_unavailable = False
     # An event that could not be read is checked against every tag rule.
     alert_content = camera_describe_content(camera_id, settings, alerted=True, event=event or None)
     if labels:
@@ -1227,6 +1251,7 @@ def _verify_and_forward(
             event, labels, settings, camera_name=camera_name,
             content=alert_content if alert_content != 'off' else None, camera_id=camera_id,
         )
+        model_unavailable = bool(record.pop('_model_unavailable', False))
         rejected = {label for label, result in record['labels'].items() if result.get('present') is False}
         kept = [
             alert for alert in triggered
@@ -1251,7 +1276,11 @@ def _verify_and_forward(
     # An event whose every alert was rejected is described as any other event.
     content = alert_content if kept else camera_describe_content(camera_id, settings, alerted=False,
                                                                  event=event or None)
-    if content != 'off':
+    if content != 'off' and model_unavailable:
+        # The model just failed to answer: asking it to describe now would
+        # hold the alert for another timeout. The catch-up describes it later.
+        start_description_catch_up()
+    elif content != 'off':
         # A description from the combined check is stored as is when it was
         # written for this content; otherwise describe now.
         if content != alert_content:
