@@ -6,7 +6,9 @@
   email/push channel inside its notify window, and honours its cooldown -
   spent only by an alert that is actually sent.
 * A fired rule adds an alert to the described event, flags it alerted and
-  queues a notification led by an "unconfirmed" line and the description.
+  queues a notification led by a status line ("AI confirmed" when the model's
+  own second look agreed, "unconfirmed" when that check could not run) and the
+  description.
 * Cameras with a rule get every event described; backfilled events never alert.
 """
 from __future__ import annotations
@@ -202,6 +204,8 @@ def test_matching_rule_alerts_and_notifies(ata, fire_env):
     assert db.alerts[0]['rule_name'] == 'Gate · Ladders' and db.alerts[0]['label'] == 'ladder'
     (triggered, event_id, rules), = sent
     assert event_id == 5 and rules[0]['name'] == triggered[0]['rule_name'] == 'Gate · Ladders'
+    # The snapshot is absent here (see fire_env), so the direct check could not
+    # run: the alert still fires, labelled as unchecked.
     assert triggered[0]['ai_description'].startswith('AI tag alert (unconfirmed): Ladder on Front (Gate).')
     assert triggered[0]['ai_description'].endswith('A man carries a ladder past the gate.')
 
@@ -365,6 +369,19 @@ def test_confirmation_fails_open_and_is_asked_once_per_event(ata, confirm_env):
     camera(_zone(), _zone(id='yard', name='Yard', x=0, y=0, width=1, height=1))
     assert ata.evaluate_event(5, EVENT, RECORD) == 2      # both zones alert, unchecked
     assert asked == ['ladder']                            # one model call, shared
+    # Sent on the caption alone, so the line says it was not checked.
+    assert all(a['message'].startswith('AI tag alert (unconfirmed):') for a in db.alerts)
+
+
+def test_checked_terms_are_labelled_ai_confirmed(ata, confirm_env):
+    # The real case: a small detector wrote "Dog 42%" on the box while the
+    # model, asked directly, confirmed a cat. The label reports that check.
+    db, sent, camera, answers, asked, _av = confirm_env
+    camera(_zone(_rule(name='Cat', tags=['cat'])))
+    record = {'text': 'A cat walks on the lawn while a white car is parked.', 'tags': ['cat']}
+    assert ata.evaluate_event(5, EVENT, record) == 1
+    assert db.alerts[0]['message'] == 'AI tag alert (AI confirmed): Cat on Front (Gate)'
+    assert sent[0][0][0]['ai_description'].startswith('AI tag alert (AI confirmed): Cat on Front (Gate).')
 
 
 def test_cooling_down_rule_skips_the_model_call(ata, confirm_env):
@@ -381,7 +398,7 @@ def test_ai_tag_alert_email_has_no_confidence_line():
 
     content = build_alert_content(
         {'rule_name': 'Pergola · Cat', 'label': 'cat', 'confidence': 0.0, 'ai_tag_alert': True,
-         'ai_description': 'AI tag alert (unconfirmed): Cat on Pergola (Pergola). A cat.'},
+         'ai_description': 'AI tag alert (AI confirmed): Cat on Pergola (Pergola). A cat.'},
         event_id=5, camera_name='Pergola',
     )
     assert content.confidence is None and 'Confidence' not in content.plain_text

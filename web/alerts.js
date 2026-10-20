@@ -315,7 +315,7 @@ function renderPolicies() {
               : activity
                 ? 'Enabled on the Zones page. Removing here turns activity-spike off for the area.'
                 : aiTags
-                  ? 'Set up on the Zones page. Alerts are unconfirmed: only the AI model saw the object. Removing here turns the AI tag alert off for the area.'
+                  ? 'Set up on the Zones page. The AI model, not the object detector, sees these: alerts carry no confidence score. Removing here turns the AI tag alert off for the area.'
                   : 'Assigned on the Zones page. Removing here unassigns this item from the area.';
     return `
     <tr class="alerts-policy-row ${status.className}" data-rule-index="${index}" title="${escapeHtml(status.title)}">

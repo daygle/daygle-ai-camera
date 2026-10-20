@@ -236,8 +236,7 @@ How it behaves:
   legacy detections without usable boxes fall back to their zone name/ID.
   A polygon's bounding rectangle is not treated as full-frame coverage.
 - **What a firing does:** it adds an alert to that event, marks it as alerted,
-  and sends a notification. The notification starts with
-  *"AI tag alert (unconfirmed): Ladder on Front (Gate)."*, followed by the
+  and sends a notification (see **What the line says** below), followed by the
   description.
 - **Double-checked:** before alerting, the model is asked a separate yes/no
   question for each matched word (*"is a real cat actually visible?"*).
@@ -247,9 +246,16 @@ How it behaves:
   terms, not across different areas. A word it then says no to
   does not alert, and does not use up the cooldown. If that check fails or
   times out, the alert is sent anyway.
-- **Unconfirmed:** only the language model saw the object, never the object
-  detector. Start with areas where an occasional false alert is harmless.
-  These notifications show "AI Tag" as the detection type and no confidence.
+- **What the line says:** *"AI tag alert (AI confirmed): Cat on Front
+  (Lawn)."* when the separate check above was asked about every word and
+  agreed. The label reports that check, not the object detector: a small
+  detector can put 42% *dog* on the box while the model correctly calls it a
+  cat. It reads *"AI tag alert (unconfirmed): …"* only when that check could
+  not run (no snapshot, model unavailable or timed out), because the alert is
+  then sent on the caption alone.
+- **AI, not the detector:** only the language model saw the object, so these
+  notifications show "AI Tag" as the detection type and never a confidence
+  score. Start with areas where an occasional false alert is harmless.
 - **Timing:** these alerts arrive a few seconds after the event, once the
   description is ready. If the model server is down, they don't fire.
 - **Cooldown:** it is only used up by an alert that is actually sent. A rule

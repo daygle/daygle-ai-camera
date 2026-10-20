@@ -18,8 +18,10 @@ run, the alert is sent, as with verification.
 
 The alert is attached to the described event (an alert_history row, and the
 event is flagged as alerted) and delivered through the normal notification
-queue, led by the description. It is labelled *unconfirmed*: unlike object
-detection, nothing but the language model saw the object.
+queue, led by the description. Its line says *AI confirmed* when that second
+look agreed for every term, and *unconfirmed* when it could not run: unlike
+object detection, nothing but the language model saw the object, so the
+label reports the check rather than a detector score.
 
 Cameras with an enabled rule have every event in a rule's zone described,
 whatever the global Alert Events / Other Events settings, because a rule can
@@ -217,8 +219,13 @@ def _zone_image(image: bytes, zone: dict[str, Any]) -> bytes:
 
 
 def _confirm_terms(event: dict[str, Any], terms: list[str], camera_name: str,
-                   cache: dict[Any, bool], zone: dict[str, Any] | None = None) -> list[str]:
-    """The terms the model still sees when asked directly. Fails open."""
+                   cache: dict[Any, tuple[bool, bool]],
+                   zone: dict[str, Any] | None = None) -> tuple[list[str], set[str]]:
+    """``(terms the model still sees, terms it gave a real verdict on)``.
+
+    Fails open: a term whose check could not run (no snapshot, or a model
+    failure) is still returned in the first set, but not in the second, so the
+    notification can say it went out unchecked."""
     from app import ai_verification as av
 
     # Different zones must not share a term verdict: a ladder on the porch
@@ -235,7 +242,7 @@ def _confirm_terms(event: dict[str, Any], terms: list[str], camera_name: str,
     if pending:
         settings = av.effective_ai_verification_settings()
         if image is None:
-            cache.update(dict.fromkeys((keys[term] for term in pending), True))
+            cache.update(dict.fromkeys((keys[term] for term in pending), (True, False)))
         else:
             verifier = av.VisionVerifier(settings)
             detections = event.get('detections') or []
@@ -250,13 +257,14 @@ def _confirm_terms(event: dict[str, Any], terms: list[str], camera_name: str,
                 except Exception as exc:
                     logger.warning('AI tag check unavailable for event %s (%s): %s; alerting unchecked.',
                                    event.get('id'), term, exc)
-                    present = True
-                else:
-                    if not present:
-                        logger.info('AI tag alert suppressed for event %s: %s not confirmed (%s)',
-                                    event.get('id'), term, reason or 'not present')
-                cache[keys[term]] = present
-    return [term for term in terms if cache[keys[term]]]
+                    cache[keys[term]] = (True, False)
+                    continue
+                if not present:
+                    logger.info('AI tag alert suppressed for event %s: %s not confirmed (%s)',
+                                event.get('id'), term, reason or 'not present')
+                cache[keys[term]] = (present, True)
+    return ([term for term in terms if cache[keys[term]][0]],
+            {term for term in terms if cache[keys[term]][1]})
 
 
 def evaluate_event(event_id: int, event: dict[str, Any], record: dict[str, Any]) -> int:
@@ -268,7 +276,7 @@ def evaluate_event(event_id: int, event: dict[str, Any], record: dict[str, Any])
         metadata = event.get('metadata') or {}
         camera = _camera_settings(metadata.get('camera_id'))
         fired = 0
-        confirmed: dict[Any, bool] = {}
+        confirmed: dict[Any, tuple[bool, bool]] = {}
         for zone, rule in zone_rules(camera):
             if not event_in_zone(event, zone):
                 continue
@@ -288,7 +296,8 @@ def evaluate_event(event_id: int, event: dict[str, Any], record: dict[str, Any])
 
 
 def _fire(event_id: int, event: dict[str, Any], camera: dict[str, Any], zone: dict[str, Any],
-          rule: dict[str, Any], hits: list[str], record: dict[str, Any], confirmed: dict[Any, bool]) -> bool:
+          rule: dict[str, Any], hits: list[str], record: dict[str, Any],
+          confirmed: dict[Any, tuple[bool, bool]]) -> bool:
     from app.alert_dispatch import (
         _rule_notify_active_now,
         deliver_alert_notifications,
@@ -317,12 +326,16 @@ def _fire(event_id: int, event: dict[str, Any], camera: dict[str, Any], zone: di
     cooldown = int(rule.get('cooldown_seconds') or 0)
     if not _cooldown_ok(key, cooldown, spend=False):
         return False
-    hits = _confirm_terms({**event, 'id': event_id}, hits, camera_name, confirmed, zone)
+    hits, checked = _confirm_terms({**event, 'id': event_id}, hits, camera_name, confirmed, zone)
     if not hits or not _cooldown_ok(key, cooldown):
         return False
     label = hits[0]
     terms = ', '.join(term.title() for term in hits)
-    message = f'AI tag alert (unconfirmed): {terms} on {camera_name} ({zone_name})'
+    # The model was asked directly about every term here and agreed, so the
+    # notification says so. Only a term whose check could not run falls back
+    # to "unconfirmed" (the alert is still sent, as with verification).
+    status = 'AI confirmed' if all(term in checked for term in hits) else 'unconfirmed'
+    message = f'AI tag alert ({status}): {terms} on {camera_name} ({zone_name})'
     database = _state.database
     database.add_alert(
         created_at=datetime.now(timezone.utc).isoformat(), rule_name=rule_name, event_id=int(event_id),

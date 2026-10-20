@@ -113,8 +113,10 @@ def test_same_term_is_checked_separately_per_zone(av, monkeypatch):
     seen = []
     monkeypatch.setattr(av.VisionVerifier, 'ask', lambda _, image, *a, **kw: seen.append(image) or (image == b'left', ''))
     cache = {}
-    assert tags._confirm_terms({}, ['ladder'], '', cache, {'image': b'left'}) == ['ladder']
-    assert tags._confirm_terms({}, ['ladder'], '', cache, {'image': b'right'}) == []
+    assert tags._confirm_terms({}, ['ladder'], '', cache, {'image': b'left'}) == (['ladder'], {'ladder'})
+    # A "no" is still a real verdict (it just does not alert), so the second
+    # set names the term; only a check that could not run leaves it out.
+    assert tags._confirm_terms({}, ['ladder'], '', cache, {'image': b'right'}) == ([], {'ladder'})
     assert seen == [b'left', b'right']
 
 
