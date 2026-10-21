@@ -1987,10 +1987,19 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _alertable_labels = _presence_new | {
         str(_dwell.get('label') or '').strip().lower() for _dwell in dwell_detections
     }
-    triggered = [
-        alert for index, alert in enumerate(triggered)
-        if index >= _zone_alert_count or str(alert.get('label') or '').strip().lower() in _alertable_labels
-    ]
+    # The alert engine reports one alert per matching detection, so two people
+    # in one frame are two alerts on the same rule: one notification (and one
+    # alert row) per rule and label is enough, led by the strongest detection.
+    _zone_alerts: dict[tuple[str, str], dict[str, Any]] = {}
+    for _zone_alert in triggered[:_zone_alert_count]:
+        _zone_label = str(_zone_alert.get('label') or '').strip().lower()
+        if _zone_label not in _alertable_labels:
+            continue
+        _zone_key = (str(_zone_alert.get('rule_name') or ''), _zone_label)
+        _kept_alert = _zone_alerts.get(_zone_key)
+        if _kept_alert is None or float(_zone_alert.get('confidence') or 0) > float(_kept_alert.get('confidence') or 0):
+            _zone_alerts[_zone_key] = _zone_alert
+    triggered = list(_zone_alerts.values()) + triggered[_zone_alert_count:]
     # Dwell and face alerts are already new by construction (a dwell fires once
     # per still streak; faces went through the presence gate above), and face
     # recognition usually lands a cycle or two AFTER the event for the person

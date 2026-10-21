@@ -141,10 +141,18 @@ def build_alert_content(
     # generic "Alert triggered: person detected (87%)" line. It is a model
     # caption, so it keeps its own casing; confidence stays in the details.
     ai_description = ' '.join(str(alert.get('ai_description') or '').split())
-    alert_message = ai_description or str(alert.get('message') or 'Alert triggered.').title()
-    # An AI tag alert has no detector score: omit the line rather than
-    # print a misleading 0%.
-    confidence = None if ai_tag_alert else float(alert.get('confidence') or 0)
+    # An AI relabel (app.ai_relabel): the model named this object, which the
+    # detector had reported as something else.
+    relabel_from = str(alert.get('ai_relabel_from') or '').strip().replace('_', ' ')
+    if ai_description:
+        alert_message = ai_description
+    elif relabel_from:
+        alert_message = f'{display_primary} Detected (AI relabel of a {relabel_from} detection)'
+    else:
+        alert_message = str(alert.get('message') or 'Alert triggered.').title()
+    # An AI tag alert has no detector score, and a relabel's score was for the
+    # detector's label: omit the line rather than print a misleading figure.
+    confidence = None if ai_tag_alert or relabel_from else float(alert.get('confidence') or 0)
 
     plain_lines = [alert_message, '', f"Camera: {camera_display}"]
     if zone_name:
