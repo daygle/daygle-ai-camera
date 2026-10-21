@@ -94,8 +94,11 @@ Dwell ("still for N minutes") alerts are not verified.
 ### Relabelling a rejected alert
 
 When the model rejects an alert, the same request also asks what the object
-is instead, chosen from the objects other alert rules in the same zone watch
-(only rules with Email or Push on). A "person" the model calls a cat then
+is instead, chosen from the objects other alert rules in the same zone would
+alert on right now (Email or Push on, inside their active hours and notify
+window). A group rule offers its members: a `pet` rule offers `cat` and
+`dog`, so a cat by day (a `cat` rule) and at night (a `pet` rule) is named
+`cat` either way and matches whichever rule is on. A "person" the model calls a cat then
 fires that zone's cat rules, just as a cat the detector had reported would:
 the event gets a cat alert row and the notification says it was an AI
 relabel. The Filtered badge's tooltip shows "looks like a cat".

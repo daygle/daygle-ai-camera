@@ -1140,3 +1140,24 @@ def test_relabel_to_none_filters_as_before(av, relabel):
                           camera_id='cam')
     assert forwarded == [] and db.alerts == []
     assert 'instead' not in db.metadata[34]['ai_verification']['labels']['person']
+
+
+@pytest.mark.parametrize(('now', 'expected'), [('12:00', ['cat']), ('23:00', ['cat', 'dog'])])
+def test_candidates_follow_the_rules_active_now_and_name_group_members(av, monkeypatch, now, expected):
+    """Cat 05:00-20:00, pet (cat or dog) 20:00-05:00 on one zone: by day only
+    "cat" is offered, at night the pet rule's members; never "pet" itself, so
+    a "cat" answer matches whichever rule is on."""
+    alerts_mod = importlib.import_module('app.alerts')
+    dispatch = importlib.import_module('app.alert_dispatch')
+    monkeypatch.setattr(alerts_mod, '_now_hm_in_admin_tz', lambda: now)
+    monkeypatch.setattr(dispatch, '_now_hm_in_admin_tz', lambda: now)
+    from app.ai_relabel import relabel_candidates
+    day = {'active_start': '05:00', 'active_end': '20:00', 'notify_start': '05:00', 'notify_end': '20:00'}
+    night = {'active_start': '20:00', 'active_end': '05:00', 'notify_start': '20:00', 'notify_end': '05:00'}
+    rules = [
+        {'name': 'Drive / person', 'object': 'person', 'zone_id': 'drive', 'enabled': True, 'push_enabled': True},
+        {'name': 'Drive / cat', 'object': 'cat', 'zone_id': 'drive', 'enabled': True, 'push_enabled': True, **day},
+        {'name': 'Drive / pet', 'object': 'pet', 'zone_id': 'drive', 'enabled': True, 'push_enabled': True, **night},
+    ]
+    triggered = [_alert('person', 0.6, rule_name='Drive / person')]
+    assert relabel_candidates(triggered, ['person'], rules) == {'person': expected}
