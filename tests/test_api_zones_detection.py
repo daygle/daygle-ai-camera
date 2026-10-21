@@ -234,8 +234,9 @@ def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
     assert 'cooldown_seconds' not in rule  # retired: presence gate, no cooldown
     schedule = rule['alert_schedules'][0]
     assert schedule['email_recipients'] == ['alerts@example.test']
-    assert schedule['active_start'] == '07:00'
-    assert schedule['active_end'] == '18:00'
+    # A legacy per-schedule detect window moves up to the rule.
+    assert (rule['active_start'], rule['active_end']) == ('07:00', '18:00')
+    assert 'active_start' not in schedule
     assert schedule['notify_start'] == '22:00'
     assert schedule['notify_end'] == '05:00'
 

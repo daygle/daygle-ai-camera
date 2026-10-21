@@ -1673,6 +1673,8 @@ input[type="file"] { padding: 10px; }
 .zone-detect-field { display: grid; gap: 4px; }
 .zone-detect-field-label { color: var(--muted); font-size: 11.5px; font-weight: 750; line-height: 1.1; }
 .zone-detect-field--num .zone-rule-conf { width: 78px; }
+.zone-detect-field .zone-detect-window { width: auto; min-width: 104px; }
+.alerts-detect-window-note { margin: 0 0 10px; }
 .zone-detect-card-fields .zone-rule-remove { align-self: center; }
 .zone-object-empty { margin-top: 12px; }
 /* The card body is a grid, so a lone action button (e.g. Motion's "Custom

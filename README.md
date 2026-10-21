@@ -308,7 +308,7 @@ The web UI has a left sidebar (a slide-in menu on phones). Pages that belong tog
 - **Recordings** - tabs: Recordings (`/recordings`), Timeline (`/recordings/timeline`), Snapshots (`/snapshots`)
 - **Setup** (admin)
   - **Cameras** (`/cameras`) - camera management, recording, and PTZ
-  - **Zones** (`/zones`) - monitoring zone editor (use **Draw polygon** or **Full Frame** to add areas, and the per-zone **Shape** control to convert between full frame and polygon), visibility controls, and per-area detection scope: assign which objects, motion, and faces each area detects, their confidence, and whether each records. Notification delivery is configured on Alerts
+  - **Zones** (`/zones`) - monitoring zone editor (use **Draw polygon** or **Full Frame** to add areas, and the per-zone **Shape** control to convert between full frame and polygon), visibility controls, and per-area detection scope: assign which objects, motion, and faces each area detects, their confidence, whether each records, and the **Detect From/Until** hours outside which a rule neither records nor alerts. Notification delivery is configured on Alerts
   - **Alerts** (`/alerts`) - notification delivery policies (email, push, schedules, cooldowns) for the objects, motion, faces, and sound classes assigned on Zones and Sounds, plus recognized-person and stranger alerts; multiple policies can target the same subject with different schedules and thresholds
   - **Detection** - tabs: Objects (`/detection`, per-object Moving Only / Still Only behavior and still-alert thresholds), Sounds (`/detection/sounds`, per-camera audio detection classes), Faces (`/detection/faces`)
 - **Intelligence** (admin)
@@ -326,7 +326,7 @@ Daygle uses the **Events** page as its activity feed, while the **Alerts** page 
 
 One recording can contain multiple event rows. Use **Recordings** or **Recordings → Timeline** to review the complete clip, while the event row provides the specific detection context. Access-controlled viewers only see events and recordings they are allowed to view.
 
-Email and push notifications use the same alert title/body format. Configure delivery channels under **Settings → Notifications**, then create one or more policies under **Alerts** for each camera/zone/object or camera/sound combination. Multiple policies for the same object are independent, so daytime and overnight thresholds or schedules can coexist. Camera offline and recovery notifications use the same channels when enabled.
+Email and push notifications use the same alert title/body format. Configure delivery channels under **Settings → Notifications**, then create one or more policies under **Alerts** for each camera/zone/object or camera/sound combination. Multiple policies for the same object are independent, so daytime and overnight thresholds or schedules can coexist. Each object's **Detect From/Until** hours are set on **Zones** and gate both recording and alerts; each alert schedule's **Alert From/Until** window then narrows when email and push go out. Camera offline and recovery notifications use the same channels when enabled.
 
 ## AI and sound detection
 
