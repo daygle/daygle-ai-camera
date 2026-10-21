@@ -90,16 +90,18 @@ function policyStatus(rule, type, now = new Date(), timezone = window.daygleAuth
   // Equal start/end windows mean "any time" on every backend gate
   // (AlertEngine._is_active_now, alert_dispatch._rule_notify_active_now),
   // including sound rules - so the badge must not show "Outside schedule"
-  // for the 1439 minutes an equal window does not literally match.
-  const detecting = schedules.filter((schedule) => isWithinDetectWindow(schedule.active_start, schedule.active_end, nowHm));
-  if (!detecting.length) return { className: 'is-out-of-schedule', label: 'Outside Schedule', title: 'Enabled, but outside all detect windows.' };
+  // for the 1439 minutes an equal window does not literally match. The
+  // detect window is the rule's own (set on the Zones page for objects).
+  if (!isWithinDetectWindow(rule.active_start, rule.active_end, nowHm)) {
+    return { className: 'is-out-of-schedule', label: 'Outside Schedule', title: 'Enabled, but outside its detect window.' };
+  }
   // Mirrors alert_dispatch._rule_notify_active_now: an alert is only sent
-  // when a detecting schedule has a channel on and its alert window covers now.
-  const alerting = detecting.some((schedule) => (schedule.email_enabled || schedule.push_enabled)
+  // when a schedule has a channel on and its alert window covers now.
+  const alerting = schedules.some((schedule) => (schedule.email_enabled || schedule.push_enabled)
     && isWithinDetectWindow(schedule.notify_start, schedule.notify_end, nowHm));
   return alerting
-    ? { className: 'is-in-schedule-alert', label: 'In Schedule (Alert)', title: 'Enabled, within a detect window, and alerts will be sent now.' }
-    : { className: 'is-in-schedule', label: 'In Schedule', title: 'Enabled and within a detect window, but no alerts will be sent now.' };
+    ? { className: 'is-in-schedule-alert', label: 'In Schedule (Alert)', title: 'Enabled, within its detect window, and alerts will be sent now.' }
+    : { className: 'is-in-schedule', label: 'In Schedule', title: 'Enabled and within its detect window, but no alerts will be sent now.' };
 }
 
 function defaultAlertSchedule() {
@@ -108,8 +110,6 @@ function defaultAlertSchedule() {
     email_enabled: false,
     push_enabled: false,
     email_recipients: [],
-    active_start: null,
-    active_end: null,
     notify_start: null,
     notify_end: null,
   };
@@ -130,8 +130,6 @@ function ensureAlertSchedules(rule) {
       email_enabled: schedule.email_enabled === true,
       push_enabled: schedule.push_enabled === true,
       email_recipients: normalizeEmailList(schedule.email_recipients),
-      active_start: schedule.active_start || null,
-      active_end: schedule.active_end || null,
       notify_start: schedule.notify_start || null,
       notify_end: schedule.notify_end || null,
     };
@@ -151,14 +149,21 @@ function defaultRule(label = 'person', type = alertType) {
   return { id: `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, label, enabled: true, record_on_detect: true, min_confidence: label === 'motion' || label === 'face' ? 0.45 : 0.5, max_confidence: 1, ai_verify: false, ai_verify_skip_above: 1, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null, alert_schedules: [defaultAlertSchedule()] };
 }
 
+// The rule's detect window is edited on the Zones page; shown here because
+// alerts only go out inside it.
+function detectWindowNote(rule) {
+  const start = String(rule.active_start || '').trim();
+  const end = String(rule.active_end || '').trim();
+  const span = start && end && start !== end ? `${start} - ${end}` : 'any time';
+  return `<p class="form-help muted alerts-detect-window-note">Detects ${escapeHtml(span)}, set on the <a href="/zones">Zones</a> page. Alerts are only sent inside this window.</p>`;
+}
+
 function renderObjectSchedules(rule, ruleIndex, schedules) {
-  return `<div class="alerts-schedule-list">${schedules.map((schedule, scheduleIndex) => `
+  return `${detectWindowNote(rule)}<div class="alerts-schedule-list">${schedules.map((schedule, scheduleIndex) => `
     <section class="alerts-schedule-entry" data-schedule-index="${scheduleIndex}">
       <header class="alerts-schedule-head"><strong>Schedule ${scheduleIndex + 1}</strong>${schedules.length > 1 ? `<button class="secondary alerts-schedule-remove" data-remove-schedule="${ruleIndex}" data-schedule-index="${scheduleIndex}" type="button" aria-label="Remove schedule ${scheduleIndex + 1}">Remove</button>` : ''}</header>
       <div class="alerts-channel-row"><label><input data-field="email_enabled" type="checkbox" ${schedule.email_enabled ? 'checked' : ''}> Email</label><label><input data-field="push_enabled" type="checkbox" ${schedule.push_enabled ? 'checked' : ''}> Push</label></div>
       <div class="alerts-policy-grid alerts-schedule-grid">
-        <label><span>Detect From</span>${timeSelect(schedule.active_start, 'data-field="active_start"')}</label>
-        <label><span>Detect Until</span>${timeSelect(schedule.active_end, 'data-field="active_end"')}</label>
         <label><span>Alert From</span>${timeSelect(schedule.notify_start, 'data-field="notify_start"')}</label>
         <label><span>Alert Until</span>${timeSelect(schedule.notify_end, 'data-field="notify_end"')}</label>
       </div>

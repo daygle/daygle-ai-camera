@@ -491,8 +491,6 @@ function normalizeAlertSchedules(rule) {
     email_enabled: schedule.email_enabled === true,
     push_enabled: schedule.push_enabled === true,
     email_recipients: normalizeEmailList(schedule.email_recipients),
-    active_start: schedule.active_start || null,
-    active_end: schedule.active_end || null,
     notify_start: schedule.notify_start || null,
     notify_end: schedule.notify_end || null,
   }));
@@ -502,7 +500,7 @@ function normalizeAlertSchedules(rule) {
   rule.push_enabled = schedules.some((schedule) => schedule.push_enabled);
   rule.email_recipients = [...new Set(schedules.flatMap((schedule) => schedule.email_recipients))];
   if (first) {
-    for (const key of ['active_start', 'active_end', 'notify_start', 'notify_end']) rule[key] = first[key];
+    for (const key of ['notify_start', 'notify_end']) rule[key] = first[key];
   }
   return schedules;
 }
@@ -546,6 +544,9 @@ function normalizeObjectRules(zone) {
         label: String(rule.label || '').trim().toLowerCase(),
         enabled: rule.enabled !== false,
         record_on_detect: rule.record_on_detect !== false,
+        // The detect window (rule-level) gates recording and alerts.
+        active_start: rule.active_start || null,
+        active_end: rule.active_end || null,
         min_confidence: clamp(Number(rule.min_confidence ?? baseConfidenceFor(rule.label)), 0, 1),
         // Upper bound of the confidence window. Defaults to 1 (no cap) and is
         // never allowed below min_confidence so the [min, max] band is valid.
@@ -787,6 +788,25 @@ function objectRuleOptions(selectedLabel) {
   return `<option value="">Add Object...</option><optgroup label="Groups">${groups}</optgroup>${coco}`;
 }
 
+// Detect From / Detect Until for a zone rule. Outside the window the rule
+// neither records nor alerts; "Any time" (or equal ends) means always.
+function detectWindowSelect(value, key, field) {
+  const options = ['<option value="">Any time</option>'];
+  for (let hour = 0; hour < 24; hour += 1) for (let minute = 0; minute < 60; minute += 15) {
+    const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    options.push(`<option value="${time}"${time === value ? ' selected' : ''}>${time}</option>`);
+  }
+  if (value && !options.some((option) => option.includes(`"${value}"`))) options.push(`<option value="${escapeHtml(value)}" selected>${escapeHtml(value)}</option>`);
+  return `<select class="zone-detect-window" data-zone-detect-window="${key}" data-window-field="${field}">${options.join('')}</select>`;
+}
+
+function detectWindowFields(rule, key, lower) {
+  const title = `Only record and alert on ${lower} between these times. Any time = always.`;
+  return `
+    <label class="zone-detect-field" title="${escapeHtml(title)}"><span class="zone-detect-field-label">Detect From</span>${detectWindowSelect(rule?.active_start, key, 'active_start')}</label>
+    <label class="zone-detect-field" title="${escapeHtml(title)}"><span class="zone-detect-field-label">Detect Until</span>${detectWindowSelect(rule?.active_end, key, 'active_end')}</label>`;
+}
+
 // Shared On/Off pill used in every detection-table cell (Detect + Record),
 // so object, motion, face and sound rows all render identically.
 function ruleToggleCell(attr, on, title, disabled) {
@@ -837,6 +857,7 @@ function renderObjectRules(zone, zoneIndex) {
             <span class="zone-detect-field-label">Record</span>
             ${ruleToggleCell(`data-zone-rule-record="${key}"`, rule.record_on_detect !== false, `Record a clip when ${lower} is detected in this area`, false)}
           </div>
+          ${detectWindowFields(rule, key, lower)}
           <label class="zone-detect-field zone-detect-field--num">
             <span class="zone-detect-field-label">Min Confidence</span>
             <input class="zone-rule-conf" type="number" data-zone-rule-confidence-value="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" title="Minimum confidence (0.01-1). Overrides the global ONNX slider for this object in this zone." />
@@ -893,6 +914,7 @@ function renderMotionCard(zone, zoneIndex) {
           <select class="zone-motion-trigger" data-zone-motion-trigger="${zoneIndex}" title="Trigger when this much of the area moves. Smaller = more sensitive." aria-label="Motion trigger for this area">${presetOptions}<option value="custom"${preset ? '' : ' selected'}>${escapeHtml(customLabel)}</option></select>
         </label>
         ${tripwireToggleField('Record', `data-zone-motion-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when motion is detected in this area')}
+        ${detectWindowFields(rule, `${zoneIndex}:${zone.object_rules.indexOf(rule)}`, 'motion')}
       </div>
       <button class="zone-rule-advanced-toggle" type="button" data-zone-motion-advanced-toggle="${zoneIndex}" title="Custom trigger and how long motion must last" aria-label="Custom trigger and how long motion must last" aria-expanded="false">${ICONS.cog}<span>Custom Trigger</span></button>
       <div class="zone-rule-advanced" data-zone-motion-advanced-for="${zoneIndex}" hidden>
@@ -932,6 +954,7 @@ function renderFaceCard(zone, zoneIndex) {
           <input type="number" data-zone-face-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(conf)}" title="Only faces with at least this confidence are processed in this area (0-1). Faces detected outside Face-enabled areas are ignored entirely." />
         </label>
         ${tripwireToggleField('Record', `data-zone-face-record="${zoneIndex}"`, (rule?.record_on_detect) !== false, 'Record a clip when a face is detected in this area')}
+        ${detectWindowFields(rule, `${zoneIndex}:${zone.object_rules.indexOf(rule)}`, 'faces')}
       </div>
     </div>` : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to detect and recognize faces in this area.</p>';
   return `
@@ -2001,6 +2024,14 @@ function bindRuleFields() {
         renderObjectDetectionRules();
         markZoneUnsaved();
       });
+    });
+  });
+  document.querySelectorAll('select[data-zone-detect-window]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const { rule } = parseZoneRuleKey(select.dataset.zoneDetectWindow);
+      if (!rule) return;
+      rule[select.dataset.windowField] = select.value || null;
+      markZoneUnsaved();
     });
   });
   // Min-confidence control: number input with clamping (0.01-1).

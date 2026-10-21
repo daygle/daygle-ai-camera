@@ -40,8 +40,10 @@ Cluster membership:
   (float [0,1]) + the optional object size /
   shape limits (``min_box_area`` ... ``max_aspect_ratio``, checked by
   ``detection_within_box_limits``), composes the canonical
-  shape with normalized en-/disable flags and ``alert_schedules`` (each
-  carrying its e-mail / push flags and detection / notification windows).
+  shape with normalized en-/disable flags, the rule's detect window
+  (``active_start`` / ``active_end``, gating recording and alerts) and
+  ``alert_schedules`` (each carrying its e-mail / push flags and alert
+  window).
 
 - ``normalize_zone_point`` -- single zone-coordinate sanitizer.
   Coerces ``{'x': fx, 'y': fy}`` into ``{'x': round(fx,4), 'y': round(fy,4)}``
@@ -300,11 +302,89 @@ def normalize_label_list(value: Any) -> list[str]:
     return labels
 
 
+_MINUTES_PER_DAY = 24 * 60
+
+
+def _window_minutes(start: str | None, end: str | None) -> set[int] | None:
+    """The minutes of the day an inclusive ``HH:MM`` window covers.
+
+    ``None`` means "any time" (an empty, partial or equal window, as every
+    backend gate reads it) or a value that is not ``HH:MM``.
+    """
+    if not start or not end or start == end:
+        return None
+    try:
+        first = int(start[:2]) * 60 + int(start[3:])
+        last = int(end[:2]) * 60 + int(end[3:])
+    except ValueError:
+        return None
+    if first <= last:
+        return set(range(first, last + 1))
+    return set(range(first, _MINUTES_PER_DAY)) | set(range(0, last + 1))
+
+
+def _minutes_window(minutes: set[int]) -> tuple[str, str] | None:
+    """The single ``HH:MM`` window covering exactly ``minutes``, if one does."""
+    starts = [minute for minute in minutes if (minute - 1) % _MINUTES_PER_DAY not in minutes]
+    if len(starts) != 1:
+        return None
+    end = starts[0]
+    while (end + 1) % _MINUTES_PER_DAY in minutes:
+        end = (end + 1) % _MINUTES_PER_DAY
+    return f'{starts[0] // 60:02d}:{starts[0] % 60:02d}', f'{end // 60:02d}:{end % 60:02d}'
+
+
+def _fold_detect_window_into_alert(schedule: dict[str, Any], start: str | None, end: str | None) -> None:
+    """Narrow ``schedule``'s alert window to a legacy per-schedule detect window.
+
+    Alerts used to need both windows to cover now, so the alert window becomes
+    their overlap. An overlap that is empty or not one window keeps the alert
+    window as it was.
+    """
+    detect = _window_minutes(start, end)
+    if detect is None:
+        return
+    alert = _window_minutes(schedule['notify_start'], schedule['notify_end'])
+    if alert is None:
+        schedule['notify_start'], schedule['notify_end'] = start, end
+        return
+    overlap = _minutes_window(detect & alert)
+    if overlap:
+        schedule['notify_start'], schedule['notify_end'] = overlap
+
+
+def normalize_zone_rule_detect_window(rule: dict[str, Any], schedules: list[dict[str, Any]]) -> tuple[str | None, str | None]:
+    """Resolve a zone rule's detect window (``active_start`` / ``active_end``).
+
+    The detect window belongs to the rule (set on the Zones page) and gates
+    both recording and alerts. Older configs kept it on each alert schedule:
+    when every schedule shares one window it moves up to the rule, otherwise
+    each schedule's window is folded into its alert window so alerts keep
+    their timing. ``schedules`` are the normalized schedules, updated in place.
+    """
+    start = _normalize_hhmm(rule.get('active_start'))
+    end = _normalize_hhmm(rule.get('active_end'))
+    raw_schedules = rule.get('alert_schedules')
+    legacy = [
+        (_normalize_hhmm(raw.get('active_start')), _normalize_hhmm(raw.get('active_end')))
+        for raw in (raw_schedules if isinstance(raw_schedules, list) else [])
+        if isinstance(raw, dict)
+    ]
+    if len(legacy) != len(schedules) or not any(_window_minutes(*window) for window in legacy):
+        return start, end
+    if _window_minutes(start, end) is None and len(set(legacy)) == 1:
+        return legacy[0]
+    for schedule, window in zip(schedules, legacy):
+        _fold_detect_window_into_alert(schedule, *window)
+    return start, end
+
+
 def normalize_zone_alert_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]:
-    """Normalize an object's independent detection and notification windows.
+    """Normalize an object's alert schedules (delivery and alert window).
 
     A rule without an ``alert_schedules`` list gets one empty schedule (no
-    delivery, no windows).
+    delivery, no window). The detect window lives on the rule; see
+    ``normalize_zone_rule_detect_window``.
     """
     raw_schedules = rule.get('alert_schedules')
     source = raw_schedules if isinstance(raw_schedules, list) else []
@@ -326,8 +406,6 @@ def normalize_zone_alert_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]
             'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
             'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
             'email_recipients': normalize_email_recipients(raw.get('email_recipients', [])),
-            'active_start': _normalize_hhmm(raw.get('active_start')),
-            'active_end': _normalize_hhmm(raw.get('active_end')),
             'notify_start': _normalize_hhmm(raw.get('notify_start')),
             'notify_end': _normalize_hhmm(raw.get('notify_end')),
         })
@@ -337,8 +415,6 @@ def normalize_zone_alert_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]
             'email_enabled': False,
             'push_enabled': False,
             'email_recipients': [],
-            'active_start': None,
-            'active_end': None,
             'notify_start': None,
             'notify_end': None,
         })
@@ -410,6 +486,8 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         except (TypeError, ValueError):
             ai_verify_skip_above = 1.0
         ai_verify_skip_above = max(0.0, min(1.0, ai_verify_skip_above))
+        schedules = normalize_zone_alert_schedules(rule)
+        active_start, active_end = normalize_zone_rule_detect_window(rule, schedules)
         rules.append({
             **({'id': raw_rule_id} if raw_rule_id else {}),
             'label': label,
@@ -422,9 +500,12 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             **box_limits,
             'ai_verify': ai_verify,
             'ai_verify_skip_above': ai_verify_skip_above,
-            # Delivery and time windows live only on the schedules;
-            # zone_object_alert_rules flattens them per schedule.
-            'alert_schedules': normalize_zone_alert_schedules(rule),
+            # The detect window gates recording and alerts; delivery and the
+            # alert window live on the schedules, which
+            # zone_object_alert_rules flattens one alert rule each.
+            'active_start': active_start,
+            'active_end': active_end,
+            'alert_schedules': schedules,
         })
     return rules
 

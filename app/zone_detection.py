@@ -149,6 +149,7 @@ from fastapi import HTTPException
 import numpy as np
 
 import app.state as _state
+from app.alerts import AlertEngine
 
 logger = logging.getLogger('daygle.ai')
 from app.config_facades import get_camera_config
@@ -704,6 +705,9 @@ def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict
                     continue
             if action == 'record' and (not rule.get('record_on_detect', True)):
                 continue
+            # The rule's detect window gates recording and alerting alike.
+            if not AlertEngine._is_active_now(rule):
+                continue
             # ``label_matches`` canonicalizes the rule label the same way the
             # detection label is (so ``human``/``people``/``pedestrian`` all
             # match a ``person`` detection) AND expands umbrella group rules
@@ -789,6 +793,8 @@ def rule_rejection_reason(settings: dict[str, Any], detection: dict[str, Any]) -
         return f'Above the {label} rule maximum ({max(maximums):.2f})'
     if not any(detection_within_box_limits(detection, rule) for rule in rules):
         return f'Outside the {label} rule size/shape limits'
+    if not any(AlertEngine._is_active_now(rule) for rule in rules):
+        return f'Outside the {label} rule detect window'
     return f'The {label} rule neither alerts nor records'
 
 
@@ -869,8 +875,8 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                     'email_enabled': bool(schedule.get('email_enabled', False)),
                     'email_recipients': normalize_email_recipients(schedule.get('email_recipients', [])),
                     'push_enabled': bool(schedule.get('push_enabled', False)),
-                    'active_start': schedule.get('active_start'),
-                    'active_end': schedule.get('active_end'),
+                    'active_start': rule.get('active_start'),
+                    'active_end': rule.get('active_end'),
                     'notify_start': schedule.get('notify_start'),
                     'notify_end': schedule.get('notify_end'),
                     'schedule_id': schedule_id,
@@ -935,7 +941,11 @@ def zone_motion_record_on_detect(settings: dict[str, Any], zone_id: str) -> bool
         for rule in zone.get('object_rules') or []:
             if not rule.get('enabled', True):
                 continue
-            if str(rule.get('label') or '').strip().lower() == 'motion' and rule.get('record_on_detect', True):
+            if (
+                str(rule.get('label') or '').strip().lower() == 'motion'
+                and rule.get('record_on_detect', True)
+                and AlertEngine._is_active_now(rule)
+            ):
                 return True
     return False
 

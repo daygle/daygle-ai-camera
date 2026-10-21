@@ -29,7 +29,8 @@ test('a rule without schedules gets one empty schedule; rule-level fields are ig
   assert.match(schedule.id, /^schedule-/);
   assert.equal(schedule.email_enabled, false);
   assert.deepEqual(rehome(schedule.email_recipients), []);
-  assert.equal(schedule.active_start, null);
+  assert.equal('active_start' in schedule, false, 'the detect window is the rule\'s own');
+  assert.equal(rule.active_start, '06:00');
   assert.equal(rule.email_enabled, false, 'summary is derived from the schedules');
   assert.equal(ensureAlertSchedules(rule).length, 1);
 });
@@ -39,18 +40,18 @@ test('explicit schedules retain separate channels, windows, and recipients', () 
     email_enabled: false,
     push_enabled: false,
     alert_schedules: [
-      { id: 'day', email_enabled: true, email_recipients: ['day@example.com'], active_start: '06:00', active_end: '18:00' },
-      { id: 'night', push_enabled: true, email_recipients: ['night@example.com'], active_start: '18:00', active_end: '06:00' },
+      { id: 'day', email_enabled: true, email_recipients: ['day@example.com'], notify_start: '06:00', notify_end: '18:00' },
+      { id: 'night', push_enabled: true, email_recipients: ['night@example.com'], notify_start: '18:00', notify_end: '06:00' },
     ],
   };
 
   const schedules = ensureAlertSchedules(rule);
   assert.equal(schedules.length, 2);
-  assert.deepEqual(rehome(schedules.map(({ id, email_enabled, push_enabled, email_recipients, active_start, active_end }) => ({
-    id, email_enabled, push_enabled, email_recipients, active_start, active_end,
+  assert.deepEqual(rehome(schedules.map(({ id, email_enabled, push_enabled, email_recipients, notify_start, notify_end }) => ({
+    id, email_enabled, push_enabled, email_recipients, notify_start, notify_end,
   }))), [
-    { id: 'day', email_enabled: true, push_enabled: false, email_recipients: ['day@example.com'], active_start: '06:00', active_end: '18:00' },
-    { id: 'night', email_enabled: false, push_enabled: true, email_recipients: ['night@example.com'], active_start: '18:00', active_end: '06:00' },
+    { id: 'day', email_enabled: true, push_enabled: false, email_recipients: ['day@example.com'], notify_start: '06:00', notify_end: '18:00' },
+    { id: 'night', email_enabled: false, push_enabled: true, email_recipients: ['night@example.com'], notify_start: '18:00', notify_end: '06:00' },
   ]);
   assert.equal(rule.email_enabled, true);
   assert.equal(rule.push_enabled, true);
@@ -82,17 +83,15 @@ test('detect window status matches admin timezone, including boundaries and over
 test('policy status distinguishes disabled, active, and outside-window policies', () => {
   const now = new Date('2026-06-01T15:00:00Z'); // 08:00 in Los Angeles
   assert.equal(statusSandbox.policyStatus({ enabled: false }, 'object', now).className, 'is-disabled');
-  assert.equal(statusSandbox.policyStatus({ enabled: true, alert_schedules: [
-    { active_start: '07:00', active_end: '08:00' },
-    { active_start: '20:00', active_end: '22:00' },
-  ] }, 'object', now).className, 'is-in-schedule');
+  assert.equal(statusSandbox.policyStatus({ enabled: true, active_start: '07:00', active_end: '08:00', alert_schedules: [{}] }, 'object', now).className, 'is-in-schedule');
+  assert.equal(statusSandbox.policyStatus({ enabled: true, active_start: '20:00', active_end: '22:00', alert_schedules: [{}] }, 'object', now).className, 'is-out-of-schedule');
   assert.equal(statusSandbox.policyStatus({ enabled: true, active_start: '09:00', active_end: '17:00' }, 'sound', now).className, 'is-out-of-schedule');
   assert.equal(statusSandbox.policyStatus({ enabled: true, active_start: '08:00', active_end: '08:00' }, 'sound', now).className, 'is-in-schedule');
 });
 
-test('policy status shows In Schedule (Alert) only when a detecting schedule will send alerts now', () => {
+test('policy status shows In Schedule (Alert) only when a detecting rule will send alerts now', () => {
   const now = new Date('2026-06-01T15:00:00Z'); // 08:00 in Los Angeles
-  const status = (schedules) => statusSandbox.policyStatus({ enabled: true, alert_schedules: schedules }, 'object', now);
+  const status = (schedules, window = {}) => statusSandbox.policyStatus({ enabled: true, ...window, alert_schedules: schedules }, 'object', now);
   // Detecting, channel on, alert window covers now.
   assert.equal(status([{ push_enabled: true, notify_start: '07:00', notify_end: '09:00' }]).className, 'is-in-schedule-alert');
   assert.equal(status([{ email_enabled: true }]).label, 'In Schedule (Alert)');
@@ -100,10 +99,7 @@ test('policy status shows In Schedule (Alert) only when a detecting schedule wil
   assert.equal(status([{ email_enabled: true, push_enabled: true, notify_start: '20:00', notify_end: '05:00' }]).label, 'In Schedule');
   // Detecting, alert window covers now, but no channel enabled.
   assert.equal(status([{ notify_start: '07:00', notify_end: '09:00' }]).className, 'is-in-schedule');
-  // Alerting schedule outside its detect window does not count.
-  assert.equal(status([
-    { active_start: '07:00', active_end: '09:00' },
-    { active_start: '20:00', active_end: '22:00', push_enabled: true },
-  ]).className, 'is-in-schedule');
-  assert.equal(status([{ active_start: '20:00', active_end: '22:00', push_enabled: true }]).label, 'Outside Schedule');
+  // The rule's detect window gates every schedule.
+  assert.equal(status([{ push_enabled: true }], { active_start: '05:00', active_end: '20:00' }).className, 'is-in-schedule-alert');
+  assert.equal(status([{ push_enabled: true }], { active_start: '20:00', active_end: '05:00' }).label, 'Outside Schedule');
 });

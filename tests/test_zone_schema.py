@@ -332,21 +332,24 @@ def test_normalize_zone_alert_schedules_ignores_rule_level_fields_and_keeps_mult
     }]})[0]
     assert bare['alert_schedules'] == [{
         'id': 'schedule-1', 'email_enabled': False, 'push_enabled': False,
-        'email_recipients': [], 'active_start': None, 'active_end': None,
-        'notify_start': None, 'notify_end': None,
+        'email_recipients': [], 'notify_start': None, 'notify_end': None,
     }]
-    for key in ('email_enabled', 'push_enabled', 'email_recipients', 'active_start', 'notify_start'):
+    for key in ('email_enabled', 'push_enabled', 'email_recipients', 'notify_start'):
         assert key not in bare
+    # The detect window is the rule's own.
+    assert (bare['active_start'], bare['active_end']) == ('08:00', None)
 
     multiple = zs.normalize_zone_object_rules({'object_rules': [{
         'id': 'person-main', 'label': 'person',
+        'active_start': '05:00', 'active_end': '23:30',
         'alert_schedules': [
-            {'id': 'morning', 'email_enabled': True, 'email_recipients': ['morning@example.com'], 'active_start': '06:00', 'active_end': '12:00'},
-            {'id': 'evening', 'push_enabled': True, 'email_recipients': ['evening@example.com'], 'active_start': '18:00', 'active_end': '23:00'},
+            {'id': 'morning', 'email_enabled': True, 'email_recipients': ['morning@example.com'], 'notify_start': '06:00', 'notify_end': '12:00'},
+            {'id': 'evening', 'push_enabled': True, 'email_recipients': ['evening@example.com'], 'notify_start': '18:00', 'notify_end': '23:00'},
         ],
     }]})[0]
     assert [schedule['id'] for schedule in multiple['alert_schedules']] == ['morning', 'evening']
-    assert [schedule['active_start'] for schedule in multiple['alert_schedules']] == ['06:00', '18:00']
+    assert [schedule['notify_start'] for schedule in multiple['alert_schedules']] == ['06:00', '18:00']
+    assert (multiple['active_start'], multiple['active_end']) == ('05:00', '23:30')
     assert [schedule['email_recipients'] for schedule in multiple['alert_schedules']] == [
         ['morning@example.com'], ['evening@example.com'],
     ]
@@ -560,3 +563,42 @@ def test_normalize_label_list_preserves_group_names(zs):
     # and can be stored on a zone/rule like any other configured label.
     assert 'animal' in zs.normalize_label_list('animal, cat')
     assert 'pet' in zs.normalize_label_list(['Pet'])
+
+
+def test_legacy_schedule_detect_window_moves_to_the_rule_when_shared(monkeypatch, zs):
+    _install_zone_dependencies(monkeypatch)
+    rule = zs.normalize_zone_object_rules({'object_rules': [{
+        'label': 'cat',
+        'alert_schedules': [
+            {'id': 'a', 'email_enabled': True, 'active_start': '05:00', 'active_end': '20:00', 'notify_start': '05:00', 'notify_end': '20:00'},
+            {'id': 'b', 'push_enabled': True, 'active_start': '5:00', 'active_end': '20:00'},
+        ],
+    }]})[0]
+    assert (rule['active_start'], rule['active_end']) == ('05:00', '20:00')
+    assert [(s['notify_start'], s['notify_end']) for s in rule['alert_schedules']] == [('05:00', '20:00'), (None, None)]
+    assert all('active_start' not in s for s in rule['alert_schedules'])
+    # Normalizing again is a no-op.
+    assert zs.normalize_zone_object_rules({'object_rules': [rule]})[0] == rule
+
+
+def test_legacy_differing_schedule_detect_windows_fold_into_alert_windows(monkeypatch, zs):
+    _install_zone_dependencies(monkeypatch)
+    rule = zs.normalize_zone_object_rules({'object_rules': [{
+        'label': 'person',
+        'alert_schedules': [
+            # Overlap of 06:00-18:00 and 07:00-23:00 is 07:00-18:00.
+            {'id': 'day', 'email_enabled': True, 'active_start': '06:00', 'active_end': '18:00', 'notify_start': '07:00', 'notify_end': '23:00'},
+            # No alert window: the detect window becomes it.
+            {'id': 'night', 'push_enabled': True, 'active_start': '18:00', 'active_end': '06:00'},
+            # Overnight overlap: 22:00-06:00 with 20:00-02:00 is 22:00-02:00.
+            {'id': 'late', 'push_enabled': True, 'active_start': '22:00', 'active_end': '06:00', 'notify_start': '20:00', 'notify_end': '02:00'},
+            # Two separate pieces cannot be one window: the alert window stays.
+            {'id': 'split', 'push_enabled': True, 'active_start': '06:00', 'active_end': '20:00', 'notify_start': '18:00', 'notify_end': '08:00'},
+            # Equal ends mean any time: nothing to fold.
+            {'id': 'any', 'push_enabled': True, 'active_start': '09:00', 'active_end': '09:00', 'notify_start': '10:00', 'notify_end': '11:00'},
+        ],
+    }]})[0]
+    assert (rule['active_start'], rule['active_end']) == (None, None)
+    assert [(s['notify_start'], s['notify_end']) for s in rule['alert_schedules']] == [
+        ('07:00', '18:00'), ('18:00', '06:00'), ('22:00', '02:00'), ('18:00', '08:00'), ('10:00', '11:00'),
+    ]

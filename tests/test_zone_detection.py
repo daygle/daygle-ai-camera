@@ -823,7 +823,7 @@ def test_zone_object_alert_rules_includes_motion_rules_from_motion_only_zones():
     assert rules[0]['zone_id'] == 'porch'
 
 
-def test_zone_object_alert_rules_expands_schedules_with_independent_windows(monkeypatch):
+def test_zone_object_alert_rules_expands_schedules_under_the_rule_detect_window(monkeypatch):
     from app import zone_detection as zd
     settings = {
         'id': 'cam-1', 'name': 'Cam 1',
@@ -833,9 +833,10 @@ def test_zone_object_alert_rules_expands_schedules_with_independent_windows(monk
             'object_rules': [{
                 'id': 'person-main', 'label': 'person', 'enabled': True,
                 'cooldown_seconds': 45, 'min_confidence': 0.6,
+                'active_start': '06:00', 'active_end': '22:00',
                 'alert_schedules': [
-                    {'id': 'day', 'email_enabled': True, 'email_recipients': ['day@example.com'], 'active_start': '06:00', 'active_end': '18:00', 'notify_start': '07:00', 'notify_end': '17:00'},
-                    {'id': 'night', 'push_enabled': True, 'active_start': '18:00', 'active_end': '06:00', 'notify_start': '19:00', 'notify_end': '05:00'},
+                    {'id': 'day', 'email_enabled': True, 'email_recipients': ['day@example.com'], 'notify_start': '07:00', 'notify_end': '17:00'},
+                    {'id': 'night', 'push_enabled': True, 'notify_start': '19:00', 'notify_end': '05:00'},
                 ],
             }],
         }]},
@@ -846,7 +847,9 @@ def test_zone_object_alert_rules_expands_schedules_with_independent_windows(monk
         'Cam 1 / Porch / person [Schedule 2]',
     ]
     assert [rule['schedule_id'] for rule in rules] == ['day', 'night']
-    assert [rule['active_start'] for rule in rules] == ['06:00', '18:00']
+    # Every schedule inherits the rule's detect window; each keeps its own alert window.
+    assert [(rule['active_start'], rule['active_end']) for rule in rules] == [('06:00', '22:00')] * 2
+    assert [rule['notify_start'] for rule in rules] == ['07:00', '19:00']
     assert rules[0]['email_recipients'] == ['day@example.com']
     assert rules[1]['push_enabled'] is True
     assert all(rule['min_confidence'] == 0.6 and 'cooldown_seconds' not in rule for rule in rules)
@@ -857,9 +860,41 @@ def test_zone_object_alert_rules_expands_schedules_with_independent_windows(monk
     monkeypatch.setattr(alerts_module, '_now_hm_in_admin_tz', lambda: now['value'])
     engine = AlertEngine(rules)
     detection = {'label': 'person', 'confidence': 0.9, 'zone_id': 'porch'}
-    assert [alert['rule_name'] for alert in engine.process([detection])] == [rules[0]['name']]
-    now['value'] = '20:00'
-    assert [alert['rule_name'] for alert in engine.process([detection])] == [rules[1]['name']]
+    assert [alert['rule_name'] for alert in engine.process([detection])] == [rule['name'] for rule in rules]
+    now['value'] = '23:00'
+    assert engine.process([detection]) == []
+
+
+def test_zone_rule_detect_window_gates_recording_and_alert_matching(monkeypatch):
+    from app import zone_detection as zd
+    import app.alerts as alerts_module
+    settings = {
+        'id': 'cam-1', 'name': 'Cam 1',
+        'detection': {'zones': [{
+            'enabled': True, 'monitor_objects': True, 'id': 'porch', 'name': 'Porch',
+            'x': 0, 'y': 0, 'width': 1, 'height': 1,
+            'object_rules': [
+                {'id': 'cat-day', 'label': 'cat', 'enabled': True, 'record_on_detect': True, 'min_confidence': 0.3,
+                 'active_start': '05:00', 'active_end': '20:00',
+                 'alert_schedules': [{'id': 'schedule-1', 'push_enabled': True}]},
+                {'id': 'motion', 'label': 'motion', 'enabled': True, 'record_on_detect': True, 'min_confidence': 0,
+                 'active_start': '20:00', 'active_end': '05:00',
+                 'alert_schedules': [{'id': 'schedule-1'}]},
+            ],
+        }]},
+    }
+    now = {'value': '12:00'}
+    monkeypatch.setattr(alerts_module, '_now_hm_in_admin_tz', lambda: now['value'])
+    detection = {'label': 'cat', 'confidence': 0.9, 'zone_id': 'porch', 'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}}
+    assert zd.zone_record_on_detect(dict(detection), settings) is True
+    assert zd.zone_object_rule_matches(settings, dict(detection), action='alert')
+    assert zd.zone_motion_record_on_detect(settings, 'porch') is False
+
+    now['value'] = '22:00'
+    assert zd.zone_record_on_detect(dict(detection), settings) is False
+    assert zd.zone_object_rule_matches(settings, dict(detection), action='alert') == []
+    assert zd.rule_rejection_reason(settings, dict(detection)) == 'Outside the cat rule detect window'
+    assert zd.zone_motion_record_on_detect(settings, 'porch') is True
 
 
 def test_zone_object_alert_rules_keeps_object_rules_inert_in_motion_only_zones():
