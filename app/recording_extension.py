@@ -326,30 +326,33 @@ def extend_active_rtsp_recording(
             # still-object continuation rule reads both.
             session.setdefault('track_ids', set()).update(_object_track_ids(detections))
             session['last_object_ts'] = max(float(session.get('last_object_ts') or 0.0), event_dt.timestamp())
-        if new_deadline <= current_deadline:
-            if extend_until > current_deadline:
-                # The deadline already sits at the Max Clip Duration ceiling and
-                # this event's horizon reaches past it: the clip contains the
-                # moment but can never hold its post-roll. Refuse, so the caller
-                # starts a follow-on clip (the split at Max Clip Duration the
-                # pre-roll clamp in start_rtsp_recording_capture describes).
-                # Only at the ceiling: below it the extension above still grows
-                # the clip up to the ceiling, so refusing there would cut short
-                # a clip that suppressed detections (which never start a
-                # capture) are still extending.
-                return None
-            return int(session.get('recording_id'))
-        session['capture_deadline_ts'] = new_deadline
-        new_run = _note_extension(session, event_dt.timestamp(), reason, label)
-        start_ts = float(session.get('start_capture_ts') or new_deadline)
-        ended_at = datetime.fromtimestamp(new_deadline, tz=timezone.utc).isoformat()
-        duration_seconds = max(1.0, new_deadline - start_ts)
+        extended = new_deadline > current_deadline
+        if not extended and extend_until > current_deadline:
+            # The deadline already sits at the Max Clip Duration ceiling and
+            # this event's horizon reaches past it: the clip contains the
+            # moment but can never hold its post-roll. Refuse, so the caller
+            # starts a follow-on clip (the split at Max Clip Duration the
+            # pre-roll clamp in start_rtsp_recording_capture describes).
+            # Only at the ceiling: below it the extension above still grows
+            # the clip up to the ceiling, so refusing there would cut short
+            # a clip that suppressed detections (which never start a
+            # capture) are still extending.
+            return None
+        new_run = False
+        if extended:
+            session['capture_deadline_ts'] = new_deadline
+            new_run = _note_extension(session, event_dt.timestamp(), reason, label)
+            start_ts = float(session.get('start_capture_ts') or new_deadline)
+            ended_at = datetime.fromtimestamp(new_deadline, tz=timezone.utc).isoformat()
+            duration_seconds = max(1.0, new_deadline - start_ts)
         recording_id = int(session.get('recording_id'))
-    # Provisional timing so a clip whose capture dies still lists a plausible
-    # duration; skipped once the capture has marked its real timing final.
-    _write_provisional_timing(
-        session, recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
-    )
+    if extended:
+        # Provisional timing so a clip whose capture dies still lists a
+        # plausible duration; skipped once the capture has marked its real
+        # timing final.
+        _write_provisional_timing(
+            session, recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
+        )
     if new_run:
         # Runs start rarely; storing each one keeps the markers on the row even
         # if the capture dies before it writes the final set.
@@ -361,30 +364,56 @@ def extend_active_rtsp_recording(
         current_session = _state.active_rtsp_recordings.get(camera_id)
         still_active = current_session is not None and int(current_session.get('recording_id', -1)) == recording_id
     if detections and still_active:
-        should_record, trigger_type, trigger_label = _state.recording_service.should_record(
-            detections, config,
-        )
-        new_labels = detection_label_strings(detections)
-        if new_labels:
-            _state.database.add_recording_labels(
-                recording_id,
-                new_labels,
-                source='extension',
-                confidences=detection_label_confidences(detections),
-            )
-        if should_record and trigger_label:
-            current_recording = _state.database.get_recording(recording_id) or {}
-            current_label = str(current_recording.get('trigger_label') or '').strip().lower()
-            current_type = str(current_recording.get('trigger_type') or '').strip().lower()
-            candidate_label = str(trigger_label).strip().lower()
-            if (
-                candidate_label not in GENERIC_TRIGGER_LABELS
-                and (current_label in GENERIC_TRIGGER_LABELS or current_type in {'motion', 'human'})
-            ):
-                _state.database.update_recording_trigger(
-                    recording_id, trigger_type=trigger_type, trigger_label=candidate_label,
-                )
+        _record_extension_labels(session, recording_id, detections, config)
     return recording_id
+
+
+def _record_extension_labels(
+    session: dict[str, Any], recording_id: int, detections: list[dict[str, Any]], config: dict[str, Any],
+) -> None:
+    """Add what an extension saw to the clip's labels and, while its trigger is
+    still generic (motion), name the object as the trigger.
+
+    A clip extends on nearly every detection cycle while something is in view,
+    so the session remembers what is already stored: only a new label or a
+    higher confidence is written, and the trigger is no longer read once it
+    names an object.
+    """
+    confidences = detection_label_confidences(detections)
+    with _state.active_rtsp_recordings_lock:
+        stored = session.setdefault('stored_labels', {})
+        fresh = [
+            name for name in detection_label_strings(detections)
+            if name not in stored or confidences.get(name, 0.0) > stored[name]
+        ]
+        trigger_known = bool(session.get('trigger_specific'))
+    if fresh:
+        _state.database.add_recording_labels(
+            recording_id, fresh, source='extension',
+            confidences={name: confidences[name] for name in fresh if name in confidences},
+        )
+        # Only once stored: a failed write is retried on the next extension.
+        with _state.active_rtsp_recordings_lock:
+            for name in fresh:
+                stored[name] = max(stored.get(name, 0.0), confidences.get(name, 0.0))
+    if trigger_known:
+        return
+    should_record, trigger_type, trigger_label = _state.recording_service.should_record(detections, config)
+    if not (should_record and trigger_label):
+        return
+    current_recording = _state.database.get_recording(recording_id) or {}
+    current_label = str(current_recording.get('trigger_label') or '').strip().lower()
+    current_type = str(current_recording.get('trigger_type') or '').strip().lower()
+    candidate_label = str(trigger_label).strip().lower()
+    generic_trigger = current_label in GENERIC_TRIGGER_LABELS or current_type in {'motion', 'human'}
+    if candidate_label not in GENERIC_TRIGGER_LABELS and generic_trigger:
+        _state.database.update_recording_trigger(
+            recording_id, trigger_type=trigger_type, trigger_label=candidate_label,
+        )
+        generic_trigger = False
+    if not generic_trigger:
+        with _state.active_rtsp_recordings_lock:
+            session['trigger_specific'] = True
 
 
 def active_recording_id(camera_id: str) -> int | None:
@@ -934,6 +963,14 @@ def start_rtsp_recording_capture(
             str(d.get('label') or '').strip().lower() not in GENERIC_TRIGGER_LABELS for d in detections or []
         ) else None,
         'extension_runs': [],
+        # What attach_event_recording stored on the row (see
+        # _record_extension_labels): extensions write only what is new.
+        'stored_labels': dict.fromkeys(detection_label_strings(detections), 0.0)
+        | detection_label_confidences(detections),
+        'trigger_specific': (
+            str(trigger_label or '').strip().lower() not in GENERIC_TRIGGER_LABELS
+            and trigger_type.strip().lower() not in {'motion', 'human'}
+        ),
     }
     if camera_id:
         with _state.active_rtsp_recordings_lock:

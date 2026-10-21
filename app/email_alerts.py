@@ -412,6 +412,12 @@ class EmailAlertService:
                 'SMTP mid-batch disconnect, opening fresh session: %s',
                 disconnect_exc,
             )
+        except (smtplib.SMTPException, OSError) as exc:
+            # A refused recipient (``SMTPRecipientsRefused``) or a rejected
+            # message leaves the session usable: record this recipient's
+            # bounce and let the batch carry on. Unwrapped, it escaped the
+            # per-recipient loop and aborted delivery to everyone after it.
+            raise EmailAlertError(f'SMTP error: {exc}') from exc
         # Use explicit __enter__/__exit__ rather than ``with`` so we can
         # return the fresh session alive after a successful retry. This
         # keeps the reconnect cost at exactly one handshake+login per

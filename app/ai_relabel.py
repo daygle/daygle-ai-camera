@@ -151,7 +151,7 @@ def relabel_alerts(
                 'rule_name': str(rule.get('name') or instead),
                 'label': instead,
                 'confidence': confidence,
-                'message': f"Alert triggered: {instead} detected (AI relabel; the detector reported {source.get('label')})",
+                'message': f"AI relabel: {instead} (the detector reported {source.get('label')})",
                 'ai_relabel_from': canonical_label(source.get('label')),
             }
             rule_label = canonical_label(rule.get('object'))
