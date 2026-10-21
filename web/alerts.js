@@ -91,10 +91,15 @@ function policyStatus(rule, type, now = new Date(), timezone = window.daygleAuth
   // (AlertEngine._is_active_now, alert_dispatch._rule_notify_active_now),
   // including sound rules - so the badge must not show "Outside schedule"
   // for the 1439 minutes an equal window does not literally match.
-  const active = schedules.some((schedule) => isWithinDetectWindow(schedule.active_start, schedule.active_end, nowHm));
-  return active
-    ? { className: 'is-in-schedule', label: 'In schedule', title: 'Enabled and currently within a detect window.' }
-    : { className: 'is-out-of-schedule', label: 'Outside schedule', title: 'Enabled, but outside all detect windows.' };
+  const detecting = schedules.filter((schedule) => isWithinDetectWindow(schedule.active_start, schedule.active_end, nowHm));
+  if (!detecting.length) return { className: 'is-out-of-schedule', label: 'Outside Schedule', title: 'Enabled, but outside all detect windows.' };
+  // Mirrors alert_dispatch._rule_notify_active_now: an alert is only sent
+  // when a detecting schedule has a channel on and its alert window covers now.
+  const alerting = detecting.some((schedule) => (schedule.email_enabled || schedule.push_enabled)
+    && isWithinDetectWindow(schedule.notify_start, schedule.notify_end, nowHm));
+  return alerting
+    ? { className: 'is-in-schedule-alert', label: 'In Schedule (Alert)', title: 'Enabled, within a detect window, and alerts will be sent now.' }
+    : { className: 'is-in-schedule', label: 'In Schedule', title: 'Enabled and within a detect window, but no alerts will be sent now.' };
 }
 
 function defaultAlertSchedule() {
@@ -154,8 +159,8 @@ function renderObjectSchedules(rule, ruleIndex, schedules) {
       <div class="alerts-policy-grid alerts-schedule-grid">
         <label><span>Detect From</span>${timeSelect(schedule.active_start, 'data-field="active_start"')}</label>
         <label><span>Detect Until</span>${timeSelect(schedule.active_end, 'data-field="active_end"')}</label>
-        <label><span>Notify From</span>${timeSelect(schedule.notify_start, 'data-field="notify_start"')}</label>
-        <label><span>Notify Until</span>${timeSelect(schedule.notify_end, 'data-field="notify_end"')}</label>
+        <label><span>Alert From</span>${timeSelect(schedule.notify_start, 'data-field="notify_start"')}</label>
+        <label><span>Alert Until</span>${timeSelect(schedule.notify_end, 'data-field="notify_end"')}</label>
       </div>
       <label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(schedule.email_recipients.join(', '))}" placeholder="alerts@example.com, me@example.com"></label>
     </section>`).join('')}<button class="secondary alerts-schedule-add" data-add-schedule="${ruleIndex}" type="button">＋ Add Schedule</button></div>`;
@@ -232,7 +237,7 @@ function scopeRequiresZone() {
 
 function updatePolicyStatus(row, rule) {
   const status = policyStatus(rule, alertType);
-  row.classList.remove('is-enabled', 'is-in-schedule', 'is-out-of-schedule', 'is-disabled');
+  row.classList.remove('is-enabled', 'is-in-schedule', 'is-in-schedule-alert', 'is-out-of-schedule', 'is-disabled');
   row.classList.add(status.className);
   row.title = status.title;
   const state = row.querySelector('.alerts-policy-state');
@@ -339,8 +344,8 @@ function renderPolicies() {
         ${alertType === 'object' || people ? '' : `<label><span>Cooldown (Seconds)</span><input data-field="cooldown_seconds" type="number" min="0" max="3600" step="5" value="${escapeHtml(String(rule.cooldown_seconds ?? 60))}"></label>`}
       </div>
       ${alertType === 'object' ? renderObjectSchedules(rule, index, schedules) : people ? '' : behaviour
-        ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`
-        : `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Notify From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Notify Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`}
+        ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Alert From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Alert Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`
+        : `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Alert From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Alert Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`}
       ${alertType === 'object' ? '' : `<label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(Array.isArray(rule.email_recipients) ? rule.email_recipients.join(', ') : rule.email_recipients || '')}" placeholder="alerts@example.com, me@example.com"></label>`}
       <p class="muted alerts-policy-note">${policyNote}</p>
     </article></td></tr>`;

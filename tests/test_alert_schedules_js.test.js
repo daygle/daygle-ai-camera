@@ -89,3 +89,21 @@ test('policy status distinguishes disabled, active, and outside-window policies'
   assert.equal(statusSandbox.policyStatus({ enabled: true, active_start: '09:00', active_end: '17:00' }, 'sound', now).className, 'is-out-of-schedule');
   assert.equal(statusSandbox.policyStatus({ enabled: true, active_start: '08:00', active_end: '08:00' }, 'sound', now).className, 'is-in-schedule');
 });
+
+test('policy status shows In Schedule (Alert) only when a detecting schedule will send alerts now', () => {
+  const now = new Date('2026-06-01T15:00:00Z'); // 08:00 in Los Angeles
+  const status = (schedules) => statusSandbox.policyStatus({ enabled: true, alert_schedules: schedules }, 'object', now);
+  // Detecting, channel on, alert window covers now.
+  assert.equal(status([{ push_enabled: true, notify_start: '07:00', notify_end: '09:00' }]).className, 'is-in-schedule-alert');
+  assert.equal(status([{ email_enabled: true }]).label, 'In Schedule (Alert)');
+  // Detecting, but alert window is overnight and excludes now.
+  assert.equal(status([{ email_enabled: true, push_enabled: true, notify_start: '20:00', notify_end: '05:00' }]).label, 'In Schedule');
+  // Detecting, alert window covers now, but no channel enabled.
+  assert.equal(status([{ notify_start: '07:00', notify_end: '09:00' }]).className, 'is-in-schedule');
+  // Alerting schedule outside its detect window does not count.
+  assert.equal(status([
+    { active_start: '07:00', active_end: '09:00' },
+    { active_start: '20:00', active_end: '22:00', push_enabled: true },
+  ]).className, 'is-in-schedule');
+  assert.equal(status([{ active_start: '20:00', active_end: '22:00', push_enabled: true }]).label, 'Outside Schedule');
+});
