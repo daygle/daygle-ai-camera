@@ -22,13 +22,29 @@ from app.zone_schema import canonical_label, detection_within_box_limits, label_
 
 logger = logging.getLogger('daygle.ai')
 
-MAX_RELABEL_CANDIDATES = 8
+MAX_RELABEL_CANDIDATES = 12
 # Never relabel to these: no object to alert on, or an identity rule.
 _NOT_RELABELS = frozenset({'motion', 'face'})
 
 
 def _notifies(rule: dict[str, Any]) -> bool:
     return bool(rule.get('enabled', True) and (rule.get('email_enabled') or rule.get('push_enabled')))
+
+
+def _alerts_now(rule: dict[str, Any]) -> bool:
+    """A notifying rule inside its active hours and notify window right now."""
+    from app.alert_dispatch import _rule_notify_active_now
+    from app.alerts import AlertEngine
+
+    return (_notifies(rule) and AlertEngine._is_active_now(rule)
+            and _rule_notify_active_now(rule.get('schedule') or rule))
+
+
+def _concrete_labels(rule: dict[str, Any], groups: dict[str, frozenset[str]]) -> set[str]:
+    # A group rule (``pet``) offers its members, so the model names the animal
+    # (``cat``) and the answer matches the cat rule and the pet rule alike.
+    label = canonical_label(rule.get('object'))
+    return set(groups.get(label) or {label})
 
 
 def _source_alerts(triggered: list[dict[str, Any]], label: str) -> list[dict[str, Any]]:
@@ -48,21 +64,28 @@ def relabel_candidates(
     triggered: list[dict[str, Any]], labels: list[str], rules: list[dict[str, Any]] | None,
 ) -> dict[str, list[str]]:
     """Per verified label, what its object may be instead: the objects other
-    notifying rules in the same zones watch. A label with none is left out, so
-    its check asks no relabel question."""
+    rules in the same zones would alert on right now, group rules as their
+    members. A label with none is left out, so its check asks no relabel
+    question."""
+    from app.label_groups import cached_label_groups
+
+    groups = cached_label_groups()
     rules_by_name = {str(rule.get('name') or ''): rule for rule in rules or []}
     candidates: dict[str, list[str]] = {}
     for label in labels:
         sources = _source_alerts(triggered, label)
         zones = _zones(sources, rules_by_name)
         detected = {canonical_label(alert.get('label')) for alert in sources}
-        names = sorted({
-            canonical_label(rule.get('object')) for rule in rules or []
-            if str(rule.get('zone_id') or '') in zones and _notifies(rule)
-            and canonical_label(rule.get('object')) not in _NOT_RELABELS
-            and not label_matches(label, rule.get('object'))
-            and not any(label_matches(name, rule.get('object')) for name in detected)
-        } - {''})
+        offered: set[str] = set()
+        for rule in rules or []:
+            if str(rule.get('zone_id') or '') in zones and _alerts_now(rule):
+                offered |= _concrete_labels(rule, groups)
+        names = sorted(
+            name for name in offered
+            if name and name not in _NOT_RELABELS
+            and not label_matches(name, label) and not label_matches(label, name)
+            and not any(label_matches(seen, name) for seen in detected)
+        )
         if names:
             candidates[label] = names[:MAX_RELABEL_CANDIDATES]
     return candidates
@@ -93,8 +116,6 @@ def relabel_alerts(
     rules already ran) and for one already on record for this camera, which
     alerted when it was first seen.
     """
-    from app.alert_dispatch import _rule_notify_active_now
-    from app.alerts import AlertEngine
     from app.event_presence import claim_presence
     from app.label_groups import cached_label_groups
 
@@ -115,10 +136,8 @@ def relabel_alerts(
         box = _source_box(event, sources)
         matching = [
             rule for rule in rules or []
-            if str(rule.get('zone_id') or '') in zones and _notifies(rule)
+            if str(rule.get('zone_id') or '') in zones and _alerts_now(rule)
             and label_matches(instead, rule.get('object'))
-            and AlertEngine._is_active_now(rule)
-            and _rule_notify_active_now(rule.get('schedule') or rule)
             and detection_within_box_limits(box, rule)
         ]
         if not matching:
