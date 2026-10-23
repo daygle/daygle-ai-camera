@@ -138,6 +138,6 @@ test('the motion engine settings use plain names', () => {
 test('Alerts points motion policies at the Zones trigger instead of a confidence window', () => {
   const alertsSource = readFileSync(path.resolve(here, '../web/alerts.js'), 'utf8');
   assert.match(alertsSource, /const motionPolicy = alertType === 'object' && String\(rule\.label \|\| ''\)\.trim\(\)\.toLowerCase\(\) === 'motion';/);
-  assert.match(alertsSource, /\$\{behaviour \|\| motionPolicy \? '' : `<label><span>\$\{confidenceLabel\}/);
+  // Alerts no longer exposes an editable Minimum Confidence: that is edited\n  // per zone on the Zones page (the value comes from the zone object_rules).\n  assert.doesNotMatch(alertsSource, /<label><span>Minimum Confidence/);
   assert.match(alertsSource, /!behaviour && !motionPolicy \? '<label><span>Maximum Confidence/);
 });

@@ -306,8 +306,6 @@ function renderPolicies() {
     // A motion policy fires on its area's trigger ("trigger when X% of this
     // area moves"), set on the Zones page; it has no confidence window to edit.
     const motionPolicy = alertType === 'object' && String(rule.label || '').trim().toLowerCase() === 'motion';
-    const confidence = people ? rule.min_confidence : sound ? rule.confidence_threshold : rule.min_confidence;
-    const confidenceLabel = people ? 'Minimum Recognition Confidence' : sound ? 'Confidence Threshold' : 'Minimum Confidence';
     const schedules = alertType === 'object' ? ensureAlertSchedules(rule) : [];
     const emailEnabled = alertType === 'object' ? schedules.some((schedule) => schedule.email_enabled) : rule.email_enabled;
     const pushEnabled = alertType === 'object' ? schedules.some((schedule) => schedule.push_enabled) : rule.push_enabled;
@@ -343,7 +341,6 @@ function renderPolicies() {
       <div class="alerts-policy-grid">
         ${people ? `<label><span>Person</span><select data-field="person_id">${ruleOptions(rule)}</select></label>` : ''}
         ${motionPolicy ? '<p class="form-help muted alerts-motion-trigger-note">Motion fires when its area passes the trigger set on the Zones page (&ldquo;Trigger when X% of this area moves&rdquo;).</p>' : ''}
-        ${behaviour || motionPolicy ? '' : `<label><span>${confidenceLabel}</span><input data-field="${people ? 'min_confidence' : sound ? 'confidence_threshold' : 'min_confidence'}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(confidence ?? (people ? '' : 0.5)))}"></label>`}
         ${!people && !sound && !behaviour && !motionPolicy ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
         ${aiVerifiable(rule) ? `<label><span>AI Verify Skip Above <span class="info-tip" data-tip="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" title="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" tabindex="0" aria-label="Help: With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1"></span></span><input data-field="ai_verify_skip_above" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(rule.ai_verify_skip_above ?? 1))}"></label>` : ''}
         ${alertType === 'object' || people ? '' : `<label><span>Cooldown (Seconds)</span><input data-field="cooldown_seconds" type="number" min="0" max="3600" step="5" value="${escapeHtml(String(rule.cooldown_seconds ?? 60))}"></label>`}
@@ -398,7 +395,6 @@ function renderPolicies() {
         details?.querySelector('.alerts-policy')?.classList.toggle('is-enabled', rule.enabled !== false);
       }
     } else if (key === 'email_recipients') rule[key] = alertType === 'people' ? field.value : field.value.split(',').map((item) => item.trim()).filter(Boolean);
-    else if (['min_confidence', 'max_confidence', 'confidence_threshold', 'cooldown_seconds', 'ai_verify_skip_above'].includes(key)) rule[key] = field.value === '' ? null : Number(field.value);
     else if (key === 'person_id') {
       rule.person_id = field.value || null;
       rule.name = enrolledPeople.find((person) => String(person.id) === field.value)?.name || 'Unknown Person';
