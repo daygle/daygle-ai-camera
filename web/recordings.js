@@ -894,7 +894,9 @@ async function loadAuth() {
 
 async function loadLiveSettings() {
   try {
-    const settings = await api('/api/settings/system');
+    // Detection-zone rules are viewer-visible; avoid the admin-gated
+    // /api/settings/system (403 for non-admin roles).
+    const settings = await api('/api/config');
 
     const labels = new Map([['motion', 0.45]]);
     const setMin = (label, conf) => {

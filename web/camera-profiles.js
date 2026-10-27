@@ -226,12 +226,14 @@ document.getElementById('panel-profiles')?.addEventListener('click', (event) => 
 
 async function loadCameraProfiles() {
   await window.daygleAuthReady;
-  const [payload, system] = await Promise.all([
+  // Only the live defaults are needed; /api/config serves them to all
+  // roles without the admin-gated /api/settings/system 403.
+  const [payload, config] = await Promise.all([
     api('/api/camera-profile-presets'),
-    api('/api/settings/system').catch(() => ({})),
+    api('/api/config').catch(() => ({})),
   ]);
   cameraProfiles = Array.isArray(payload?.presets) ? payload.presets : [];
-  globalLiveDefaults = system?.live || globalLiveDefaults;
+  globalLiveDefaults = config?.live || globalLiveDefaults;
   renderProfileLists();
 }
 

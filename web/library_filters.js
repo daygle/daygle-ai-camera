@@ -212,6 +212,10 @@ function createLibraryFilters(options) {
   let state = libraryStateFromSearch(window.location?.search || '', types, controls);
   let searchTimer = null;
   let facetsSession = 0;
+  // AbortController for the in-flight facets request; superseded requests
+  // are aborted so they never linger server-side (this is the app-side
+  // pairing for the cloudflared "context canceled" disconnect noise).
+  let facetsAbort = null;
   let facets = { labels: [], faces: { people: [], unknown: 0 } };
   const ids = {
     search: `${kind}-filter-search`,
@@ -468,17 +472,28 @@ function createLibraryFilters(options) {
   async function loadFacets() {
     facetsSession += 1;
     const session = facetsSession;
+    if (facetsAbort) {
+      facetsAbort.abort();
+      facetsAbort = null;
+    }
+    // Caller-supplied signal bypasses the shared GET cache in api(), so each
+    // request can be aborted individually.
+    const abort = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    facetsAbort = abort;
     const { since, until } = libraryFilterWindow(state);
     const params = new URLSearchParams({ kind });
     if (since) params.set('since', since);
     if (until) params.set('until', until);
     try {
-      const result = await api(`/api/library/facets?${params}`);
+      const result = await api(`/api/library/facets?${params}`, abort ? { signal: abort.signal } : {});
       if (session !== facetsSession) return;
       facets = result || facets;
     } catch (_err) {
       // Facets only feed the dropdowns; the list itself still loads.
+      // An aborted superseded request also lands here.
       if (session !== facetsSession) return;
+    } finally {
+      if (facetsAbort === abort) facetsAbort = null;
     }
     renderFacetOptions();
   }

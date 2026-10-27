@@ -98,8 +98,10 @@ async function loadSoundStatus() {
   messageEl.textContent = '';
   refreshBtn.disabled = true;
   try {
+    // Camera names are viewer-visible; avoid the admin-gated
+    // /api/settings/system (403 for non-admin roles).
     const [settings, overall] = await Promise.all([
-      api('/api/settings/system'),
+      api('/api/config'),
       api('/api/sound/status'),
     ]);
     const cameras = settings.cameras || (settings.camera ? [settings.camera] : []);

@@ -1085,7 +1085,9 @@ window.daygleDatePrefsChanged = function daygleDatePrefsChanged() { /* no-op */ 
 
 async function loadCameras() {
   await window.daygleAuthReady;
-  var settings = await api('/api/settings/system');
+  // Cameras/presets are viewer-visible operational config; the admin-gated
+  // /api/settings/system would 403 for non-admin roles.
+  var settings = await api('/api/config');
   cameras = settings.cameras || (settings.camera ? [settings.camera] : []);
   cameraProfilePresets = settings.profile_presets || [];
   // Clear stale entries so removed cameras don't linger.

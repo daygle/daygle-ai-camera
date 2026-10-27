@@ -397,8 +397,10 @@ function setMessage(text, isError = false) {
 async function loadSounds() {
   await window.daygleAuthReady;
   soundDirty = false;
+  // Camera names are viewer-visible; avoid the admin-gated
+  // /api/settings/system (403 for non-admin roles).
   const [settings, classPayload] = await Promise.all([
-    api('/api/settings/system'),
+    api('/api/config'),
     api('/api/sound/classes').catch(() => ({ classes: [] })),
   ]);
   soundClasses = classPayload.classes || [];

@@ -24,6 +24,7 @@ from app.deps import get_auth_enabled, get_database, get_detector
 from app.detector import DetectorUnavailableError
 from app.request_helpers import write_audit_log, _read_uploaded_image
 from app.alert_dispatch import compute_minimum_rule_confidence
+from app.profile_presets import list_presets
 from app.recording_extension import clear_runtime_media_directory, delete_recording_files
 import app.state as _state
 active_rtsp_recordings = _state.active_rtsp_recordings
@@ -126,7 +127,11 @@ def session_remaining(request: Request):
 
 
 @router.get('/api/config')
-def runtime_config(request: Request, auth_enabled: bool = Depends(get_auth_enabled)):
+def runtime_config(
+    request: Request,
+    auth_enabled: bool = Depends(get_auth_enabled),
+    db=Depends(get_database),
+):
     require_user(request)
     ai_state = ai_status_payload()
     ai_cfg = effective_ai_config()
@@ -168,6 +173,10 @@ def runtime_config(request: Request, auth_enabled: bool = Depends(get_auth_enabl
         },
         'live': effective_live_config(),
         'recording': effective_recording_config(),
+        # Profile presets carry detection parameters, not credentials, so they
+        # are viewer-safe. Admin-only pages read the same list through the
+        # admin-gated /api/settings/system endpoint.
+        'profile_presets': list_presets(db.get_setting('camera_profile_presets')),
     }
 
 
