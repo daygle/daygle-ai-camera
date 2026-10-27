@@ -40,6 +40,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from app.diagnostics import log_ai_diagnostic
 import app.state as _state
 
 logger = logging.getLogger('daygle.ai')
@@ -255,13 +256,22 @@ def _confirm_terms(event: dict[str, Any], terms: list[str], camera_name: str,
                     ) else image
                     present, reason = verifier.ask(focused, term, camera_name, source='An automatic caption')
                 except Exception as exc:
-                    logger.warning('AI tag check unavailable for event %s (%s): %s; alerting unchecked.',
-                                   event.get('id'), term, exc)
+                    log_ai_diagnostic(
+                        'ai_tag_check_unavailable',
+                        f'AI tag check unavailable for event #{event.get("id")} ({term}): {exc}; alerting unchecked.',
+                        severity='warning',
+                        camera_id=(event.get('metadata') or {}).get('camera_id'),
+                        details={'event_id': event.get('id'), 'term': term},
+                    )
                     cache[keys[term]] = (True, False)
                     continue
                 if not present:
-                    logger.info('AI tag alert suppressed for event %s: %s not confirmed (%s)',
-                                event.get('id'), term, reason or 'not present')
+                    log_ai_diagnostic(
+                        'ai_tag_alert_suppressed',
+                        f'AI tag alert suppressed for event #{event.get("id")}: {term} not confirmed ({reason or "not present"})',
+                        camera_id=(event.get('metadata') or {}).get('camera_id'),
+                        details={'event_id': event.get('id'), 'term': term, 'reason': reason},
+                    )
                 cache[keys[term]] = (present, True)
     return ([term for term in terms if cache[keys[term]][0]],
             {term for term in terms if cache[keys[term]][1]})
@@ -352,5 +362,10 @@ def _fire(event_id: int, event: dict[str, Any], camera: dict[str, Any], zone: di
         with _cooldown_lock:
             _cooldowns.pop(key, None)
         return False
-    logger.info('AI tag alert on %s/%s for event %s: %s', camera_name, zone_name, event_id, terms)
+    log_ai_diagnostic(
+        'ai_tag_alert_fired',
+        f'AI tag alert on {camera_name}/{zone_name} for event #{event_id}: {terms}',
+        camera_id=camera.get('id'), camera_name=camera_name,
+        details={'event_id': int(event_id), 'zone': zone_name, 'terms': hits, 'status': status},
+    )
     return True

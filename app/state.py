@@ -70,7 +70,7 @@ ADMIN_PATHS: frozenset[str] = frozenset({
     '/models', '/models/faces', '/models/cameras', '/models/sound', '/models/settings',
     '/ai', '/cameras', '/settings',
     '/users', '/zones', '/detection', '/detection/sounds', '/detection/faces',
-    '/audit', '/camera-log', '/application-log',
+    '/audit', '/camera-log', '/application-log', '/ai-log',
 })
 MUTATING_METHODS: frozenset[str] = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 

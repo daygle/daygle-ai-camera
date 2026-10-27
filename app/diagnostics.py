@@ -45,3 +45,41 @@ def log_camera_diagnostic(
         )
     except Exception as exc:
         logger.debug('Failed to write camera diagnostic (%s/%s): %s', camera_id, event_type, exc)
+
+
+def log_ai_diagnostic(
+    event_type: str,
+    message: str = '',
+    *,
+    severity: str = 'info',
+    details: dict[str, Any] | None = None,
+    camera_id: Any = None,
+    camera_name: Any = None,
+) -> None:
+    """Record a system-generated AI activity event in the dedicated AI log.
+
+    The AI-side counterpart of ``log_camera_diagnostic``: per-event AI
+    activity (verification verdicts, descriptions and tag checks, relabels,
+    face-review captures) goes here instead of the application logger.
+    Best-effort - never raises into the calling AI pool path.
+    """
+    try:
+        if camera_name is None and camera_id not in (None, ''):
+            cid = str(camera_id)
+            cfg = next(
+                (c for c in _state.cameras_config if str(c.get('id') or '') == cid),
+                None,
+            )
+            if cfg:
+                camera_name = str(cfg.get('name') or '').strip() or None
+        _state.database.add_ai_diagnostic(
+            created_at=utc_now(),
+            camera_id=str(camera_id) if camera_id not in (None, '') else None,
+            camera_name=str(camera_name) if camera_name not in (None, '') else None,
+            event_type=event_type,
+            severity=severity,
+            message=message,
+            details=details,
+        )
+    except Exception as exc:
+        logger.debug('Failed to write AI diagnostic (%s): %s', event_type, exc)

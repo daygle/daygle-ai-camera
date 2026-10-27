@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<script>(function(){var t=localStorage.getItem("daygle.theme");if(t!=="dark")document.documentElement.classList.add("light");})()</script>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Log - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Administration</p>
+        <h1>AI Log</h1>
+        <p class="muted">What the local AI decided and did - verification verdicts, descriptions and tag checks, object relabels, face-review captures, and the AI model's startup and engineering diagnostics (detector load, backend selection, INT8 quantization). Use this to see why an alert was filtered or delivered unverified, and how the AI models loaded.</p>
+      </div>
+      <div class="onnx-hero-mark hero-mark--slate" aria-hidden="true">
+        <span class="onnx-hero-ring onnx-hero-ring-back"></span>
+        <span class="onnx-hero-ring onnx-hero-ring-front"></span>
+        <span class="onnx-hero-core">🧠</span>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">🧠</div>
+        <div>
+          <h2>AI Events</h2>
+          <p class="settings-section-subtitle">AI activity recorded while events were verified, described and matched against rules, plus AI model startup and engineering diagnostics. Newest first. Events age out on the same retention window as recordings (and the most recent 10,000 are always kept).</p>
+        </div>
+      </div>
+
+      <div class="audit-filters">
+        <label class="application-log-date-field">From
+          <input id="filterDateFrom" type="date" aria-label="From date" />
+        </label>
+        <label class="application-log-date-field">To
+          <input id="filterDateTo" type="date" aria-label="To date" />
+        </label>
+        <input id="filterCamera" placeholder="Filter by camera id" aria-label="Filter by camera id" />
+        <input id="filterSearch" type="search" placeholder="Search messages & details…” aria-label="Search messages and details" />
+        <select id="filterEventType" aria-label="Event type">
+          <option value="">All event types</option>
+          <option value="ai_verification_filtered">AI Verify Filtered</option>
+          <option value="ai_verification_recheck">AI Verify Re-check</option>
+          <option value="ai_verification_unavailable">AI Verify Unavailable</option>
+          <option value="ai_verification_queue_full">AI Verify Queue Full</option>
+          <option value="ai_verification_store_failed">AI Verify Store Failed</option>
+          <option value="ai_description_unavailable">AI Description Unavailable</option>
+          <option value="ai_description_store_failed">AI Description Store Failed</option>
+          <option value="ai_tag_check_unavailable">AI Tag Check Unavailable</option>
+          <option value="ai_tag_alert_suppressed">AI Tag Suppressed</option>
+          <option value="ai_tag_alert_fired">AI Tag Alert</option>
+          <option value="ai_relabel">AI Relabel</option>
+          <option value="ai_relabel_store_failed">AI Relabel Store Failed</option>
+          <option value="ai_search_fallback">AI Search Fallback</option>
+          <option value="face_capture_skipped">Face Capture Skipped</option>
+          <option value="face_capture_failed">Face Capture Failed</option>
+          <option value="ai_detector_startup">Detector Startup</option>
+          <option value="ai_detector_backend">Detector Backend</option>
+          <option value="ai_int8_quantization">INT8 Quantization</option>
+          <option value="ai_model_install">Model Install</option>
+          <option value="ai_face_embedder">Face Embedder</option>
+          <option value="ai_face_service">Face Recognition</option>
+          <option value="ai_yamnet_model">YAMNet TFLite</option>
+        </select>
+        <select id="filterSeverity" aria-label="Severity">
+          <option value="">All severities</option>
+          <option value="info">Info</option>
+          <option value="warning">Warning</option>
+          <option value="error">Error</option>
+        </select>
+        <button id="applyFiltersBtn" type="button">Apply</button>
+        <button id="clearFiltersBtn" class="secondary" type="button">Clear</button>
+      </div>
+
+      <div id="logEmpty" hidden>No AI activity events match the current filters.</div>
+      <div class="audit-table-wrap">
+        <table class="audit-table" id="logTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Camera</th>
+              <th>Event</th>
+              <th>Severity</th>
+              <th>Message</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+
+      <div class="pagination" id="pagination" hidden>
+        <button id="prevBtn" class="secondary" type="button">Previous</button>
+        <span id="pageInfo"></span>
+        <button id="nextBtn" class="secondary" type="button">Next</button>
+      </div>
+
+      <div class="button-row">
+        <button id="refreshBtn" class="btn-info" type="button">Refresh</button>
+        <button id="clearLogBtn" class="btn-danger" type="button">Clear Log</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/ai-log.js"></script>
+</body>
+</html>

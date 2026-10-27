@@ -32,6 +32,7 @@ def list_camera_log(
     camera_id: str | None = None,
     event_type: str | None = None,
     severity: str | None = None,
+    q: str | None = Query(None, max_length=300, description="Free-text search: every hit matches the message or the details JSON (PTZ target ids, preset names, timestamps)."),
     date_from: str | None = None,
     date_to: str | None = None,
     tz_offset_minutes: int | None = Query(
@@ -53,6 +54,7 @@ def list_camera_log(
         camera_id=camera_id or None,
         event_type=event_type or None,
         severity=severity or None,
+        search=(q.strip() or None) if q else None,
         created_after=created_after,
         created_before=created_before,
     )
@@ -60,6 +62,7 @@ def list_camera_log(
         camera_id=camera_id or None,
         event_type=event_type or None,
         severity=severity or None,
+        search=(q.strip() or None) if q else None,
         created_after=created_after,
         created_before=created_before,
     )

@@ -29,6 +29,7 @@ from app.ai_verification import (
     describe_mode,
     effective_ai_verification_settings,
 )
+from app.diagnostics import log_ai_diagnostic
 
 logger = logging.getLogger('daygle.ai')
 
@@ -254,7 +255,11 @@ def search_events(
         try:
             plan = plan_with_model(query, settings, now_utc)
         except VerificationError as exc:
-            logger.info('AI search fell back to keywords for %r: %s', query, exc)
+            log_ai_diagnostic(
+            'ai_search_fallback',
+            f'AI search fell back to keywords for {query!r}: {exc}',
+            details={'query': query},
+        )
         except Exception:  # noqa: BLE001 - search must not fail on the model
             logger.exception('AI search interpretation failed; using keywords')
     if plan is None:

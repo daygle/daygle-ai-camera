@@ -27,7 +27,7 @@ test('configuration lives in admin-only Setup, Intelligence and Admin groups', (
 
 test('every page is either a sidebar entry or a section tab', () => {
   for (const href of ['/cameras', '/zones', '/alerts', '/detection', '/detection/sounds', '/detection/faces', '/ai',
-    '/models', '/models/faces', '/models/cameras', '/models/sound', '/models/settings', '/settings', '/users', '/system', '/camera-log',
+    '/models', '/models/faces', '/models/cameras', '/models/sound', '/models/settings', '/settings', '/users', '/system', '/camera-log', '/ai-log',
     '/application-log', '/audit', '/recordings/timeline', '/snapshots']) {
     assert.ok(nav.includes(`href: '${href}'`), `${href} is not reachable from the navigation`);
   }

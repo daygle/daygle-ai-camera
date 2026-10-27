@@ -76,6 +76,7 @@ from fastapi import HTTPException
 
 import app.state as _state
 from app.config_facades import effective_ai_config
+from app.diagnostics import log_ai_diagnostic
 from app.detector import load_labels
 from app.runtime_config import settings_generation
 from app.settings import config_file_path
@@ -379,16 +380,42 @@ def detector_loaded_for(settings: dict[str, Any]) -> bool:
 
 
 def log_detector_initialization(context: str = 'startup') -> None:
+    """Record the backend-selection summary of a detector (re)load in the AI Log.
+
+    Startup engineering diagnostics live in the dedicated AI log
+    (``log_ai_diagnostic``, event type ``ai_detector_backend``) next to the
+    detector's own load diagnostics (``ai_detector_startup``) and the INT8
+    quantization trace (``ai_int8_quantization``); the application logger
+    keeps only low-level platform/server lifecycle lines.
+    """
     ai_status = ai_status_payload()
     active_providers = getattr(_state.detector, 'active_providers', None)
     providers_str = ','.join(active_providers) if active_providers else '<none>'
-    logger.info(
-        'AI detector %s: active_backend=%s configured_backend=%s model_loaded=%s inference_available=%s active_precision=%s requested_precision=%s providers=%s model_path=%s labels_path=%s error=%s',
-        context, ai_status['active_backend'], ai_status['configured_backend'], ai_status['model_loaded'],
-        ai_status['inference_available'], ai_status.get('active_precision') or '<none>',
-        str(ai_status.get('precision') or '<none>').lower(), providers_str,
-        ai_status['model_path'] or '<none>', ai_status['labels_path'] or '<none>',
-        ai_status['error'] or '<none>',
+    message = (
+        f"AI detector {context}: active_backend={ai_status['active_backend']} "
+        f"configured_backend={ai_status['configured_backend']} model_loaded={ai_status['model_loaded']} "
+        f"inference_available={ai_status['inference_available']} "
+        f"active_precision={ai_status.get('active_precision') or '<none>'} "
+        f"requested_precision={str(ai_status.get('precision') or '<none>').lower()} "
+        f"providers={providers_str} model_path={ai_status['model_path'] or '<none>'} "
+        f"labels_path={ai_status['labels_path'] or '<none>'} error={ai_status['error'] or '<none>'}"
+    )
+    details = {
+        'context': context,
+        'active_backend': ai_status['active_backend'],
+        'configured_backend': ai_status['configured_backend'],
+        'model_loaded': ai_status['model_loaded'],
+        'inference_available': ai_status['inference_available'],
+        'active_precision': ai_status.get('active_precision') or '<none>',
+        'requested_precision': str(ai_status.get('precision') or '<none>').lower(),
+        'providers': providers_str,
+        'model_path': ai_status['model_path'] or '<none>',
+        'labels_path': ai_status['labels_path'] or '<none>',
+        'error': ai_status['error'] or '<none>',
+    }
+    log_ai_diagnostic(
+        'ai_detector_backend', message,
+        severity='warning' if ai_status['error'] else 'info', details=details,
     )
 
 

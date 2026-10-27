@@ -245,7 +245,7 @@ def test_a_capture_the_queue_rejects_is_offered_again(monkeypatch):
     face_identity.reset_camera_identities(camera)
 
 
-def test_a_failed_capture_is_logged_as_a_warning(monkeypatch):
+def test_a_failed_capture_reaches_the_ai_log_as_a_warning(monkeypatch):
     def broken(**_kwargs):
         raise RuntimeError('disk full')
 
@@ -254,7 +254,14 @@ def test_a_failed_capture_is_logged_as_a_warning(monkeypatch):
     # Patch the live module: other tests in this file reload the app package.
     monkeypatch.setattr(importlib.import_module('app.state'), 'database', SimpleNamespace(store_unknown_face=broken))
     service = SimpleNamespace(model_id='m', embed_face=lambda _crop: np.ones(4, dtype=np.float32))
-    warnings = []
-    monkeypatch.setattr(face_identity.logger, 'warning', lambda msg, *args: warnings.append(msg % args))
+    events = []
+    monkeypatch.setattr(
+        face_identity, 'log_ai_diagnostic',
+        lambda event_type, message='', **kw: events.append(
+            {'event_type': event_type, 'message': message, **kw},
+        ),
+    )
     face_identity._store_unknown_face('cam', 1, {}, np.zeros((20, 20, 3), dtype=np.uint8), service)
-    assert any('Failed to capture unknown face on camera cam' in message for message in warnings)
+    assert [event['event_type'] for event in events] == ['face_capture_failed']
+    assert events[0]['camera_id'] == 'cam'
+    assert 'Failed to capture unknown face on camera cam' in events[0]['message']

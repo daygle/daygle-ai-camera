@@ -11,6 +11,7 @@ from app.db.alerts import AlertsMixin
 from app.db.audit import AuditLogMixin
 from app.db.descriptions import EventDescriptionsMixin
 from app.db.diagnostics import CameraDiagnosticsMixin
+from app.db.ai_diagnostics import AiDiagnosticsMixin
 from app.db.events import EventsMixin
 from app.db.persons import PersonsMixin
 from app.db.recordings import RecordingsMixin
@@ -71,6 +72,7 @@ class EventDatabase(
     SettingsRepoMixin,
     AuditLogMixin,
     CameraDiagnosticsMixin,
+    AiDiagnosticsMixin,
     PersonsMixin,
     UnknownFacesMixin,
     EventDescriptionsMixin,
@@ -375,6 +377,26 @@ class EventDatabase(
                 CREATE INDEX IF NOT EXISTS idx_camera_diag_camera_id ON camera_diagnostics(camera_id);
                 CREATE INDEX IF NOT EXISTS idx_camera_diag_event_type ON camera_diagnostics(event_type);
                 CREATE INDEX IF NOT EXISTS idx_camera_diag_severity ON camera_diagnostics(severity);
+
+                -- Dedicated AI activity log (app.diagnostics.log_ai_diagnostic):
+                -- verification verdicts, descriptions and tag checks, relabels,
+                -- face-review captures. camera_id is nullable because some AI
+                -- jobs (search, catch-up descriptions) run without a camera.
+                CREATE TABLE IF NOT EXISTS ai_diagnostics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    camera_id TEXT,
+                    camera_name TEXT,
+                    event_type TEXT NOT NULL,
+                    severity TEXT NOT NULL DEFAULT 'info',
+                    message TEXT NOT NULL DEFAULT '',
+                    details TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_ai_diag_created_at ON ai_diagnostics(created_at);
+                CREATE INDEX IF NOT EXISTS idx_ai_diag_camera_id ON ai_diagnostics(camera_id);
+                CREATE INDEX IF NOT EXISTS idx_ai_diag_event_type ON ai_diagnostics(event_type);
+                CREATE INDEX IF NOT EXISTS idx_ai_diag_severity ON ai_diagnostics(severity);
 
                 -- Face recognition enrolment (Stage 2). ``persons`` names an
                 -- enrolled individual; ``person_faces`` holds one or more face

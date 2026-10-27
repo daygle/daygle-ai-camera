@@ -827,6 +827,22 @@ def purge_camera_diagnostics_by_policy() -> int:
         return 0
 
 
+def purge_ai_diagnostics_by_policy() -> int:
+    """Age out old AI activity events (app/diagnostics.py log_ai_diagnostic).
+
+    Same two bounds as the camera diagnostics log: a hard row cap on every
+    insert and this time-based purge following the recording retention
+    window, so the AI log ages out alongside the recordings it explains.
+    """
+    try:
+        retention_days = max(1, int(effective_recording_config().get('retention_days', 14)))
+        older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        return _state.database.purge_ai_diagnostics_older_than(older_than)
+    except Exception as exc:
+        logger.debug('AI diagnostics purge failed: %s', exc)
+        return 0
+
+
 def purge_face_identities_by_policy() -> int:
     """Age out recognised-identity data on events per the recognition policy.
 

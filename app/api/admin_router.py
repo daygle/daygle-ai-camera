@@ -231,6 +231,7 @@ def preview_delete_runtime_data(request: Request, db=Depends(get_database)):
             ('alerts', 'SELECT COUNT(*) FROM alert_history'),
             ('objects', 'SELECT COUNT(*) FROM detections'),
             ('camera_diagnostics', 'SELECT COUNT(*) FROM camera_diagnostics'),
+            ('ai_diagnostics', 'SELECT COUNT(*) FROM ai_diagnostics'),
         ):
             row = conn.execute(sql).fetchone()
             counts[source] = int(row[0]) if row else 0
@@ -306,6 +307,7 @@ def delete_runtime_data(
     deleted_objects = db.delete_all_objects()
     deleted_events = db.delete_all_events()
     deleted_diagnostics = db.delete_all_camera_diagnostics()
+    deleted_ai_diagnostics = db.delete_all_ai_diagnostics()
     storage_config = effective_storage_config()
     deleted_snapshots = clear_runtime_media_directory(storage_config.get('snapshots_dir'))
     deleted_event_artifacts = clear_runtime_media_directory(storage_config.get('events_dir'))
@@ -319,6 +321,7 @@ def delete_runtime_data(
             'alerts': deleted_alerts,
             'objects': deleted_objects,
             'camera_diagnostics': deleted_diagnostics,
+            'ai_diagnostics': deleted_ai_diagnostics,
             'snapshot_files': deleted_snapshots,
             'event_artifacts': deleted_event_artifacts,
         },

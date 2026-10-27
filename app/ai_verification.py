@@ -40,6 +40,7 @@ from fastapi import HTTPException
 
 import app.state as _state
 from app.detection_status import GENERIC_TRIGGER_LABELS
+from app.diagnostics import log_ai_diagnostic
 from app.runtime_config import cached_snapshot
 from app.zone_schema import label_matches
 
@@ -1122,11 +1123,15 @@ def _forward(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[st
         submit_alert_notification(deliver_alert_notifications, triggered, event_id, rules)
 
 
-def _record(event_id: int, record: dict[str, Any]) -> None:
+def _record(event_id: int, record: dict[str, Any], camera_id: Any = None) -> None:
     try:
         _state.database.merge_event_metadata(event_id, {'ai_verification': record})
     except Exception as exc:  # noqa: BLE001 - recording the verdict is best effort
-        logger.warning('Could not store AI verification result for event %s: %s', event_id, exc)
+        log_ai_diagnostic(
+            'ai_verification_store_failed',
+            f'Could not store AI verification result for event #{event_id}: {exc}',
+            severity='warning', camera_id=camera_id, details={'event_id': event_id},
+        )
 
 
 def describe_event(
@@ -1228,12 +1233,17 @@ def _describe_and_store_claimed(
     backfill of past events turns it off so old events never alert.
     ``record`` is a description already made (by the combined alert check).
     """
+    camera_id = (event.get('metadata') or {}).get('camera_id')
     try:
         if record is None:
             record = describe_event(event, settings, camera_name=camera_name, background=background,
                                     content=content)
     except VerificationError as exc:
-        logger.warning('AI description unavailable for event %s: %s', event_id, exc)
+        log_ai_diagnostic(
+            'ai_description_unavailable',
+            f'AI description unavailable for event #{event_id}: {exc}',
+            severity='warning', camera_id=camera_id, details={'event_id': event_id},
+        )
         return None
     except Exception:  # noqa: BLE001 - never break notification delivery
         logger.exception('AI description failed unexpectedly for event %s', event_id)
@@ -1246,7 +1256,11 @@ def _describe_and_store_claimed(
         if record.get('tags'):
             _state.database.add_ai_recording_tags(event_id, record['tags'])
     except Exception as exc:  # noqa: BLE001
-        logger.warning('Could not store AI description for event %s: %s', event_id, exc)
+        log_ai_diagnostic(
+            'ai_description_store_failed',
+            f'Could not store AI description for event #{event_id}: {exc}',
+            severity='warning', camera_id=camera_id, details={'event_id': event_id},
+        )
         return None
     if evaluate_rules:
         from app.ai_tag_alerts import evaluate_event
@@ -1292,7 +1306,7 @@ def _verify_and_forward(
     max_wait = max(60.0, 3.0 * float(settings.get('timeout_seconds') or 20))
     if submitted_at is not None and time.monotonic() - submitted_at > max_wait:
         if labels:
-            _record(event_id, {'status': 'skipped', 'reason': 'Verification queue backlog; delivered unverified.'})
+            _record(event_id, {'status': 'skipped', 'reason': 'Verification queue backlog; delivered unverified.'}, camera_id=camera_id)
         _forward(triggered, event_id, rules)
         if mode != 'off':
             # Not described now; the catch-up captions it once the model is idle.
@@ -1330,18 +1344,29 @@ def _verify_and_forward(
         # went out decides whether the event is described as an alert or as
         # any other event.
         record['delivered'] = bool(kept)
-        _record(event_id, record)
+        _record(event_id, record, camera_id=camera_id)
         if rejected:
-            logger.info(
-                'AI verification filtered event %s (%s): %s', event_id, ', '.join(sorted(rejected)),
-                '; '.join(f"{label}: {record['labels'][label].get('reason') or 'not present'}" for label in sorted(rejected)),
+            log_ai_diagnostic(
+                'ai_verification_filtered',
+                'AI verification filtered event #{event_id} ({labels}): {reasons}'.format(
+                    event_id=event_id, labels=', '.join(sorted(rejected)),
+                    reasons='; '.join(
+                        f"{label}: {record['labels'][label].get('reason') or 'not present'}" for label in sorted(rejected)
+                    ),
+                ),
+                camera_id=camera_id,
+                details={'event_id': event_id, 'labels': sorted(rejected), 'delivered': bool(kept)},
             )
         if rejected and camera_id is not None:
             _reopen_rejected(camera_id, triggered, kept, event)
         for label, result in record['labels'].items():
             if result.get('error'):
-                logger.warning('AI verification unavailable for event %s (%s): %s; alert delivered unverified.',
-                               event_id, label, result['error'])
+                log_ai_diagnostic(
+                    'ai_verification_unavailable',
+                    f'AI verification unavailable for event #{event_id} ({label}): {result["error"]}; alert delivered unverified.',
+                    severity='warning', camera_id=camera_id,
+                    details={'event_id': event_id, 'label': label},
+                )
     # An event whose every alert was rejected is described as any other event.
     content = alert_content if kept else camera_describe_content(camera_id, settings, alerted=False,
                                                                  event=event or None)
@@ -1383,8 +1408,14 @@ def _reopen_rejected(camera_id: Any, triggered: list[dict[str, Any]], kept: list
         logger.exception('Could not reopen rejected labels for event %s', event.get('id'))
         return
     if reopened:
-        logger.info('AI verification will re-check %s on its next sighting on camera %s',
-                    ', '.join(sorted(reopened)), camera_id)
+        log_ai_diagnostic(
+            'ai_verification_recheck',
+            'AI verification will re-check {labels} on their next sighting on camera {camera}'.format(
+                labels=', '.join(sorted(reopened)), camera=camera_id,
+            ),
+            camera_id=camera_id,
+            details={'labels': sorted(reopened), 'event_id': event.get('id')},
+        )
 
 
 def describe_only(event_id: int, camera_name: str = '', camera_id: Any = None) -> None:
@@ -1573,7 +1604,11 @@ def submit_alert_notification_with_verification(
             accepted = False
         if accepted:
             return True
-        logger.warning('AI verification queue full; delivering event %s notification unverified', event_id)
+        log_ai_diagnostic(
+            'ai_verification_queue_full',
+            f'AI verification queue full; delivering event #{event_id} notification unverified',
+            severity='warning', camera_id=camera_id, details={'event_id': event_id},
+        )
         if describes_camera(camera_id, settings):
             start_description_catch_up()
     return submit_alert_notification(deliver_alert_notifications, triggered, event_id, rules)

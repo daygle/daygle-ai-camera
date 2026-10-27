@@ -123,7 +123,7 @@ from app.recording_extension import (
     extend_active_rtsp_recording,
     recording_skip_reason,
 )
-from app.backup import purge_camera_diagnostics_by_policy
+from app.backup import purge_camera_diagnostics_by_policy, purge_ai_diagnostics_by_policy
 from app.utils import build_stream_url, normalize_bool_setting, normalize_ptz_motion_detection
 from app.zone_schema import label_matches
 from app.motion_object_priority import (
@@ -651,6 +651,7 @@ def live_alert_monitor_loop() -> None:
             if now - _last_prune > 300:
                 _prune_frame_motion_state()
                 purge_camera_diagnostics_by_policy()
+                purge_ai_diagnostics_by_policy()
                 _last_prune = now
             configured_intervals = [
                 float(effective_camera_live_settings(camera, live_settings).get('detection_interval_seconds', 0.5))

@@ -158,6 +158,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
         "/users",
         "/audit",
         "/camera-log",
+        "/ai-log",
         "/application-log",
     }
     actual_paths = {

@@ -17,6 +17,8 @@ from urllib.request import urlretrieve
 
 import numpy as np
 
+from app.diagnostics import log_ai_diagnostic
+
 logger = logging.getLogger('daygle.sound')
 
 SAMPLE_RATE = 16000
@@ -212,10 +214,15 @@ class _YamnetBackend:
         tmp_path = path.with_suffix(path.suffix + '.download')
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
-        logger.info('Downloading %s to %s', label, path)
         try:
             urlretrieve(url, tmp_path)  # noqa: S310 - trusted model/class-map URLs controlled by the app
             tmp_path.replace(path)
+            log_ai_diagnostic(
+                'ai_yamnet_model',
+                f'Downloaded {label} ({path.stat().st_size} bytes).',
+                details={'step': 'download', 'label': label, 'file': path.name,
+                         'size_bytes': path.stat().st_size},
+            )
         finally:
             # A failed transfer must not leave stale bytes that a later
             # retry could mistake for a completed download.
@@ -281,7 +288,12 @@ class _YamnetBackend:
             new_sha = self._sha256_file(tmp_path)
             new_size = tmp_path.stat().st_size
         except Exception as exc:
-            logger.warning('YAMNet update check failed (%s).', type(exc).__name__)
+            log_ai_diagnostic(
+                'ai_yamnet_model',
+                f'YAMNet update check failed ({type(exc).__name__}): {exc}',
+                severity='warning',
+                details={'step': 'update_check', 'error': str(exc)},
+            )
             return {'update_available': False, 'error': 'Unable to check for model updates.'}
         finally:
             # A failed download, hash, or stat must not leave a misleading
@@ -289,6 +301,13 @@ class _YamnetBackend:
             # later check must not accidentally treat stale bytes as fresh.
             tmp_path.unlink(missing_ok=True)
         update_available = bool(current_sha and new_sha and current_sha != new_sha)
+        log_ai_diagnostic(
+            'ai_yamnet_model',
+            f'YAMNet update check: {"newer model available" if update_available else "no newer model available"}.',
+            details={'step': 'update_check', 'update_available': update_available,
+                     'current_sha256': current_sha, 'latest_sha256': new_sha,
+                     'latest_size': new_size},
+        )
         return {
             'update_available': update_available,
             'current_sha256': current_sha,
@@ -356,7 +375,12 @@ class _YamnetBackend:
                                 _YAMNET_TFLITE_PATH.unlink(missing_ok=True)
                         except OSError as restore_exc:
                             rollback_failed = True
-                            logger.error('Could not restore YAMNet TFLite asset after failed reload: %s', restore_exc)
+                            log_ai_diagnostic(
+                                'ai_yamnet_model',
+                                f'Could not restore YAMNet TFLite asset after failed reload: {restore_exc}',
+                                severity='error',
+                                details={'step': 'rollback', 'asset': 'tflite', 'error': str(restore_exc)},
+                            )
                     if csv_replaced:
                         try:
                             if had_csv and rollback_csv.exists():
@@ -365,7 +389,12 @@ class _YamnetBackend:
                                 _YAMNET_CLASS_MAP_PATH.unlink(missing_ok=True)
                         except OSError as restore_exc:
                             rollback_failed = True
-                            logger.error('Could not restore YAMNet class map after failed reload: %s', restore_exc)
+                            log_ai_diagnostic(
+                                'ai_yamnet_model',
+                                f'Could not restore YAMNet class map after failed reload: {restore_exc}',
+                                severity='error',
+                                details={'step': 'rollback', 'asset': 'class_map', 'error': str(restore_exc)},
+                            )
                     tmp_tflite.unlink(missing_ok=True)
                     tmp_csv.unlink(missing_ok=True)
                     if not rollback_failed:
@@ -388,11 +417,20 @@ class _YamnetBackend:
                 # class-index setup fails after the two asset replacements.
                 rollback_tflite.unlink(missing_ok=True)
                 rollback_csv.unlink(missing_ok=True)
-                logger.info('YAMNet TFLite reloaded successfully')
+                log_ai_diagnostic(
+                    'ai_yamnet_model',
+                    'YAMNet TFLite reloaded successfully',
+                    details={'step': 'reload'},
+                )
                 return True
             except Exception as exc:
                 failure_reason = f'YAMNet TFLite reload failed: {exc}'
-                logger.warning('%s', failure_reason)
+                log_ai_diagnostic(
+                    'ai_yamnet_model',
+                    failure_reason,
+                    severity='warning',
+                    details={'step': 'reload', 'error': str(exc)},
+                )
                 if assets_committed:
                     # A failure after the pair was swapped must restore the
                     # previous on-disk pair before retaining the old in-memory
@@ -414,10 +452,20 @@ class _YamnetBackend:
                             self._write_metadata(previous_metadata)
                         except OSError as metadata_exc:
                             asset_rollback_failed = True
-                            logger.error('Could not restore YAMNet metadata after post-commit reload failure: %s', metadata_exc)
+                            log_ai_diagnostic(
+                                'ai_yamnet_model',
+                                f'Could not restore YAMNet metadata after post-commit reload failure: {metadata_exc}',
+                                severity='error',
+                                details={'step': 'rollback', 'asset': 'metadata', 'error': str(metadata_exc)},
+                            )
                     except OSError as restore_exc:
                         asset_rollback_failed = True
-                        logger.error('Could not restore YAMNet assets after post-commit reload failure: %s', restore_exc)
+                        log_ai_diagnostic(
+                            'ai_yamnet_model',
+                            f'Could not restore YAMNet assets after post-commit reload failure: {restore_exc}',
+                            severity='error',
+                            details={'step': 'rollback', 'asset': 'assets', 'error': str(restore_exc)},
+                        )
                 if had_working_model and not asset_rollback_failed and not reload_failed_after_commit:
                     # Reload is a refresh operation, not a destructive reset:
                     # retain the already allocated interpreter when the new
@@ -477,10 +525,19 @@ class _YamnetBackend:
                 self._available = True
                 self._unavailable_reason = None
                 self._save_installed_version()
-                logger.info('YAMNet TFLite ready - classifying against %d AudioSet classes', len(class_names))
+                log_ai_diagnostic(
+                    'ai_yamnet_model',
+                    f'YAMNet TFLite ready - classifying against {len(class_names)} AudioSet classes',
+                    details={'step': 'ready', 'classes': len(class_names)},
+                )
             except Exception as exc:
                 self._unavailable_reason = f'YAMNet TFLite unavailable: {exc}'
-                logger.warning('YAMNet TFLite unavailable: %s', exc)
+                log_ai_diagnostic(
+                    'ai_yamnet_model',
+                    f'YAMNet TFLite unavailable: {exc}',
+                    severity='warning',
+                    details={'step': 'load', 'error': str(exc)},
+                )
                 self._available = False
         return bool(self._available)
 

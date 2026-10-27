@@ -5134,6 +5134,25 @@ button.activity-item-action.activity-item-action-delete:hover {
   letter-spacing: 0.04em;
   border: 1px solid;
 }
+/* AI Log engineering events (Model Install / Face Recognition / YAMNet
+   TFLite) carry a `step` in their details; the Event column renders it as
+   this small phase badge next to the event label. */
+.step-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: rgba(127, 127, 127, 0.12);
+  color: var(--muted);
+  border: 1px solid rgba(127, 127, 127, 0.28);
+}
+:root.light .step-badge {
+  background: rgba(0, 0, 0, 0.05);
+}
 .status-success {
   background: rgba(73, 230, 163, 0.14);
   color: var(--success);

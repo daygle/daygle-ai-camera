@@ -32,6 +32,7 @@ Routes:
 - GET  /audit         -- audit_page
 - GET  /camera-log    -- camera_log_page
 - GET  /application-log -- application_log_page
+- GET  /ai-log        -- ai_log_page
 """
 
 from __future__ import annotations
@@ -368,6 +369,12 @@ def audit_page(request: Request, web_dir: Path = Depends(get_web_dir)):
 def camera_log_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
     return _page(web_dir, 'camera-log.html')
+
+
+@router.get('/ai-log')
+def ai_log_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
+    return _page(web_dir, 'ai-log.html')
 
 
 @router.get('/application-log')

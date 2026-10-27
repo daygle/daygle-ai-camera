@@ -303,7 +303,7 @@ window.daygleAuthReady = (async () => {
       links: [
         { href: '/settings', matches: ['/settings'], label: 'Settings', icon: 'settings' },
         { href: '/users', matches: ['/users'], label: 'Users', icon: 'users' },
-        { href: '/system', matches: ['/system', '/camera-log', '/application-log', '/audit'], label: 'System', icon: 'system' },
+        { href: '/system', matches: ['/system', '/camera-log', '/ai-log', '/application-log', '/audit'], label: 'System', icon: 'system' },
       ],
     },
   ];
@@ -334,6 +334,7 @@ window.daygleAuthReady = (async () => {
     [
       { href: '/system', icon: '🩺', label: 'Health' },
       { href: '/camera-log', icon: '📹', label: 'Camera Log' },
+      { href: '/ai-log', icon: '🧠', label: 'AI Log' },
       { href: '/application-log', icon: '📄', label: 'Application Log' },
       { href: '/audit', icon: '🛡️', label: 'Audit Log' },
     ],

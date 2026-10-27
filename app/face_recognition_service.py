@@ -31,6 +31,7 @@ from app.face_recognition import (
     decode_bgr_image,
     embedding_to_bytes,
 )
+from app.diagnostics import log_ai_diagnostic
 from app.utils import normalize_bool_setting as _coerce_bool
 
 logger = logging.getLogger('daygle.ai')
@@ -116,12 +117,22 @@ class FaceRecognitionService:
                 try:
                     rows = self._database.load_face_embeddings(self.model_id)
                 except Exception as exc:  # pragma: no cover - defensive DB guard
-                    logger.warning('Face matcher refresh failed to load embeddings: %s', exc)
+                    log_ai_diagnostic(
+                        'ai_face_service',
+                        f'Face matcher refresh failed to load embeddings: {exc}',
+                        severity='warning',
+                        details={'step': 'matcher_refresh', 'model_id': self.model_id, 'error': str(exc)},
+                    )
                     rows = []
             try:
                 matcher = FaceMatcher(rows)
             except Exception as exc:  # pragma: no cover - defensive (numpy missing)
-                logger.warning('Face matcher rebuild failed: %s', exc)
+                log_ai_diagnostic(
+                    'ai_face_service',
+                    f'Face matcher rebuild failed: {exc}',
+                    severity='warning',
+                    details={'step': 'matcher_refresh', 'model_id': self.model_id, 'error': str(exc)},
+                )
                 matcher = None
             with self._lock:
                 self._matcher = matcher
@@ -147,7 +158,12 @@ class FaceRecognitionService:
                 return
             rows = self._database.stored_face_embeddings_for_refresh(self.model_id)
         except Exception as exc:  # pragma: no cover - defensive DB guard
-            logger.warning('Could not check stored face embeddings against the model input scaling: %s', exc)
+            log_ai_diagnostic(
+                'ai_face_service',
+                f'Could not check stored face embeddings against the model input scaling: {exc}',
+                severity='warning',
+                details={'step': 'scaling_sync', 'model_id': self.model_id, 'error': str(exc)},
+            )
             return
         redone = removed = left = 0
         for row in rows:
@@ -165,23 +181,39 @@ class FaceRecognitionService:
                 redone += 1
             except Exception as exc:
                 left += 1
-                logger.warning('Could not re-embed stored face %s/%s: %s', row['table'], row['id'], exc)
+                log_ai_diagnostic(
+                    'ai_face_service',
+                    f'Could not re-embed stored face {row["table"]}/{row["id"]}: {exc}',
+                    severity='warning',
+                    details={'step': 'scaling_sync', 'model_id': self.model_id,
+                             'table': row['table'], 'row_id': row['id'], 'error': str(exc)},
+                )
         recorded[self.model_id] = scaling
         try:
             from app.auth import utc_now
 
             self._database.set_setting(INPUT_SCALING_SETTING, recorded, utc_now())
         except Exception as exc:  # pragma: no cover - defensive DB guard
-            logger.warning('Could not record the face embedding input scaling: %s', exc)
-        logger.info(
-            'Face embedding input scaling is now %s: re-embedded %d stored face(s) from their pictures and '
-            'removed %d auto-learned face(s) learned under the old scaling.',
-            scaling, redone, removed,
+            log_ai_diagnostic(
+                'ai_face_service',
+                f'Could not record the face embedding input scaling: {exc}',
+                severity='warning',
+                details={'step': 'scaling_sync', 'model_id': self.model_id, 'error': str(exc)},
+            )
+        log_ai_diagnostic(
+            'ai_face_service',
+            f'Face embedding input scaling is now {scaling}: re-embedded {redone} stored face(s) from their '
+            f'pictures and removed {removed} auto-learned face(s) learned under the old scaling.',
+            details={'step': 'scaling_sync', 'model_id': self.model_id, 'scaling': scaling,
+                     're_embedded': redone, 'removed': removed, 'left': left},
         )
         if left:
-            logger.warning(
-                '%d stored face(s) have no picture to re-embed from and will not match reliably; '
-                'delete them on the People card and add a new photo.', left,
+            log_ai_diagnostic(
+                'ai_face_service',
+                f'{left} stored face(s) have no picture to re-embed from and will not match reliably; '
+                'delete them on the People card and add a new photo.',
+                severity='warning',
+                details={'step': 'scaling_sync', 'model_id': self.model_id, 'left': left},
             )
 
     # -- recognition -----------------------------------------------------
@@ -287,7 +319,12 @@ def reload_face_recognition_service(config: dict[str, Any] | None = None) -> tup
     except Exception as exc:  # pragma: no cover - construction is defensive already
         # Keep the returned reason generic: it flows to the settings API
         # response, and raw exception text can leak internal details.
-        logger.warning('Face recognition reload failed: %s', exc)
+        log_ai_diagnostic(
+            'ai_face_service',
+            f'Face recognition reload failed: {exc}',
+            severity='warning',
+            details={'step': 'reload', 'error': str(exc)},
+        )
         return False, 'Face recognition failed to load.'
     with _singleton_lock:
         _service = service

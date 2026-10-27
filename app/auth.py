@@ -948,6 +948,8 @@ class AuthService:
         try:
             from app.backup import purge_camera_diagnostics_by_policy
             purge_camera_diagnostics_by_policy()
+            from app.backup import purge_ai_diagnostics_by_policy
+            purge_ai_diagnostics_by_policy()
         except Exception as diag_purge_exc:
             logging.getLogger('daygle.ai').warning(
                 'cleanup_expired_sessions: camera_diagnostics purge failed: %s',

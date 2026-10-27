@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import app.state as _state
+from app.diagnostics import log_ai_diagnostic
 from app.zone_schema import canonical_label, detection_within_box_limits, label_matches
 
 logger = logging.getLogger('daygle.ai')
@@ -176,6 +177,20 @@ def _store(alerts: list[dict[str, Any]], event: dict[str, Any], event_id: int) -
             )
         database.mark_event_alert_triggered(int(event_id))
     except Exception as exc:  # noqa: BLE001 - the notification still goes out
-        logger.warning('Could not store AI relabel alert for event %s: %s', event_id, exc)
-    logger.info('AI relabel on event %s: %s', event_id,
-                ', '.join(f"{alert['ai_relabel_from']} -> {alert['label']} ({alert['rule_name']})" for alert in alerts))
+        log_ai_diagnostic(
+            'ai_relabel_store_failed',
+            f'Could not store AI relabel alert for event #{event_id}: {exc}',
+            severity='warning', camera_id=(event.get('metadata') or {}).get('camera_id'),
+            details={'event_id': int(event_id)},
+        )
+    log_ai_diagnostic(
+        'ai_relabel',
+        f'AI relabel on event #{event_id}: ' + ', '.join(
+            f"{alert['ai_relabel_from']} -> {alert['label']} ({alert['rule_name']})" for alert in alerts
+        ),
+        camera_id=(event.get('metadata') or {}).get('camera_id'),
+        details={
+            'event_id': int(event_id),
+            'relabels': [f"{alert['ai_relabel_from']} -> {alert['label']} ({alert['rule_name']})" for alert in alerts],
+        },
+    )

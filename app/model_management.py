@@ -38,6 +38,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from app.diagnostics import log_ai_diagnostic
+
 
 def _onnxslim_available() -> bool:
     """Return ``True`` iff the ``onnxslim`` package is importable.
@@ -297,7 +299,15 @@ def _read_installed_models() -> dict[str, Any]:
         try:
             return json.loads(p.read_text(encoding='utf-8'))
         except Exception as exc:
-            logger.warning('Failed to read settings file: %s', exc)
+            # The installed-models registry is the model-install lifecycle's
+            # own state: a corrupted/unreadable file belongs in the AI Log
+            # next to the download/export records, not the app logger.
+            log_ai_diagnostic(
+                'ai_model_install',
+                f'Failed to read models/installed.json: {exc}',
+                severity='warning',
+                details={'step': 'registry'},
+            )
             return {}
     return {}
 
@@ -421,6 +431,20 @@ def _download_weights(
                 f'(sha256 {actual}, expected {expected_sha256}).'
             )
         tmp.replace(destination)
+        log_ai_diagnostic(
+            'ai_model_install',
+            f'Downloaded {destination.name} ({total} bytes) from {url}; sha256 verified.',
+            details={'step': 'download', 'url': url, 'file': destination.name,
+                     'size_bytes': total, 'sha256': actual},
+        )
+    except Exception as exc:
+        log_ai_diagnostic(
+            'ai_model_install',
+            f'Weight download failed: {exc}',
+            severity='error',
+            details={'step': 'download', 'url': url, 'file': destination.name, 'error': str(exc)},
+        )
+        raise
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -515,7 +539,12 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
         if cached_source.is_file() and expected_sha256 and _sha256_file(cached_source) != expected_sha256:
             # A cached copy from before the hash was pinned (or one altered on
             # disk) is not trusted: discard it and fetch a verified one.
-            logger.warning('Cached weights %s failed their integrity check; re-downloading.', cached_source.name)
+            log_ai_diagnostic(
+                'ai_model_install',
+                f'Cached weights {cached_source.name} failed their integrity check; re-downloading.',
+                severity='warning',
+                details={'step': 'integrity', 'file': cached_source.name},
+            )
             cached_source.unlink(missing_ok=True)
         if not cached_source.is_file():
             _download_weights(str(weights_url), cached_source, expected_sha256=expected_sha256)
@@ -569,7 +598,25 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
         if destination.stat().st_size <= 0:
             destination.unlink(missing_ok=True)
             raise RuntimeError('Exported model file is empty.')
-        return destination.stat().st_size
+        exported_bytes = destination.stat().st_size
+        log_ai_diagnostic(
+            'ai_model_install',
+            f'Exported {model_name} ONNX to {destination.name} ({exported_bytes} bytes) '
+            f'at imgsz={imgsz}, precision={precision}, device={device}.',
+            details={'step': 'export', 'model': model_name, 'imgsz': imgsz,
+                     'precision': precision, 'device': device, 'nms_free': nms_free,
+                     'file': destination.name, 'size_bytes': exported_bytes},
+        )
+        return exported_bytes
+    except Exception as exc:
+        log_ai_diagnostic(
+            'ai_model_install',
+            f'ONNX export of {model_name} failed: {exc}',
+            severity='error',
+            details={'step': 'export', 'model': model_name, 'imgsz': imgsz,
+                     'precision': precision, 'device': device, 'error': str(exc)},
+        )
+        raise
     finally:
         if temporary_export_dir is not None:
             # Ultralytics may download the source weights into its cwd when
@@ -579,6 +626,11 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
             if downloaded_weights.is_file() and not cached_weights.is_file():
                 cached_weights.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(downloaded_weights, cached_weights)
+                log_ai_diagnostic(
+                    'ai_model_install',
+                    f'Ultralytics downloaded {pt_name} into the export sandbox; cached it for reuse.',
+                    details={'step': 'download', 'file': pt_name, 'via': 'ultralytics'},
+                )
             temporary_export_dir.cleanup()
 
 
@@ -682,6 +734,7 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
     # Also remove the sibling INT8 quantization cache (``*.int8.onnx``) if one
     # was produced for this model, so precision=int8 deployments don't leave an
     # orphaned quantized copy behind after the source model is deleted.
+    had_int8_cache = False
     try:
         from app.quantization import (
             _int8_cache_metadata_path,
@@ -689,6 +742,7 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
             int8_cache_path,
         )
         int8_path = int8_cache_path(onnx_path)
+        had_int8_cache = int8_path.exists() or _int8_cache_metadata_path(onnx_path).exists()
         with _int8_process_lock(int8_path):
             # Remove derived artifacts first. If a later source unlink fails,
             # the model remains usable and no stale INT8 artifact can be
@@ -700,6 +754,13 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
         # Never report success when the source could not be deleted. Leaving
         # the model intact is safer than a partial deletion with an orphaned
         # cache that can later be mistaken for a complete deployment.
+        log_ai_diagnostic(
+            'ai_model_install',
+            f'Deletion of {info["label"]} failed: {exc}',
+            severity='error',
+            details={'step': 'delete', 'model': model_name, 'imgsz': int(imgsz),
+                     'file': rel_path, 'error': str(exc)},
+        )
         raise HTTPException(
             status_code=503,
             detail=f"Could not safely delete '{info['label']}'. Retry after the model is no longer in use.",
@@ -737,6 +798,13 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
     # whose backing file no longer exists.
     from app.camera_models import evict_camera_model_cache
     evict_camera_model_cache(rel_path)
+
+    log_ai_diagnostic(
+        'ai_model_install',
+        f'Deleted {info["label"]} ONNX model {rel_path} (variant imgsz={int(imgsz)}).',
+        details={'step': 'delete', 'model': model_name, 'imgsz': int(imgsz),
+                 'file': rel_path, 'int8_cache_removed': had_int8_cache},
+    )
 
     return {
         'ok': True,

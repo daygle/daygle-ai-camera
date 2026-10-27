@@ -59,6 +59,57 @@ def test_camera_diagnostics_log_crud_and_retention(tmp_path, monkeypatch):
     assert db.list_camera_diagnostics(created_after=day_start, created_before=day_end)[0]['event_type'] == 'detection_recovered'
 
 
+def test_camera_diagnostics_search_filters_message_and_details(tmp_path, monkeypatch):
+    """Free-text search matches the message OR the details JSON blob.
+
+    Mirrors the AI-log search: wildcards typed by the operator must be
+    literals (escaped), not SQL LIKE wildcards, and matching is
+    case-insensitive for ASCII.
+    """
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    db = main.database
+    db.add_camera_diagnostic(
+        created_at='2026-10-27T01:00:00+00:00', camera_id='front-yard', camera_name='Front Yard',
+        event_type='ptz_track_acquired', severity='info', message='tracking person',
+        details={'target': 'person', 'preset': 'Gate 01'},
+    )
+    db.add_camera_diagnostic(
+        created_at='2026-10-27T02:00:00+00:00', camera_id='driveway', camera_name='Driveway',
+        event_type='capture_failed', severity='error', message='read error',
+    )
+
+    # Matched in the message text...
+    assert db.count_camera_diagnostics(search='tracking person') == 1
+    # ...and in the details JSON (preset names are searchable).
+    assert db.count_camera_diagnostics(search='gate 01') == 1
+    # Case-insensitive for ASCII.
+    assert db.count_camera_diagnostics(search='TRACKING') == 1
+    # A literal '%'/_ typed by the operator matches nothing, not everything.
+    assert db.count_camera_diagnostics(search='%') == 0
+    assert db.count_camera_diagnostics(search='_') == 0
+    assert db.count_camera_diagnostics() == 2
+
+    hits = db.list_camera_diagnostics(search='gate 01')
+    assert [hit['camera_id'] for hit in hits] == ['front-yard']
+    # Details stay structured after a search hit.
+    assert hits[0]['details'] == {'target': 'person', 'preset': 'Gate 01'}
+
+
+def test_camera_log_router_passes_search_through():
+    """The /api/camera-log GET accepts a q param and feeds it to both the
+    list and the count query (mirrors the AI-log router pinning style)."""
+    import inspect
+
+    from app.api import camera_log_router
+
+    source = inspect.getsource(camera_log_router)
+    assert 'q: str | None' in source
+    assert 'search=(q.strip() or None) if q else None' in source
+    assert source.count('search=') >= 2  # list + count
+
+
 def test_camera_diagnostics_purge_follows_retention_days(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main

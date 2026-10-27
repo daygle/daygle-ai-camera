@@ -222,6 +222,23 @@ def normalize_hhmm(value: Any) -> str | None:
     return s
 
 
+def _search_like(user_search: str) -> str:
+    r"""Turn an operator's free-text search into an escaped SQL LIKE needle.
+
+    Shared by the diagnostics log layers (camera + AI): ``%``/``_`` in the
+    operator's text must match literally and ``\`` must escape itself
+    (SQLite ``LIKE ... ESCAPE``), never act as wildcards. SQLite ``LIKE``
+    is case-insensitive for ASCII, which is what operators expect when
+    searching model file names or sha256 prefixes.
+    """
+    escaped = (
+        user_search.replace('\\', '\\\\')
+        .replace('%', '\\%')
+        .replace('_', '\\_')
+    )
+    return f"%{escaped}%"
+
+
 def _parse_iso_datetime(value: Any) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(str(value or ''))

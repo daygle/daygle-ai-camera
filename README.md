@@ -316,8 +316,7 @@ The web UI has a left sidebar (a slide-in menu on phones). Pages that belong tog
   - **Models** - tabs: Object Models (`/models`), Face Models (`/models/faces`, face detection and ArcFace recognition models), Camera Models (`/models/cameras`, per-camera YOLO model assignment), Sound Model (`/models/sound`), Settings (`/models/settings`, detection runtime tuning)
 - **Admin** (admin)
   - **Settings** (`/settings`) - tabs: Detection & Live, Recording & Storage, Notifications, Network & Access (Cloudflare Tunnel, LAN & proxy, login security), Maintenance (updates, GPU health, backup, danger zone)
-  - **Users** (`/users`) - user management
-  - **System** - tabs: Health (`/system`, CPU, load, RAM, GPU and VRAM), Camera Log (`/camera-log`), Application Log (`/application-log`), Audit Log (`/audit`)
+  - **Users** (`/users`) - user management   - **System** - tabs: Health (`/system`, CPU, load, RAM, GPU and VRAM), Camera Log (`/camera-log`, with free-text search across messages and details), AI Log (`/ai-log`, verification verdicts, descriptions and tag checks, relabels, face-review captures, and AI model startup/engineering diagnostics - detector load, backend selection, INT8 quantization, and model downloads + ONNX export/install/deletion; also free-text searchable) plus the side models (face embedder load, face matcher refresh/scaling sync/reload failures, and YAMNet TFLite asset downloads, update checks and reloads), Application Log (`/application-log`), Audit Log (`/audit`)
 - `/profile` - change your own password and theme (account menu at the bottom of the sidebar)
 
 ## Events, recordings, and alerts

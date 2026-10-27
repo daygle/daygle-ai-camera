@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import Any
 
 import app.state as _state
+from app.diagnostics import log_ai_diagnostic
 
 logger = logging.getLogger('daygle.ai')
 
@@ -113,7 +114,11 @@ def _int8_process_lock(cache: Path):
                 except Exception as unlock_exc:  # pragma: no cover - OS-specific
                     # Never mask the conversion/deletion exception with an
                     # advisory-lock cleanup failure.
-                    logger.warning('Failed to release INT8 cache lock %s: %s', lock_path, unlock_exc)
+                    log_ai_diagnostic(
+                        'ai_int8_quantization',
+                        f'Failed to release INT8 cache lock {lock_path}: {unlock_exc}',
+                        severity='warning', details={'lock_path': str(lock_path)},
+                    )
         finally:
             handle.close()
 
@@ -395,7 +400,12 @@ def _configured_camera_calibration_frames() -> tuple[list[Any], int]:
         remaining = max(0.0, sample_deadline - time.monotonic())
         thread.join(timeout=remaining)
         if thread.is_alive():
-            logger.info('INT8 calibration camera %s did not provide frames within %.1fs; using synthetic fallback.', config['id'], _REAL_CALIBRATION_TIMEOUT_SECONDS)
+            log_ai_diagnostic(
+                'ai_int8_quantization',
+                f"INT8 calibration camera {config['id']} did not provide frames within "
+                f'{_REAL_CALIBRATION_TIMEOUT_SECONDS:.1f}s; using synthetic fallback.',
+                details={'camera_id': str(config['id'])},
+            )
             continue
         try:
             sampled.extend(output.get_nowait())
@@ -701,7 +711,11 @@ def quantize_int8(model_path: Path) -> Path | None:
                 # conversion is actually available.
                 if not int8_quantization_available():
                     return None
-                logger.warning('Discarding invalid or stale-provenance INT8 cache for %s.', source)
+                log_ai_diagnostic(
+                    'ai_int8_quantization',
+                    f'Discarding invalid or stale-provenance INT8 cache for {source}.',
+                    severity='warning', details={'source': str(source)},
+                )
                 cache.unlink(missing_ok=True)
                 metadata.unlink(missing_ok=True)
 
@@ -737,13 +751,17 @@ def quantize_int8(model_path: Path) -> Path | None:
                 input_shape,
                 real_frames=real_frames,
             )
-            logger.info(
-                'INT8 QDQ quantization (MinMax calibration, %d samples: %d real camera, %d synthetic fallback; %d configured cameras) for %s ...',
-                len(calibration_reader),
-                calibration_reader.real_frame_count,
-                calibration_reader.synthetic_frame_count,
-                configured_camera_count,
-                source,
+            log_ai_diagnostic(
+                'ai_int8_quantization',
+                'INT8 QDQ quantization (MinMax calibration, {} samples: {} real camera, '
+                '{} synthetic fallback; {} configured cameras) for {} ...'.format(
+                    len(calibration_reader),
+                    calibration_reader.real_frame_count,
+                    calibration_reader.synthetic_frame_count,
+                    configured_camera_count,
+                    source,
+                ),
+                details={'source': str(source)},
             )
 
             # Never let ORT write directly to the cache. A killed or failed
@@ -812,7 +830,11 @@ def quantize_int8(model_path: Path) -> Path | None:
                 raise RuntimeError('source model changed while publishing INT8 cache')
             return cache
         except Exception as exc:  # pragma: no cover - quantization failure is environment-specific
-            logger.warning('INT8 quantization failed for %s: %s', source, exc)
+            log_ai_diagnostic(
+                'ai_int8_quantization',
+                f'INT8 quantization failed for {source}: {exc}',
+                severity='warning', details={'source': str(source)},
+            )
             if fd is not None:
                 os.close(fd)
             if temporary_path is not None:

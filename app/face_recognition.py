@@ -25,6 +25,8 @@ from typing import Any
 
 import numpy as np
 
+from app.diagnostics import log_ai_diagnostic
+
 logger = logging.getLogger('daygle.ai')
 
 
@@ -393,7 +395,14 @@ class FaceEmbedder:
             # Log the underlying error for operators but keep the surfaced
             # reason generic: it flows to the settings API response, and raw
             # exception text can leak internal paths / stack details.
-            logger.warning('Failed to load face embedding model %s: %s', self.model_path, exc)
+            # The model-load outcome is AI engineering: it lands in the AI Log
+            # beside the detector-backend records, not the application logger.
+            log_ai_diagnostic(
+                'ai_face_embedder',
+                f'Failed to load face embedding model {self.model_path}: {exc}',
+                severity='warning',
+                details={'step': 'load', 'file': self.model_path.name, 'error': str(exc)},
+            )
             self.unavailable_reason = "Failed to load the face embedding model."
             self.session = None
             return
@@ -449,7 +458,12 @@ class FaceEmbedder:
             }
             scaling, similarity = choose_input_scaling(embeddings)
         except Exception as exc:
-            logger.warning('Could not check the face embedding model input scaling; using [-1, 1]: %s', exc)
+            log_ai_diagnostic(
+                'ai_face_embedder',
+                f'Could not check the face embedding model input scaling; using [-1, 1]: {exc}',
+                severity='warning',
+                details={'step': 'scaling', 'file': self.model_path.name, 'error': str(exc)},
+            )
             return self.input_scaling
         self.input_scaling = scaling
         measured = (
@@ -457,12 +471,17 @@ class FaceEmbedder:
             f'{similarity[INPUT_SCALING_RAW]:.0%} alike at 0-255'
         )
         if scaling == INPUT_SCALING_RAW:
-            logger.info(
-                'Face embedding model %s normalises pixels itself (%s); feeding it raw 0-255 pixels.',
-                self.model_path.name, measured,
+            log_ai_diagnostic(
+                'ai_face_embedder',
+                f'Face embedding model {self.model_path.name} normalises pixels itself ({measured}); feeding it raw 0-255 pixels.',
+                details={'step': 'scaling', 'file': self.model_path.name, 'scaling': 'raw', 'measured': measured},
             )
         else:
-            logger.info('Face embedding model %s takes [-1, 1] pixels (%s).', self.model_path.name, measured)
+            log_ai_diagnostic(
+                'ai_face_embedder',
+                f'Face embedding model {self.model_path.name} takes [-1, 1] pixels ({measured}).',
+                details={'step': 'scaling', 'file': self.model_path.name, 'scaling': 'normalized', 'measured': measured},
+            )
         return scaling
 
     def embed(self, face_bgr: Any) -> Any:

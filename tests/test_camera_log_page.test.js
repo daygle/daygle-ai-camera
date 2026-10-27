@@ -57,3 +57,15 @@ test('the page copy names the PTZ auto-track events that land here', () => {
     assert.ok(new RegExp(`<option value="${value}">`).test(html), `${value} missing from the filter`);
   }
 });
+
+test('free-text search reaches the API server-side', () => {
+  // Operators search records by PTZ target ids, preset names or timestamps;
+  // the Camera Log is a paged API, so the search box is a `q` query param
+  // (not client-side filtering like the streaming Application Log page).
+  assert.match(html, /id="filterSearch" type="search"/);
+  assert.match(html, /aria-label="Search messages and details"/);
+  assert.match(js, /q: document\.getElementById\('filterSearch'\)\.value\.trim\(\)/);
+  assert.match(js, /params\.set\('q', f\.q\)/);
+  assert.match(js, /filterSearch'\)\.value = ''/);
+  assert.match(js, /filterSearch[\s\S]{0,200}Enter/);
+});

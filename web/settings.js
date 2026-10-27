@@ -693,6 +693,23 @@ document.getElementById('purgeRecordingsBtn').addEventListener('click', guard(as
   setMessage(`Purged ${result.purged} recording(s), deleted ${result.files_deleted} file(s).`);
 }));
 
+// Settings → Maintenance → Log Maintenance: manual clear-down of the
+// diagnostic logs without touching events, recordings or settings. The
+// endpoints are the same admin-gated clears the Camera Log and AI Log pages
+// use (DELETE /api/camera-log, DELETE /api/ai-log); the confirm copy matches
+// camera-log.js so the wording stays consistent across entry points.
+document.getElementById('purgeCameraLogBtn').addEventListener('click', guard(async () => {
+  if (!window.confirm('Clear all camera diagnostic events? This cannot be undone.')) return;
+  const result = await api('/api/camera-log', { method: 'DELETE' });
+  setMessage(`Cleared ${result.deleted} camera log event(s).`);
+}));
+
+document.getElementById('clearAiLogBtn').addEventListener('click', guard(async () => {
+  if (!window.confirm('Clear all AI log events? This cannot be undone.')) return;
+  const result = await api('/api/ai-log', { method: 'DELETE' });
+  setMessage(`Cleared ${result.deleted} AI log event(s).`);
+}));
+
 
 const fullBackupLink = document.getElementById('fullBackupLink');
 fullBackupLink?.addEventListener('click', () => {

@@ -25,6 +25,7 @@ function getFilters() {
     camera_id: document.getElementById('filterCamera').value.trim(),
     event_type: document.getElementById('filterEventType').value,
     severity: document.getElementById('filterSeverity').value,
+    q: document.getElementById('filterSearch').value.trim(),
   };
 }
 
@@ -38,6 +39,7 @@ function buildQuery(offset) {
   if (f.camera_id) params.set('camera_id', f.camera_id);
   if (f.event_type) params.set('event_type', f.event_type);
   if (f.severity) params.set('severity', f.severity);
+  if (f.q) params.set('q', f.q);
   return params.toString();
 }
 
@@ -177,6 +179,7 @@ document.getElementById('clearFiltersBtn').addEventListener('click', () => {
   document.getElementById('filterCamera').value = '';
   document.getElementById('filterEventType').value = '';
   document.getElementById('filterSeverity').value = '';
+  document.getElementById('filterSearch').value = '';
   loadEntries(0);
 });
 document.getElementById('refreshBtn').addEventListener('click', () => loadEntries(currentOffset));
@@ -195,6 +198,9 @@ document.getElementById('clearLogBtn').addEventListener('click', async () => {
 });
 
 document.getElementById('filterCamera').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') loadEntries(0);
+});
+document.getElementById('filterSearch').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') loadEntries(0);
 });
 

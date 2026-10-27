@@ -667,6 +667,9 @@ def test_requested_gpu_running_on_cpu_warns(monkeypatch, tmp_path, caplog):
     fake_ort.InferenceSession = _Session
     monkeypatch.setitem(sys.modules, 'onnxruntime', fake_ort)
 
+    import app.detector as detector
+
+    recorder = _ai_diagnostic_recorder(monkeypatch, detector)
     with caplog.at_level('INFO', logger='daygle.ai'):
         det = OnnxYoloDetector(
             model_path=str(model_path),
@@ -676,7 +679,8 @@ def test_requested_gpu_running_on_cpu_warns(monkeypatch, tmp_path, caplog):
 
     assert det.available is True
     assert det.model_type == 'grid_nms'
-    diagnostics = [r.getMessage() for r in caplog.records if 'Detector startup diagnostics:' in r.getMessage()]
+    diagnostics = [e['message'] for e in recorder if e['event_type'] == 'ai_detector_startup'
+                   and 'Detector startup diagnostics:' in e['message']]
     assert diagnostics and 'model_path=' in diagnostics[0]
     assert 'model_type=grid_nms' in diagnostics[0]
     assert 'active_providers=' in diagnostics[0]
@@ -684,10 +688,27 @@ def test_requested_gpu_running_on_cpu_warns(monkeypatch, tmp_path, caplog):
     assert 'nms_free=False' in diagnostics[0]
     assert det.active_providers == ['CPUExecutionProvider']
     gpu_warnings = [
-        r.getMessage() for r in caplog.records
-        if 'running on CPU' in r.getMessage() and 'GPU acceleration was requested' in r.getMessage()
+        e['message'] for e in recorder
+        if e['event_type'] == 'ai_detector_startup'
+        and 'running on CPU' in e['message'] and 'GPU acceleration was requested' in e['message']
     ]
-    assert len(gpu_warnings) == 1, caplog.text
+    assert len(gpu_warnings) == 1, diagnostics
+    assert all(e['severity'] == 'warning' and e['details'].get('model_path') for e in recorder
+               if e['event_type'] == 'ai_detector_startup' and 'running on CPU' in e['message'])
+    assert not [r for r in caplog.records
+                if 'Detector startup diagnostics' in r.getMessage() or 'GPU acceleration was requested' in r.getMessage()]
+
+
+def _ai_diagnostic_recorder(monkeypatch, detector):
+    """Capture detector.log_ai_diagnostic calls (startup lines land in the AI log now)."""
+    entries = []
+
+    def log_ai_diagnostic(event_type, message='', *, severity='info', details=None,
+                          camera_id=None, camera_name=None):
+        entries.append({'event_type': event_type, 'message': message, 'severity': severity, 'details': details or {}})
+
+    monkeypatch.setattr(detector, 'log_ai_diagnostic', log_ai_diagnostic)
+    return entries
 
 
 def test_cpu_only_host_does_not_warn_about_gpu(monkeypatch, tmp_path, caplog):
@@ -735,6 +756,9 @@ def test_cpu_only_host_does_not_warn_about_gpu(monkeypatch, tmp_path, caplog):
     fake_ort.InferenceSession = _Session
     monkeypatch.setitem(sys.modules, 'onnxruntime', fake_ort)
 
+    import app.detector as detector
+
+    recorder = _ai_diagnostic_recorder(monkeypatch, detector)
     with caplog.at_level('WARNING', logger='daygle.ai'):
         det = OnnxYoloDetector(
             model_path=str(model_path),
@@ -743,6 +767,7 @@ def test_cpu_only_host_does_not_warn_about_gpu(monkeypatch, tmp_path, caplog):
         )
 
     assert det.available is True
+    assert not [e for e in recorder if 'GPU acceleration was requested' in e['message']]
     assert not [r for r in caplog.records if 'GPU acceleration was requested' in r.getMessage()]
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.utils import _normalize_iso_to_utc
+from app.utils import _normalize_iso_to_utc, _search_like
 
 
 class CameraDiagnosticsMixin:
@@ -73,6 +73,7 @@ class CameraDiagnosticsMixin:
         severity: str | None,
         created_after: str | None = None,
         created_before: str | None = None,
+        search: str | None = None,
     ) -> tuple[str, list[Any]]:
         # ``created_after`` / ``created_before`` are half-open [after, before)
         # UTC ISO bounds. The router derives them from the requested calendar
@@ -83,6 +84,13 @@ class CameraDiagnosticsMixin:
         if camera_id:
             conditions.append("camera_id = ?")
             params.append(camera_id)
+        if search:
+            # Same free-text needle as the AI diagnostics log: matches the
+            # message and the stored details JSON (PTZ target ids, preset
+            # names, timestamps, etc. as written text).
+            needle = _search_like(search)
+            conditions.append("(message LIKE ? ESCAPE '\\' OR details LIKE ? ESCAPE '\\')")
+            params.extend([needle, needle])
         if event_type:
             conditions.append("event_type = ?")
             params.append(event_type)
@@ -108,9 +116,11 @@ class CameraDiagnosticsMixin:
         severity: str | None = None,
         created_after: str | None = None,
         created_before: str | None = None,
+        search: str | None = None,
     ) -> list[dict[str, Any]]:
         where, params = self._camera_diagnostics_filter(
             camera_id, event_type, severity, created_after, created_before,
+            search=search,
         )
         with self.connect() as db:
             rows = db.execute(
@@ -132,9 +142,11 @@ class CameraDiagnosticsMixin:
         severity: str | None = None,
         created_after: str | None = None,
         created_before: str | None = None,
+        search: str | None = None,
     ) -> int:
         where, params = self._camera_diagnostics_filter(
             camera_id, event_type, severity, created_after, created_before,
+            search=search,
         )
         with self.connect() as db:
             row = db.execute(f"SELECT COUNT(*) AS count FROM camera_diagnostics {where}", params).fetchone()

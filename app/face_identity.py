@@ -22,6 +22,7 @@ import logging
 import threading
 from typing import Any
 
+from app.diagnostics import log_ai_diagnostic
 from app.face_detection_rules import (
     _coerce_bool,
     effective_face_detection_rules,
@@ -272,7 +273,12 @@ def _store_unknown_face(
             return
         embedding = service.embed_face(crop_bgr)
         if embedding is None:
-            logger.info('Unknown face on camera %s not captured for Review: the face could not be embedded', camera_id)
+            log_ai_diagnostic(
+                'face_capture_skipped',
+                f'Unknown face on camera {camera_id} not captured for Review: the face could not be embedded',
+                camera_id=camera_id,
+                details={'camera_id': camera_id, 'track_id': str(track_id) if track_id is not None else None},
+            )
             return
         emb_bytes = embedding_to_bytes(embedding)
         dim = int(embedding.shape[0])
@@ -295,8 +301,13 @@ def _store_unknown_face(
         logger.debug('Captured unknown face track %s on camera %s', track_id, camera_id)
     except Exception as exc:
         # Warning, not debug: a failing capture is why Review stays empty, and
-        # it must show in the Application Log.
-        logger.warning('Failed to capture unknown face on camera %s for Review: %s', camera_id, exc)
+        # it must show in the AI Log.
+        log_ai_diagnostic(
+            'face_capture_failed',
+            f'Failed to capture unknown face on camera {camera_id} for Review: {exc}',
+            severity='warning', camera_id=camera_id,
+            details={'camera_id': camera_id},
+        )
 
 
 def _clear_camera_identity_state(camera_id: str, *, clear_generation: bool = False) -> None:

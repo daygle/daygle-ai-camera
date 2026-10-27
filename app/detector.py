@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 
+from app.diagnostics import log_ai_diagnostic
 from app.utils import normalize_bool_setting
 
 logger = logging.getLogger('daygle.ai')
@@ -255,10 +256,12 @@ class OnnxYoloDetector:
                 # on real frames, yielding no detections. Keep this model on
                 # FP32 until a representative/QAT path exists; silently losing
                 # object recordings is worse than the speed trade-off.
-                logger.warning(
-                    'precision=int8 is not supported for NMS-free YOLO output; '
-                    'forcing FP32 for %s.',
-                    self.model_path,
+                log_ai_diagnostic(
+                    'ai_detector_startup',
+                    f'precision=int8 is not supported for NMS-free YOLO output; '
+                    f'forcing FP32 for {self.model_path}.',
+                    severity='warning',
+                    details={'model_path': str(self.model_path)},
                 )
                 self._precision = 'fp32'
             else:
@@ -266,26 +269,35 @@ class OnnxYoloDetector:
                 if quantized is not None:
                     session_model_path = Path(quantized)
                     int8_runtime_model = True
-                    logger.info(
-                        'INT8 QDQ quantization ready for %s -> %s',
-                        self.model_path, session_model_path,
+                    log_ai_diagnostic(
+                        'ai_detector_startup',
+                        f'INT8 QDQ quantization ready for {self.model_path} -> {session_model_path}',
+                        details={'model_path': str(self.model_path)},
                     )
                 else:
-                    logger.warning(
-                        'precision=int8 requested but quantization is unavailable or failed; '
-                        'falling back to FP32 model %s.',
-                        self.model_path,
+                    log_ai_diagnostic(
+                        'ai_detector_startup',
+                        f'precision=int8 requested but quantization is unavailable or failed; '
+                        f'falling back to FP32 model {self.model_path}.',
+                        severity='warning',
+                        details={'model_path': str(self.model_path)},
                     )
                     self._precision = 'fp32'
         elif self._precision == 'fp16':
             # The exported ONNX is already FP16 -- nothing to convert.
-            logger.info('precision=fp16: loading pre-exported half-precision model %s', self.model_path)
+            log_ai_diagnostic(
+                'ai_detector_startup',
+                f'precision=fp16: loading pre-exported half-precision model {self.model_path}',
+                details={'model_path': str(self.model_path)},
+            )
         elif self._precision != 'fp32':
             # Unknown precision silently normalises to fp32 so a stale
             # config setting can't break the detector.
-            logger.warning(
-                'Unknown precision=%r; defaulting to fp32 for %s.',
-                self._precision, self.model_path,
+            log_ai_diagnostic(
+                'ai_detector_startup',
+                f'Unknown precision={self._precision!r}; defaulting to fp32 for {self.model_path}.',
+                severity='warning',
+                details={'model_path': str(self.model_path)},
             )
             self._precision = 'fp32'
 
@@ -304,10 +316,11 @@ class OnnxYoloDetector:
             if int8_runtime_model:
                 use_cuda = False
                 if self._device in {"cuda", "auto"}:
-                    logger.info(
-                        'INT8 dynamic model is CPU-bound; using CPUExecutionProvider '
-                        'instead of requested device=%s.',
-                        self._device,
+                    log_ai_diagnostic(
+                        'ai_detector_startup',
+                        f'INT8 dynamic model is CPU-bound; using CPUExecutionProvider '
+                        f'instead of requested device={self._device}.',
+                        details={'model_path': str(self.model_path)},
                     )
                 self._use_io_binding = False
             else:
@@ -397,18 +410,21 @@ class OnnxYoloDetector:
             # models set ``use_cuda=False`` deliberately (logged separately) so
             # they never trip this.
             if use_cuda and 'CUDAExecutionProvider' not in self.active_providers:
-                logger.warning(
-                    'GPU acceleration was requested (device=%s) but the model is '
-                    'running on CPU (active_providers=%s). ONNX Runtime could not '
+                log_ai_diagnostic(
+                    'ai_detector_startup',
+                    'GPU acceleration was requested (device={}) but the model is '
+                    'running on CPU (active_providers={}). ONNX Runtime could not '
                     'initialize CUDA -- verify the NVIDIA driver is loaded '
                     '(nvidia-smi) and built for the running kernel, and that '
                     'the CUDA/cuDNN libraries it names above are installed '
                     '(on a Pascal GPU such as the Tesla P4, re-running '
                     'scripts/update.sh repairs them; see '
                     'docs/tesla-p4-gpu-setup.md). Inference will fall back to '
-                    'CPU and run slowly until this is resolved.',
-                    self._device,
-                    self.active_providers,
+                    'CPU and run slowly until this is resolved.'.format(
+                        self._device, self.active_providers,
+                    ),
+                    severity='warning',
+                    details={'model_path': str(self.model_path), 'device': str(self._device)},
                 )
             # Preflight: ``io_binding`` is a CUDA-only ORT API. If the session
             # ended up CPU-bound (e.g. user toggled the setting on a host
@@ -416,10 +432,12 @@ class OnnxYoloDetector:
             # didn't include CUDA), disable + log so the per-call branch
             # never has to handle a runtime-binding explosion.
             if self._use_io_binding and 'CUDAExecutionProvider' not in self.active_providers:
-                logger.warning(
-                    'use_io_binding=True requested but CUDAExecutionProvider is not '
-                    'active (active_providers=%s); falling back to session.run.',
-                    self.active_providers,
+                log_ai_diagnostic(
+                    'ai_detector_startup',
+                    f'use_io_binding=True requested but CUDAExecutionProvider is not '
+                    f'active (active_providers={self.active_providers}); falling back to session.run.',
+                    severity='warning',
+                    details={'model_path': str(self.model_path)},
                 )
                 self._use_io_binding = False
             # Read the model's actual input shape and override configured
@@ -433,10 +451,12 @@ class OnnxYoloDetector:
                 model_w = model_shape[3]
                 if isinstance(model_h, int) and isinstance(model_w, int):
                     if (model_h, model_w) != (self.input_height, self.input_width):
-                        logger.warning(
-                            'ONNX model input shape (%dx%d) differs from configured input_size (%dx%d). '
-                            'Using model shape.',
-                            model_w, model_h, self.input_width, self.input_height,
+                        log_ai_diagnostic(
+                            'ai_detector_startup',
+                            f'ONNX model input shape ({model_w}x{model_h}) differs from configured '
+                            f'input_size ({self.input_width}x{self.input_height}). Using model shape.',
+                            severity='warning',
+                            details={'model_path': str(self.model_path)},
                         )
                         self.input_width = model_w
                         self.input_height = model_h
@@ -446,16 +466,19 @@ class OnnxYoloDetector:
             input_type = getattr(model_input, 'type', None)
             self._input_dtype = np.float16 if input_type == 'tensor(float16)' else np.float32
             self._fp16_weights = _export_quantize_scheme(self.session) == '16'
-            logger.info(
-                "Detector startup diagnostics: model_path=%s model_type=%s "
-                "active_providers=%s precision=%s nms_free=%s "
-                "output_shape=%s",
-                self.model_path,
-                self.model_type,
-                self.active_providers,
-                self.active_precision,
-                self.model_type == "nms_free" if self.model_type != "unknown" else self._nms_free,
-                self.output_shape,
+            log_ai_diagnostic(
+                'ai_detector_startup',
+                "Detector startup diagnostics: model_path={} model_type={} "
+                "active_providers={} precision={} nms_free={} "
+                "output_shape={}".format(
+                    self.model_path,
+                    self.model_type,
+                    self.active_providers,
+                    self.active_precision,
+                    self.model_type == "nms_free" if self.model_type != "unknown" else self._nms_free,
+                    self.output_shape,
+                ),
+                details={'model_path': str(self.model_path)},
             )
             # Warm-up: ORT lazily builds kernels + allocations on the first
             # ``run``, spiking latency on the first live frame after every
@@ -478,10 +501,11 @@ class OnnxYoloDetector:
                     # unavailable in the installed ORT build. Do not leave a
                     # detector marked available while reporting INT8: retry
                     # the original FP32 graph on CPU instead.
-                    logger.warning(
-                        'INT8 warm-up failed (%s); falling back to FP32 model %s.',
-                        warm_exc,
-                        self.model_path,
+                    log_ai_diagnostic(
+                        'ai_detector_startup',
+                        f'INT8 warm-up failed ({warm_exc}); falling back to FP32 model {self.model_path}.',
+                        severity='warning',
+                        details={'model_path': str(self.model_path)},
                     )
                     # Same cache hygiene as the session-construction path: a
                     # quantized graph that parses but fails its first run
@@ -528,10 +552,12 @@ class OnnxYoloDetector:
                     # session.run warm-up so detection falls back to the plain
                     # (still-GPU) path instead. Same graceful-degradation
                     # philosophy as the CUDA preflight and INT8->FP32 fallbacks.
-                    logger.warning(
-                        'io_binding warm-up failed (%s); disabling io_binding and '
-                        'falling back to session.run for %s.',
-                        warm_exc, self.model_path,
+                    log_ai_diagnostic(
+                        'ai_detector_startup',
+                        f'io_binding warm-up failed ({warm_exc}); disabling io_binding and '
+                        f'falling back to session.run for {self.model_path}.',
+                        severity='warning',
+                        details={'model_path': str(self.model_path)},
                     )
                     self._use_io_binding = False
                     try:
@@ -823,12 +849,13 @@ class OnnxYoloDetector:
                 # Once per detector: the mismatch is a property of the loaded
                 # model, so logging it on every frame only floods the log.
                 self._head_mismatch_logged = True
-                logger.warning(
-                    'ONNX output shape %s indicates a %s head, but nms_free=%s was configured; '
-                    'using the format implied by the output shape.',
-                    tuple(int(d) for d in np.asarray(output).shape),
-                    'NMS-free' if shape_nms_free else 'grid/NMS',
-                    self._nms_free,
+                log_ai_diagnostic(
+                    'ai_detector_startup',
+                    f'ONNX output shape {tuple(int(d) for d in np.asarray(output).shape)} indicates a '
+                    f"{'NMS-free' if shape_nms_free else 'grid/NMS'} head, but nms_free={self._nms_free} "
+                    'was configured; using the format implied by the output shape.',
+                    severity='warning',
+                    details={'model_path': str(self.model_path)},
                 )
             use_nms_free = shape_nms_free
 
