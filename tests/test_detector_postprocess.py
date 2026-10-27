@@ -669,9 +669,13 @@ def test_requested_gpu_running_on_cpu_warns(monkeypatch, tmp_path, caplog):
 
     import app.detector as detector
 
+    # Bind the class from the same module object the recorder patches: earlier
+    # tests in the run (tests that ``_load_app``) reload app.detector, so the
+    # module-level ``from app.detector import OnnxYoloDetector`` may hold a
+    # stale class whose globals no longer match this module reference.
     recorder = _ai_diagnostic_recorder(monkeypatch, detector)
     with caplog.at_level('INFO', logger='daygle.ai'):
-        det = OnnxYoloDetector(
+        det = detector.OnnxYoloDetector(
             model_path=str(model_path),
             categories=LABELS,
             device='cuda',
@@ -758,9 +762,10 @@ def test_cpu_only_host_does_not_warn_about_gpu(monkeypatch, tmp_path, caplog):
 
     import app.detector as detector
 
+    # Same module-binding guard as the GPU-fallback test above.
     recorder = _ai_diagnostic_recorder(monkeypatch, detector)
     with caplog.at_level('WARNING', logger='daygle.ai'):
-        det = OnnxYoloDetector(
+        det = detector.OnnxYoloDetector(
             model_path=str(model_path),
             categories=LABELS,
             device='auto',

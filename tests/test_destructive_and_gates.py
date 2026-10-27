@@ -119,6 +119,7 @@ class TestM2RuntimeDataTwoStepDelete:
             assert 'counts' in body
             assert set(body['counts']) == {
                 'recordings', 'events', 'alerts', 'objects', 'camera_diagnostics',
+                'ai_diagnostics',
             }
             assert body['preserved'] == ['settings', 'users', 'sessions', 'rules']
         finally:
