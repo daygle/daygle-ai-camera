@@ -1909,9 +1909,9 @@ ultralytics-platform==0.1.84 \
     --hash=sha256:72ddd62c4c69a6e5b8fca1eb823a7fb92da5fce538cd630bd3fbf86114fb6629 \
     --hash=sha256:da7873d10e515c116fde1371867ee2ca7e893cb41b8feda1d25176a57901011f
     # via ultralytics
-ultralytics-thop==2.2.2 \
-    --hash=sha256:10ef0f4ab45261516008660619fef114cddc2b7c8383d9d3bd76c1e551208ca3 \
-    --hash=sha256:149a89c26c2be35b709fa25951f4644dea13d63017025569a193159a5908e3ed
+ultralytics-thop==2.2.3 \
+    --hash=sha256:141cea7d1af7fda04b135b5070d19d84f2272c76c5401de9e47581c23e7c5c60 \
+    --hash=sha256:d56c860b9422b6abfd7e9d7afdd8af3b1242a854c17305bd60ad05cbc7f4b5b6
     # via ultralytics
 urllib3==2.8.0 \
     --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
