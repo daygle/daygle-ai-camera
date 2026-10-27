@@ -1325,9 +1325,9 @@ onnx==1.23.2 \
     #   -r requirements.txt
     #   onnx-ir
     #   onnxscript
-onnx-ir==1.0.0 \
-    --hash=sha256:9e261f25fde8da9612ae5cb43b3b374d5ff469c04af0363cad588b2bb000b812 \
-    --hash=sha256:e578f0d608d3062866b48223616eb2d10a6d6d01f8b8faac596129034f483cc7
+onnx-ir==1.1.0 \
+    --hash=sha256:76cc313a788c073b75271c1b6abb172aaf90fcc6335ed40f9f3238b2064a2fa3 \
+    --hash=sha256:b72176de575d820ec26864d17270d58ef886a7cf64db7649d15fcc3d5ae2a8ee
     # via onnxscript
 onnxruntime==1.20.1 \
     --hash=sha256:06bfbf02ca9ab5f28946e0f912a562a5f005301d0c419283dc57b3ed7969bb7b \
