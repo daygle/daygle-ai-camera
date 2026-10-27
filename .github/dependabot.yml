@@ -97,6 +97,14 @@ updates:
       - dependency-name: "triton"
       - dependency-name: "polars*"
       - dependency-name: "ultralytics-platform"
+      # contourpy 1.4 and networkx 3.7 require Python >=3.12, but the lock is
+      # compiled for the Python 3.11 floor (python:3.11-slim image). Lock-only
+      # bumps to them were merged once and broke --require-hashes installs on
+      # 3.11; hold them until the project floor moves to 3.12.
+      - dependency-name: "contourpy"
+        versions: [">=1.4"]
+      - dependency-name: "networkx"
+        versions: [">=3.7"]
     # Exact-pinned entries (e.g. ultralytics==8.4.113) still get Dependabot
     # PRs -- an exact pin does not stop Dependabot on its own; it simply
     # proposes a new pin at the latest release. That is intended here:
