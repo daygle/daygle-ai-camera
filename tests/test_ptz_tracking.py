@@ -579,3 +579,45 @@ def test_auto_track_transitions_reach_the_camera_log(caplog, monkeypatch):
     # The lost label names what was last followed (its latest label).
     assert events[2]['details']['label'] == 'car'
     assert not [record for record in caplog.records if record.levelname == 'INFO']
+
+
+def test_a_failed_camera_command_reaches_the_camera_log_as_a_warning(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        pt, 'log_camera_diagnostic',
+        lambda camera_id, event_type, message='', **kw: events.append(
+            {'camera_id': camera_id, 'event_type': event_type, 'message': message,
+             'severity': kw.get('severity'), 'details': kw.get('details')},
+        ),
+    )
+    with pt._lock:
+        state = pt._state_for('cam')
+
+    def _boom() -> None:
+        raise RuntimeError('camera went away')
+
+    assert pt._dispatch('cam', state, _boom, 'pulse') is True
+    assert [entry['event_type'] for entry in events] == ['ptz_move_failed']
+    assert events[0]['severity'] == 'warning' and events[0]['camera_id'] == 'cam'
+    assert events[0]['details']['action'] == 'pulse'
+    assert 'camera went away' in events[0]['details']['error']
+
+
+def test_a_missing_home_preset_reaches_the_camera_log_as_a_warning(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        pt, 'log_camera_diagnostic',
+        lambda camera_id, event_type, message='', **kw: events.append(
+            {'camera_id': camera_id, 'event_type': event_type, 'message': message,
+             'severity': kw.get('severity'), 'details': kw.get('details')},
+        ),
+    )
+    import app.detection_state
+    import app.ptz
+    monkeypatch.setattr(app.ptz, 'ptz_goto_home', lambda conn, preset: False)
+    monkeypatch.setattr(app.detection_state, 'mark_camera_motion', lambda *args, **kw: None)
+
+    pt._default_mover('home', 'cam', object(), '')
+    assert [entry['event_type'] for entry in events] == ['ptz_no_home_preset']
+    assert events[0]['severity'] == 'warning' and events[0]['camera_id'] == 'cam'
+    assert 'staying put' in events[0]['message']

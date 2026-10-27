@@ -420,7 +420,12 @@ def _dispatch(camera_id: str, state: _CameraState, job: Callable[[], None], what
         try:
             job()
         except Exception as exc:  # noqa: BLE001 - a camera error must not kill the worker
-            logger.warning('PTZ auto-track %s failed on %s: %s', what, camera_id, exc)
+            # Command failures are per-camera ground truths: they belong in
+            # the camera log (warning severity), alongside the transitions.
+            log_camera_diagnostic(
+                camera_id, 'ptz_move_failed', f'Auto-track {what} failed: {exc}',
+                severity='warning', details={'action': what, 'error': str(exc)},
+            )
         finally:
             with _lock:
                 state.busy = False
@@ -827,7 +832,11 @@ def _default_mover(action: str, camera_id: str, conn: Any, *args: Any) -> None:
         (preset,) = args
         mark_camera_motion(camera_id, HOME_MOVE_SECONDS, reason='auto_track_home')
         if not ptz_goto_home(conn, preset):
-            logger.info('PTZ auto-track on %s: no home preset set for this protocol; staying put', camera_id)
+            log_camera_diagnostic(
+                camera_id, 'ptz_no_home_preset',
+                'No home preset set for this protocol; staying put',
+                severity='warning',
+            )
 
 
 def _status(state: _CameraState, now: float, note: dict[str, Any] | None = None) -> dict[str, Any]:

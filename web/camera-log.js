@@ -49,9 +49,39 @@ function formatDetails(details) {
 }
 
 function severityBadgeClass(severity) {
+  // Info is neutral, not green: this stream is informational activity (PTZ
+  // transitions, detection recovery), and painting it with the success
+  // palette made warning and error rows less distinct on the small-screen
+  // stacked cards.
   if (severity === 'error') return 'status-failed';
   if (severity === 'warning') return 'status-pending';
-  return 'status-success';
+  return 'status-muted';
+}
+
+// The Event column reads as words (matching the filter dropdown, which is
+// the single source of truth for these values). Unknown or future types
+// fall back to their raw machine code.
+const EVENT_TYPE_LABELS = {
+  prebuffer_fallback: 'Prebuffer Fallback',
+  prebuffer_short_preroll: 'Prebuffer Short Pre-roll',
+  prebuffer_degenerate: 'Prebuffer Degenerate',
+  prebuffer_restart: 'Prebuffer Restart',
+  audio_mux_disk_full: 'Audio Mux Disk Full',
+  capture_failed: 'Capture Failed',
+  detection_backoff: 'Detection Backoff',
+  detection_recovered: 'Detection Recovered',
+  camera_offline: 'Camera Offline',
+  camera_online: 'Camera Online',
+  ptz_track_acquired: 'PTZ Track Acquired',
+  ptz_track_switched: 'PTZ Track Switched',
+  ptz_track_lost: 'PTZ Track Lost',
+  ptz_move_failed: 'PTZ Move Failed',
+  ptz_no_home_preset: 'PTZ No Home Preset',
+};
+
+function eventTypeLabel(eventType) {
+  const key = String(eventType || '').trim();
+  return EVENT_TYPE_LABELS[key] || key || '-';
 }
 
 async function loadAuth() {
@@ -88,6 +118,7 @@ function makeCell(text, opts = {}) {
   if (opts.label) td.dataset.label = opts.label;
   if (opts.noWrap) td.style.whiteSpace = 'nowrap';
   if (opts.className) td.className = opts.className;
+  if (opts.title) td.title = opts.title;
   if (opts.code) {
     const code = document.createElement('code');
     code.textContent = text;
@@ -115,7 +146,7 @@ function renderEntries(entries) {
     const cameraLabel = entry.camera_name || entry.camera_id || '-';
     tr.appendChild(makeCell(formatLogTime(entry.created_at), { label: 'Time', noWrap: true }));
     tr.appendChild(makeCell(cameraLabel, { label: 'Camera' }));
-    tr.appendChild(makeCell(entry.event_type || '-', { label: 'Event', code: true }));
+    tr.appendChild(makeCell(eventTypeLabel(entry.event_type), { label: 'Event', code: true, title: entry.event_type || undefined }));
     tr.appendChild(makeCell(entry.severity || 'info', { label: 'Severity', badge: severityBadgeClass(entry.severity) }));
     tr.appendChild(makeCell(entry.message || '-', { label: 'Message', className: 'details-cell' }));
     tr.appendChild(makeCell(formatDetails(entry.details), { label: 'Details', className: 'details-cell' }));
