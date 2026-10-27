@@ -543,3 +543,39 @@ def test_a_person_target_never_turns_into_an_animal(default_groups):
     _step(camera, 10.0, candidates=[_det('person', 0.8, 0.5, track_id=1)], mover=mover)
     status = _step(camera, 11.2, candidates=[], visible=[_det('bird', 0.75, 0.5, track_id=2)], mover=mover)
     assert status['track_id'] == 1 and status['label'] == 'person'
+
+
+def test_auto_track_transitions_reach_the_camera_log(caplog, monkeypatch):
+    # The acquire/switch/lost transitions used to be logger.info lines on the
+    # application log; they now belong in the per-camera diagnostics log.
+    events = []
+    monkeypatch.setattr(
+        pt, 'log_camera_diagnostic',
+        lambda camera_id, event_type, message='', **kw: events.append(
+            {'camera_id': camera_id, 'event_type': event_type, 'message': message, 'details': kw.get('details')},
+        ),
+    )
+    with caplog.at_level('INFO'):
+        mover = _Mover()
+        camera = _camera(labels=['person', 'car'])
+        assert _step(camera, 10.0, candidates=[_det('person', 0.8, 0.5, track_id=1)], mover=mover)['label'] == 'person'
+        # Switch: the followed person parks, a moving car takes over.
+        person = _det('person', 0.8, 0.5, track_id=1)
+        car = _det('car', 0.2, 0.5, track_id=2)
+        status = _step(
+            camera, 11.0,
+            candidates=[{**person, 'motion_state': 'still'}, {**car, 'motion_state': 'moving'}],
+            mover=mover,
+        )
+        assert status['track_id'] == 2 and status['switched_from'] == 1
+        # Lost: the target leaves the frame and stays gone past lost_seconds.
+        status = _step(camera, 11.0 + 3.0 + 0.1 + mover.calls[-1][4], candidates=[], mover=mover)
+        assert status['event'] == 'lost'
+
+    assert [entry['event_type'] for entry in events] == ['ptz_track_acquired', 'ptz_track_switched', 'ptz_track_lost']
+    assert all(entry['camera_id'] == 'cam' for entry in events)
+    assert events[0]['details'] == {'label': 'person', 'track_id': 1}
+    assert events[1]['details']['from_track_id'] == 1 and events[1]['details']['track_id'] == 2
+    # The lost label names what was last followed (its latest label).
+    assert events[2]['details']['label'] == 'car'
+    assert not [record for record in caplog.records if record.levelname == 'INFO']

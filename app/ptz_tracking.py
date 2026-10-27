@@ -59,6 +59,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+from app.diagnostics import log_camera_diagnostic
 from app.utils import normalize_bool_setting
 
 logger = logging.getLogger('daygle.ai')
@@ -613,7 +614,13 @@ def update_auto_tracking(
         max_jump = 1.5 if state.edge_pushes else MAX_FOLLOW_JUMP
         target = _follow(state, visible, max_jump=max_jump) if state.target_label else None
         if target is None and state.target_label and now - state.last_seen > settings['lost_seconds']:
-            logger.info('PTZ auto-track on %s lost the %s', camera_id, state.target_label)
+            # Track transitions belong in the per-camera log (camera-log page),
+            # not the application logger that carried them before.
+            log_camera_diagnostic(
+                camera_id, 'ptz_track_lost',
+                f'Lost the {state.target_label}',
+                details={'label': state.target_label, 'track_id': state.target_track_id},
+            )
             note.update(event='lost', lost_label=state.target_label, lost_track_id=state.target_track_id)
             state.drop_target()
         if target is None and state.target_label is None:
@@ -621,7 +628,11 @@ def update_auto_tracking(
             if target is not None:
                 _set_target_label(state, target, settings['labels'])
                 note['acquired'] = True
-                logger.info('PTZ auto-track on %s following %s (track %s)', camera_id, state.target_label, target.get('track_id'))
+                log_camera_diagnostic(
+                    camera_id, 'ptz_track_acquired',
+                    f'Following {state.target_label} (track {target.get("track_id")})',
+                    details={'label': state.target_label, 'track_id': target.get('track_id')},
+                )
         elif target is not None and target.get('motion_state') == 'still':
             # The target has stopped (or was a parked object all along) and
             # something else worth following is moving: follow that instead.
@@ -633,8 +644,15 @@ def update_auto_tracking(
                 _set_target_label(state, mover_target, settings['labels'])
                 state.reset_steering()
                 note['acquired'] = True
-                logger.info('PTZ auto-track on %s switched from a still %s to a moving %s (track %s)',
-                            camera_id, target.get('label'), state.target_label, mover_target.get('track_id'))
+                log_camera_diagnostic(
+                    camera_id, 'ptz_track_switched',
+                    f'Switched from the still {target.get("label")} to the moving {state.target_label}'
+                    f' (track {mover_target.get("track_id")})',
+                    details={
+                        'from_label': target.get('label'), 'from_track_id': target.get('track_id'),
+                        'to_label': state.target_label, 'track_id': mover_target.get('track_id'),
+                    },
+                )
                 target = mover_target
 
         if target is not None:
