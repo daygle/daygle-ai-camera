@@ -76,4 +76,4 @@ ai-edge-litert>=2.1.6,<3.0
 # is effectively a no-op there. Camera timezone validation relies on this
 # being present: a zone it cannot resolve is rejected at save time with the
 # same rule the solar suggestion applies at runtime.
-tzdata>=2024.1
+tzdata>=2026.6
