@@ -52,4 +52,4 @@ nvidia-curand-cu12==10.3.5.147
 nvidia-cudnn-cu12==9.1.0.70
 # Keep GPU deployments aligned with requirements.txt so camera timezone,
 # solar-schedule, and Windows zoneinfo fallback behavior work consistently.
-tzdata>=2024.1
+tzdata>=2026.6
