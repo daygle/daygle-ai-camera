@@ -1,64 +1,23 @@
-"""Auth-gate helpers extracted from ``app/main.py`` (Phase-16).
+"""Session/role gates and client-IP resolution shared by the API routers.
 
-Phase-16 audit of ``app/main.py`` identified the auth-gate cluster as the
-highest-ROI group for extraction:
+Exported helpers:
 
-- Highest cross-router reach frequency amongst all helper groups (~19 sites
-  across 13+ routers; ``require_admin`` alone is reached by every mutating
-  admin-protected router in the codebase).
-- Tightest cohesion (all four helpers are about session/role gating; they
-  share the same input (``Request``) and the same State attributes set by
-  ``authentication_middleware`` from Phase-15).
-- Smallest extraction risk (~22 lines combined; no module-level state of
-  their own to migrate; no decorator bindings to move; type-hint-only
-  imports for the helpers themselves).
+- ``require_user`` -- returns the authenticated user dict from
+  ``request.state``; raises 401 when auth is enabled and no session is set,
+  and returns an anonymous admin when auth is disabled.
+- ``require_session`` -- returns the full session dict (``user``,
+  ``csrf_token``, ``expires_at``) with the same 401/anonymous behaviour.
+- ``require_admin`` -- ``require_user`` plus an admin-role check (403).
+- ``_request_ip`` -- client IP for audit logging and rate limiting.
+  ``X-Forwarded-For`` is honoured only when the direct peer is a configured
+  trusted proxy, so an untrusted client cannot spoof its address.
+- ``is_trusted_proxy`` -- membership test for ``auth.trusted_proxies``,
+  accepting single IPs and CIDR ranges.
 
-This module follows the same hybrid-pattern template as ``app/middleware.py``::
-
-    import app.main as main
-    # helpers reach main.<attr> at CALL time, not at module top
-
-Callables moved (4):
-
-- ``require_admin`` -- session-role gate; raises ``HTTPException(403)`` if
-  ``request.state.user.role != 'admin'``. Returns the user dict.
-- ``require_user`` -- returns ``request.state.user`` (set by
-  ``authentication_middleware`` after a successful session lookup).
-- ``require_session`` -- returns ``request.state.session`` (raw session
-  dict with ``csrf_token``, ``expires_at``, ``user``).
-- ``_request_ip`` -- loopback-aware client-IP extraction: if the direct
-  connection is loopback (``127.0.0.1``, ``::1``, localhost), trust the
-  first hop of the ``X-Forwarded-For`` header (so behind a reverse proxy
-  the operator's real IP is reported); otherwise return the direct peer
-  IP. Returns ``'unknown'`` if no client info is available.
-
-Pool A from-import rebinds (preserved at the bottom of ``app/main.py``):
-
-::
-
-    from app.auth_gates import (
-        require_admin as require_admin,
-        require_user as require_user,
-        require_session as require_session,
-        _request_ip as _request_ip,
-    )
-
-This is the back-compat contract that lets every consumer router call
-``main.require_admin(request)`` etc. without rewriting their imports.
-
-Helpers KEPT on ``app.main`` (this module calls them via ``main.<attr>``):
-
-- ``main._LOOPBACK`` -- the set of loopback identifiers ``_request_ip``
-  matches against. Kept on ``app.main`` because ``_LOOPBACK`` is a
-  transport-level constant that other future code in ``main.py`` (e.g.
-  IP-rate-limit logic) may want to read, and the hybrid-pattern rules
-  prefer keeping module-level constants at ``app.main`` (Pool A) with
-  consumers reaching them via Pool C. Moving it into ``auth_gates.py``
-  would split the constant's existence across two modules.
-
-Re-typed imports: ``from fastapi import HTTPException, Request`` works at
-top-level (Phase-15 verified ``HTTPException`` is reachable from
-``fastapi.*``).
+The auth-enabled flag and the trusted-proxy list are read live through
+``effective_auth_config()``, so a database override saved from the UI applies
+without a restart. Shared constants (public/admin paths, mutating methods)
+live in ``app.state``.
 """
 
 from __future__ import annotations
@@ -73,10 +32,9 @@ import app.state as _state
 from app.config_facades import effective_auth_config
 
 
-# Default trust set - matches the legacy ``_state._LOOPBACK`` behaviour so a
-# loopback direct peer is still trusted when ``trusted_proxies`` is missing
-# from the YAML/DB override (e.g. unit tests that import ``app.auth_gates``
-# without running ``_startup()``).
+# Default trust set: a loopback direct peer is trusted when ``trusted_proxies``
+# is missing from the YAML/DB override (e.g. unit tests that import
+# ``app.auth_gates`` without running ``_startup()``).
 _DEFAULT_TRUSTED_PROXIES: frozenset[str] = frozenset({"127.0.0.1", "::1"})
 
 

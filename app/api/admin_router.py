@@ -23,6 +23,7 @@ from app.config_facades import (
 from app.deps import get_auth_enabled, get_database, get_detector
 from app.detector import DetectorUnavailableError
 from app.request_helpers import write_audit_log, _read_uploaded_image
+from app.utils import _parse_iso_datetime
 from app.alert_dispatch import compute_minimum_rule_confidence
 from app.profile_presets import list_presets
 from app.recording_extension import clear_runtime_media_directory, delete_recording_files
@@ -111,18 +112,19 @@ def session_remaining(request: Request):
     reflects the most up-to-date expiry. A lightweight GET (no CSRF needed)
     that the frontend can poll on a 10-30 s interval for the countdown.
 
-    When auth is disabled ``require_session`` returns an anonymous session
-    with an empty ``expires_at`` - we catch the parse error and return 0
-    so the frontend doesn't see a 500.
+    ``expires_at`` is stored as canonical UTC, but legacy/restored rows can
+    carry a naive timestamp. Parsing through ``_parse_iso_datetime`` treats a
+    naive value as UTC (the auth layer's storage contract); calling
+    ``datetime.fromisoformat(...).timestamp()`` directly would read it in the
+    host's local timezone and shift the countdown by the UTC offset. An
+    unparseable value (including the anonymous session's empty string when
+    auth is disabled) reports 0 remaining instead of raising.
     """
     session = require_session(request)
-    try:
-        remaining = max(0, int(
-            datetime.fromisoformat(session['expires_at']).timestamp()
-            - datetime.now(timezone.utc).timestamp()
-        ))
-    except (TypeError, ValueError):
-        remaining = 0
+    expires_dt = _parse_iso_datetime(session.get('expires_at'))
+    remaining = 0
+    if expires_dt is not None:
+        remaining = max(0, int((expires_dt - datetime.now(timezone.utc)).total_seconds()))
     return {'remaining_seconds': remaining, 'expires_at': session['expires_at']}
 
 
