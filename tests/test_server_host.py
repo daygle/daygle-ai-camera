@@ -178,16 +178,118 @@ def test_forwarded_allow_ips_uses_ui_saved_trusted_proxies(tmp_path) -> None:
 
 
 def test_main_wires_the_derived_forwarded_allow_ips(monkeypatch) -> None:
-    """``main()`` must pass the derived list (and keep proxy headers on)."""
+    """``main()`` runs the factory (which applies the proxy middleware itself)
+    with the derived trust list, and turns Uvicorn's own copy off."""
     import app.server as server
 
     captured: dict = {}
     cfg = _config()
     cfg["auth"] = {"trusted_proxies": ["10.0.0.5"]}
     monkeypatch.setattr(server, "load_settings", lambda: cfg)
-    monkeypatch.setattr(server.uvicorn, "run", lambda *args, **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(server, "_forwarded_allow_ips", None)
+    monkeypatch.setattr(server.uvicorn, "run", lambda *args, **kwargs: captured.update(kwargs, app=args[0]))
 
     server.main()
 
-    assert captured["proxy_headers"] is True
-    assert captured["forwarded_allow_ips"] == "10.0.0.5,127.0.0.1,::1"
+    assert captured["app"] == "app.server:create_asgi_app"
+    assert captured["factory"] is True
+    assert captured["proxy_headers"] is False
+    assert server._forwarded_allow_ips == "10.0.0.5,127.0.0.1,::1"
+
+
+# ---------------------------------------------------------------------------
+# X-Forwarded-Host from a trusted proxy (``ForwardedHostMiddleware``)
+#
+# Uvicorn's ProxyHeadersMiddleware rewrites the client address but ignores
+# X-Forwarded-Host, so after it runs the app can no longer tell the request
+# came through a trusted proxy. A proxy that rewrites Host (nginx's default)
+# then failed the same-origin check on every mutating request.
+# ---------------------------------------------------------------------------
+
+
+def _scope(client: str, headers: list[tuple[bytes, bytes]]) -> dict:
+    return {
+        "type": "http", "http_version": "1.1", "method": "POST", "scheme": "http",
+        "path": "/api/x", "raw_path": b"/api/x", "query_string": b"", "root_path": "",
+        "headers": headers, "client": (client, 40000), "server": ("10.0.0.20", 8080),
+    }
+
+
+def _run_chain(scope: dict, trusted: str = "10.0.0.5,127.0.0.1,::1") -> dict:
+    """Run *scope* through the same middleware stack ``create_asgi_app`` builds."""
+    import asyncio
+
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    from app.server import ForwardedHostMiddleware
+
+    seen: dict = {}
+
+    async def inner(inner_scope, receive, send):
+        seen["scope"] = inner_scope
+
+    app = ForwardedHostMiddleware(ProxyHeadersMiddleware(inner, trusted_hosts=trusted), trusted)
+    asyncio.run(app(scope, None, None))
+    return seen["scope"]
+
+
+_PROXY_HEADERS = [
+    (b"host", b"10.0.0.20:8080"),
+    (b"origin", b"https://cam.example.com"),
+    (b"x-forwarded-for", b"192.168.1.50"),
+    (b"x-forwarded-proto", b"https"),
+    (b"x-forwarded-host", b"cam.example.com"),
+]
+
+
+def test_trusted_proxy_rewritten_host_passes_same_origin_check(monkeypatch) -> None:
+    import app.middleware as middleware
+    import app.state as state
+    from starlette.requests import Request
+
+    monkeypatch.setattr(state, "auth_config", {"trusted_proxies": ["10.0.0.5"]}, raising=False)
+    monkeypatch.setattr(state, "database", None, raising=False)
+    scope = _run_chain(_scope("10.0.0.5", list(_PROXY_HEADERS)))
+    request = Request(scope)
+
+    assert scope["client"][0] == "192.168.1.50"
+    assert str(request.url) == "https://cam.example.com/api/x"
+    assert middleware._check_same_origin(request) == (True, "")
+
+
+def test_untrusted_peer_cannot_set_host_via_x_forwarded_host() -> None:
+    scope = _run_chain(_scope("192.168.1.99", list(_PROXY_HEADERS)))
+    assert dict(scope["headers"])[b"host"] == b"10.0.0.20:8080"
+    assert scope["client"][0] == "192.168.1.99"
+
+
+def test_forwarded_host_uses_first_entry_and_keeps_port() -> None:
+    headers = [(b"host", b"10.0.0.20:8080"), (b"x-forwarded-host", b"cam.example.com:8443, inner.lan")]
+    scope = _run_chain(_scope("10.0.0.5", headers))
+    assert [v for n, v in scope["headers"] if n == b"host"] == [b"cam.example.com:8443"]
+
+
+def test_malformed_forwarded_host_is_ignored() -> None:
+    for bad in (b"evil.com/path", b"user@evil.com", b"a b", b""):
+        headers = [(b"host", b"10.0.0.20:8080"), (b"x-forwarded-host", bad)]
+        scope = _run_chain(_scope("10.0.0.5", headers))
+        assert dict(scope["headers"])[b"host"] == b"10.0.0.20:8080", bad
+
+
+def test_forwarded_host_trusts_cidr_and_ipv6_loopback() -> None:
+    headers = [(b"host", b"internal"), (b"x-forwarded-host", b"[2001:db8::1]:443")]
+    scope = _run_chain(_scope("::1", headers), trusted="192.168.1.0/24,127.0.0.1,::1")
+    assert dict(scope["headers"])[b"host"] == b"[2001:db8::1]:443"
+    scope = _run_chain(_scope("192.168.1.7", [(b"host", b"internal"), (b"x-forwarded-host", b"cam.lan")]),
+                       trusted="192.168.1.0/24,127.0.0.1,::1")
+    assert dict(scope["headers"])[b"host"] == b"cam.lan"
+
+
+def test_create_asgi_app_wraps_fastapi_app_outermost_first(monkeypatch) -> None:
+    import app.server as server
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    monkeypatch.setattr(server, "_forwarded_allow_ips", "10.0.0.5,127.0.0.1,::1")
+    wrapped = server.create_asgi_app()
+    assert isinstance(wrapped, server.ForwardedHostMiddleware)
+    assert isinstance(wrapped.app, ProxyHeadersMiddleware)

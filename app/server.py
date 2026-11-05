@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 import uvicorn
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.cloudflare_tunnel import CloudflareTunnelSecretStore, resolve_cloudflare_tunnel_settings
 from app.settings import load_settings
@@ -131,16 +133,95 @@ def server_host(config: dict[str, Any] | None = None) -> str:
     return str(server_config.get("host", "0.0.0.0"))
 
 
+# A bare hostname / IPv4 / bracketed IPv6, optionally with a port. Anything
+# else (spaces, paths, userinfo, several values) is ignored rather than used.
+_FORWARDED_HOST_RE = re.compile(r"^(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]+)(?::[0-9]{1,5})?$")
+
+# Set by ``main()`` before Uvicorn calls ``create_asgi_app``; the factory
+# re-derives it when it is built some other way (e.g. a test).
+_forwarded_allow_ips: str | None = None
+
+
+class ForwardedHostMiddleware:
+    """Apply ``X-Forwarded-Host`` from a trusted proxy to the ``Host`` header.
+
+    Uvicorn's ``ProxyHeadersMiddleware`` applies ``X-Forwarded-Proto`` and
+    ``X-Forwarded-For`` but not ``X-Forwarded-Host``, and it replaces the
+    client address with the real client's. After that, the app can no longer
+    see that the request came through a trusted proxy, so its own
+    ``X-Forwarded-Host`` handling (same-origin check) never runs. A proxy that
+    rewrites ``Host`` (nginx's default ``$proxy_host``) would then fail the
+    origin check on every mutating request.
+
+    This middleware runs OUTSIDE ``ProxyHeadersMiddleware``, while the direct
+    peer is still visible, and only for peers in the same trusted list. It
+    takes the first (original) entry and replaces ``Host`` with it, so
+    ``request.url`` carries the external host.
+    """
+
+    def __init__(self, app: Any, trusted_hosts: str) -> None:
+        self.app = app
+        self._networks = []
+        for entry in _config_entries(trusted_hosts):
+            try:
+                self._networks.append(ipaddress.ip_network(entry, strict=False))
+            except ValueError:
+                continue
+
+    def _is_trusted(self, peer: Any) -> bool:
+        try:
+            address = ipaddress.ip_address(str(peer).split("%", 1)[0])
+        except ValueError:
+            return False
+        return any(address in network for network in self._networks)
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") in ("http", "websocket"):
+            client = scope.get("client")
+            if client and self._is_trusted(client[0]):
+                forwarded = None
+                for name, value in scope.get("headers", []):
+                    if name == b"x-forwarded-host":
+                        forwarded = value
+                        break
+                if forwarded is not None:
+                    host = forwarded.decode("latin-1").split(",")[0].strip()
+                    if _FORWARDED_HOST_RE.match(host):
+                        headers = [(n, v) for n, v in scope["headers"] if n != b"host"]
+                        headers.append((b"host", host.encode("latin-1")))
+                        scope = dict(scope, headers=headers)
+        await self.app(scope, receive, send)
+
+
+def create_asgi_app() -> Any:
+    """Uvicorn factory: the FastAPI app behind the forwarded-header middleware.
+
+    Order matters: ``ForwardedHostMiddleware`` must be outermost so it sees the
+    proxy's address before ``ProxyHeadersMiddleware`` replaces it with the
+    client's. Uvicorn's own ``proxy_headers`` option is therefore turned off in
+    ``main()`` and the proxy middleware is applied here instead, with the same
+    trusted list.
+    """
+    from app.main import app as fastapi_app
+
+    trusted = _forwarded_allow_ips if _forwarded_allow_ips is not None else forwarded_allow_ips()
+    return ForwardedHostMiddleware(ProxyHeadersMiddleware(fastapi_app, trusted_hosts=trusted), trusted)
+
+
 def main() -> None:
+    global _forwarded_allow_ips
     config = load_settings()
     server_config = config.get("server", {})
+    _forwarded_allow_ips = forwarded_allow_ips(config)
     uvicorn.run(
-        "app.main:app",
+        "app.server:create_asgi_app",
+        factory=True,
         host=server_host(config),
         port=int(server_config.get("port", 8080)),
         reload=False,
-        proxy_headers=True,
-        forwarded_allow_ips=forwarded_allow_ips(config),
+        # Applied by ``create_asgi_app`` (with X-Forwarded-Host support), so
+        # Uvicorn must not wrap the app in a second copy.
+        proxy_headers=False,
     )
 
 
