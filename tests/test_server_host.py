@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.server import server_host
+from app.server import forwarded_allow_ips, server_host
 
 # A database path under a directory that cannot exist keeps the sqlite and
 # secret-store probes from creating real files during the unit test.
@@ -113,3 +113,81 @@ def test_persisted_tunnel_loopback_only_overrides_yaml(tmp_path) -> None:
     cfg = _config(host="0.0.0.0", tunnel_loopback_only=False, tunnel_token="tok")
     cfg["storage"] = {"database": str(db_path)}
     assert server_host(cfg) == "127.0.0.1"
+
+
+# ---------------------------------------------------------------------------
+# Forwarded-header trust (``forwarded_allow_ips``)
+#
+# Uvicorn's ProxyHeadersMiddleware only applies X-Forwarded-Proto/-For from the
+# listed peers. The launcher derives that list from ``auth.trusted_proxies``
+# (the setting the app's own origin/client checks use) plus loopback, so a
+# remote reverse proxy produces an external request URL and HSTS works.
+# ---------------------------------------------------------------------------
+
+
+def test_forwarded_allow_ips_defaults_to_loopback() -> None:
+    assert forwarded_allow_ips(_config()) == "127.0.0.1,::1"
+
+
+def test_forwarded_allow_ips_includes_configured_reverse_proxy() -> None:
+    cfg = _config()
+    cfg["auth"] = {"trusted_proxies": ["10.0.0.5", "192.168.1.0/24"]}
+    assert forwarded_allow_ips(cfg) == "10.0.0.5,192.168.1.0/24,127.0.0.1,::1"
+
+
+def test_forwarded_allow_ips_accepts_comma_separated_string() -> None:
+    cfg = _config()
+    cfg["auth"] = {"trusted_proxies": " 10.0.0.5 , 192.168.1.0/24 ,"}
+    assert forwarded_allow_ips(cfg) == "10.0.0.5,192.168.1.0/24,127.0.0.1,::1"
+
+
+def test_forwarded_allow_ips_drops_invalid_and_wildcard_entries() -> None:
+    # A YAML typo must not widen trust, and "*" is deliberately unsupported:
+    # the app's own is_trusted_proxy() would never honour it.
+    cfg = _config()
+    cfg["auth"] = {"trusted_proxies": ["not-an-ip", "*", "10.0.0.5", "10.0.0.5"]}
+    assert forwarded_allow_ips(cfg) == "10.0.0.5,127.0.0.1,::1"
+
+
+def test_forwarded_allow_ips_does_not_duplicate_loopback() -> None:
+    cfg = _config()
+    cfg["auth"] = {"trusted_proxies": ["127.0.0.1", "::1", "10.0.0.5"]}
+    assert forwarded_allow_ips(cfg) == "127.0.0.1,::1,10.0.0.5"
+
+
+def test_forwarded_allow_ips_uses_ui_saved_trusted_proxies(tmp_path) -> None:
+    """A DB row saved from the LAN & Proxy Access card wins over YAML."""
+    import json
+    import sqlite3
+
+    db_path = tmp_path / "data" / "daygle_ai_camera.sqlite3"
+    db_path.parent.mkdir()
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES ('auth', ?, '')",
+            (json.dumps({"trusted_proxies": ["10.9.8.7"]}),),
+        )
+
+    cfg = _config()
+    cfg["auth"] = {"trusted_proxies": ["10.0.0.1"]}
+    cfg["storage"] = {"database": str(db_path)}
+    assert forwarded_allow_ips(cfg) == "10.9.8.7,127.0.0.1,::1"
+
+
+def test_main_wires_the_derived_forwarded_allow_ips(monkeypatch) -> None:
+    """``main()`` must pass the derived list (and keep proxy headers on)."""
+    import app.server as server
+
+    captured: dict = {}
+    cfg = _config()
+    cfg["auth"] = {"trusted_proxies": ["10.0.0.5"]}
+    monkeypatch.setattr(server, "load_settings", lambda: cfg)
+    monkeypatch.setattr(server.uvicorn, "run", lambda *args, **kwargs: captured.update(kwargs))
+
+    server.main()
+
+    assert captured["proxy_headers"] is True
+    assert captured["forwarded_allow_ips"] == "10.0.0.5,127.0.0.1,::1"

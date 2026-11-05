@@ -14,11 +14,11 @@ Environment=PYTHONUNBUFFERED=1
 # modules; see scripts/prepare_gpu.sh). "+" runs it with full privileges,
 # "-" means a machine without an NVIDIA GPU still starts.
 ExecStartPre=+-/bin/sh /opt/daygle-ai-camera/scripts/prepare_gpu.sh
-# --proxy-headers makes request.url honour X-Forwarded-Proto/Host from a
-# reverse proxy so HSTS, redirects, and the same-origin CSRF guard see the
-# external scheme/host. --forwarded-allow-ips defaults to loopback for a
-# same-host proxy; set it to the reverse proxy's IP (and add that IP to
-# auth.trusted_proxies in config.yaml) for a proxy on a separate host/container.
+# Proxy headers are enabled, and app/server.py derives Uvicorn's forwarded-
+# allow-ips list from auth.trusted_proxies (plus loopback) so request.url,
+# HSTS, and the same-origin CSRF guard see the external scheme for a reverse
+# proxy on a separate host/container. Add that proxy's IP/CIDR to Trusted
+# Proxy IPs (or auth.trusted_proxies in config.yaml) and restart the service.
 ExecStart=/opt/daygle-ai-camera/.venv/bin/python -m app.server
 Restart=on-failure
 RestartSec=5
