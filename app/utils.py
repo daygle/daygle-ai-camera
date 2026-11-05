@@ -1,23 +1,24 @@
-"""Pure stateless utility helpers extracted from ``app/main.py`` (Phase A).
+"""Small stateless helpers shared across the application.
 
-This module contains helpers that have zero state dependencies - they only
-use stdlib and their own arguments. Because they are pure, any sibling
-module can import them at the top level without any circular-import risk.
+Exported helpers:
 
-Cluster membership:
+- ``_current_version`` -- version from the latest git tag, with a VERSION-file
+  fallback for tarball installs.
+- ``utc_now`` / ``_parse_iso_datetime`` / ``_normalize_iso_to_utc`` --
+  canonical UTC timestamp formatting, parsing, and normalisation.
+- ``local_day_bounds_to_utc`` -- browser-local calendar-day filter window
+  converted to half-open UTC bounds.
+- ``build_stream_url`` / ``_inject_credentials`` -- RTSP URL construction,
+  including IPv6 bracketing and credential escaping.
+- ``camera_default_name`` / ``default_camera_detection_settings`` --
+  camera record defaults.
+- ``normalize_bool_setting`` / ``normalize_ptz_motion_detection`` /
+  ``normalize_hhmm`` / ``normalize_email_recipients`` -- setting coercion.
+- ``_search_like`` -- escaped ``LIKE`` needle for the diagnostics searches.
 
-- ``_non_empty_setting`` -- strip a string setting value from a dict.
-- ``build_stream_url`` -- construct an RTSP stream URL from camera settings.
-- ``camera_default_name`` -- pick the display name for a camera.
-- ``default_camera_detection_settings`` -- return the factory-default
-  detection settings dict.
-- ``normalize_bool_setting`` -- coerce an arbitrary value to bool.
-- ``normalize_email_recipients`` -- deduplicate and validate email addresses.
-- ``_parse_iso_datetime`` -- parse an ISO timestamp string to a UTC datetime.
-
-**Pool A rebind (in ``app/main.py``):** every helper is re-bound as
-``main.<orig_name>`` so tests and callers that reach them as
-``main.normalize_bool_setting`` etc. keep working.
+Everything here depends only on the standard library and its own arguments:
+no ``app`` imports and no application singletons, so the module is safe to
+import from any layer, including during bootstrap.
 """
 from __future__ import annotations
 

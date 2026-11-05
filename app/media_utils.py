@@ -27,6 +27,7 @@ import subprocess
 import threading
 import time
 import uuid
+import weakref
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -144,7 +145,13 @@ def recording_playback_sidecar_path(file_path: Path) -> Path:
 # other's output mid-write, both reported failure, and the clip was then marked
 # unplayable (recording 21395: "Converted MP4 does not contain a video stream"
 # and "MP4 conversion did not create an output file" in the same second).
-_conversion_locks: dict[str, threading.Lock] = {}
+# The map is weak-valued: every clip that is converted used to leave its lock
+# behind for the life of the process, so a long-running deployment grew one
+# entry per converted recording. A lock stays reachable for as long as a
+# conversion holds (or a waiter references) it, which is exactly the window in
+# which two conversions must not run; once both are done it is collected and
+# the next play creates a fresh one.
+_conversion_locks: weakref.WeakValueDictionary[str, threading.Lock] = weakref.WeakValueDictionary()
 _conversion_locks_guard = threading.Lock()
 
 # A failed conversion is not retried on every play, but it is retried after

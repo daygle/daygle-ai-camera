@@ -363,3 +363,101 @@ def test_form_data_still_parses_small_bodies():
     request = SimpleNamespace(stream=stream, headers={'content-length': '35'})
     data = asyncio.run(helpers.form_data(request))
     assert data == {'username': 'admin', 'password': 'Admin123!'}
+
+
+def test_session_remaining_parses_naive_expiry_as_utc():
+    """A legacy tz-naive ``expires_at`` must be read as UTC, not host-local.
+
+    ``datetime.fromisoformat(value).timestamp()`` interprets a naive value in
+    the server's local timezone, which shifted the countdown by the UTC offset.
+    """
+    import os
+    import time as time_module
+    from datetime import datetime, timedelta, timezone
+
+    if not hasattr(time_module, 'tzset'):
+        pytest.skip('tzset is unavailable on this platform')
+
+    module = importlib.import_module('app.api.admin_router')
+    naive_expiry = (
+        datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=120)
+    ).isoformat()
+    request = SimpleNamespace(
+        state=SimpleNamespace(session={
+            'session_token': 'token',
+            'csrf_token': 'csrf',
+            'expires_at': naive_expiry,
+            'user': {'id': 1, 'role': 'admin', 'username': 'admin'},
+        })
+    )
+
+    previous = os.environ.get('TZ')
+    os.environ['TZ'] = 'Etc/GMT-10'  # UTC+10: a local-time read shifts by 10 hours
+    time_module.tzset()
+    try:
+        body = module.session_remaining(request)
+    finally:
+        if previous is None:
+            os.environ.pop('TZ', None)
+        else:
+            os.environ['TZ'] = previous
+        time_module.tzset()
+
+    assert 100 <= body['remaining_seconds'] <= 121
+    assert body['expires_at'] == naive_expiry
+
+
+def test_authenticated_request_skips_the_setup_state_query(monkeypatch):
+    """A valid session proves a user exists, so the middleware must not also
+    run the per-request ``COUNT(*) FROM users`` setup probe."""
+    from datetime import datetime, timedelta, timezone
+
+    from starlette.requests import Request
+    from starlette.responses import Response
+
+    middleware = importlib.import_module('app.middleware')
+    state = importlib.import_module('app.state')
+    session = {
+        'session_token': 'token',
+        'csrf_token': 'csrf',
+        'expires_at': (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        'user': {'id': 1, 'role': 'admin', 'username': 'admin'},
+    }
+    calls = {'users_exist': 0, 'get_session': 0}
+
+    class _Auth:
+        def users_exist(self):
+            calls['users_exist'] += 1
+            return True
+
+        def get_session(self, token):
+            calls['get_session'] += 1
+            return session if token == 'token' else None
+
+    monkeypatch.setattr(state, 'auth', _Auth(), raising=False)
+    monkeypatch.setattr(middleware, 'effective_auth_config', lambda: {
+        'enabled': True,
+        'cookie_name': 'daygle_session',
+        'session_timeout_hours': 12,
+    })
+    request = Request({
+        'type': 'http',
+        'http_version': '1.1',
+        'method': 'GET',
+        'scheme': 'http',
+        'path': '/api/status',
+        'raw_path': b'/api/status',
+        'query_string': b'',
+        'root_path': '',
+        'headers': [(b'cookie', b'daygle_session=token')],
+        'client': ('127.0.0.1', 12345),
+        'server': ('testserver', 80),
+    })
+
+    async def call_next(_request):
+        return Response(content=b'{}', media_type='application/json')
+
+    response = asyncio.run(middleware.authentication_middleware(request, call_next))
+
+    assert response.status_code == 200
+    assert calls == {'users_exist': 0, 'get_session': 1}

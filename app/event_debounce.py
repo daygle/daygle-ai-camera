@@ -1,18 +1,19 @@
-"""Per-camera live-detection backoff extracted from ``app/main.py`` (Phase-27).
+"""Per-camera live-detection backoff.
 
-``_live_backoff_lock`` + ``live_detection_failure_count`` +
-``live_detection_retry_after`` are the per-camera backoff counters that
-``schedule_live_camera_backoff`` writes to and that
-``clear_live_camera_backoff`` clears on a successful frame read.
+``schedule_live_camera_backoff`` records a failed frame read and computes the
+exponential retry delay (capped at 300s); ``clear_live_camera_backoff`` clears
+the counters after a successful read. Both operate on the shared primitives in
+``app.state`` (``_live_backoff_lock``, ``live_detection_failure_count``,
+``live_detection_retry_after``) and publish the resulting status through
+``update_live_detection_status``.
 
-(The duplicate-event debounce that used to live here was replaced by the
-presence gate in :mod:`app.event_presence`, which needs no cooldown.)
+The duplicate-event debounce that used to live here was replaced by the
+presence gate in :mod:`app.event_presence`, which needs no cooldown.
 
-State PRIMITIVES stay on ``app.state``; ``clear_live_camera_backoff`` also
-resets the per-camera motion-gate state (``_frame_motion_prev``,
-``_frame_motion_error_cameras``, ``_periodic_scan_last_ts``) when a camera
-transitions out of backoff, and logs the recovery via
-``log_camera_diagnostic``.
+A transition out of backoff (not every successful frame) also resets the
+per-camera motion state -- ``clear_frame_motion_state`` and
+``_periodic_scan_last_ts`` -- so both motion engines reseed from the next
+frame instead of diffing against a pre-outage background.
 """
 
 from __future__ import annotations

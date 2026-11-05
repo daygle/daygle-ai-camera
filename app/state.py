@@ -12,6 +12,7 @@ Rules:
 """
 from __future__ import annotations
 
+import hmac
 import secrets
 import threading
 import time
@@ -73,10 +74,6 @@ ADMIN_PATHS: frozenset[str] = frozenset({
     '/audit', '/camera-log', '/application-log', '/ai-log',
 })
 MUTATING_METHODS: frozenset[str] = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
-
-# Auth-gates loopback set (moved from app.main so app.auth_gates can import
-# at module top-level without a circular import).
-_LOOPBACK: frozenset[str] = frozenset({'127.0.0.1', '::1', 'localhost'})
 
 # ---------------------------------------------------------------------------
 # Lifespan-initialized singletons (None until app.main populates them)
@@ -375,6 +372,8 @@ def consume_runtime_delete_token(user_id: Any, presented_token: str) -> str | No
         if entry is None:
             return 'Token not recognised; please request a new preview first.'
         stored_token, _issued_at = entry
-        if stored_token != presented_token:
+        # Constant-time comparison: the token is a 256-bit secret, so compare
+        # it the same way as the CSRF/session secrets rather than with ``!=``.
+        if not isinstance(presented_token, str) or not hmac.compare_digest(stored_token, presented_token):
             return 'Token invalid or has already been used.'
         return None
