@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 
@@ -25,6 +26,20 @@ def stats(request: Request, since: str | None = Query(None), cameras_config=Depe
     return result
 
 
+def _int_setting(value: Any, fallback: int) -> int:
+    """Coerce a stored numeric setting, falling back on anything unusable.
+
+    The settings validator bounds the GPU thermal thresholds, but
+    ``app_settings`` can also be restored from an uploaded backup (validated
+    for schema, not value types) or hand-edited. A non-numeric value must not
+    turn every System page load into an HTTP 500.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
 @router.get('/api/system/resources')
 def system_resources_status(request: Request):
     """Host CPU / load-average / RAM / GPU snapshot for the dashboard cards."""
@@ -33,8 +48,8 @@ def system_resources_status(request: Request):
     # Health); fall back to the module defaults when unset.
     system = effective_system_config()
     result = system_resources(
-        gpu_warn_c=int(system.get('gpu_temp_warn_c') or GPU_TEMP_WARN_C),
-        gpu_critical_c=int(system.get('gpu_temp_critical_c') or GPU_TEMP_CRITICAL_C),
+        gpu_warn_c=_int_setting(system.get('gpu_temp_warn_c'), GPU_TEMP_WARN_C),
+        gpu_critical_c=_int_setting(system.get('gpu_temp_critical_c'), GPU_TEMP_CRITICAL_C),
     )
     result['video_decode'] = video_decode_status()
     return result

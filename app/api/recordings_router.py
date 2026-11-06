@@ -50,7 +50,12 @@ _PLAYABLE_STREAM_CACHE_LOCK = threading.Lock()
 
 def _playable_stream_path(file_path: Path) -> Path | None:
     """Return the browser-playable copy of ``file_path``, or ``None``."""
-    source_stat = file_path.stat()
+    try:
+        source_stat = file_path.stat()
+    except OSError:
+        # Purged/rotated between the caller's existence check and here. A
+        # routine race must read as "not playable", not as an HTTP 500.
+        return None
     key = (str(file_path), source_stat.st_mtime_ns, source_stat.st_size)
     with _PLAYABLE_STREAM_CACHE_LOCK:
         cached = _PLAYABLE_STREAM_CACHE.get(key)
@@ -67,7 +72,10 @@ def _playable_stream_path(file_path: Path) -> Path | None:
     stream_path = recording_stream_path(file_path)
     if not stream_path.exists() or not mp4_has_video_stream(stream_path):
         return None
-    stream_stat = stream_path.stat()
+    try:
+        stream_stat = stream_path.stat()
+    except OSError:
+        return None
     with _PLAYABLE_STREAM_CACHE_LOCK:
         _PLAYABLE_STREAM_CACHE[key] = (stream_path, stream_stat.st_mtime_ns, stream_stat.st_size)
         _PLAYABLE_STREAM_CACHE.move_to_end(key)
@@ -264,7 +272,10 @@ def stream_recording(recording_id: int, request: Request, db=Depends(get_databas
             status_code=415,
             detail='Recording file is not a playable video stream. Generate a new recording to rebuild media.',
         )
-    file_size = stream_path.stat().st_size
+    try:
+        file_size = stream_path.stat().st_size
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail='Recording media file not found') from exc
     media_type = mimetypes.guess_type(stream_path.name)[0] or 'video/mp4'
     range_header = request.headers.get('range')
     if not range_header:

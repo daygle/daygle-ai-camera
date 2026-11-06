@@ -15,6 +15,8 @@ Exported helpers:
 - ``normalize_bool_setting`` / ``normalize_ptz_motion_detection`` /
   ``normalize_hhmm`` / ``normalize_email_recipients`` -- setting coercion.
 - ``_search_like`` -- escaped ``LIKE`` needle for the diagnostics searches.
+- ``parse_json_object`` -- tolerant parser for JSON-object columns (event
+  metadata), so one malformed row cannot fail a whole list response.
 
 Everything here depends only on the standard library and its own arguments:
 no ``app`` imports and no application singletons, so the module is safe to
@@ -23,6 +25,7 @@ import from any layer, including during bootstrap.
 from __future__ import annotations
 
 import ipaddress
+import json
 import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -221,6 +224,25 @@ def normalize_hhmm(value: Any) -> str | None:
         except ValueError:
             pass
     return s
+
+
+def parse_json_object(raw: Any) -> dict[str, Any]:
+    """Parse a JSON-object column, tolerating corrupt or legacy values.
+
+    Event ``metadata`` blobs are written by this application, but they also
+    arrive with a database restored from an uploaded backup (validated for
+    schema, not for value contents) or written by older revisions. The search
+    layer already guards this with ``json_valid``; the list hydration used to
+    call ``json.loads`` directly, so a single unreadable row raised
+    ``JSONDecodeError`` and failed the whole ``/api/events`` or
+    ``/api/recordings`` request with an HTTP 500. Anything that is not a JSON
+    object reads as ``{}`` -- no metadata -- instead.
+    """
+    try:
+        parsed = json.loads(raw or '{}')
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _search_like(user_search: str) -> str:

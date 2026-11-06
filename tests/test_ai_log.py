@@ -789,6 +789,11 @@ def test_yamnet_update_check_reaches_the_ai_log(tmp_path, monkeypatch, caplog):
     events = _replacer(monkeypatch, sd)
     monkeypatch.setattr(sd, '_YAMNET_TFLITE_PATH', tmp_path / 'yamnet.tflite')
     monkeypatch.setattr(sd, '_YAMNET_CLASS_MAP_PATH', tmp_path / 'yamnet-class-map.csv')
+    # Isolate the metadata sidecar too. It lives under models/, not next to the
+    # (monkeypatched) tflite path, and an earlier reload test leaves a real
+    # installed_sha256 there -- without this redirect a second run in the same
+    # checkout reports that stale hash as "current" and sees an update.
+    monkeypatch.setattr(sd._YamnetBackend, '_METADATA_PATH', tmp_path / 'yamnet-metadata.json')
     backend = sd._YamnetBackend()
 
     # A failed network fetch -> warning record, no check artifact left behind.
