@@ -52,3 +52,21 @@ def test_successful_password_change_resets_the_counter(tmp_path):
         auth.change_password(user_id, 'Wr0ng-Guess!', 'N3w-Str0ng-Pass!')
     auth.change_password(user_id, PASSWORD, 'N3w-Str0ng-Pass!')
     assert auth.get_user(user_id)['failed_attempts'] == 0
+
+
+def test_locked_sign_in_pays_the_same_hashing_cost(tmp_path, monkeypatch):
+    # The login page shows a locked account the generic "Invalid username or
+    # password" message; the locked branch must not answer measurably faster
+    # either, or response time would still reveal that the username exists.
+    auth, user_id = _auth(tmp_path, max_attempts=1)
+    with pytest.raises(AuthError):
+        auth.authenticate('alex', 'Wr0ng-Guess!', '10.0.0.1')
+    assert auth.get_user(user_id)['locked_until'] is not None
+    calls: list[str] = []
+    # Patch the globals ``authenticate`` actually resolves against: other tests
+    # reload ``app.auth``, so ``import app.auth`` here can be a newer module
+    # object than the one this file's ``AuthService`` was defined in.
+    monkeypatch.setitem(AuthService.authenticate.__globals__, '_equalize_password_timing', calls.append)
+    with pytest.raises(AuthError, match='temporarily locked'):
+        auth.authenticate('alex', PASSWORD, '10.0.0.2')
+    assert calls == [PASSWORD]

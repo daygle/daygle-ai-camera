@@ -763,6 +763,9 @@ class AuthService:
                         raise AuthError("Too many failed login attempts. Try again later.")
                     raise AuthError("Invalid username or password.")
                 if _is_locked_until_future(row["locked_until"], now_dt):
+                    # Pay the same hashing cost as a wrong password so a locked
+                    # account cannot be told apart by response time either.
+                    _equalize_password_timing(password)
                     raise AuthError("Account is temporarily locked. Try again later.")
                 if self.too_many_recent_failures(db, username, ip_address, now_dt):
                     raise AuthError("Too many failed login attempts. Try again later.")
