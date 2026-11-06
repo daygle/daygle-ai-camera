@@ -81,7 +81,7 @@ opencv-python-headless>=5.0.0.93,<6.0
 python-multipart>=0.0.33,<1.0
 sounddevice>=0.5.6,<1.0
 # CPU-only YAMNet sound classifier runtime.
-ai-edge-litert>=2.1.6,<3.0
+ai-edge-litert>=2.3.0,<3.0
 # PEP 615 IANA tzdata for zoneinfo. Windows hosts ship no IANA database, so
 # without this package every non-UTC ZoneInfo(...) lookup fails: camera
 # timezone validation, the solar sunrise/sunset suggestion, and per-camera
