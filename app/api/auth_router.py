@@ -182,7 +182,7 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
         )
     if setup_ip:
         setup_limiter.record(setup_ip)
-    if auth.users_exist():
+    if await run_in_threadpool(auth.users_exist):
         return RedirectResponse('/login', status_code=303)
     data = await form_data(request)
     if not _csrf_double_submit_ok(data, request):
@@ -190,7 +190,8 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
     if data.get('password') != data.get('confirm_password'):
         return setup_page(request, 'Passwords do not match.', auth=auth, auth_enabled=auth_enabled)
     try:
-        auth.create_initial_admin(
+        await run_in_threadpool(
+            auth.create_initial_admin,
             data.get('username', ''),
             data.get('password', ''),
             first_name=data.get('first_name', ''),

@@ -187,7 +187,6 @@ class _YamnetBackend:
         self._available: bool | None = None  # None = not yet attempted
         self._unavailable_reason: str | None = None
         self._dynamic_target_len: int | None = None
-        self._installed_version: str | None = None
         self._installed_sha256: str | None = None
 
     # ------------------------------------------------------------------

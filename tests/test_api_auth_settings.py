@@ -1487,7 +1487,7 @@ def test_viewer_responses_redact_camera_and_alert_credentials(tmp_path, monkeypa
         assert viewer["role"] == "viewer"
 
         viewer_client = LocalClient(base_url)
-        viewer_csrf = _login(viewer_client, "watcher", "Viewer123!")
+        _login(viewer_client, "watcher", "Viewer123!")
 
         status, _headers, config = viewer_client.request("/api/config")
         assert status == 200

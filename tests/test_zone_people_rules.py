@@ -18,8 +18,6 @@ fdr = importlib.import_module('app.face_detection_rules')  # noqa: E402
 fi = importlib.import_module('app.face_identity')  # noqa: E402
 
 
-import pytest  # noqa: E402
-
 
 class _DbStub:
     def __init__(self, settings=None):
