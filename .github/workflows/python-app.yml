@@ -36,22 +36,58 @@ jobs:
       uses: actions/setup-python@v7
       with:
         python-version: ${{ matrix.python-version }}
+        # Reuse downloaded wheels between runs. The key is the hash of
+        # requirements.txt (per Python version and OS), so a dependency change
+        # starts a fresh cache.
+        cache: pip
+        cache-dependency-path: requirements.txt
+    - name: Restore cached ffmpeg packages
+      # The Azure Ubuntu mirror intermittently trickles at a few KB/s (one 9 MB
+      # .deb took 4+ minutes; three of the last few runs stalled here), and
+      # ffmpeg pulls in ~87 packages / 63 MB. Cache the .debs so normal runs
+      # install offline. The key includes the runner image version, so the
+      # cached packages always match the image they are installed onto.
+      id: ffmpeg-cache
+      uses: actions/cache@v6
+      with:
+        path: ~/ffmpeg-debs
+        key: ffmpeg-debs-${{ runner.os }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-v1
     - name: Install ffmpeg
       # Real ffmpeg/ffprobe for the end-to-end prebuffer render regression
       # (tests/test_prebuffer_segment_durations.py), which fails rather than
       # skips under CI when they are missing.
+      # Cache hit: offline dpkg install (~seconds). Cache miss (first run on a
+      # new runner image): download once from the mirror, with per-attempt
+      # timeouts and retries, then keep the .debs for the cache to save.
+      timeout-minutes: 10
       run: |
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends ffmpeg
+        if [ "${{ steps.ffmpeg-cache.outputs.cache-hit }}" = "true" ]; then
+          sudo dpkg -i ~/ffmpeg-debs/*.deb
+        else
+          # Download straight into the cached directory, so it holds exactly
+          # ffmpeg's packages (not whatever else is in apt's archive dir).
+          mkdir -p ~/ffmpeg-debs/partial
+          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Dir::Cache::Archives=$HOME/ffmpeg-debs"
+          sudo apt-get $APT_OPTS update
+          sudo apt-get $APT_OPTS install -y --no-install-recommends ffmpeg
+          sudo rm -rf ~/ffmpeg-debs/partial ~/ffmpeg-debs/lock
+          sudo chown -R "$USER" ~/ffmpeg-debs
+        fi
+        ffmpeg -hide_banner -version > /tmp/ffmpeg-version && head -n 1 /tmp/ffmpeg-version
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install ruff pytest pytest-cov
+        pip install ruff pytest pytest-cov pytest-xdist
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Lint with ruff
       run: ruff check app/ scripts/
     - name: Test with pytest
-      run: pytest
+      # Spread the suite over every runner core (~7 min -> ~2.5 min).
+      # --dist loadfile keeps each test file on one worker: tests/support.py
+      # re-imports the app.* namespace per test, so interleaving files on a
+      # worker can cross-contaminate (see CONTRIBUTING.md). Coverage is still
+      # collected and floored via pytest.ini's addopts.
+      run: pytest -n auto --dist loadfile
 
   # Dashboard frontend (web/) and its node:test suites. ESLint enforces the
   # recommended correctness rules as ERRORS for web/: cross-script globals
