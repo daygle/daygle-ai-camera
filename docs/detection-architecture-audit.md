@@ -1,6 +1,6 @@
 # Detection architecture re-audit (Item 10)
 
-**Audit date:** 2026-09-25  
+**Audit date:** 2026-09-25\
 **Scope:** live motion analysis, object inference, tracking, zone matching,
 behavioural monitors, confirmation, recording/alert decisions, and the object
 benchmark.
