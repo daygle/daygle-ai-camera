@@ -112,13 +112,14 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
             )
         except Exception as unexpected_exc:
             logger.warning('Unexpected error during login callback: %s', unexpected_exc)
-        # Keep authentication internals out of the HTML response. Preserve
-        # only the two deliberate, user-safe login states; the audit entry
-        # retains the detailed reason for administrators.
+        # Keep authentication internals out of the HTML response; the audit
+        # entry retains the detailed reason for administrators. A locked
+        # account deliberately gets the generic message: only accounts that
+        # exist can be locked, so a distinct "locked" message would confirm
+        # the username. The throttle message is kept because it applies to
+        # unknown usernames and IPs alike and so reveals nothing.
         safe_error = 'Invalid username or password.'
-        if str(exc) == 'Account is temporarily locked. Try again later.':
-            safe_error = 'Account is temporarily locked. Try again later.'
-        elif str(exc) == 'Too many failed login attempts. Try again later.':
+        if str(exc) == 'Too many failed login attempts. Try again later.':
             safe_error = 'Too many failed login attempts. Try again later.'
         return login_page(request, safe_error, return_to=data.get('return_to'), auth=auth, auth_enabled=auth_enabled)
 
@@ -182,7 +183,7 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
         )
     if setup_ip:
         setup_limiter.record(setup_ip)
-    if auth.users_exist():
+    if await run_in_threadpool(auth.users_exist):
         return RedirectResponse('/login', status_code=303)
     data = await form_data(request)
     if not _csrf_double_submit_ok(data, request):
@@ -190,7 +191,8 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
     if data.get('password') != data.get('confirm_password'):
         return setup_page(request, 'Passwords do not match.', auth=auth, auth_enabled=auth_enabled)
     try:
-        auth.create_initial_admin(
+        await run_in_threadpool(
+            auth.create_initial_admin,
             data.get('username', ''),
             data.get('password', ''),
             first_name=data.get('first_name', ''),

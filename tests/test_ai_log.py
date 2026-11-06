@@ -349,7 +349,6 @@ def test_download_weights_failure_logged_as_an_error(tmp_path, monkeypatch, capl
 def test_cached_weights_integrity_failure_reaches_the_ai_log(tmp_path, monkeypatch, caplog):
     mm, events = _mm_recorder(monkeypatch)
     import subprocess
-    import sys
 
     models_dir = tmp_path / 'models'
     models_dir.mkdir(parents=True)
@@ -566,7 +565,6 @@ def test_face_matcher_refresh_failures_reach_the_ai_log(tmp_path, monkeypatch, c
 
 def test_face_service_reload_failure_reaches_the_ai_log(monkeypatch, caplog):
     import app.face_recognition_service as frs
-    import app.state as state
 
     events = _replacer(monkeypatch, frs)
 
@@ -821,8 +819,6 @@ def test_yamnet_update_check_reaches_the_ai_log(tmp_path, monkeypatch, caplog):
 
 
 def test_yamnet_reload_success_reaches_the_ai_log(tmp_path, monkeypatch, caplog):
-    import app.sound_detector as sd
-
     sd, det = _yamnet_detector(monkeypatch)
     events = _replacer(monkeypatch, sd)
     # The reload flow replaces temp files onto the module asset paths, so
@@ -848,8 +844,6 @@ def test_yamnet_reload_success_reaches_the_ai_log(tmp_path, monkeypatch, caplog)
 
 
 def test_yamnet_reload_failure_reaches_the_ai_log(tmp_path, monkeypatch, caplog):
-    import app.sound_detector as sd
-
     sd, det = _yamnet_detector(monkeypatch)
     events = _replacer(monkeypatch, sd)
     monkeypatch.setattr(sd, '_YAMNET_TFLITE_PATH', tmp_path / 'yamnet.tflite')

@@ -139,8 +139,12 @@ def test_login_failure_and_account_lockout(tmp_path, monkeypatch):
         client.request("/login")
         csrf = client.cookie("daygle_csrf")
         status, _headers, body = client.request("/login", method="POST", form={"username": "admin", "password": "Admin123!", "csrf_token": csrf or ""})
+        # Locked: even the correct password is refused, and with the generic
+        # message so the page does not confirm that the account exists.
         assert status == 200
-        assert "temporarily locked" in body
+        assert "Invalid username or password" in body
+        assert "temporarily locked" not in body
+        assert client.cookie("daygle_session") is None
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -1487,7 +1491,7 @@ def test_viewer_responses_redact_camera_and_alert_credentials(tmp_path, monkeypa
         assert viewer["role"] == "viewer"
 
         viewer_client = LocalClient(base_url)
-        viewer_csrf = _login(viewer_client, "watcher", "Viewer123!")
+        _login(viewer_client, "watcher", "Viewer123!")
 
         status, _headers, config = viewer_client.request("/api/config")
         assert status == 200

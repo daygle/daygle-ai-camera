@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from app.auth import AuthError
 from app.auth_gates import require_admin, require_user
@@ -20,7 +21,9 @@ async def update_profile(request: Request, auth=Depends(get_auth)):
     user = require_user(request)
     payload = await read_json_object(request)
     try:
-        updated = auth.update_profile(
+        # bcrypt verification is CPU-bound: keep it off the event loop.
+        updated = await run_in_threadpool(
+            auth.update_profile,
             int(user['id']),
             username=payload.get('username'),
             first_name=payload.get('first_name'),
@@ -48,7 +51,8 @@ async def change_profile_password(request: Request, auth=Depends(get_auth)):
     payload = await read_json_object(request)
     session = getattr(request.state, 'session', None) or {}
     try:
-        auth.change_password(
+        await run_in_threadpool(
+            auth.change_password,
             int(user['id']),
             str(payload.get('current_password') or ''),
             str(payload.get('new_password') or ''),
@@ -75,7 +79,8 @@ async def create_user(request: Request, db=Depends(get_database), auth=Depends(g
     require_admin(request)
     payload = await read_json_object(request)
     try:
-        user = auth.create_user(
+        user = await run_in_threadpool(
+            auth.create_user,
             payload.get('username', ''),
             payload.get('password', ''),
             payload.get('role', 'viewer'),
@@ -109,7 +114,8 @@ async def update_user(user_id: int, request: Request, db=Depends(get_database), 
     if 'password' in payload:
         changes['password_changed'] = True
     try:
-        user = auth.update_user(
+        user = await run_in_threadpool(
+            auth.update_user,
             user_id,
             username=payload.get('username'),
             first_name=payload.get('first_name'),

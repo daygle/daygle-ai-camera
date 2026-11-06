@@ -590,6 +590,7 @@ class AuthService:
                         'Account is temporarily locked. Try again later.'
                     )
                 if not self.verify_password(current_password, row['password_hash']):
+                    self._record_failed_password(db, row, now_dt)
                     raise AuthError('Current password is incorrect.')
         updates: list[str] = []
         params: list[Any] = []
@@ -679,6 +680,7 @@ class AuthService:
             if _is_locked_until_future(row["locked_until"], now_dt):
                 raise AuthError("Account is temporarily locked. Try again later.")
             if not self.verify_password(current_password, row["password_hash"]):
+                self._record_failed_password(db, row, now_dt)
                 raise AuthError("Current password is incorrect.")
             db.execute(
                 "UPDATE users SET password_hash = ?, failed_attempts = 0, locked_until = NULL, updated_at = ? WHERE id = ?",
@@ -688,6 +690,26 @@ class AuthService:
                 "DELETE FROM user_sessions WHERE user_id = ? AND session_token IS NOT ?",
                 (user_id, keep_session_token),
             )
+
+    def _record_failed_password(self, db: sqlite3.Connection, row: sqlite3.Row, now_dt: datetime) -> None:
+        """Count a wrong password against the account and lock it at the threshold.
+
+        Shared by sign-in and by the signed-in re-verification paths
+        (``change_password`` / ``update_profile``), so a stolen session cookie
+        cannot be used to brute-force the account password without tripping
+        the same lockout as the login form. The caller raises ``AuthError``
+        afterwards, which makes ``connect()`` roll back -- so the counter is
+        committed here first, or the failure would never be recorded.
+        """
+        failures = int(row["failed_attempts"] or 0) + 1
+        locked_until = None
+        if failures >= self.max_login_attempts:
+            locked_until = (now_dt + self.lockout).astimezone(timezone.utc).isoformat()
+        db.execute(
+            "UPDATE users SET failed_attempts = ?, locked_until = ?, updated_at = ? WHERE id = ?",
+            (failures, locked_until, now_dt.astimezone(timezone.utc).isoformat(), row["id"]),
+        )
+        db.commit()
 
     def too_many_recent_failures(self, db: sqlite3.Connection, username: str, ip_address: str, now: datetime) -> bool:
         _window_start_raw = (now - self.lockout).isoformat()
@@ -741,28 +763,14 @@ class AuthService:
                         raise AuthError("Too many failed login attempts. Try again later.")
                     raise AuthError("Invalid username or password.")
                 if _is_locked_until_future(row["locked_until"], now_dt):
+                    # Pay the same hashing cost as a wrong password so a locked
+                    # account cannot be told apart by response time either.
+                    _equalize_password_timing(password)
                     raise AuthError("Account is temporarily locked. Try again later.")
                 if self.too_many_recent_failures(db, username, ip_address, now_dt):
                     raise AuthError("Too many failed login attempts. Try again later.")
                 if not self.verify_password(password, row["password_hash"]):
-                    failures = int(row["failed_attempts"]) + 1
-                    locked_until = None
-                    if failures >= self.max_login_attempts:
-                        # Defence-in-depth -- cosmetically identical coverage to the
-                        # rest of the users / login_attempts lifecycle.
-                        # ``(now_dt + self.lockout).isoformat()`` against a tz-aware
-                        # UTC ``now_dt`` is already canonical ``+00:00`` so the helper
-                        # is a no-op on the present source. The wrap routes any
-                        # FUTURE change (different tz derivation, naive ``datetime``,
-                        # f-string of local time) through the same canonicaliser so
-                        # the storage form on the ``UPDATE`` below stays uniform.
-                        # Idempotent on already-canonical input.
-                        _locked_raw = (now_dt + self.lockout).isoformat()
-                        locked_until = _normalize_iso_to_utc(_locked_raw) or _locked_raw
-                    db.execute(
-                        "UPDATE users SET failed_attempts = ?, locked_until = ?, updated_at = ? WHERE id = ?",
-                        (failures, locked_until, now, row["id"]),
-                    )
+                    self._record_failed_password(db, row, now_dt)
                     raise AuthError("Invalid username or password.")
                 token = secrets.token_urlsafe(48)
                 csrf_token = secrets.token_urlsafe(32)
