@@ -4,6 +4,11 @@
 # `.github/workflows/*.yml` up to date with a weekly scan. The hash lock is
 # excluded (see the pip entry below).
 #
+# No `labels:` are set, on purpose: Dependabot's defaults (`dependencies` plus
+# an ecosystem label such as `python`) are created automatically when missing,
+# whereas custom labels that do not exist in the repository are silently
+# dropped (with a "labels could not be found" warning on every PR).
+#
 # Two mechanisms keep Dependabot inside the versions this project can actually
 # run, and they are NOT interchangeable:
 #
@@ -37,9 +42,6 @@ updates:
     # manageable when several ranges open up at once.
     open-pull-requests-limit: 5
     rebase-strategy: "auto"
-    labels:
-      - "dependencies"
-      - "python"
     commit-message:
       prefix: "deps(pip)"
       include: "scope"
@@ -107,9 +109,6 @@ updates:
     groups:
       npm-dev:
         dependency-type: "development"
-    labels:
-      - "dependencies"
-      - "javascript"
     commit-message:
       prefix: "deps(npm)"
       include: "scope"
@@ -129,9 +128,6 @@ updates:
       github-actions:
         patterns:
           - "*"
-    labels:
-      - "dependencies"
-      - "github-actions"
     commit-message:
       prefix: "deps(ci)"
       include: "scope"
