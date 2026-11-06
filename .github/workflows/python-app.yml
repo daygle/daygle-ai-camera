@@ -36,6 +36,11 @@ jobs:
       uses: actions/setup-python@v7
       with:
         python-version: ${{ matrix.python-version }}
+        # Reuse downloaded wheels between runs. The key is the hash of
+        # requirements.txt (per Python version and OS), so a dependency change
+        # starts a fresh cache.
+        cache: pip
+        cache-dependency-path: requirements.txt
     - name: Install ffmpeg
       # Real ffmpeg/ffprobe for the end-to-end prebuffer render regression
       # (tests/test_prebuffer_segment_durations.py), which fails rather than
