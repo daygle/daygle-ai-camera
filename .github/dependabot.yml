@@ -95,6 +95,13 @@ updates:
       # requirements.txt bumps regenerate it in the same PR.
       - dependency-name: "anyio"
       - dependency-name: "triton"
+      # torch/torchvision are ultralytics transitives that exact-pin their
+      # CUDA wheels (cuda-toolkit, nvidia-cudnn-cu13, ...). A lock-only torch
+      # bump (2.14.1 -> 2.15.0) moved torch without those pins and left the
+      # lock unsatisfiable for `pip install --require-hashes`; they move only
+      # through a full lock regeneration.
+      - dependency-name: "torch"
+      - dependency-name: "torchvision"
       - dependency-name: "polars*"
       - dependency-name: "ultralytics-platform"
       # contourpy 1.4 and networkx 3.7 require Python >=3.12, but the lock is

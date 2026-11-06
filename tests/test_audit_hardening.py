@@ -123,7 +123,7 @@ def test_delete_all_events_removes_snapshot_files(tmp_path, monkeypatch):
     try:
         _setup_admin(client)
         csrf = _login(client)
-        add_event(_state.database, 
+        add_event(_state.database,
             created_at=datetime.now(timezone.utc).isoformat(),
             source='camera',
             snapshot_path=str(snapshot),

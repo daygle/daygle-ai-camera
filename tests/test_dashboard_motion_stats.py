@@ -17,7 +17,7 @@ from tests.support import add_event
 
 
 def _add_event(database, detections, *, source='camera', created_at='2026-08-01T10:00:00+00:00'):
-    return add_event(database, 
+    return add_event(database,
         created_at=created_at,
         source=source,
         snapshot_path=None,

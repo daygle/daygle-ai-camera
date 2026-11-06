@@ -139,8 +139,8 @@ is a **derived** artifact - the output of
    lock in the same PR: `./scripts/lock_python_deps.sh`. Commit both files.
 2. **Dependabot PR touching only `requirements.cpu.lock.txt`?** The pip
    `ignore` rules in `.github/dependabot.yml` suppress these for the known
-   lock-only transitives (torch chain: `nvidia-*`, `cuda-*`, `triton`,
-   `mpmath`; FastAPI chain: `anyio`; misc: `polars*`,
+   lock-only transitives (torch chain: `torch`, `torchvision`, `nvidia-*`,
+   `cuda-*`, `triton`, `mpmath`; FastAPI chain: `anyio`; misc: `polars*`,
    `ultralytics-platform`, `pydantic-core`). If a new lock-only PR still
    appears, add an ignore rule rather than merging a piecemeal lock edit - a
    single-pin edit outside a resolver run desyncs the lock from its

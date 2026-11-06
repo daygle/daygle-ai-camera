@@ -68,4 +68,3 @@ test('camera table exposes day and night profiles and editor can collapse', () =
   assert.match(source, /realIndex === openCameraEditIndex/);
   assert.doesNotMatch(source, /insertAdjacentHTML\('afterend', safeHtml\(\[formHtml\]\)\)/);
 });
-

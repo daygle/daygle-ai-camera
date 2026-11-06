@@ -55,7 +55,21 @@ onnxscript>=0.7.2,<1.0
 # Likewise fp16 exports emit quantize=16 instead of the deprecated half=True
 # (byte-identical on 8.4.176), and simplify is always passed explicitly:
 # 8.4.x defaults it to True and pip auto-installs onnxslim when it is missing.
-ultralytics==8.4.178
+# Bumped to 8.4.203 on 2026-11-06 after reviewing the upstream release notes
+# (8.4.179-8.4.203: no export-kwarg renames, no minimum Python/torch bump;
+# 8.4.203 hardens supply chain - checkpoints no longer trigger package
+# installs, restricted unpickler, sudo check without a shell). Source-checked
+# the two install-path changes: the CUDA-device ONNX export now requests
+# onnxruntime-gpu[cuda], but check_requirements matches name+version only, so
+# the installed (Pascal-safe <1.21) ORT still satisfies it and nothing is
+# installed; the new onnxruntime.preload_dlls() call lives in Ultralytics' own
+# ONNX inference backend (unused here) and needs ORT >=1.21. A/B export:
+# yolo11n with this repo's exact kwargs (format='onnx', nms=None, opset=13,
+# simplify=True, imgsz=640) under 8.4.178 vs 8.4.203 on torch 2.15.0 gives a
+# byte-identical graph once the date/version metadata is stripped, equal
+# initializer hashes, and byte-identical ORT 1.20.1 CPU output on fixed inputs.
+# The fp16 (quantize=16) export path needs a CUDA host and was not A/B-checked.
+ultralytics==8.4.203
 # Bumped to the 5.x line on 2026-07-27. Audited every cv2 symbol this repo
 # uses (imdecode/imencode, cvtColor, resize INTER_NEAREST/LINEAR, rectangle,
 # putText/getTextSize, VideoWriter[_fourcc], VideoCapture + CAP_PROP_BUFFERSIZE,
@@ -64,7 +78,7 @@ ultralytics==8.4.178
 # exact pixel values; no test here asserts pixel-exact output, so they are a
 # no-op for us. Cap below 6.0 so a future major bump gets the same review.
 opencv-python-headless>=5.0.0.93,<6.0
-python-multipart>=0.0.32,<1.0
+python-multipart>=0.0.33,<1.0
 sounddevice>=0.5.6,<1.0
 # CPU-only YAMNet sound classifier runtime.
 ai-edge-litert>=2.1.6,<3.0
