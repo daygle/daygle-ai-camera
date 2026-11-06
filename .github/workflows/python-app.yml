@@ -40,18 +40,28 @@ jobs:
       # Real ffmpeg/ffprobe for the end-to-end prebuffer render regression
       # (tests/test_prebuffer_segment_durations.py), which fails rather than
       # skips under CI when they are missing.
+      # Normally ~20s. A slow Ubuntu mirror once stalled this step for 24
+      # minutes, so bound each network attempt, retry, and cap the step: a
+      # stuck mirror now fails fast instead of holding the run hostage.
+      timeout-minutes: 6
       run: |
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends ffmpeg
+        APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+        sudo apt-get $APT_OPTS update
+        sudo apt-get $APT_OPTS install -y --no-install-recommends ffmpeg
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install ruff pytest pytest-cov
+        pip install ruff pytest pytest-cov pytest-xdist
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Lint with ruff
       run: ruff check app/ scripts/
     - name: Test with pytest
-      run: pytest
+      # Spread the suite over every runner core (~7 min -> ~2.5 min).
+      # --dist loadfile keeps each test file on one worker: tests/support.py
+      # re-imports the app.* namespace per test, so interleaving files on a
+      # worker can cross-contaminate (see CONTRIBUTING.md). Coverage is still
+      # collected and floored via pytest.ini's addopts.
+      run: pytest -n auto --dist loadfile
 
   # Dashboard frontend (web/) and its node:test suites. ESLint enforces the
   # recommended correctness rules as ERRORS for web/: cross-script globals

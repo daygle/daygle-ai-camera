@@ -13,7 +13,7 @@ cd daygle-ai-camera
 python3 -m venv .venv
 source .venv/bin/activate
 ./scripts/install_python_deps.sh python requirements.txt
-pip install --no-cache-dir pytest pytest-cov ruff pre-commit
+pip install --no-cache-dir pytest pytest-cov pytest-xdist ruff pre-commit
 npm install   # frontend lint/test tooling (Node.js 22+)
 ```
 
@@ -38,6 +38,7 @@ a uvicorn thread against a tmpdir config, and the harness in `tests/support.py`
 wipes and re-imports the whole `app.*` namespace per test, so interleaving two
 files onto one worker produces cross-test contamination that looks like a real
 failure.
+CI runs exactly this command, so a local run matches what CI checks.
 
 **Add `--no-cov` when running a subset.** `pytest.ini` sets
 `--cov-fail-under=60`, so running one file reports a coverage failure and exits
