@@ -8,7 +8,7 @@ from typing import Any
 from app.db.library_filters import recording_face_condition, recording_query_condition
 from app.detection_status import GENERIC_TRIGGER_LABELS
 from app.media_utils import recording_playback_sidecar_path, safe_storage_path
-from app.utils import _normalize_iso_to_utc
+from app.utils import _normalize_iso_to_utc, parse_json_object
 
 _SQLITE_BATCH_SIZE = 400
 
@@ -663,7 +663,7 @@ class RecordingsMixin:
             ).fetchall()
             if event_row:
                 event = dict(event_row)
-                event["metadata"] = json.loads(event.get("metadata") or "{}")
+                event["metadata"] = parse_json_object(event.get("metadata"))
                 recording["event"] = event
             recording["detections"] = [dict(detection) for detection in detections]
         # A recording spans many events: attach every event linked to this clip.
@@ -691,7 +691,7 @@ class RecordingsMixin:
             ).fetchall()
             for event_row in event_rows:
                 event = dict(event_row)
-                event['metadata'] = json.loads(event.get('metadata') or '{}')
+                event['metadata'] = parse_json_object(event.get('metadata'))
                 events_map[int(event['id'])] = event
             det_rows = db.execute(
                 f"SELECT * FROM detections WHERE event_id IN ({placeholders}) ORDER BY confidence DESC",
@@ -744,7 +744,7 @@ class RecordingsMixin:
         grouped: dict[int, list[dict[str, Any]]] = {}
         for row in event_rows:
             event = dict(row)
-            event['metadata'] = json.loads(event.get('metadata') or '{}')
+            event['metadata'] = parse_json_object(event.get('metadata'))
             event['detections'] = detections_by_event.get(int(event['id']), [])
             grouped.setdefault(int(row['recording_id']), []).append(event)
         return grouped

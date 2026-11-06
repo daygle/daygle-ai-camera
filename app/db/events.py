@@ -13,7 +13,7 @@ from app.db.library_filters import (
     face_facet_rows,
 )
 from app.detection_status import GENERIC_TRIGGER_LABELS
-from app.utils import _normalize_iso_to_utc
+from app.utils import _normalize_iso_to_utc, parse_json_object
 
 _SQLITE_BATCH_SIZE = 400
 
@@ -228,7 +228,7 @@ class EventsMixin:
             if row is None:
                 return None
             event = dict(row)
-            event["metadata"] = json.loads(event.get("metadata") or "{}")
+            event["metadata"] = parse_json_object(event.get("metadata"))
             self._purge_event_children(db, [int(event_id)])
             db.execute("DELETE FROM events WHERE id = ?", (event_id,))
             return event
@@ -554,7 +554,7 @@ class EventsMixin:
                 ).fetchall()
                 for row in rows:
                     event = dict(row)
-                    event['metadata'] = json.loads(event.get('metadata') or '{}')
+                    event['metadata'] = parse_json_object(event.get('metadata'))
                     events.append(event)
             purged_ids = [int(event['id']) for event in events]
             self._purge_event_children(db, purged_ids)
@@ -595,7 +595,7 @@ class EventsMixin:
             events = []
             for row in rows:
                 event = dict(row)
-                event['metadata'] = json.loads(event.get('metadata') or '{}')
+                event['metadata'] = parse_json_object(event.get('metadata'))
                 events.append(event)
             event_ids = [int(event['id']) for event in events]
             self._purge_event_children(db, event_ids)
@@ -780,7 +780,7 @@ class EventsMixin:
             return []
         events = {int(row['id']): dict(row) for row in rows}
         for event in events.values():
-            event['metadata'] = json.loads(event.get('metadata') or '{}')
+            event['metadata'] = parse_json_object(event.get('metadata'))
             event['detections'] = []
             event['has_snapshot'] = bool(event.get('snapshot_path'))
             event['alert'] = None
