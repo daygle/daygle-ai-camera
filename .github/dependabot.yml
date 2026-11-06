@@ -1,7 +1,8 @@
 # Dependabot configuration for daygle-ai-camera.
 #
-# Keeps `requirements.txt` and `.github/workflows/*.yml` up to date with a
-# weekly scan.
+# Keeps `requirements.txt`, `requirements-gpu-pascal.txt`, package.json and
+# `.github/workflows/*.yml` up to date with a weekly scan. The hash lock is
+# excluded (see the pip entry below).
 #
 # Two mechanisms keep Dependabot inside the versions this project can actually
 # run, and they are NOT interchangeable:
@@ -42,11 +43,28 @@ updates:
     commit-message:
       prefix: "deps(pip)"
       include: "scope"
+    # The hash lock(s) (requirements.cpu.lock.txt, and any requirements.gpu /
+    # legacy requirements.lock.txt) are DERIVED artifacts: `uv pip compile
+    # requirements.txt --generate-hashes` output, regenerated only via
+    # scripts/lock_python_deps.sh (see CONTRIBUTING.md). Dependabot treats
+    # every requirements*.txt as an independent manifest, so scanning the lock
+    # produced piecemeal one-pin PRs that bypass the resolver: the bumped
+    # package's own requirements are not pulled in, and two of them (torch
+    # 2.14.1 -> 2.15.0, then pydantic 2.14.1 -> 2.14.2 without pydantic-core)
+    # made the lock unsatisfiable for `pip install --require-hashes`.
+    # Version updates therefore skip the locks entirely; transitive pins move
+    # only through a full lock regeneration.
+    # Note: exclude-paths applies to version updates only. A security update
+    # can still open a PR against the lock - handle it by regenerating the lock
+    # with `--upgrade-package <name>` rather than merging the one-pin edit.
+    exclude-paths:
+      - "requirements*.lock.txt"
     ignore:
       # Hard stops (see the mechanism note at the top of this file). The
       # requirements.txt ceilings alone do not prevent these -- Dependabot would
       # otherwise rewrite the range up to the newest release, which is exactly
-      # the update we must not take.
+      # the update we must not take. `ignore` also suppresses security updates,
+      # so keep this list to the deliberate holds below.
       #
       # numpy is held below 2.3 as a deliberate no-runtime-change freeze on the
       # detection stack (2.3+ is fine for the Python 3.11 floor, but bumping it
@@ -58,60 +76,11 @@ updates:
       # onnxruntime-gpu>=1.18,<1.21 default in scripts/install_python_deps.sh.
       - dependency-name: "onnxruntime"
         versions: [">=1.21"]
-      # The nvidia-* CUDA userspace wheels (both the -cu12 pins in
-      # requirements-gpu-pascal.txt and the -cu13/suffix-less transitive pins in
-      # requirements.cpu.lock.txt) are resolver/pascal managed, not Dependabot
-      # managed:
-      #   * nvidia-*-cu12 are pinned to the CUDA 12.4 line because those exact
-      #     versions still ship Pascal (sm_61) cubins; CUDA 12.8+/12.9 wheels
-      #     drop them, which silently breaks GPU inference on the Tesla P4.
-      #   * the -cu13 / suffix-less nvidia-* wheels and the cuda-* packages
-      #     (cuda-toolkit, cuda-bindings, cuda-pathfinder) are transitive
-      #     dependencies of torch inside the hash lock; torch constrains their
-      #     versions (cuDNN is effectively exact-pinned), so hand-editing one
-      #     hash block desyncs the lock from torch's declared requirements.
-      # They move only via docs/tesla-p4-gpu-setup.md or a torch upgrade with a
-      # full lock regeneration -- ignore every version of both families.
+      # The nvidia-*-cu12 pins in requirements-gpu-pascal.txt stay on the CUDA
+      # 12.4 line because those exact versions still ship Pascal (sm_61) cubins;
+      # CUDA 12.8+/12.9 wheels drop them, which silently breaks GPU inference on
+      # the Tesla P4. They move only via docs/tesla-p4-gpu-setup.md.
       - dependency-name: "nvidia-*-cu12"
-      - dependency-name: "nvidia-*"
-      - dependency-name: "cuda-*"
-      # pydantic exact-pins pydantic-core (pydantic-core==2.46.4 for
-      # pydantic 2.13.x); a standalone bump breaks hash-lock resolution.
-      - dependency-name: "pydantic-core"
-      # mpmath is a sympy/torch-chain transitive in the hash lock.
-      - dependency-name: "mpmath"
-      # The committed hash lock (requirements.cpu.lock.txt) is a DERIVED
-      # artifact: `uv pip compile requirements.txt --generate-hashes` output,
-      # regenerated only via scripts/lock_python_deps.sh after
-      # requirements.txt changes. Dependabot scans every requirements*.txt as
-      # an INDEPENDENT manifest, so without these rules it proposes piecemeal
-      # lock-only bumps (previously anyio, ultralytics-platform, triton,
-      # polars-runtime-32) that edit one pin outside a resolver run: the new
-      # pin's own transitive requirements are NOT pulled into the lock, so a
-      # --require-hashes install can fail or silently drift from
-      # requirements.txt. Ignore the known lock-only transitives and extend
-      # this list if a new lock-only PR ever appears. Policy (see
-      # CONTRIBUTING.md): the lock moves ONLY via a full lock regeneration;
-      # requirements.txt bumps regenerate it in the same PR.
-      - dependency-name: "anyio"
-      - dependency-name: "triton"
-      # torch/torchvision are ultralytics transitives that exact-pin their
-      # CUDA wheels (cuda-toolkit, nvidia-cudnn-cu13, ...). A lock-only torch
-      # bump (2.14.1 -> 2.15.0) moved torch without those pins and left the
-      # lock unsatisfiable for `pip install --require-hashes`; they move only
-      # through a full lock regeneration.
-      - dependency-name: "torch"
-      - dependency-name: "torchvision"
-      - dependency-name: "polars*"
-      - dependency-name: "ultralytics-platform"
-      # contourpy 1.4 and networkx 3.7 require Python >=3.12, but the lock is
-      # compiled for the Python 3.11 floor (python:3.11-slim image). Lock-only
-      # bumps to them were merged once and broke --require-hashes installs on
-      # 3.11; hold them until the project floor moves to 3.12.
-      - dependency-name: "contourpy"
-        versions: [">=1.4"]
-      - dependency-name: "networkx"
-        versions: [">=3.7"]
     # Exact-pinned entries (e.g. ultralytics==8.4.113) still get Dependabot
     # PRs -- an exact pin does not stop Dependabot on its own; it simply
     # proposes a new pin at the latest release. That is intended here:

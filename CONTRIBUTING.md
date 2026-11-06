@@ -137,14 +137,26 @@ is a **derived** artifact - the output of
 
 1. **Direct dependency change?** Edit `requirements.txt`, then regenerate the
    lock in the same PR: `./scripts/lock_python_deps.sh`. Commit both files.
-2. **Dependabot PR touching only `requirements.cpu.lock.txt`?** The pip
-   `ignore` rules in `.github/dependabot.yml` suppress these for the known
-   lock-only transitives (torch chain: `torch`, `torchvision`, `nvidia-*`,
-   `cuda-*`, `triton`, `mpmath`; FastAPI chain: `anyio`; misc: `polars*`,
-   `ultralytics-platform`, `pydantic-core`). If a new lock-only PR still
-   appears, add an ignore rule rather than merging a piecemeal lock edit - a
-   single-pin edit outside a resolver run desyncs the lock from its
-   upstream's declared constraints and can break `--require-hashes` installs.
+2. **Transitive (lock-only) updates.** Dependabot version updates skip the
+   lock (`exclude-paths` in `.github/dependabot.yml`): a one-pin lock edit
+   bypasses the resolver, so the bumped package's own requirements never reach
+   the lock - that is how the torch 2.15.0 and pydantic 2.14.2 bumps left it
+   unsatisfiable for `pip install --require-hashes`. Move transitive pins by
+   regenerating the lock, upgrading just the packages you mean to move:
+
+   ```bash
+   uv pip compile requirements.txt --generate-hashes \
+     --output-file requirements.cpu.lock.txt \
+     --python-version 3.11 --python-platform linux \
+     --upgrade-package <name> [--upgrade-package <name> ...]
+   ```
+
+   `exclude-paths` covers version updates only, so a Dependabot **security**
+   PR can still edit the lock. Do not merge it as-is: regenerate with
+   `--upgrade-package <vulnerable package>` instead and close the PR. CI
+   installs `requirements.txt`, not the lock, so it will not catch a lock that
+   cannot resolve; check with
+   `uv pip compile requirements.cpu.lock.txt --python-version 3.11 --python-platform linux -o /dev/null`.
 3. **`ultralytics` bump**: it is exact-pinned
    (`ultralytics==8.4.x`) deliberately. A Dependabot PR for it is the review
    trigger, not an auto-merge: read the upstream release notes, then
