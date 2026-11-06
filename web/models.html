@@ -35,11 +35,11 @@
        badge only ever renders on this page's model cards, and web/styles.css
        is a shared sheet. Tones follow the shared .model-status pills. */
     .model-status-recommended {
-      background: rgba(71,214,255,.12);
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
       color: var(--accent);
-      border: 1px solid rgba(71,214,255,.32);
+      border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
     }
-    :root.light .model-status-recommended { background: rgba(2,132,199,.08); color: #026aa7; border-color: rgba(2,132,199,.28); }
+    :root.light .model-status-recommended { background: color-mix(in srgb, var(--accent) 8%, transparent); color: #026aa7; border-color: color-mix(in srgb, var(--accent) 28%, transparent); }
   </style>
 </head>
 <body>
