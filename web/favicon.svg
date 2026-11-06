@@ -1,8 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#07131f"/>
-  <path d="M18 24h7l3-5h9l3 5h6a6 6 0 0 1 6 6v15a6 6 0 0 1-6 6H18a6 6 0 0 1-6-6V30a6 6 0 0 1 6-6Z" fill="#101f2d" stroke="#74d8ff" stroke-width="3"/>
-  <circle cx="32" cy="38" r="10" fill="#0b1622" stroke="#8ef0b1" stroke-width="4"/>
-  <circle cx="32" cy="38" r="4" fill="#74d8ff"/>
-  <path d="M45 18h8v8" fill="none" stroke="#8ef0b1" stroke-linecap="round" stroke-width="4"/>
-  <path d="M53 18 42 29" fill="none" stroke="#8ef0b1" stroke-linecap="round" stroke-width="4"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 8 92 92">
+  <!-- Daygle AI Camera logo, from the Android app's launcher icon
+       (daygle-ai-camera-app: res/drawable/ic_launcher_foreground.xml) with
+       the solid launcher background left out so it sits on any page. -->
+  <circle cx="54" cy="54" r="44" fill="#3DDC97" fill-opacity="0.1"/>
+  <circle cx="54" cy="54" r="30" fill="#3DDC97"/>
+  <circle cx="54" cy="54" r="22" fill="#0B1220"/>
+  <path d="M32,32 L22,22 M22,22 L14,22" stroke="#3DDC97" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+  <circle cx="14" cy="22" r="2" fill="#3DDC97"/>
+  <path d="M76,76 L86,86 M86,86 L94,86" stroke="#3DDC97" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+  <circle cx="94" cy="86" r="2" fill="#3DDC97"/>
+  <path d="M76,32 L88,32" stroke="#D8FFEE" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+  <circle cx="88" cy="32" r="1.5" fill="#D8FFEE"/>
+  <path d="M48,42a14,14 0 0 1 12,0" fill="#D8FFEE" fill-opacity="0.6"/>
+  <circle cx="54" cy="54" r="6" fill="#3DDC97" fill-opacity="0.8"/>
 </svg>
