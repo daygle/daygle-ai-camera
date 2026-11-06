@@ -373,13 +373,13 @@ window.daygleAuthReady = (async () => {
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
       </button>
       <a class="app-brand" href="/">
-        <span class="brand-mark">D</span>
+        <img class="brand-mark brand-logo" src="/static/favicon.svg" alt="" width="28" height="28">
         <span class="brand-text">Daygle AI Camera</span>
       </a>
     </div>
     <div class="app-nav-body">
       <a class="app-brand app-sidebar-brand" href="/">
-        <span class="brand-mark">D</span>
+        <img class="brand-mark brand-logo" src="/static/favicon.svg" alt="" width="28" height="28">
         <span class="brand-text">Daygle AI Camera</span>
       </a>
       <div class="app-nav-links">

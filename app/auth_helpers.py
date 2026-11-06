@@ -64,8 +64,10 @@ def auth_page(title: str, body: str) -> HTMLResponse:
         f'<html lang="en">{theme_script}<head><meta charset="utf-8" />'
         f'<meta name="viewport" content="width=device-width, initial-scale=1" />\n'
         f'<title>{escape(title)} · Daygle AI Camera</title>'
+        f'<link rel="icon" href="/favicon.ico" type="image/svg+xml" />'
         f'<link rel="stylesheet" href="/static/styles.css" /></head>\n'
         f'<body><main class="auth-shell"><section class="card auth-card">'
+        f'<img class="auth-logo" src="/static/favicon.svg" alt="" width="56" height="56" />'
         f'<p class="eyebrow">Daygle AI Camera</p>{body}</section></main></body></html>'
     )
 
