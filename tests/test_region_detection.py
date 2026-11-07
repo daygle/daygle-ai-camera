@@ -189,3 +189,22 @@ def test_tiling_noop_without_detect_frame():
     class _NoDetectFrame:
         pass
     assert rd.detect_with_tiling(_NoDetectFrame(), frame, base, cols=2, rows=2) == base
+
+
+def test_dedup_drops_partial_crop_box_nested_in_full_frame_box():
+    """A crop that only saw a person's legs yields a box inside the
+    full-frame person box with IoU well under 0.5; it is still a duplicate."""
+    dets = [
+        {'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.6}},
+        {'label': 'person', 'confidence': 0.7, 'box': {'x': 0.12, 'y': 0.45, 'width': 0.15, 'height': 0.25}},
+    ]
+    kept = rd._dedup_by_iou(dets, 0.5)
+    assert len(kept) == 1 and kept[0]['confidence'] == 0.9
+
+
+def test_dedup_keeps_nested_box_of_different_label():
+    dets = [
+        {'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.6}},
+        {'label': 'backpack', 'confidence': 0.7, 'box': {'x': 0.12, 'y': 0.2, 'width': 0.08, 'height': 0.1}},
+    ]
+    assert len(rd._dedup_by_iou(dets, 0.5)) == 2

@@ -20,6 +20,8 @@ import logging
 import math
 from typing import Any
 
+from app.detector import CONTAINMENT_THRESHOLD
+
 
 logger = logging.getLogger("daygle.ai")
 
@@ -71,9 +73,18 @@ def _motion_region_boxes(
     return boxes
 
 
-def _dedup_by_iou(detections: list[dict[str, Any]], iou_threshold: float) -> list[dict[str, Any]]:
+def _dedup_by_iou(
+    detections: list[dict[str, Any]],
+    iou_threshold: float,
+    containment_threshold: float = CONTAINMENT_THRESHOLD,
+) -> list[dict[str, Any]]:
     """Class-aware greedy de-dup: keep the highest-confidence box, drop any
-    later same-label box overlapping it by >= ``iou_threshold``.
+    later same-label box overlapping it by >= ``iou_threshold``, or nested
+    in / around it (intersection over the smaller box's area >=
+    ``containment_threshold``). The containment rule catches a crop or tile
+    that only saw part of an object (e.g. a person's legs): its box sits
+    inside the full-frame box with a low IoU and would otherwise survive as a
+    second box on the same object.
 
     The region/tile default remains 0.5 deliberately: it only suppresses boxes
     with substantial overlap (roughly duplicate views of one object), while
@@ -81,7 +92,7 @@ def _dedup_by_iou(detections: list[dict[str, Any]], iou_threshold: float) -> lis
     Lowering it would make duplicate crop/tile boxes more likely to leak into
     the event pipeline; changing it would require labeled evaluation.
     """
-    def _iou(a: dict[str, Any], b: dict[str, Any]) -> float:
+    def _is_duplicate(a: dict[str, Any], b: dict[str, Any]) -> bool:
         ax1, ay1 = float(a.get("x") or 0), float(a.get("y") or 0)
         ax2, ay2 = ax1 + float(a.get("width") or 0), ay1 + float(a.get("height") or 0)
         bx1, by1 = float(b.get("x") or 0), float(b.get("y") or 0)
@@ -89,10 +100,15 @@ def _dedup_by_iou(detections: list[dict[str, Any]], iou_threshold: float) -> lis
         ix1, iy1, ix2, iy2 = max(ax1, bx1), max(ay1, by1), min(ax2, bx2), min(ay2, by2)
         iw, ih = ix2 - ix1, iy2 - iy1
         if iw <= 0 or ih <= 0:
-            return 0.0
+            return False
         inter = iw * ih
-        union = (ax2 - ax1) * (ay2 - ay1) + (bx2 - bx1) * (by2 - by1) - inter
-        return inter / union if union > 0 else 0.0
+        area_a = (ax2 - ax1) * (ay2 - ay1)
+        area_b = (bx2 - bx1) * (by2 - by1)
+        union = area_a + area_b - inter
+        if union > 0 and inter / union >= iou_threshold:
+            return True
+        smaller = min(area_a, area_b)
+        return smaller > 0 and inter / smaller >= containment_threshold
 
     ordered = sorted(detections, key=lambda d: float(d.get("confidence") or 0.0), reverse=True)
     kept: list[dict[str, Any]] = []
@@ -101,7 +117,7 @@ def _dedup_by_iou(detections: list[dict[str, Any]], iou_threshold: float) -> lis
         box = det.get("box") or {}
         if any(
             label == str(k.get("label") or "").strip().lower()
-            and _iou(box, k.get("box") or {}) >= iou_threshold
+            and _is_duplicate(box, k.get("box") or {})
             for k in kept
         ):
             continue

@@ -690,8 +690,9 @@ def _normalize_confidence_only_nms(value: Any) -> str:
 
     Returns one of ``'auto'`` | ``'on'`` | ``'off'``. Legacy persisted bools
     map to ``'on'`` / ``'off'``; anything unrecognised (including a missing
-    value) normalises to ``'auto'`` so the detector applies its model-aware
-    default (skip the redundant NMS for NMS-free YOLO26 heads).
+    value) normalises to ``'auto'`` so the detector applies its default
+    (run the class-aware dedupe, which also catches the stacked duplicates
+    NMS-free YOLO26 heads emit on hard frames).
     """
     if isinstance(value, bool):
         return 'on' if value else 'off'
@@ -790,8 +791,9 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
             updated['use_io_binding'] = bool(val)
     # ``confidence_only_nms`` is tri-state: 'auto' | 'on' | 'off'. 'auto'
     # (the default when the key is absent) lets the detector apply its
-    # model-aware default -- skip the redundant class-aware NMS for NMS-free
-    # YOLO26 heads, keep it for grid heads. 'on'/'off' are explicit overrides.
+    # default -- run the class-aware dedupe on every head, since NMS-free
+    # YOLO26 output still carries stacked duplicates on hard frames.
+    # 'on' (skip on NMS-free heads) / 'off' (always run) are explicit overrides.
     # Persisting a tri-state (rather than a bare bool from a checkbox) is what
     # lets the settings form save 'auto' without clobbering the smart default.
     # Only normalise when present so an absent key stays absent -> 'auto'.

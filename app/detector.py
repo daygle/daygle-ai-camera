@@ -57,7 +57,31 @@ def load_labels(labels_path: str | Path | None, fallback: list[str] | None = Non
     return fallback or []
 
 
-def non_max_suppression(boxes: np.ndarray, scores: np.ndarray, classes: np.ndarray, iou_threshold: float) -> list[int]:
+# A lower-confidence same-class box with at least this fraction of its own
+# area inside a stronger box is treated as a duplicate of it, whatever the IoU.
+# Plain IoU cannot see a part-of-body box nested inside a full-body box: a
+# "legs" box covering a third of the "person" box has IoU ~0.33 and survives a
+# 0.45 IoU threshold, so one person renders as several stacked "Person" boxes.
+# 0.8 leaves room for two genuinely distinct same-class objects that merely
+# overlap (people walking side by side, cars in a row) to stay separate.
+CONTAINMENT_THRESHOLD = 0.8
+
+
+def non_max_suppression(
+    boxes: np.ndarray,
+    scores: np.ndarray,
+    classes: np.ndarray,
+    iou_threshold: float,
+    containment_threshold: float = CONTAINMENT_THRESHOLD,
+) -> list[int]:
+    """Class-aware greedy NMS with nested-box suppression.
+
+    Keeps the highest-scoring box of each class and drops any remaining box of
+    that class that either overlaps it by more than ``iou_threshold`` (IoU) or
+    lies mostly inside it / mostly contains it -- intersection over the
+    smaller of the two areas >= ``containment_threshold``. Pass a
+    ``containment_threshold`` above 1 to disable the containment rule.
+    """
     if boxes.size == 0:
         return []
 
@@ -89,8 +113,11 @@ def non_max_suppression(boxes: np.ndarray, scores: np.ndarray, classes: np.ndarr
             current_area = max(0.0, float(areas[current]))
             union = current_area + rest_areas - intersection
             ious = intersection / np.maximum(union, 1e-9)
-            ordered = rest[ious <= iou_threshold]
-            class_areas = rest_areas[ious <= iou_threshold]
+            smaller_area = np.minimum(current_area, rest_areas)
+            containment = intersection / np.maximum(smaller_area, 1e-9)
+            survivors = (ious <= iou_threshold) & (containment < containment_threshold)
+            ordered = rest[survivors]
+            class_areas = rest_areas[survivors]
     return keep
 
 
@@ -189,7 +216,9 @@ class OnnxYoloDetector:
         # class-aware NMS dedupe pass entirely and rely on the model head's
         # one-to-one label assignment + the confidence threshold. Only read
         # on the NMS-free output path; ``create_detector`` resolves the
-        # Automatic setting to True so any NMS-free output skips the pass.
+        # Automatic setting to False so the dedupe still runs (the head does
+        # emit stacked duplicates on hard frames) -- only an explicit "Skip"
+        # sets it.
         self._confidence_only_nms = bool(confidence_only_nms)
         # ``precision`` selects the on-disk / runtime model layout.
         # ``fp32`` (default -- prior behavior) loads the source ONNX.
@@ -928,12 +957,13 @@ class OnnxYoloDetector:
         if filtered_boxes.dtype != np.float32:
             filtered_boxes = filtered_boxes.astype(np.float32)
             filtered_scores = filtered_scores.astype(np.float32)
-        # YOLO26 is NMS-free at train time, so when ``confidence_only_nms``
-        # is set the model head's one-to-one label assignment plus the
-        # confidence threshold already give us a clean detection list --
-        # skipping the class-aware NMS saves the per-frame Python sort +
-        # IoU matrix cost. Set by default (Automatic); "Force Class-Aware
-        # NMS" clears it to run the dedupe here anyway.
+        # YOLO26 is NMS-free at train time, but its one-to-one head still
+        # emits stacked same-class boxes on hard frames (motion blur,
+        # occlusion, a person framed by a doorway), which render as several
+        # "Person" boxes on one person. The dedupe runs by default
+        # (Automatic / "Force Class-Aware NMS"); only an explicit "Skip"
+        # sets ``confidence_only_nms`` to trust the head alone. With at most
+        # 300 candidates the pass is cheap.
         if filtered_boxes.shape[0] > 0 and not self._confidence_only_nms:
             keep = non_max_suppression(
                 filtered_boxes, filtered_scores, filtered_class_ids, self.iou_threshold
@@ -1269,25 +1299,25 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
 def _resolve_confidence_only_nms(value: Any) -> bool:
     """Resolve the tri-state ``confidence_only_nms`` setting to a bool.
 
-    NMS-free heads (YOLO26) already perform one-to-one label assignment in the
-    model, so the extra class-aware NMS pass is redundant work that can also
-    wrongly suppress genuinely overlapping objects. The flag is only consulted
-    on the NMS-free postprocess path, which ``_postprocess`` picks from the
-    model's actual output shape -- grid heads (YOLOv8/YOLO11) always run NMS.
-    The setting is tri-state:
+    NMS-free heads (YOLO26) perform one-to-one label assignment in the model,
+    but in practice still emit stacked same-class duplicates on hard frames
+    (several "Person" boxes nested on one person), so the class-aware dedupe
+    runs unless explicitly skipped. The flag is only consulted on the NMS-free
+    postprocess path, which ``_postprocess`` picks from the model's actual
+    output shape -- grid heads (YOLOv8/YOLO11) always run NMS. The setting is
+    tri-state:
 
-    - ``'auto'`` / ``None`` (default): follow the model's output -- skip the
-      NMS pass whenever the output is NMS-free, whatever the file is called.
-    - ``'on'`` / truthy: skip the NMS pass (same effect as auto today).
+    - ``'auto'`` / ``None`` (default): run the dedupe (same effect as off).
+    - ``'on'`` / truthy: skip the NMS pass and trust the model head alone.
     - ``'off'`` / falsy: always run the class-aware NMS dedupe.
 
     A bool is also accepted (``True`` -> skip, ``False`` -> run).
     """
     if value is None:
-        return True
+        return False
     if isinstance(value, bool):
         return value
     text = str(value).strip().lower()
-    if text in {'off', '0', 'false', 'no'}:
-        return False
-    return True  # 'auto', 'on' or any unknown value
+    if text in {'on', '1', 'true', 'yes'}:
+        return True
+    return False  # 'auto', 'off' or any unknown value

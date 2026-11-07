@@ -213,13 +213,13 @@ def test_run_inference_preserves_real_low_threshold():
 # -- confidence_only_nms tri-state resolution ------------------------------
 
 @pytest.mark.parametrize("value,expected", [
-    (None, True),        # auto -> skip NMS on any NMS-free output
-    ("auto", True),
-    ("on", True),
+    (None, False),       # auto -> run the dedupe, even on NMS-free output
+    ("auto", False),
+    ("on", True),        # explicit skip trusts the NMS-free head alone
     ("off", False),      # explicit off always runs the dedupe
     (True, True),        # legacy persisted bool
     (False, False),      # legacy persisted bool
-    ("garbage", True),   # unknown -> auto
+    ("garbage", False),  # unknown -> auto
 ])
 def test_resolve_confidence_only_nms(value, expected):
     assert _resolve_confidence_only_nms(value) is expected
@@ -254,10 +254,11 @@ def test_nms_free_skips_dedupe_when_enabled():
     assert len(res) == 2
 
 
-@pytest.mark.parametrize("setting,expected", [("auto", 2), ("off", 1)])
-def test_auto_dedupe_follows_model_output_not_file_name(setting, expected):
-    """A renamed NMS-free model (file name not ``yolo26*``) still skips the
-    dedupe on Automatic: the output shape, not the name, picks the path."""
+@pytest.mark.parametrize("setting,expected", [("auto", 1), ("off", 1), ("on", 2)])
+def test_nms_free_dedupe_setting_via_create_detector(setting, expected):
+    """A renamed NMS-free model (file name not ``yolo26*``) still takes the
+    NMS-free path from its output shape; Automatic and Force run the
+    dedupe there, only an explicit Skip keeps the stacked duplicate."""
     import app.detector as detector_mod
 
     det = detector_mod.create_detector({
@@ -854,3 +855,78 @@ def test_pose_head_without_keypoint_count_mislabels_regression():
     # result the keypoint-aware path produces.
     assert not (len(res) == 1 and res[0]["label"] == "face"
                 and res[0]["confidence"] == pytest.approx(0.9, abs=1e-3))
+
+
+# -- nested (contained) same-class boxes ----------------------------------
+
+def test_nms_drops_box_nested_inside_stronger_box_despite_low_iou():
+    """A partial "legs" box inside a full-body box has IoU ~0.33 (< 0.45),
+    so plain IoU NMS keeps it; containment suppression must drop it."""
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [100, 100, 200, 400],   # full body, area 30000
+        [110, 250, 190, 375],   # legs, area 10000, fully inside
+    ], dtype=np.float32)
+    scores = np.array([0.92, 0.79], dtype=np.float32)
+    classes = np.array([0, 0])
+    assert non_max_suppression(boxes, scores, classes, 0.45) == [0]
+
+
+def test_nms_drops_weaker_box_that_contains_stronger_box():
+    """Containment is symmetric: a weaker box wrapped around a stronger
+    one is the same object too."""
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [110, 250, 190, 375],
+        [100, 100, 200, 400],
+    ], dtype=np.float32)
+    scores = np.array([0.9, 0.6], dtype=np.float32)
+    classes = np.array([0, 0])
+    assert non_max_suppression(boxes, scores, classes, 0.45) == [0]
+
+
+def test_nms_keeps_side_by_side_same_class_boxes():
+    """Two people walking side by side overlap a little but neither is
+    nested in the other, so both survive."""
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [100, 100, 200, 400],
+        [170, 110, 270, 410],   # 30% horizontal overlap
+    ], dtype=np.float32)
+    scores = np.array([0.9, 0.85], dtype=np.float32)
+    classes = np.array([0, 0])
+    assert sorted(non_max_suppression(boxes, scores, classes, 0.45)) == [0, 1]
+
+
+def test_nms_containment_is_class_aware():
+    """A bag held in front of a person is nested in the person's box but is
+    a different class, so it is kept."""
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [100, 100, 200, 400],
+        [120, 250, 160, 300],
+    ], dtype=np.float32)
+    scores = np.array([0.9, 0.7], dtype=np.float32)
+    classes = np.array([0, 24])
+    assert sorted(non_max_suppression(boxes, scores, classes, 0.45)) == [0, 1]
+
+
+def test_nms_free_auto_collapses_stacked_person_boxes():
+    """The reported case: a YOLO26 head emits several nested "person"
+    boxes on one person; Automatic keeps only the strongest."""
+    det = OnnxYoloDetector(model_path="/does-not-exist.onnx", categories=LABELS,
+                           iou_threshold=0.45, nms_free=True,
+                           confidence_only_nms=_resolve_confidence_only_nms("auto"))
+    det.input_width = det.input_height = 640
+    out = np.zeros((300, 6), dtype=np.float32)
+    out[0] = [300, 200, 400, 380, 0.92, 0]   # full body
+    out[1] = [301, 220, 360, 380, 0.90, 0]   # left two-thirds
+    out[2] = [320, 260, 360, 380, 0.79, 0]   # legs
+    out[3] = [300, 210, 400, 380, 0.63, 0]   # near-identical
+    res = det._postprocess_nms_free(out, SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
+    assert len(res) == 1
+    assert res[0]["confidence"] == pytest.approx(0.92)

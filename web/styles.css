@@ -533,6 +533,11 @@ textarea {
 .still-alert-input { width: 68px; padding: 6px 8px; }
 /* Touch screens: a 26px-tall number box is a hard tap target. */
 @media (pointer: coarse), (max-width: 600px) { .still-alert-input { min-height: 40px; } }
+/* Per-object overlay box colour (Objects page): swatch + optional Reset. */
+.box-color-cell { display: inline-flex; align-items: center; gap: 8px; }
+.box-color-input { width: 44px; height: 32px; padding: 2px; border-radius: 6px; cursor: pointer; }
+.box-color-reset { padding: 4px 10px; font-size: 0.85rem; }
+@media (pointer: coarse), (max-width: 600px) { .box-color-input { height: 40px; } }
 .empty { color: var(--muted); padding: 12px; }
 
 .form-stack { display: grid; gap: 14px; margin-top: 18px; }

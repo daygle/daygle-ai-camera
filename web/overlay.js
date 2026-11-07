@@ -25,11 +25,37 @@ const OVERLAY_LABEL_BACKGROUND = 'rgba(7, 11, 19, 0.58)';
 // Teal reuses the motion accent; amber matches the app's warning palette.
 const MOTION_STATE_COLORS = { moving: MOTION_OVERLAY_COLOR, still: '#fbbf24' };
 
+// Operator-chosen per-label box colours (Objects page), label -> '#rrggbb'.
+// Loaded once per page by loadOverlayBoxColors(); until it resolves (or if it
+// fails) every object keeps OBJECT_OVERLAY_COLOR, so drawing never waits.
+let _overlayBoxColors = Object.create(null);
+const _OVERLAY_HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+
+// Exported for tests and future callers that already hold the colour map.
+function setOverlayBoxColors(colors) {
+  const next = Object.create(null);
+  if (colors && typeof colors === 'object') {
+    for (const [label, color] of Object.entries(colors)) {
+      const key = String(label || '').trim().toLowerCase();
+      if (key && _OVERLAY_HEX_COLOR_RE.test(String(color || ''))) next[key] = String(color).toLowerCase();
+    }
+  }
+  _overlayBoxColors = next;
+}
+
+function loadOverlayBoxColors() {
+  if (typeof api !== 'function') return Promise.resolve();
+  const ready = window.daygleAuthReady || Promise.resolve();
+  return Promise.resolve(ready)
+    .then(() => api('/api/overlay/box_colors'))
+    .then((payload) => setOverlayBoxColors(payload?.box_colors))
+    .catch(() => { /* keep the default colours */ });
+}
+
 function overlayColorForDetection(detection) {
   const label = String(detection?.label || '').trim().toLowerCase();
-  return detection?.motion_event === true || label === 'motion'
-    ? MOTION_OVERLAY_COLOR
-    : OBJECT_OVERLAY_COLOR;
+  if (detection?.motion_event === true || label === 'motion') return MOTION_OVERLAY_COLOR;
+  return _overlayBoxColors[label] || OBJECT_OVERLAY_COLOR;
 }
 
 const OVERLAY_GENERIC_LABELS = new Set(['', 'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
@@ -528,3 +554,5 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
     }
   }
 }
+
+loadOverlayBoxColors();

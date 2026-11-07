@@ -49,7 +49,7 @@ class _FakeDatabase:
 
 
 def test_normalize_object_settings_defaults():
-    defaults = {'default_mode': 'moving', 'labels': {}, 'group_modes': {}, 'still_alerts': {}}
+    defaults = {'default_mode': 'moving', 'labels': {}, 'group_modes': {}, 'still_alerts': {}, 'box_colors': {}}
     assert os.normalize_object_settings(None) == defaults
     assert os.normalize_object_settings({}) == defaults
     assert os.normalize_object_settings('junk') == defaults
@@ -57,7 +57,7 @@ def test_normalize_object_settings_defaults():
 
 
 def test_normalize_object_settings_round_trip():
-    raw = {'default_mode': 'moving', 'labels': {'person': 'still', 'car': 'still'}, 'group_modes': {}, 'still_alerts': {}}
+    raw = {'default_mode': 'moving', 'labels': {'person': 'still', 'car': 'still'}, 'group_modes': {}, 'still_alerts': {}, 'box_colors': {}}
     assert os.normalize_object_settings(raw) == raw
 
 
@@ -150,7 +150,7 @@ def test_effective_object_settings_defaults_without_database(monkeypatch):
     previous = _state.database
     try:
         _state.database = None
-        assert os.effective_object_settings() == {'default_mode': 'moving', 'labels': {}, 'group_modes': {}, 'still_alerts': {}}
+        assert os.effective_object_settings() == {'default_mode': 'moving', 'labels': {}, 'group_modes': {}, 'still_alerts': {}, 'box_colors': {}}
     finally:
         _state.database = previous
 
@@ -878,3 +878,36 @@ def test_annotate_stamps_the_basis_of_each_verdict():
         [{**tracked, 'track_displacement': 0.0}, _det('person')], _mask_changed_inside_box(),
     )
     assert [(d['motion_state'], d['motion_basis']) for d in annotated] == [('still', 'displacement'), ('moving', 'mask')]
+
+
+# ---------------------------------------------------------------------------
+# box_colors (per-label overlay box colour)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ('#FF5A5F', '#ff5a5f'),
+    ('ff5a5f', '#ff5a5f'),
+    ('#0f0', '#00ff00'),
+    (' #abcdef ', '#abcdef'),
+    ('red', None),
+    ('#12345', None),
+    ('rgb(1,2,3)', None),
+    ('', None),
+    (None, None),
+])
+def test_normalize_box_color(raw, expected):
+    assert os.normalize_box_color(raw) == expected
+
+
+def test_normalize_object_settings_keeps_valid_box_colors_only():
+    out = os.normalize_object_settings({
+        'box_colors': {'Person': '#FF0000', 'car': 'nope', '': '#00ff00', 'dog': '#00f'},
+    })
+    assert out['box_colors'] == {'person': '#ff0000', 'dog': '#0000ff'}
+
+
+def test_overlay_box_colors_reads_settings():
+    assert os.overlay_box_colors({'box_colors': {'person': '#ff0000'}}) == {'person': '#ff0000'}
+    assert os.overlay_box_colors({}) == {}
+    assert os.overlay_box_colors({'box_colors': 'junk'}) == {}
