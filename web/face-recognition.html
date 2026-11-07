@@ -14,7 +14,7 @@
       <div>
         <p class="eyebrow">Monitoring</p>
         <h1>Face Recognition</h1>
-        <p class="muted">Identify enrolled people on cameras running a face-detection model. Recognition is admin-only and off until you download an embedding model on the ArcFace page and enable it here. Model status and downloads live on the ArcFace page.</p>
+        <p class="muted">Identify enrolled people on cameras running a face-detection model. Recognition is admin-only and off until you download an embedding model under <a href="/models/faces">Models › Face Models</a> and enable it here.</p>
       </div>
       <div class="onnx-hero-mark hero-mark--violet" aria-hidden="true">
         <span class="onnx-hero-ring onnx-hero-ring-back"></span>
@@ -33,7 +33,7 @@
         <div class="settings-section-icon">⚙️</div>
         <div>
           <h2>Settings</h2>
-          <p class="settings-section-subtitle">Enabling requires an embedding model downloaded on the ArcFace page. Face embeddings are biometric data.</p>
+          <p class="settings-section-subtitle">Enabling requires an embedding model downloaded under <a href="/models/faces">Models › Face Models</a>. Face embeddings are biometric data.</p>
         </div>
       </div>
       <p id="frRuntime" class="fr-runtime" role="status" hidden></p>
@@ -86,8 +86,8 @@
             </select></label>
         </div>
         <div class="button-row">
-          <button id="frReloadBtn" class="btn-info" type="button">Reload</button>
-          <button id="frSaveBtn" class="btn-success" type="submit">Save</button>
+          <button id="frReloadBtn" class="secondary" type="button">Reload</button>
+          <button id="frSaveBtn" type="submit">Save</button>
         </div>
       </form>
     </section>
@@ -110,7 +110,7 @@
           <input type="text" name="notes" maxlength="2000" />
         </label>
         <div class="button-row">
-          <button id="addPersonBtn" class="btn-success" type="submit">Add Person</button>
+          <button id="addPersonBtn" type="submit">Add Person</button>
         </div>
       </form>
       <div id="peopleMessage" class="muted"></div>

@@ -120,7 +120,7 @@ function detectorConfidenceMap(confidences = {}) {
 function renderDetectorStatuses(rows) {
   if (!soundCameraStatusList) return;
   if (!rows.length) {
-    soundCameraStatusList.innerHTML = '<p class="muted empty-message">No Cameras Are Configured.</p>';
+    soundCameraStatusList.innerHTML = '<p class="muted empty-message">No cameras configured. Add one on the <a href="/cameras">Cameras</a> page.</p>';
     return;
   }
   const rowsHtml = rows.map(({ camera, status }) => `
