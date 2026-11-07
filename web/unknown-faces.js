@@ -245,7 +245,7 @@
         emptyMsg.classList.add('review-empty-problem');
       } else if (!status.model_loaded) {
         const reason = status.unavailable_reason || 'the embedding model did not load';
-        emptyMsg.textContent = `Nothing is being captured: face recognition is enabled but not running (${reason}). Choose an embedding model on the ArcFace page, then Save the settings above.`;
+        emptyMsg.textContent = `Nothing is being captured: face recognition is enabled but not running (${reason}). Choose an embedding model under Models › Face Models, then Save the settings above.`;
         emptyMsg.classList.add('review-empty-problem');
       }
     } catch {

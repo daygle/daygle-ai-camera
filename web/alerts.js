@@ -260,7 +260,7 @@ function refreshPolicyStatuses() {
 function renderPolicies() {
   const rules = currentRules();
   if (!currentCamera()) {
-    $('alertsList').innerHTML = '<div class="empty">Add a camera first.</div>';
+    $('alertsList').innerHTML = '<div class="empty">No cameras configured. Add one on the <a href="/cameras">Cameras</a> page, then create alert policies here.</div>';
     return;
   }
   if (scopeRequiresZone() && !currentZone()) {

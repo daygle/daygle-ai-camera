@@ -8062,3 +8062,30 @@ button.btn-success:active:not(:disabled), button.btn-info:active:not(:disabled) 
    background) replaces the lettered brand square. */
 .brand-mark.brand-logo { display: block; width: 28px; height: 28px; padding: 0; border-radius: 0; background: none; }
 .auth-logo { display: block; width: 56px; height: 56px; margin-bottom: 12px; }
+
+/* ── GUI polish pass ─────────────────────────────────────────────────────
+ * The solid colour-coded fills above lose to older ``:root.light`` gradient
+ * rules on specificity, so light mode still drew blue→teal gradients on
+ * info/success buttons and on the active library segment (Today / All),
+ * unlike every other primary control. Match them to the flat accent. */
+:root.light button.btn-danger, :root.light button.btn-danger:active:not(:disabled) { background: var(--danger); color: #fff; }
+:root.light button.btn-warning, :root.light button.btn-warning:active:not(:disabled) { background: #c27c0e; color: #fff; }
+:root.light button.btn-success, :root.light button.btn-success:active:not(:disabled) { background: #0e8f62; color: #fff; }
+:root.light button.btn-info, :root.light label.btn-info, :root.light button.btn-info:active:not(:disabled) { background: var(--accent); color: #fff; }
+:root.light .library-segment-btn.active { background: var(--accent); }
+
+/* A dependent field's "Only used when …" note sits under its input. With the
+ * grid's bottom alignment that pushed the note-less fields in the same row
+ * down, so their inputs no longer lined up. Top-align grids holding a note. */
+.form-grid:has(.field-inactive-note) { align-items: start; }
+
+/* Live with no cameras: the empty state says it all, so drop the bare
+ * "Camera" header and the view/camera controls that have nothing to act on. */
+.live-frame-card:has(#liveCameraEmpty:not([hidden])) .live-frame-header,
+main:has(#liveCameraEmpty:not([hidden])) .live-controls-card { display: none; }
+
+/* System › Health: no divider under the Video Decoding header while there
+ * are no cameras to list, and the "No NVIDIA GPU" line reads as a note
+ * rather than stray body text. */
+#videoDecodeCard:has(> .decode-list:empty) > .settings-section-header { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+.system-note { margin: 0; padding: 12px 16px; border: 1px dashed var(--border); border-radius: 12px; font-size: 13px; background: var(--panel); }
