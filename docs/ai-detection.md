@@ -165,7 +165,10 @@ touch these. Change one at a time so you can attribute any per-frame impact.
     model, ~1-2 mAP cost, and the biggest CPU performance win.
 - **IoU Threshold** - intersection-over-union threshold for merging overlapping
   detections. Only applies when the class-aware NMS dedupe actually runs.
-  Default: 0.45.
+  Default: 0.45. Independently of this threshold, the dedupe also drops a
+  lower-confidence box that sits mostly (80%+ of its area) inside a stronger
+  box of the same label, or mostly contains it. That catches a partial
+  "legs" or "torso" box stacked on a full-body box, which plain IoU misses.
 - **Inference Threads** - CPU threads used per inference run. Leave blank to
   auto-detect (up to 4). More threads speed up each inference but use more CPU
   per camera.
@@ -177,14 +180,15 @@ touch these. Change one at a time so you can attribute any per-frame impact.
   *Sequential* uses a single thread and can be faster on small graphs. A/B test
   on your hardware.
 - **NMS Dedupe** - class-aware NMS dedupe pass.
-  - *Auto* (recommended) - skips the extra dedupe for NMS-free YOLO26 models and
-    keeps it for YOLOv8/YOLO11. The choice follows the model's actual output
-    format, not its file name, so a renamed or custom NMS-free model is
-    handled the same way.
+  - *Auto* (recommended) - runs the dedupe on every model. NMS-free YOLO26
+    heads dedupe most of their own boxes, but on hard frames (motion blur,
+    occlusion, a person in a doorway) they can still emit several stacked
+    boxes on one object, so the pass stays on. With at most 300 candidates it
+    is cheap.
   - *Skip (NMS-Free Models Only)* - confidence threshold only; affects NMS-free
     YOLO26 models. YOLOv8/YOLO11 always run class-aware NMS because their grid
     head emits thousands of raw boxes.
-  - *Force Class-Aware NMS* - always run the dedupe, even on NMS-free models.
+  - *Force Class-Aware NMS* - always run the dedupe (same as *Auto*).
 - **CUDA IO Binding** - Enabled/Disabled. When enabled, frames are copied
   to/from the GPU with ONNX Runtime's `io_binding` API instead of host
   round-trips, which can reduce per-frame latency on GPU systems. CUDA only -
@@ -263,6 +267,9 @@ helpers for small or distant objects. They keep the existing class-aware IoU
 deduplication default of `0.5`: that threshold removes substantially
 overlapping duplicate views of one object while retaining nearby same-class
 boxes with lower overlap. It has not been tuned without a labeled camera set.
+The merge also drops a same-label box nested inside (or around) a stronger one
+-- 80%+ of the smaller box inside the larger -- so a crop that only saw part
+of an object does not add a second box on top of the full-frame one.
 
 Tiled inference drops a tile detection whose remapped area exceeds `0.1` of the
 full frame because the full-frame pass is expected to be more reliable for a
