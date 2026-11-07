@@ -115,7 +115,7 @@
         <div class="settings-section-icon" aria-hidden="true">🏷️</div>
         <div>
           <h2>Per-Object Overrides</h2>
-          <p class="settings-section-subtitle">One row per class the current detector can identify, loaded from <code>models/coco.names</code> - the 80 standard COCO categories. <strong>Inherit</strong> uses the default above; the Effective column shows what actually applies. Assign objects and set recording per area on <strong>Zones</strong>; configure email, push, schedules, and thresholds as alert policies on <strong>Alerts</strong>. <strong>Still alert after</strong> fires an event and in-app alert the first time this object has been detected continuously still for that many minutes - 0 turns it off.</p>
+          <p class="settings-section-subtitle">One row per class the current detector can identify, loaded from <code>models/coco.names</code> - the 80 standard COCO categories. <strong>Inherit</strong> uses the default above; the Effective column shows what actually applies. Assign objects and set recording per area on <strong>Zones</strong>; configure email, push, schedules, and thresholds as alert policies on <strong>Alerts</strong>. <strong>Still alert after</strong> fires an event and in-app alert the first time this object has been detected continuously still for that many minutes - 0 turns it off. <strong>Box Colour</strong> sets the colour of this object's box and label on Live, playback and snapshots; <strong>Reset</strong> returns it to the default.</p>
         </div>
       </div>
       <div id="objectsMessage" class="muted" style="margin-bottom:8px"></div>
@@ -127,6 +127,7 @@
               <th>Detection Mode</th>
               <th>Effective</th>
               <th>Still alert after (min)</th>
+              <th>Box Colour</th>
             </tr>
           </thead>
           <tbody id="objectsTableBody"></tbody>

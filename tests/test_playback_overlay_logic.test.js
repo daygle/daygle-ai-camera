@@ -275,3 +275,16 @@ test('sampleTrackAtTime shows a box seen on a single check until the next check'
   assert.equal(sandbox.sampleTrackAtTime(slow, 0.9).length, 1);
   assert.equal(sandbox.sampleTrackAtTime(slow, 1.1).length, 0);
 });
+
+
+test('per-label box colours override the object colour but never motion', () => {
+  try {
+    sandbox.setOverlayBoxColors({ Person: '#FF0000', car: 'not-a-colour', motion: '#00ff00' });
+    assert.equal(sandbox.overlayColorForDetection({ label: 'person', confidence: 0.9 }), '#ff0000');
+    assert.equal(sandbox.overlayColorForDetection({ label: 'car', confidence: 0.9 }), '#47d6ff');
+    assert.equal(sandbox.overlayColorForDetection({ label: 'dog', confidence: 0.9 }), '#47d6ff');
+    assert.equal(sandbox.overlayColorForDetection({ label: 'motion', motion_event: true }), '#49e6a3');
+  } finally {
+    sandbox.setOverlayBoxColors({});
+  }
+});

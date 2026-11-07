@@ -121,6 +121,16 @@ not the class the detector gave: *"is a real animal visible?"* rather than
 the same group, in the same place, also count towards each other for
 [Confirm Frames](motion-detection.md#confirm-frames--confirm-window).
 
+### Box colours
+
+Each row on the Objects page has a **Box Colour** picker that sets the colour
+of that object's box and label wherever detections are drawn: Live, recording
+and timeline playback, the Zones preview, event snapshots and alert images.
+**Reset** returns the object to the default colour. Motion boxes always keep
+the motion colour. Gallery thumbnails are rendered once, when the event is
+captured, so a colour change applies to thumbnails of new events only; the
+full-size snapshot uses the current colour.
+
 ---
 
 ## Settings

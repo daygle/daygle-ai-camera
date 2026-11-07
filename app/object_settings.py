@@ -47,6 +47,7 @@ Settings are stored in the database (setting key ``objects``) as::
         "labels": {"person": "still"},         # optional per-label overrides
         "group_modes": {"animal": "moving"},   # optional per-group overrides
         "still_alerts": {"package": 10},       # label -> minutes (0/absent = off)
+        "box_colors": {"person": "#ff5a5f"},   # label -> overlay box colour
     }
 
 A label without an override falls back to ``default_mode``; the default for
@@ -70,6 +71,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import time
 from typing import Any
 
@@ -90,6 +92,11 @@ MODE_MOVING = 'moving'  # only when the object's pixels are changing (default)
 MODE_STILL = 'still'    # only when the object's pixels are not changing
 
 VALID_MODES: frozenset[str] = frozenset({MODE_ANY, MODE_MOVING, MODE_STILL})
+
+# Per-label overlay box colours are stored as lowercase ``#rrggbb`` - the
+# value an ``<input type="color">`` produces, and one both the canvas overlay
+# and the cv2 snapshot renderer can draw without further parsing.
+_BOX_COLOR_RE = re.compile(r'^#[0-9a-f]{6}$')
 
 # Still-dwell alert bounds (minutes). A value below the floor is treated as
 # off; the cap keeps a silly 10,000-minute streak from being persisted.
@@ -187,6 +194,7 @@ def normalize_object_settings(value: Any) -> dict[str, Any]:
             'labels': {},
             'group_modes': {},
             'still_alerts': {},
+            'box_colors': {},
         }
     default_mode = normalize_mode(value.get('default_mode'), MODE_MOVING)
     labels: dict[str, str] = {}
@@ -226,13 +234,51 @@ def normalize_object_settings(value: Any) -> dict[str, Any]:
             minutes = _normalize_still_alert_minutes(raw_minutes)
             if minutes is not None:
                 still_alerts[label] = minutes
+    box_colors: dict[str, str] = {}
+    raw_colors = value.get('box_colors')
+    if isinstance(raw_colors, dict):
+        for raw_label, raw_color in raw_colors.items():
+            label = canonical_label(raw_label)
+            color = normalize_box_color(raw_color)
+            if label and color is not None:
+                box_colors[label] = color
     normalized = {
         'default_mode': default_mode,
         'labels': labels,
         'group_modes': group_modes,
         'still_alerts': still_alerts,
+        'box_colors': box_colors,
     }
     return normalized
+
+
+def normalize_box_color(value: Any) -> str | None:
+    """Return ``value`` as a lowercase ``#rrggbb`` colour, or ``None``.
+
+    Accepts the 3-digit shorthand (``#f00``) and a missing ``#``; anything
+    else (names, ``rgb()``, junk) is rejected so it never reaches a renderer.
+    """
+    text = str(value or '').strip().lower()
+    if text and not text.startswith('#'):
+        text = '#' + text
+    if re.fullmatch(r'#[0-9a-f]{3}', text):
+        text = '#' + ''.join(ch * 2 for ch in text[1:])
+    return text if _BOX_COLOR_RE.match(text) else None
+
+
+def overlay_box_colors(settings: dict[str, Any] | None = None) -> dict[str, str]:
+    """The operator's per-label overlay box colours (``label -> #rrggbb``).
+
+    Labels without an entry keep the renderer's built-in default colour.
+    Never raises: a settings lookup failure yields no overrides.
+    """
+    if settings is None:
+        try:
+            settings = effective_object_settings()
+        except Exception:  # pragma: no cover - defensive; DB may be mid-startup
+            return {}
+    colors = settings.get('box_colors') if isinstance(settings, dict) else None
+    return dict(colors) if isinstance(colors, dict) else {}
 
 
 def _normalize_still_alert_minutes(value: Any) -> int | None:

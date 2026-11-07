@@ -93,6 +93,40 @@ _OVERLAY_BOX_BGR = (163, 230, 73)  # #49e6a3 teal accent
 _OVERLAY_LABEL_BG_BGR = (19, 11, 7)  # #070b13 dark navy
 
 
+def _hex_to_bgr(color: Any) -> tuple[int, int, int] | None:
+    """``#rrggbb`` -> cv2 ``(b, g, r)``; ``None`` for anything else."""
+    text = str(color or '').strip()
+    if len(text) != 7 or not text.startswith('#'):
+        return None
+    try:
+        red, green, blue = (int(text[i:i + 2], 16) for i in (1, 3, 5))
+    except ValueError:
+        return None
+    return (blue, green, red)
+
+
+def _box_color_bgr(detection: dict[str, Any], box_colors: dict[str, str]) -> tuple[int, int, int]:
+    """The BGR colour to draw ``detection`` in: the operator's per-label
+    colour (Objects page) for an object, else the default teal. Motion boxes
+    are not an object type and always keep the default."""
+    if detection.get('motion_event') is True:
+        return _OVERLAY_BOX_BGR
+    label = str(detection.get('label') or '').strip().lower()
+    if not label or label in GENERIC_TRIGGER_LABELS:
+        return _OVERLAY_BOX_BGR
+    return _hex_to_bgr(box_colors.get(label)) or _OVERLAY_BOX_BGR
+
+
+def _default_box_colors() -> dict[str, str]:
+    # Imported lazily so this module stays importable (and its pure helpers
+    # testable) without pulling in the settings/runtime-config stack.
+    try:
+        from app.object_settings import overlay_box_colors
+        return overlay_box_colors()
+    except Exception:  # pragma: no cover - settings unavailable mid-startup
+        return {}
+
+
 def overlay_detection_rows(detections: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Normalize detections into the shape the JPEG overlay draws.
 
@@ -150,8 +184,13 @@ def render_live_snapshot_jpeg_overlay(
     detections: list[dict[str, Any]],
     *,
     max_width: int | None = None,
+    box_colors: dict[str, str] | None = None,
 ) -> bytes:
     """Return the frame with detection boxes drawn on it.
+
+    ``box_colors`` maps a label to a ``#rrggbb`` box colour; when omitted the
+    operator's per-label colours from the Objects settings are used. Labels
+    without a colour (and motion boxes) draw in the default teal.
 
     ``max_width`` downscales the frame before the boxes are drawn, so a
     thumbnail request decodes and encodes exactly once and ships a fraction of
@@ -176,6 +215,8 @@ def render_live_snapshot_jpeg_overlay(
         return image_bytes
     if image is None:
         return image_bytes
+    if box_colors is None:
+        box_colors = _default_box_colors() if detections else {}
     height, width = image.shape[:2]
     if max_width and width > max_width:
         scale = max_width / width
@@ -207,10 +248,11 @@ def render_live_snapshot_jpeg_overlay(
             # the whole snapshot render into a 500 - skip just that box.
             continue
         text = f'{label} {confidence}%'
-        cv2.rectangle(image, (x, y), (x2, y2), _OVERLAY_BOX_BGR, 2)
+        box_bgr = _box_color_bgr(detection, box_colors)
+        cv2.rectangle(image, (x, y), (x2, y2), box_bgr, 2)
         text_y = max(22, y - 8)
         (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.62, 2)
         cv2.rectangle(image, (x, text_y - text_height - 8), (min(width - 1, x + text_width + 10), text_y + 4), _OVERLAY_LABEL_BG_BGR, -1)
-        cv2.putText(image, text, (x + 5, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, _OVERLAY_BOX_BGR, 2, cv2.LINE_AA)
+        cv2.putText(image, text, (x + 5, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, box_bgr, 2, cv2.LINE_AA)
     ok, encoded = cv2.imencode('.jpg', image, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
     return encoded.tobytes() if ok else image_bytes

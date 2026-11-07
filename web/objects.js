@@ -1,4 +1,5 @@
-// objects.js - Per-label still/moving object detection settings (Objects page).
+// objects.js - Per-label still/moving object detection settings and overlay
+// box colours (Objects page).
 // Loaded on objects.html only. Uses api() / escapeHtml / titleCase /
 // showToast from web/utils.js.
 
@@ -61,6 +62,12 @@ let hasUnsavedChanges = false;
 let availableLabels = [];
 let labels = {}; // label -> 'any' | 'moving' | 'still' (explicit overrides only)
 let stillAlerts = {}; // label -> minutes for the "still for N minutes" dwell alert
+let boxColors = {}; // label -> '#rrggbb' overlay box colour (explicit overrides only)
+
+// The colour an object's box uses when it has no override - mirrors
+// OBJECT_OVERLAY_COLOR in web/overlay.js (not loaded on this page).
+const DEFAULT_BOX_COLOR = '#47d6ff';
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 let groups = {}; // group name -> [member labels]
 let groupModes = {}; // group name -> 'any' | 'moving' | 'still'
 let editingGroupName = null; // set while editing an existing group
@@ -119,6 +126,7 @@ function renderTable() {
     const fallback = groupFallbackMode(label);
     const effective = override || fallback;
     const stillMinutes = stillAlerts[label] || 0;
+    const boxColor = boxColors[label];
     return `
       <tr data-object-label="${escapeHtml(label)}">
         <td class="cell-label">${title}</td>
@@ -133,6 +141,12 @@ function renderTable() {
         <td><span class="model-status ${effective === 'any' ? 'model-status-installed' : 'model-status-active'}">${escapeHtml(modeLabel(effective))}</span></td>
         <td data-label="Still alert after (min)">
           <input type="number" min="0" step="1" inputmode="numeric" class="still-alert-input" value="${stillMinutes}" data-still-alert="${escapeHtml(label)}" aria-label="Still alert after minutes for ${title}" title="Alert after this object has been detected continuously still for this many minutes (0 = off)">
+        </td>
+        <td data-label="Box Colour">
+          <span class="box-color-cell">
+            <input type="color" class="box-color-input" value="${escapeHtml(boxColor || DEFAULT_BOX_COLOR)}" data-box-color="${escapeHtml(label)}" aria-label="Box colour for ${title}" title="Colour of the ${title} box and label on Live, playback and snapshots">
+            <button type="button" class="secondary box-color-reset" data-box-color-reset="${escapeHtml(label)}" ${boxColor ? '' : 'hidden'} title="Return ${title} to the default box colour">Reset</button>
+          </span>
         </td>
       </tr>`;
   }).join('');
@@ -153,6 +167,27 @@ function renderTable() {
     // only needs to flag the form dirty.
     input.addEventListener('change', markUnsaved);
   });
+
+  tableBody.querySelectorAll('input[data-box-color]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const label = input.dataset.boxColor;
+      boxColors[label] = input.value.toLowerCase();
+      const reset = tableBody.querySelector(`button[data-box-color-reset="${CSS.escape(label)}"]`);
+      if (reset) reset.hidden = false;
+      markUnsaved();
+    });
+  });
+
+  tableBody.querySelectorAll('button[data-box-color-reset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const label = button.dataset.boxColorReset;
+      delete boxColors[label];
+      const input = tableBody.querySelector(`input[data-box-color="${CSS.escape(label)}"]`);
+      if (input) input.value = DEFAULT_BOX_COLOR;
+      button.hidden = true;
+      markUnsaved();
+    });
+  });
 }
 
 function render(settings) {
@@ -168,6 +203,12 @@ function render(settings) {
     for (const [label, minutes] of Object.entries(settings.still_alerts)) {
       const parsed = Number.parseInt(minutes, 10);
       if (Number.isFinite(parsed) && parsed > 0) stillAlerts[label] = parsed;
+    }
+  }
+  boxColors = {};
+  if (settings.box_colors && typeof settings.box_colors === 'object') {
+    for (const [label, color] of Object.entries(settings.box_colors)) {
+      if (HEX_COLOR_RE.test(String(color || ''))) boxColors[label] = String(color).toLowerCase();
     }
   }
   groupModes = {};
@@ -461,6 +502,7 @@ async function saveObjects() {
       labels,
       group_modes: groupModesPayload,
       still_alerts: stillAlertsPayload,
+      box_colors: boxColors,
     };
     const result = await api('/api/settings/objects', { method: 'PUT', body: JSON.stringify(payload) });
     render(result);

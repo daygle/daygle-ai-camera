@@ -62,7 +62,7 @@ def test_objects_settings_save_round_trip(tmp_path, monkeypatch):
             row = db.execute("SELECT value FROM app_settings WHERE key = 'objects'").fetchone()
         assert row is not None
         stored = json.loads(row[0])
-        assert stored == {"default_mode": "moving", "labels": {"car": "still", "person": "moving"}, "group_modes": {}, "still_alerts": {}}
+        assert stored == {"default_mode": "moving", "labels": {"car": "still", "person": "moving"}, "group_modes": {}, "still_alerts": {}, "box_colors": {}}
 
         # GET returns what was saved.
         status, _headers, payload = client.request("/api/settings/objects")
@@ -252,6 +252,61 @@ def test_objects_settings_audit_logged(tmp_path, monkeypatch):
         assert audit["entries"][0]["username"] == "admin"
         assert audit["entries"][0]["details"]["default_mode"] == "moving"
         assert "car" in audit["entries"][0]["details"]["labels"]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_objects_box_colors_round_trip_and_overlay_endpoint(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        csrf = _login(admin)
+
+        # Default: no overrides.
+        status, _headers, payload = admin.request("/api/overlay/box_colors")
+        assert status == 200
+        assert payload == {"box_colors": {}}
+
+        # Saved colours are normalised to lowercase #rrggbb (shorthand expanded).
+        status, _headers, updated = admin.request(
+            "/api/settings/objects",
+            method="PUT",
+            json_body={"default_mode": "moving", "box_colors": {"Person": "#FF5A5F", "car": "#0f0"}},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert updated["box_colors"] == {"person": "#ff5a5f", "car": "#00ff00"}
+
+        # A junk colour is rejected rather than silently dropped.
+        status, _headers, body = admin.request(
+            "/api/settings/objects",
+            method="PUT",
+            json_body={"default_mode": "moving", "box_colors": {"dog": "red; background:url(x)"}},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 400
+        assert "box_colors['dog']" in body["detail"]
+
+        # Any signed-in user (not just admins) can read the colours, since
+        # every user sees the overlays.
+        status, _headers, viewer = admin.request(
+            "/api/users",
+            method="POST",
+            json_body={"username": "viewer", "password": "Viewer123!", "role": "viewer"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        viewer_client = LocalClient(base_url)
+        _login(viewer_client, viewer["username"], "Viewer123!")
+        status, _headers, payload = viewer_client.request("/api/overlay/box_colors")
+        assert status == 200
+        assert payload == {"box_colors": {"person": "#ff5a5f", "car": "#00ff00"}}
+
+        # Signed-out requests are refused.
+        assert LocalClient(base_url).request("/api/overlay/box_colors")[0] == 401
     finally:
         server.should_exit = True
         thread.join(timeout=5)

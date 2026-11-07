@@ -1,7 +1,7 @@
 """Settings / Objects APIRouter.
 
 Per-label still/moving object-detection behavior (the Objects page). Stores a
-small ``{default_mode, labels, group_modes, still_alerts}`` dict in the
+small ``{default_mode, labels, group_modes, still_alerts, box_colors}`` dict in the
 ``objects`` database setting and exposes the available model labels so the
 page can render one row per class.
 """
@@ -14,13 +14,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.ai_settings import detector_status
 from app.auth import utc_now
-from app.auth_gates import require_admin
+from app.auth_gates import require_admin, require_user
 from app.config_facades import effective_ai_config
 from app.deps import get_database
 from app.object_settings import (
     VALID_MODES,
     effective_object_settings,
+    normalize_box_color,
     normalize_object_settings,
+    overlay_box_colors,
 )
 from app.request_helpers import read_json_object, write_audit_log
 
@@ -38,6 +40,18 @@ def get_object_settings(request: Request):
         **settings,
         'available_labels': labels,
     }
+
+
+@router.get('/api/overlay/box_colors')
+def get_overlay_box_colors(request: Request):
+    """Per-label overlay box colours for the playback/live overlays.
+
+    Every signed-in user sees boxes, so this is readable by any user (unlike
+    the admin-only Objects settings it is derived from) and exposes only the
+    ``label -> #rrggbb`` map.
+    """
+    require_user(request)
+    return {'box_colors': overlay_box_colors()}
 
 
 @router.put('/api/settings/objects')
@@ -100,11 +114,24 @@ async def update_object_settings(request: Request, db=Depends(get_database)):
                 detail=f"still_alerts['{label}'] must be a number of minutes (>= 1) or 0 to disable.",
             )
 
+    raw_colors = payload.get('box_colors', {})
+    if raw_colors is None:
+        raw_colors = {}
+    if not isinstance(raw_colors, dict):
+        raise HTTPException(status_code=400, detail='box_colors must be an object mapping label to a #rrggbb colour.')
+    for label, raw_color in raw_colors.items():
+        if normalize_box_color(raw_color) is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"box_colors['{label}'] must be a hex colour such as #ff5a5f.",
+            )
+
     normalized = normalize_object_settings({
         'default_mode': default_mode,
         'labels': raw_labels,
         'group_modes': raw_group_modes,
         'still_alerts': raw_still,
+        'box_colors': raw_colors,
     })
     db.set_setting('objects', normalized, utc_now())
     write_audit_log(request, db, 'update', 'settings.objects', details={
@@ -112,6 +139,7 @@ async def update_object_settings(request: Request, db=Depends(get_database)):
         'labels': sorted(normalized['labels']),
         'group_modes': normalized['group_modes'],
         'still_alerts': normalized['still_alerts'],
+        'box_colors': normalized['box_colors'],
     })
     return {
         **normalized,
