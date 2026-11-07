@@ -343,7 +343,7 @@ function createLibraryFilters(options) {
     if (state.range !== 'custom') return '';
     const from = state.dateFrom ? `${formatUserDate(state.dateFrom)} ${state.timeFrom}` : '';
     const to = state.dateTo ? `${formatUserDate(state.dateTo)} ${state.timeTo}` : '';
-    if (from && to) return `${from} – ${to}`;
+    if (from && to) return `${from} - ${to}`;
     if (from) return `From ${from}`;
     if (to) return `Until ${to}`;
     return '';

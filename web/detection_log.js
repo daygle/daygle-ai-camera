@@ -181,7 +181,7 @@ function detectionLogHtml(track) {
   return rows.map((row) => {
     if (row.kind === 'gap') {
       const span = row.count > 1
-        ? `${formatLogTime(row.from)} – ${formatLogTime(row.to)} (${row.count} checks)`
+        ? `${formatLogTime(row.from)} - ${formatLogTime(row.to)} (${row.count} checks)`
         : `${formatLogTime(row.from)}`;
       return `<div class="detection-log-row is-gap"><button type="button" class="detection-log-time" data-seek="${row.from}">${_logEscape(formatLogTime(row.from))}</button>`
         + `<span class="muted">Nothing seen · ${_logEscape(span)}</span></div>`;

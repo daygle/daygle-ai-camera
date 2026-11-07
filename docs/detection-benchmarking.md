@@ -119,7 +119,7 @@ The same pattern can be used to compare other supported settings: run with
 `--gated` versus the always-on path, change `--shadow`, or add `--tiling 3x3`.
 Keep the input and annotations identical when comparing configurations.
 
-## 5. Validate tuning choices (Items 11–12)
+## 5. Validate tuning choices (Items 11-12)
 
 Use `--post-pipeline` to compare the raw detector with the policy stages that
 can be evaluated without camera-zone configuration:

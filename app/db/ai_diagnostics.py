@@ -73,7 +73,7 @@ class AiDiagnosticsMixin:
             needle = _search_like(search)
             # ``details`` is stored as a JSON blob, so a LIKE across message
             # and details matches filenames, sha256 prefixes, backend names..
-            # as written text — good enough for a diagnostics log.
+            # as written text - good enough for a diagnostics log.
             conditions.append("(message LIKE ? ESCAPE '\\' OR details LIKE ? ESCAPE '\\')")
             params.extend([needle, needle])
         if event_type:

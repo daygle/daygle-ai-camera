@@ -10,16 +10,16 @@
 // suite uses for HTML/script contracts:
 //   1. FORM_DEFAULTS.auth and the form's field names must stay in exact sync
 //      (fillForm() silently skips a field with no default).
-//   2. Every field must be declared in FIELD_TYPES with the right coercion —
+//   2. Every field must be declared in FIELD_TYPES with the right coercion -
 //      session_timeout_hours as a fractional number, the other two as
-//      integers — and blanks must not be sent as 0 (coercePayload skips
+//      integers - and blanks must not be sent as 0 (coercePayload skips
 //      empty strings, so clearing a field means "leave unchanged" server-side
 //      rather than a bogus minimum value).
 //   3. The submit button lives outside the form and relies on form="…", so
 //      dropping that attribute would turn Save into a no-op.
 //   4. HTML min/max bounds mirror the backend validator in
-//      app/payload_validators.py (0.25–720 hours, 1–100 attempts,
-//      1–1440 minutes) so the browser rejects out-of-range input first.
+//      app/payload_validators.py (0.25-720 hours, 1-100 attempts,
+//      1-1440 minutes) so the browser rejects out-of-range input first.
 //
 // Run with:
 //   node --test tests/test_login_security_card_js.test.js

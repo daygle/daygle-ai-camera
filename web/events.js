@@ -449,7 +449,7 @@ function describeInterpretation(interp, count) {
   if (interp.camera) parts.push(`on ${interp.camera}`);
   const fmt = (iso) => (iso ? formatDate(iso) : '');
   if (interp.since || interp.until) {
-    parts.push(interp.since && interp.until ? `${fmt(interp.since)} – ${fmt(interp.until)}`
+    parts.push(interp.since && interp.until ? `${fmt(interp.since)} - ${fmt(interp.until)}`
       : interp.since ? `since ${fmt(interp.since)}` : `until ${fmt(interp.until)}`);
   }
   const how = interp.interpreted_by === 'model' ? 'AI-interpreted' : 'keyword';

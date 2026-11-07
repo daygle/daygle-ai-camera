@@ -1,4 +1,4 @@
-// Unit tests for normalizeActivity in web/utils.js — the client mirror of
+// Unit tests for normalizeActivity in web/utils.js - the client mirror of
 // app/zone_schema.py::normalize_zone_activity used by the Zones save path.
 //
 // Same vm-in-a-window-stub pattern as the other normalize tests.

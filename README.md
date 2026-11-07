@@ -385,13 +385,13 @@ Hours are your **local** wall-clock time. The baseline needs about a week of his
 
 ### Activity spike
 
-Learns how busy an area normally is each hour, then alerts on an **unusual burst** — far more objects than typical for the hour (a crowd forming, a queue of cars).
+Learns how busy an area normally is each hour, then alerts on an **unusual burst** - far more objects than typical for the hour (a crowd forming, a queue of cars).
 
 - Open `/zones`, select a camera and area, and turn on **Activity spike** in the detection panel.
-- Set **Min count** — a floor of distinct objects in an hour before a burst can fire — and **Sensitivity** (how far above the hour's learned normal counts as a spike; lower = more sensitive). Optionally limit **Counts** to specific object classes, choose whether it records, then **Save Zones**.
+- Set **Min count** - a floor of distinct objects in an hour before a burst can fire - and **Sensitivity** (how far above the hour's learned normal counts as a spike; lower = more sensitive). Optionally limit **Counts** to specific object classes, choose whether it records, then **Save Zones**.
 - Configure notifications on the **Alerts** page under the **Activity spike** type.
 
-The alert fires in real time the moment the hour's running count of distinct objects crosses `max(min count, normal + sensitivity × spread)` for that hour, and stays quiet while it learns (about a week per hour-of-day). Learned baselines persist across restarts. Pure statistics on the object tracker — no extra model or GPU load.
+The alert fires in real time the moment the hour's running count of distinct objects crosses `max(min count, normal + sensitivity × spread)` for that hour, and stays quiet while it learns (about a week per hour-of-day). Learned baselines persist across restarts. Pure statistics on the object tracker - no extra model or GPU load.
 
 ## Updating
 

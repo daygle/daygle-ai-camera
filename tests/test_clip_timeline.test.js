@@ -162,9 +162,9 @@ test('each extension run is marked on the bar and in the legend', () => {
   ]);
   assert.equal(strips[2].style.left, '50%');
   assert.equal(strips[2].style.width, '20%');
-  assert.equal(strips[0].title, 'Car kept recording 11s–14s');
-  assert.equal(strips[1].title, 'Car kept recording while still 20s–28s');
-  assert.equal(strips[2].title, 'Motion kept recording 30s–42s');
+  assert.equal(strips[0].title, 'Car kept recording 11s-14s');
+  assert.equal(strips[1].title, 'Car kept recording while still 20s-28s');
+  assert.equal(strips[2].title, 'Motion kept recording 30s-42s');
   const original = bar.find((el) => el.className === 'clip-original-end');
   assert.equal(original.style.left, `${(25 / 60) * 100}%`);
   const texts = legend.map((item) => item.text);

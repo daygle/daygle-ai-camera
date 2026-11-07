@@ -93,7 +93,7 @@ function clipExtensionText(run) {
   const what = run.reason === 'motion' ? CLIP_EXTENSION_REASONS.motion
     : `${label || 'Object'} ${CLIP_EXTENSION_REASONS[run.reason] || 'kept recording'}`;
   const span = run.endAt - run.startAt >= 0.05
-    ? `${fmtClipSeconds(run.startAt)}–${fmtClipSeconds(run.endAt)}`
+    ? `${fmtClipSeconds(run.startAt)}-${fmtClipSeconds(run.endAt)}`
     : `at ${fmtClipSeconds(run.startAt)}`;
   return `${what} ${span}`;
 }
