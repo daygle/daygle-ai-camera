@@ -126,8 +126,12 @@ the same group, in the same place, also count towards each other for
 Each row on the Objects page has a **Box Colour** picker that sets the colour
 of that object's box and label wherever detections are drawn: Live, recording
 and timeline playback, the Zones preview, event snapshots and alert images.
-**Reset** returns the object to the default colour. Motion boxes always keep
-the motion colour. Gallery thumbnails are rendered once, when the event is
+**Reset** returns the object to its group's colour, or the default.
+
+The Group Behavior table has the same picker per object group: a group colour
+applies to every member that has no colour of its own. When an object belongs
+to several coloured groups, the smallest (most specific) group wins, the same
+rule as detection modes. Motion boxes always keep the motion colour. Gallery thumbnails are rendered once, when the event is
 captured, so a colour change applies to thumbnails of new events only; the
 full-size snapshot uses the current colour.
 

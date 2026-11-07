@@ -49,7 +49,7 @@ class _FakeDatabase:
 
 
 def test_normalize_object_settings_defaults():
-    defaults = {'default_mode': 'moving', 'labels': {}, 'group_modes': {}, 'still_alerts': {}, 'box_colors': {}}
+    defaults = {'default_mode': 'moving', 'labels': {}, 'group_modes': {}, 'still_alerts': {}, 'box_colors': {}, 'group_box_colors': {}}
     assert os.normalize_object_settings(None) == defaults
     assert os.normalize_object_settings({}) == defaults
     assert os.normalize_object_settings('junk') == defaults
@@ -57,7 +57,7 @@ def test_normalize_object_settings_defaults():
 
 
 def test_normalize_object_settings_round_trip():
-    raw = {'default_mode': 'moving', 'labels': {'person': 'still', 'car': 'still'}, 'group_modes': {}, 'still_alerts': {}, 'box_colors': {}}
+    raw = {'default_mode': 'moving', 'labels': {'person': 'still', 'car': 'still'}, 'group_modes': {}, 'still_alerts': {}, 'box_colors': {}, 'group_box_colors': {}}
     assert os.normalize_object_settings(raw) == raw
 
 
@@ -150,7 +150,7 @@ def test_effective_object_settings_defaults_without_database(monkeypatch):
     previous = _state.database
     try:
         _state.database = None
-        assert os.effective_object_settings() == {'default_mode': 'moving', 'labels': {}, 'group_modes': {}, 'still_alerts': {}, 'box_colors': {}}
+        assert os.effective_object_settings() == {'default_mode': 'moving', 'labels': {}, 'group_modes': {}, 'still_alerts': {}, 'box_colors': {}, 'group_box_colors': {}}
     finally:
         _state.database = previous
 
@@ -911,3 +911,27 @@ def test_overlay_box_colors_reads_settings():
     assert os.overlay_box_colors({'box_colors': {'person': '#ff0000'}}) == {'person': '#ff0000'}
     assert os.overlay_box_colors({}) == {}
     assert os.overlay_box_colors({'box_colors': 'junk'}) == {}
+
+
+def test_normalize_object_settings_keeps_valid_group_box_colors_only():
+    out = os.normalize_object_settings({'group_box_colors': {'Animal': '#FBBF24', 'pet': 'nope'}})
+    assert out['group_box_colors'] == {'animal': '#fbbf24'}
+
+
+def test_overlay_box_colors_expands_groups_with_label_precedence():
+    groups = {'animal': frozenset({'cat', 'dog', 'horse'}), 'pet': frozenset({'cat', 'dog'})}
+    settings = {
+        'group_box_colors': {'animal': '#111111', 'pet': '#222222', 'ghost': '#333333'},
+        'box_colors': {'dog': '#444444'},
+    }
+    assert os.overlay_box_colors(settings, groups=groups) == {
+        'cat': '#222222',    # most specific group wins
+        'dog': '#444444',    # own colour beats any group
+        'horse': '#111111',  # only in the broad group
+    }
+
+
+def test_overlay_box_colors_group_ties_break_alphabetically():
+    groups = {'alpha': frozenset({'cat', 'dog'}), 'beta': frozenset({'cat', 'bird'})}
+    settings = {'group_box_colors': {'alpha': '#aaaaaa', 'beta': '#bbbbbb'}}
+    assert os.overlay_box_colors(settings, groups=groups)['cat'] == '#aaaaaa'

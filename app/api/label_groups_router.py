@@ -209,16 +209,22 @@ def _rename_in_cameras(renames: dict[str, str], db, apply_cameras_settings) -> N
 
 
 def _rename_group_modes(renames: dict[str, str], db) -> None:
-    """Carry a renamed group's Objects-page detection mode over to its new name."""
+    """Carry a renamed group's Objects-page detection mode and box colour over
+    to its new name."""
     objects = db.get_setting('objects')
-    if not isinstance(objects, dict) or not isinstance(objects.get('group_modes'), dict):
+    if not isinstance(objects, dict):
         return
-    modes = dict(objects['group_modes'])
+    updated = dict(objects)
     moved = False
-    for old, new in renames.items():
-        if old in modes:
-            mode = modes.pop(old)
-            modes.setdefault(new, mode)
-            moved = True
+    for key in ('group_modes', 'group_box_colors'):
+        if not isinstance(objects.get(key), dict):
+            continue
+        values = dict(objects[key])
+        for old, new in renames.items():
+            if old in values:
+                value = values.pop(old)
+                values.setdefault(new, value)
+                moved = True
+        updated[key] = values
     if moved:
-        db.set_setting('objects', {**objects, 'group_modes': modes}, utc_now())
+        db.set_setting('objects', updated, utc_now())

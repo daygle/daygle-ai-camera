@@ -1,7 +1,8 @@
 """Settings / Objects APIRouter.
 
 Per-label still/moving object-detection behavior (the Objects page). Stores a
-small ``{default_mode, labels, group_modes, still_alerts, box_colors}`` dict in the
+small ``{default_mode, labels, group_modes, still_alerts, box_colors,
+group_box_colors}`` dict in the
 ``objects`` database setting and exposes the available model labels so the
 page can render one row per class.
 """
@@ -126,12 +127,25 @@ async def update_object_settings(request: Request, db=Depends(get_database)):
                 detail=f"box_colors['{label}'] must be a hex colour such as #ff5a5f.",
             )
 
+    raw_group_colors = payload.get('group_box_colors', {})
+    if raw_group_colors is None:
+        raw_group_colors = {}
+    if not isinstance(raw_group_colors, dict):
+        raise HTTPException(status_code=400, detail='group_box_colors must be an object mapping a group name to a #rrggbb colour.')
+    for group, raw_color in raw_group_colors.items():
+        if normalize_box_color(raw_color) is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"group_box_colors['{group}'] must be a hex colour such as #fbbf24.",
+            )
+
     normalized = normalize_object_settings({
         'default_mode': default_mode,
         'labels': raw_labels,
         'group_modes': raw_group_modes,
         'still_alerts': raw_still,
         'box_colors': raw_colors,
+        'group_box_colors': raw_group_colors,
     })
     db.set_setting('objects', normalized, utc_now())
     write_audit_log(request, db, 'update', 'settings.objects', details={
@@ -140,6 +154,7 @@ async def update_object_settings(request: Request, db=Depends(get_database)):
         'group_modes': normalized['group_modes'],
         'still_alerts': normalized['still_alerts'],
         'box_colors': normalized['box_colors'],
+        'group_box_colors': normalized['group_box_colors'],
     })
     return {
         **normalized,
