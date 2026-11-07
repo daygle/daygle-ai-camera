@@ -48,6 +48,7 @@ Settings are stored in the database (setting key ``objects``) as::
         "group_modes": {"animal": "moving"},   # optional per-group overrides
         "still_alerts": {"package": 10},       # label -> minutes (0/absent = off)
         "box_colors": {"person": "#ff5a5f"},   # label -> overlay box colour
+        "group_box_colors": {"animal": "#fbbf24"},  # group -> overlay box colour
     }
 
 A label without an override falls back to ``default_mode``; the default for
@@ -195,6 +196,7 @@ def normalize_object_settings(value: Any) -> dict[str, Any]:
             'group_modes': {},
             'still_alerts': {},
             'box_colors': {},
+            'group_box_colors': {},
         }
     default_mode = normalize_mode(value.get('default_mode'), MODE_MOVING)
     labels: dict[str, str] = {}
@@ -242,12 +244,21 @@ def normalize_object_settings(value: Any) -> dict[str, Any]:
             color = normalize_box_color(raw_color)
             if label and color is not None:
                 box_colors[label] = color
+    group_box_colors: dict[str, str] = {}
+    raw_group_colors = value.get('group_box_colors')
+    if isinstance(raw_group_colors, dict):
+        for raw_group, raw_color in raw_group_colors.items():
+            group = canonical_label(raw_group)
+            color = normalize_box_color(raw_color)
+            if group and color is not None:
+                group_box_colors[group] = color
     normalized = {
         'default_mode': default_mode,
         'labels': labels,
         'group_modes': group_modes,
         'still_alerts': still_alerts,
         'box_colors': box_colors,
+        'group_box_colors': group_box_colors,
     }
     return normalized
 
@@ -266,10 +277,17 @@ def normalize_box_color(value: Any) -> str | None:
     return text if _BOX_COLOR_RE.match(text) else None
 
 
-def overlay_box_colors(settings: dict[str, Any] | None = None) -> dict[str, str]:
-    """The operator's per-label overlay box colours (``label -> #rrggbb``).
+def overlay_box_colors(
+    settings: dict[str, Any] | None = None,
+    groups: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """The effective per-label overlay box colours (``label -> #rrggbb``).
 
-    Labels without an entry keep the renderer's built-in default colour.
+    Same precedence as detection modes: a label's own colour wins; otherwise
+    the colour of the most specific object group containing it (fewest
+    members, ties alphabetical); otherwise no entry, so the renderer uses its
+    built-in default. Group colours are expanded to their member labels here,
+    so renderers only ever look a detection's label up in one flat map.
     Never raises: a settings lookup failure yields no overrides.
     """
     if settings is None:
@@ -277,8 +295,31 @@ def overlay_box_colors(settings: dict[str, Any] | None = None) -> dict[str, str]
             settings = effective_object_settings()
         except Exception:  # pragma: no cover - defensive; DB may be mid-startup
             return {}
-    colors = settings.get('box_colors') if isinstance(settings, dict) else None
-    return dict(colors) if isinstance(colors, dict) else {}
+    if not isinstance(settings, dict):
+        return {}
+    resolved: dict[str, str] = {}
+    group_colors = settings.get('group_box_colors')
+    if isinstance(group_colors, dict) and group_colors:
+        if groups is None:
+            try:
+                groups = cached_label_groups()
+            except Exception:  # pragma: no cover - defensive
+                groups = {}
+        covering: list[tuple[int, str, str]] = []
+        for group, color in group_colors.items():
+            members = groups.get(group)
+            if members:
+                covering.append((len(members), group, color))
+        # Apply the broadest groups first so a more specific group's colour
+        # overwrites them for shared members.
+        covering.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        for _size, group, color in covering:
+            for member in groups[group]:
+                resolved[str(member)] = color
+    colors = settings.get('box_colors')
+    if isinstance(colors, dict):
+        resolved.update(colors)
+    return resolved
 
 
 def _normalize_still_alert_minutes(value: Any) -> int | None:

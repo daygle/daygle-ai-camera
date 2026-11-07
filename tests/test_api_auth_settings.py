@@ -1359,7 +1359,8 @@ def test_label_group_rename_updates_zone_rules(tmp_path, monkeypatch):
         status, _headers, _objects = client.request(
             "/api/settings/objects",
             method="PUT",
-            json_body={"default_mode": "moving", "group_modes": {"pet": "any"}},
+            json_body={"default_mode": "moving", "group_modes": {"pet": "any"},
+                       "group_box_colors": {"pet": "#fbbf24"}},
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 200
@@ -1380,6 +1381,7 @@ def test_label_group_rename_updates_zone_rules(tmp_path, monkeypatch):
         assert [rule["label"] for rule in rules] == ["pets", "person"]
         status, _headers, objects = client.request("/api/settings/objects")
         assert objects["group_modes"] == {"pets": "any"}
+        assert objects["group_box_colors"] == {"pets": "#fbbf24"}
     finally:
         server.should_exit = True
         thread.join(timeout=5)

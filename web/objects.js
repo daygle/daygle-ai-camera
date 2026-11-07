@@ -58,11 +58,30 @@ function groupFallbackMode(label) {
   return best ? best.mode : (defaultSelect.value || 'moving');
 }
 
+// The box colour a class INHERITS when it has no colour of its own: its most
+// specific covering group's colour, otherwise the default. Mirrors the
+// backend's overlay_box_colors (app/object_settings.py) - same precedence as
+// groupFallbackMode above.
+function groupFallbackColor(label) {
+  const l = String(label || '').toLowerCase();
+  let best = null; // { size, name, color }
+  for (const [name, color] of Object.entries(groupBoxColors)) {
+    const members = groups[name];
+    if (!Array.isArray(members) || !members.includes(l)) continue;
+    const size = members.length;
+    if (!best || size < best.size || (size === best.size && name < best.name)) {
+      best = { size, name, color };
+    }
+  }
+  return best ? best.color : DEFAULT_BOX_COLOR;
+}
+
 let hasUnsavedChanges = false;
 let availableLabels = [];
 let labels = {}; // label -> 'any' | 'moving' | 'still' (explicit overrides only)
 let stillAlerts = {}; // label -> minutes for the "still for N minutes" dwell alert
 let boxColors = {}; // label -> '#rrggbb' overlay box colour (explicit overrides only)
+let groupBoxColors = {}; // group name -> '#rrggbb' overlay box colour
 
 // The colour an object's box uses when it has no override - mirrors
 // OBJECT_OVERLAY_COLOR in web/overlay.js (not loaded on this page).
@@ -144,8 +163,8 @@ function renderTable() {
         </td>
         <td data-label="Box Colour">
           <span class="box-color-cell">
-            <input type="color" class="box-color-input" value="${escapeHtml(boxColor || DEFAULT_BOX_COLOR)}" data-box-color="${escapeHtml(label)}" aria-label="Box colour for ${title}" title="Colour of the ${title} box and label on Live, playback and snapshots">
-            <button type="button" class="secondary box-color-reset" data-box-color-reset="${escapeHtml(label)}" ${boxColor ? '' : 'hidden'} title="Return ${title} to the default box colour">Reset</button>
+            <input type="color" class="box-color-input" value="${escapeHtml(boxColor || groupFallbackColor(label))}" data-box-color="${escapeHtml(label)}" aria-label="Box colour for ${title}" title="Colour of the ${title} box and label on Live, playback and snapshots">
+            <button type="button" class="secondary box-color-reset" data-box-color-reset="${escapeHtml(label)}" ${boxColor ? '' : 'hidden'} title="Return ${title} to its group's box colour, or the default">Reset</button>
           </span>
         </td>
       </tr>`;
@@ -183,7 +202,7 @@ function renderTable() {
       const label = button.dataset.boxColorReset;
       delete boxColors[label];
       const input = tableBody.querySelector(`input[data-box-color="${CSS.escape(label)}"]`);
-      if (input) input.value = DEFAULT_BOX_COLOR;
+      if (input) input.value = groupFallbackColor(label);
       button.hidden = true;
       markUnsaved();
     });
@@ -209,6 +228,12 @@ function render(settings) {
   if (settings.box_colors && typeof settings.box_colors === 'object') {
     for (const [label, color] of Object.entries(settings.box_colors)) {
       if (HEX_COLOR_RE.test(String(color || ''))) boxColors[label] = String(color).toLowerCase();
+    }
+  }
+  groupBoxColors = {};
+  if (settings.group_box_colors && typeof settings.group_box_colors === 'object') {
+    for (const [group, color] of Object.entries(settings.group_box_colors)) {
+      if (HEX_COLOR_RE.test(String(color || ''))) groupBoxColors[group] = String(color).toLowerCase();
     }
   }
   groupModes = {};
@@ -275,6 +300,7 @@ function renderGroupModes() {
     const members = (groups[name] || []).map((member) => titleCase(member)).join(', ');
     const override = groupModes[name];
     const effective = override || defaultMode;
+    const groupColor = groupBoxColors[name];
     return `
       <tr data-group-mode="${escapeHtml(name)}">
         <td class="cell-label">${title}</td>
@@ -288,8 +314,35 @@ function renderGroupModes() {
           </select>
         </td>
         <td><span class="model-status ${effective === 'any' ? 'model-status-installed' : 'model-status-active'}">${escapeHtml(modeLabel(effective))}</span></td>
+        <td data-label="Box Colour">
+          <span class="box-color-cell">
+            <input type="color" class="box-color-input" value="${escapeHtml(groupColor || DEFAULT_BOX_COLOR)}" data-group-box-color="${escapeHtml(name)}" aria-label="Box colour for ${title}" title="Colour of the box and label for every ${title} member without its own colour">
+            <button type="button" class="secondary box-color-reset" data-group-box-color-reset="${escapeHtml(name)}" ${groupColor ? '' : 'hidden'} title="Return ${title} to the default box colour">Reset</button>
+          </span>
+        </td>
       </tr>`;
   }).join('');
+  groupModesBody.querySelectorAll('input[data-group-box-color]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const name = input.dataset.groupBoxColor;
+      groupBoxColors[name] = input.value.toLowerCase();
+      const reset = groupModesBody.querySelector(`button[data-group-box-color-reset="${CSS.escape(name)}"]`);
+      if (reset) reset.hidden = false;
+      rerenderObjectTable();  // members without their own colour now inherit this one
+      markUnsaved();
+    });
+  });
+  groupModesBody.querySelectorAll('button[data-group-box-color-reset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const name = button.dataset.groupBoxColorReset;
+      delete groupBoxColors[name];
+      const input = groupModesBody.querySelector(`input[data-group-box-color="${CSS.escape(name)}"]`);
+      if (input) input.value = DEFAULT_BOX_COLOR;
+      button.hidden = true;
+      rerenderObjectTable();
+      markUnsaved();
+    });
+  });
   groupModesBody.querySelectorAll('select[data-group-mode-select]').forEach((select) => {
     select.addEventListener('change', () => {
       const name = select.dataset.groupModeSelect;
@@ -375,6 +428,10 @@ async function saveGroup() {
       groupModes[name] = groupModes[editingGroupName];
       delete groupModes[editingGroupName];
     }
+    if (Object.prototype.hasOwnProperty.call(groupBoxColors, editingGroupName)) {
+      groupBoxColors[name] = groupBoxColors[editingGroupName];
+      delete groupBoxColors[editingGroupName];
+    }
   }
   next[name] = members;
   await persistGroups(next, renames);
@@ -385,6 +442,7 @@ async function removeGroup(name) {
   const next = { ...groups };
   delete next[name];
   delete groupModes[name];
+  delete groupBoxColors[name];
   if (editingGroupName === name) resetGroupForm();
   await persistGroups(next);
 }
@@ -497,12 +555,17 @@ async function saveObjects() {
     for (const [group, mode] of Object.entries(groupModes)) {
       if (Object.prototype.hasOwnProperty.call(groups, group)) groupModesPayload[group] = mode;
     }
+    const groupBoxColorsPayload = {};
+    for (const [group, color] of Object.entries(groupBoxColors)) {
+      if (Object.prototype.hasOwnProperty.call(groups, group)) groupBoxColorsPayload[group] = color;
+    }
     const payload = {
       default_mode: defaultSelect.value || 'moving',
       labels,
       group_modes: groupModesPayload,
       still_alerts: stillAlertsPayload,
       box_colors: boxColors,
+      group_box_colors: groupBoxColorsPayload,
     };
     const result = await api('/api/settings/objects', { method: 'PUT', body: JSON.stringify(payload) });
     render(result);

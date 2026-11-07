@@ -62,7 +62,7 @@ def test_objects_settings_save_round_trip(tmp_path, monkeypatch):
             row = db.execute("SELECT value FROM app_settings WHERE key = 'objects'").fetchone()
         assert row is not None
         stored = json.loads(row[0])
-        assert stored == {"default_mode": "moving", "labels": {"car": "still", "person": "moving"}, "group_modes": {}, "still_alerts": {}, "box_colors": {}}
+        assert stored == {"default_mode": "moving", "labels": {"car": "still", "person": "moving"}, "group_modes": {}, "still_alerts": {}, "box_colors": {}, "group_box_colors": {}}
 
         # GET returns what was saved.
         status, _headers, payload = client.request("/api/settings/objects")
@@ -307,6 +307,54 @@ def test_objects_box_colors_round_trip_and_overlay_endpoint(tmp_path, monkeypatc
 
         # Signed-out requests are refused.
         assert LocalClient(base_url).request("/api/overlay/box_colors")[0] == 401
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_group_box_colors_round_trip_and_expand_to_members(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        headers = {"X-CSRF-Token": csrf}
+        status, _headers, _groups = client.request(
+            "/api/settings/label_groups",
+            method="PUT",
+            json_body={"groups": {"animal": ["cat", "dog", "horse"], "pet": ["cat", "dog"]}},
+            headers=headers,
+        )
+        assert status == 200
+
+        status, _headers, updated = client.request(
+            "/api/settings/objects",
+            method="PUT",
+            json_body={
+                "default_mode": "moving",
+                "group_box_colors": {"Animal": "#FBBF24", "pet": "#a78bfa"},
+                "box_colors": {"dog": "#ff0000"},
+            },
+            headers=headers,
+        )
+        assert status == 200
+        assert updated["group_box_colors"] == {"animal": "#fbbf24", "pet": "#a78bfa"}
+
+        # The overlay map is flattened to labels: own colour > most specific
+        # group (pet beats animal for cat) > broader group (horse).
+        status, _headers, payload = client.request("/api/overlay/box_colors")
+        assert status == 200
+        assert payload["box_colors"] == {"cat": "#a78bfa", "dog": "#ff0000", "horse": "#fbbf24"}
+
+        status, _headers, body = client.request(
+            "/api/settings/objects",
+            method="PUT",
+            json_body={"default_mode": "moving", "group_box_colors": {"pet": "blue"}},
+            headers=headers,
+        )
+        assert status == 400
+        assert "group_box_colors['pet']" in body["detail"]
     finally:
         server.should_exit = True
         thread.join(timeout=5)
