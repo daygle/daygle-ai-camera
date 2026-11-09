@@ -95,7 +95,10 @@ function setMessage(text, isError = false) {
  * @param {string} text - Message to display
  * @param {string} type - 'loading' | 'success' | 'error' | 'info'
  */
-function setModelMessage(modelId, text, type = 'info') {
+function setModelMessage(key, text, type = 'info') {
+  // One card holds every variant of a model, so resolve the button's variant
+  // key to that card (and key the stored message by it).
+  const modelId = modelCardId(key);
   // Clear any pending timeout so rapid actions don't clear new messages
   if (modelMessageTimeouts[modelId]) {
     clearTimeout(modelMessageTimeouts[modelId]);
@@ -296,16 +299,222 @@ function fillAiForm(settings) {
 }
 
 // Fill one library (object or face) when this page has it.
+//
+// The API returns one row per installed resolution plus a "-new" download row
+// for every installed model, all sharing the catalog ``id``. Rendering those
+// rows 1:1 showed the same model two or three times, interleaved with the
+// catalog. Group them by model instead: one card per INSTALLED model (its
+// resolutions as rows inside it, plus an "add another size" control), then a
+// compact catalog of the models that are not installed yet.
 function renderLibrary(card, list, empty, count, familyModels) {
   if (!list) return;
   if (card) card.hidden = false;
-  list.innerHTML = familyModels.map(renderCard).join('');
-  if (empty) empty.hidden = familyModels.length > 0;
+  const groups = groupModels(familyModels);
+  const installedGroups = groups.filter((g) => g.variants.length);
+  const catalogGroups = groups.filter((g) => !g.variants.length);
+  const sections = [];
+  if (installedGroups.length) {
+    sections.push(`
+      <div class="model-library-section">
+        <h3 class="model-library-section-title">Installed <span class="model-library-section-count">${installedGroups.length}</span></h3>
+        <div class="model-card-grid">${installedGroups.map(renderInstalledCard).join('')}</div>
+      </div>`);
+  }
+  if (catalogGroups.length) {
+    sections.push(`
+      <div class="model-library-section">
+        <h3 class="model-library-section-title">${installedGroups.length ? 'More models' : 'Available models'} <span class="model-library-section-count">${catalogGroups.length}</span></h3>
+        ${renderCatalog(catalogGroups)}
+      </div>`);
+  }
+  list.innerHTML = sections.join('');
+  if (empty) empty.hidden = groups.length > 0;
   if (count) {
-    count.textContent = familyModels.length
-      ? `${familyModels.filter((m) => m.installed).length} installed · ${familyModels.length} available`
+    count.textContent = groups.length
+      ? `${installedGroups.length} installed · ${groups.length} available`
       : '0 models';
   }
+}
+
+// Card keys are variant ids (``yolo26s-768``, ``yolo26s-new``) but one card
+// now holds every variant of a model, so map each key to its model's card.
+const cardIdByKey = {};
+function modelCardId(key) {
+  return cardIdByKey[key] || key;
+}
+
+function groupModels(familyModels) {
+  const groups = new Map();
+  for (const m of familyModels) {
+    let group = groups.get(m.id);
+    if (!group) {
+      group = { id: m.id, base: null, variants: [] };
+      groups.set(m.id, group);
+    }
+    cardIdByKey[m.variant_id || m.id] = m.id;
+    if (m.installed) group.variants.push(m);
+    else if (!group.base) group.base = m;
+  }
+  for (const group of groups.values()) {
+    // The download row always exists, but fall back to an installed row (its
+    // label carries the " · 640×640" suffix, so strip it) just in case.
+    const info = group.base || group.variants[0];
+    group.info = info;
+    group.label = group.base ? info.label : String(info.label || '').replace(/\s·\s\d+×\d+$/, '');
+    group.downloadKey = group.base ? (group.base.variant_id || group.base.id) : `${group.id}-new`;
+  }
+  return [...groups.values()];
+}
+
+const RESOLUTION_OPTIONS = [
+  [320, '320 (Fast)'], [416, '416'], [480, '480'], [512, '512'], [640, '640 (Default)'],
+  [768, '768'], [800, '800'], [896, '896'], [1024, '1024 (Accurate)'], [1280, '1280 (Max)'],
+];
+
+// Resolution picker + Download button. Sizes already installed are disabled so
+// "add another size" can never silently re-export an existing one.
+function downloadControlsHtml(group, installedSizes = []) {
+  const taken = new Set(installedSizes);
+  // Default to 640, else the nearest larger size, else the nearest smaller.
+  const preferred = [640, 768, 800, 896, 1024, 1280, 512, 480, 416, 320].find((size) => !taken.has(size));
+  const options = RESOLUTION_OPTIONS.map(([size, label]) => {
+    const disabled = taken.has(size) ? ' disabled' : '';
+    const selected = size === preferred ? ' selected' : '';
+    return `<option value="${size}"${disabled}${selected}>${label}${disabled ? ' - installed' : ''}</option>`;
+  }).join('');
+  const key = escapeHtml(group.downloadKey);
+  return `
+    <select class="model-res-select" data-model-id="${key}" aria-label="Export resolution for ${escapeHtml(group.label)}" title="Model export resolution  -  this determines the input size the model accepts. Higher = more accurate on small objects, slower inference.">${options}</select>
+    <button class="btn-info model-action-btn" data-action="download" data-model-id="${key}" data-model-name="${escapeHtml(group.id)}" data-model-family="${escapeHtml(group.info.family || 'object')}" title="Install this model. It will not change the default model - press Use afterwards to switch to it, or assign it to a camera on Camera Models."${preferred === undefined ? ' disabled' : ''}>⬇ Download</button>`;
+}
+
+function cardMessageHtml(cardKey) {
+  // Re-emit a message left by a previous action (see modelCardMessages) so a
+  // list rebuild does not erase the proof that the last operation finished.
+  const storedMessage = modelCardMessages[cardKey];
+  return storedMessage
+    ? `<div class="model-card-message model-card-message-${escapeHtml(storedMessage.type)}">${escapeHtml(storedMessage.text)}</div>`
+    : '<div class="model-card-message model-card-message-hidden"></div>';
+}
+
+function sizeBarHtml(m) {
+  const maxMb = 131;
+  const barWidth = Math.min(100, Math.round((m.approx_mb / maxMb) * 100));
+  return `
+    <div class="model-card-size">
+      <span class="model-size-value">~${escapeHtml(String(m.approx_mb))} MB</span>
+      <div class="model-size-bar"><div class="model-size-fill" style="width:${barWidth}%"></div></div>
+    </div>`;
+}
+
+// One installed resolution inside an installed model's card.
+function renderVariantRow(m) {
+  const key = escapeHtml(m.variant_id || m.id);
+  const family = escapeHtml(m.family || 'object');
+  const common = `data-model-id="${key}" data-model-name="${escapeHtml(m.id)}" data-model-family="${family}" data-model-imgsz="${m.exported_imgsz || ''}"`;
+  const hasUpdate = modelUpdateMap[m.id]?.update_available === true;
+  const canDelete = m.can_delete !== false;
+  const updateBtn = hasUpdate
+    ? `<button class="btn-warning model-action-btn" data-action="update" ${common}>↻ Update</button>`
+    : '';
+  let actionsHtml;
+  if (m.active && !canDelete) {
+    actionsHtml = `<button class="btn-success model-action-btn" disabled>✓ In Use</button>${updateBtn}`;
+  } else {
+    actionsHtml = `
+      ${m.active ? '<button class="btn-success model-action-btn" disabled>✓ In Use</button>' : `<button class="btn-success model-action-btn" data-action="use" ${common} data-model-path="${escapeHtml(m.path)}">▶ Use</button>`}
+      ${updateBtn}
+      <button class="btn-danger model-action-btn" data-action="delete" ${common}>✕ Delete</button>`;
+  }
+  const sizeText = m.size_bytes ? `${(m.size_bytes / 1048576).toFixed(0)} MB` : '';
+  const meta = [sizeText, m.installed_version ? `v${m.installed_version}` : ''].filter(Boolean).join(' · ');
+  return `
+    <div class="model-variant-row${m.active ? ' is-active' : ''}">
+      <div class="model-variant-info">
+        <div class="model-variant-title">
+          <strong>${m.exported_imgsz ? `${m.exported_imgsz}×${m.exported_imgsz}` : 'Default size'}</strong>
+          ${m.active ? '<span class="model-status model-status-active">● Active</span>' : ''}
+          ${meta ? `<span class="model-version">${escapeHtml(meta)}</span>` : ''}
+        </div>
+        ${modelExportInfoHtml(m.export_info)}
+      </div>
+      <div class="model-variant-actions">${actionsHtml}</div>
+    </div>`;
+}
+
+function renderInstalledCard(group) {
+  const m = group.info;
+  const isActive = group.variants.some((v) => v.active);
+  const hasUpdate = modelUpdateMap[group.id]?.update_available === true;
+  // "Recommended" rides with the server's recommended pick.
+  const recommendedBadge = m.recommended
+    ? '<span class="model-status model-status-recommended">Recommended</span>'
+    : '';
+  const statusHtml = isActive
+    ? '<span class="model-status model-status-active">● Active</span>'
+    : '<span class="model-status model-status-installed">○ Installed</span>';
+  const updateBadge = hasUpdate ? '<span class="model-badge model-badge-update">Update Available</span>' : '';
+  const sizes = group.variants.map((v) => v.exported_imgsz).filter(Boolean);
+  const cardKey = group.id;
+  return `
+    <div class="model-card ${isActive ? 'model-card-active' : 'model-card-installed'}" id="model-card-${escapeHtml(cardKey)}">
+      <div class="model-card-header">
+        <div class="model-card-title">
+          <h3>${escapeHtml(group.label)}</h3>
+          <div class="model-card-meta">${statusHtml}${recommendedBadge}${updateBadge}</div>
+        </div>
+        ${sizeBarHtml(m)}
+      </div>
+      <p class="model-card-desc">${escapeHtml(m.description)}</p>
+      <div class="model-variant-list">${group.variants.map(renderVariantRow).join('')}</div>
+      ${cardMessageHtml(cardKey)}
+      <div class="model-card-actions model-add-size">
+        <span class="model-add-size-label">Add another size</span>
+        ${downloadControlsHtml(group, sizes)}
+      </div>
+    </div>`;
+}
+
+// Catalog generation ("YOLO26", "YOLO11", "YOLOv8") from the catalog id, so
+// the not-installed list can be grouped newest first.
+function modelGeneration(id) {
+  const match = /^yolo(v?)(\d+)/i.exec(String(id || ''));
+  if (!match) return { key: 'other', label: 'Other', rank: -1 };
+  return { key: `${match[1]}${match[2]}`, label: `YOLO${match[1]}${match[2]}`, rank: Number(match[2]) };
+}
+
+function renderCatalogRow(group) {
+  const m = group.info;
+  const cardKey = group.id;
+  const recommendedBadge = m.recommended
+    ? '<span class="model-status model-status-recommended">Recommended</span>'
+    : '';
+  return `
+    <div class="model-catalog-row${m.recommended ? ' is-recommended' : ''}" id="model-card-${escapeHtml(cardKey)}">
+      <div class="model-catalog-main">
+        <div class="model-catalog-title"><h4>${escapeHtml(group.label)}</h4>${recommendedBadge}</div>
+        <p class="model-card-desc">${escapeHtml(m.description)}</p>
+      </div>
+      <span class="model-catalog-size">~${escapeHtml(String(m.approx_mb))} MB</span>
+      <div class="model-card-actions model-catalog-actions">${downloadControlsHtml(group)}</div>
+      ${cardMessageHtml(cardKey)}
+    </div>`;
+}
+
+function renderCatalog(groups) {
+  const byGeneration = new Map();
+  for (const group of groups) {
+    const generation = modelGeneration(group.id);
+    if (!byGeneration.has(generation.key)) byGeneration.set(generation.key, { ...generation, groups: [] });
+    byGeneration.get(generation.key).groups.push(group);
+  }
+  const generations = [...byGeneration.values()].sort((a, b) => b.rank - a.rank);
+  const showHeadings = generations.length > 1;
+  return generations.map((generation) => `
+    <div class="model-catalog-group">
+      ${showHeadings ? `<h4 class="model-catalog-group-title">${escapeHtml(generation.label)}</h4>` : ''}
+      <div class="model-catalog-list">${generation.groups.map(renderCatalogRow).join('')}</div>
+    </div>`).join('');
 }
 
 function renderModelList(models) {
@@ -324,119 +533,6 @@ function renderModelList(models) {
   renderLibrary(faceModelsCard, faceModelList, faceModelsEmpty, faceModelCount, faceModels);
 
   bindModelCardActions();
-}
-
-function renderCard(m) {
-  const cardKey = m.variant_id || m.id;
-  // Re-emit a message left by a previous action (see modelCardMessages) so a
-  // list rebuild does not erase the proof that the last operation finished.
-  const storedMessage = modelCardMessages[cardKey];
-  const messageHtml = storedMessage
-    ? `<div class="model-card-message model-card-message-${escapeHtml(storedMessage.type)}">${escapeHtml(storedMessage.text)}</div>`
-    : '<div class="model-card-message model-card-message-hidden"></div>';
-    const updateInfo = modelUpdateMap[m.id] || {};
-    const hasUpdate = updateInfo.update_available === true;
-    const sizeMb = m.size_bytes ? `${(m.size_bytes / 1048576).toFixed(0)} MB` : `~${m.approx_mb} MB`;
-    const isInstalled = m.installed;
-    const isActive = m.active;
-    const canDelete = m.can_delete !== false;
-    const versionLabel = m.installed_version ? `v${escapeHtml(m.installed_version)}` : '';
-    // "Recommended" rides with the server's recommended pick on every row of
-    // that model (each installed resolution), so the badge shows up whether
-    // the card is the catalog entry or an installed variant.
-    const recommendedBadge = m.recommended
-      ? '<span class="model-status model-status-recommended">Recommended</span>'
-      : '';
-
-    // Determine card state class
-    let cardClass = 'model-card';
-    if (isActive) cardClass += ' model-card-active';
-    else if (isInstalled) cardClass += ' model-card-installed';
-    else cardClass += ' model-card-available';
-
-    // Status indicator
-    let statusHtml = '';
-    if (isActive) {
-      statusHtml = '<span class="model-status model-status-active">\u25CF Active</span>';
-    } else if (isInstalled) {
-      statusHtml = '<span class="model-status model-status-installed">\u25CB Installed</span>';
-    }
-
-    // Update badge
-    let updateBadge = '';
-    if (hasUpdate) {
-      updateBadge = '<span class="model-badge model-badge-update">Update Available</span>';
-    }
-
-    // Resolution badge for installed models
-    let resBadge = '';
-    if (m.installed && m.exported_imgsz) {
-      resBadge = `<span class="model-badge model-badge-res">${m.exported_imgsz}\u00d7${m.exported_imgsz}</span>`;
-    }
-
-    // How the installed file was actually exported (read from the ONNX
-    // metadata), so a fp16 or simplify request that fell back is visible.
-    const exportInfoHtml = isInstalled ? modelExportInfoHtml(m.export_info) : '';
-
-    // Size bar (visual weight indicator)
-    const maxMb = 131;
-    const barWidth = Math.min(100, Math.round((m.approx_mb / maxMb) * 100));
-
-    // Action buttons
-    let actionsHtml;
-    if (!isInstalled) {
-      actionsHtml = `
-        <div class="model-download-row">
-          <select class="model-res-select" data-model-id="${escapeHtml(cardKey)}" title="Model export resolution  -  this determines the input size the model accepts. Higher = more accurate on small objects, slower inference.">
-            <option value="320">320 (Fast)</option>
-            <option value="416">416</option>
-            <option value="480">480</option>
-            <option value="512">512</option>
-            <option value="640" selected>640 (Default)</option>
-            <option value="768">768</option>
-            <option value="800">800</option>
-            <option value="896">896</option>
-            <option value="1024">1024 (Accurate)</option>
-            <option value="1280">1280 (Max)</option>
-          </select>
-          <button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-family="${escapeHtml(m.family || 'object')}" title="Install this model. It will not change the default model - press Use afterwards to switch to it, or assign it to a camera on Camera Models.">\u2B07 Download</button>
-        </div>`;
-    } else if (isActive && !canDelete && hasUpdate) {
-      // Active model with update: allow re-export in place
-      actionsHtml = `
-        <span class="model-active-label">\u25CF In Use</span>
-        <button class="btn-warning model-action-btn" data-action="update" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-family="${escapeHtml(m.family || 'object')}" data-model-imgsz="${m.exported_imgsz || ''}">\u21BB Update</button>`;
-    } else if (isActive && !canDelete) {
-      actionsHtml = '<button class="btn-success model-action-btn" disabled>\u2713 In Use</button>';
-    } else {
-      const updateBtn = hasUpdate
-        ? `<button class="btn-warning model-action-btn" data-action="update" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-family="${escapeHtml(m.family || 'object')}" data-model-imgsz="${m.exported_imgsz || ''}">\u21BB Update</button>`
-        : '';
-      actionsHtml = `
-        <button class="btn-success model-action-btn" data-action="use" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}" data-model-family="${escapeHtml(m.family || 'object')}" data-model-imgsz="${m.exported_imgsz || ''}">\u25B6 Use</button>
-        ${updateBtn}
-        <button class="btn-danger model-action-btn" data-action="delete" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-family="${escapeHtml(m.family || 'object')}" data-model-imgsz="${m.exported_imgsz || ''}">\u2715 Delete</button>`;
-    }
-
-    return `
-      <div class="${cardClass}" id="model-card-${escapeHtml(cardKey)}">
-        <div class="model-card-header">
-          <div class="model-card-title">
-            <h3>${escapeHtml(m.label)}</h3>
-            <div class="model-card-meta">
-              ${statusHtml}${recommendedBadge}${updateBadge}${resBadge}${versionLabel ? `<span class="model-version">${versionLabel}</span>` : ''}
-            </div>
-          </div>
-          <div class="model-card-size">
-            <span class="model-size-value">${sizeMb}</span>
-            <div class="model-size-bar"><div class="model-size-fill" style="width:${barWidth}%"></div></div>
-          </div>
-        </div>
-        <p class="model-card-desc">${escapeHtml(m.description)}</p>
-        ${exportInfoHtml}
-        ${messageHtml}
-        <div class="model-card-actions">${actionsHtml}</div>
-      </div>`;
 }
 
 // One-line summary of an installed model's export settings, e.g.
@@ -523,7 +619,7 @@ function bindModelCardActions() {
           result = await api(`/api/settings/ai/models/${encodeURIComponent(modelName)}${query}`, { method: 'DELETE' });
           // This card is about to disappear; drop its stored message so a later
           // reinstall of the same resolution cannot resurrect "Deleted ...".
-          delete modelCardMessages[modelId];
+          delete modelCardMessages[modelCardId(modelId)];
         }
 
         // Status card: "use" returns the saved settings and download/update

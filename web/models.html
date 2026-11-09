@@ -57,12 +57,22 @@
       </div>
     </header>
 
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">📦</div>
-        <div>
-          <h2>Object Detection Status</h2>
-          <p class="settings-section-subtitle">Detects everyday objects (person, car…) - these labels are what zones, alerts, and recordings use.</p>
+    <!-- One card per model family: header, a one-line status strip, the
+         installed models (one card each, sizes inside), then the catalog of
+         models not installed yet. -->
+    <section class="card model-library-card" id="objectModelsCard" aria-labelledby="objectLibraryTitle">
+      <div class="model-library-header">
+        <div class="settings-section-icon" aria-hidden="true">📦</div>
+        <div class="model-library-header-copy">
+          <span class="model-library-kicker">Primary detector</span>
+          <h2 id="objectLibraryTitle">Object detection</h2>
+          <p>Detects people, vehicles, animals and everyday objects - these labels are what zones, alerts and recordings use. Downloading installs a model; it does not become the default until you choose <strong>Use</strong> (or assign it to a camera on Camera Models).</p>
+        </div>
+        <div class="model-library-toolbar-actions">
+          <span class="model-library-count" id="objectModelCount">Loading models…</span>
+          <button id="checkObjectModelUpdatesBtn" class="btn-info model-update-check-btn" type="button">
+            <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
+          </button>
         </div>
       </div>
       <div id="firstRunNotice" class="first-run-notice" hidden>
@@ -72,41 +82,19 @@
         </div>
         <button id="firstRunChooseModelBtn" class="btn-info" type="button">Choose a model</button>
       </div>
-      <div id="settingsMessage" class="muted"></div>
-      <div id="objectStatusPanel" class="status-panel"></div>
-      <div class="button-row">
-        <button id="checkModelBtn" class="secondary" type="button">Check Model</button>
-        <button id="reloadDetectorBtn" class="secondary" type="button">Reload Detector</button>
-        <button id="testDetectorBtn" class="btn-info" type="button">Test Detector</button>
-      </div>
-    </section>
-
-    <section class="model-library-toolbar model-library-toolbar-object" aria-labelledby="objectLibraryTitle">
-      <div class="model-library-toolbar-copy">
-        <span class="model-library-kicker">Primary detector</span>
-        <h2 id="objectLibraryTitle">Object models</h2>
-        <p>Models for people, vehicles, animals, and the everyday objects used by your zones and alerts. Downloading installs a model; it does not become the default until you choose <strong>Use</strong> (or assign it to a camera on Camera Models).</p>
-      </div>
-      <div class="model-library-toolbar-actions">
-        <span class="model-library-count" id="objectModelCount">Loading models…</span>
-        <button id="checkObjectModelUpdatesBtn" class="btn-info model-update-check-btn" type="button">
-          <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
-        </button>
-      </div>
-    </section>
-    <div id="objectModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
-
-    <section class="card model-library-card" id="objectModelsCard">
-      <div class="model-library-card-header">
-        <div>
-          <span class="model-library-kicker">Available catalog</span>
-          <h2>Choose an object model</h2>
+      <div class="model-status-row">
+        <div id="objectStatusPanel" class="status-panel model-status-strip" aria-label="Object detection status"></div>
+        <div class="button-row model-status-actions">
+          <button id="checkModelBtn" class="secondary" type="button">Check Model</button>
+          <button id="reloadDetectorBtn" class="secondary" type="button">Reload Detector</button>
+          <button id="testDetectorBtn" class="btn-info" type="button">Test Detector</button>
         </div>
-        <span class="model-library-tip">Larger models trade speed for accuracy</span>
       </div>
-      <div id="objectModelList" class="model-card-grid"></div>
+      <div id="settingsMessage" class="muted"></div>
+      <div id="objectModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
+      <div id="objectModelList" class="model-library-body"></div>
       <p id="objectModelsEmpty" class="model-library-empty" hidden>No object models available.</p>
-      <p class="model-library-empty" id="objectModelsFirstRunHint">Nothing here is installed for you: press <strong>Download</strong> to install a model, then <strong>Use</strong> to make it the one your cameras run. Recommended starting point: <strong id="recommendedModelName">&hellip;</strong>. Need INT8 precision on a CPU-only host? Pick a YOLO11 or YOLOv8 export instead.</p>
+      <p class="model-library-empty" id="objectModelsFirstRunHint">Nothing here is installed for you: press <strong>Download</strong> to install a model, then <strong>Use</strong> to make it the one your cameras run. Recommended starting point: <strong id="recommendedModelName">&hellip;</strong>. Larger models trade speed for accuracy. Need INT8 precision on a CPU-only host? Pick a YOLO11 or YOLOv8 export instead.</p>
     </section>
   </main>
   <script src="/static/nav.js"></script>
