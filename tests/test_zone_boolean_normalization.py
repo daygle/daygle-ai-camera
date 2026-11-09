@@ -20,7 +20,7 @@ def test_behavior_rule_string_booleans_use_application_boolean_semantics():
         'a': {'x': 0.1, 'y': 0.1}, 'b': {'x': 0.9, 'y': 0.9},
         'direction': 'both', 'labels': [], 'cooldown_seconds': 30,
         'record_on_detect': False, 'email_enabled': False,
-        'email_recipients': [], 'push_enabled': False,
+        'email_recipients': [], 'push_recipients': [], 'push_enabled': False,
         'notify_start': None, 'notify_end': None,
     }
     for normalize_rule, key in (

@@ -90,6 +90,7 @@ Filter by camera ID, event type, or severity when investigating a specific strea
 - **Zones** - draw zones directly in the zone editor with **Draw polygon** or **Full Frame**, use the per-zone **Shape** control to convert areas between full frame and polygon, manage zone rules, and use the per-zone visibility controls to show or hide overlays while configuring the scene.
 - **Notifications** - push (ntfy), camera offline alerts, and email (SMTP) delivery, each with a test action.
   Detection alert pushes carry a `daygle-event-<id>` ntfy tag naming the triggering event; the Android app uses it to open that event when the notification is tapped.
+  Email and push recipients are picked from users, on the **Alerts** page per alert and here for camera offline alerts. Email goes to each chosen user's current email address. Push goes to each chosen user's own ntfy topic, set as **Push Topic** on their **Profile** (or by an admin on **Users**). An alert with no push recipients ticked goes to the shared topic set here. One whose chosen users are all deactivated, deleted or without a topic sends no push. The Android app subscribes to both the shared topic and the signed-in user's own topic.
 - **System** - software updates, Cloudflare Tunnel, database backup/restore, login security, and the Danger Zone. Software Updates appears above Cloudflare Tunnel; the tunnel card shows whether the service is running, stopped, unconfigured, or needs attention.
 
 ## Cloudflare Tunnel

@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
-from app.auth import AuthError
+from app.auth import AuthError, normalize_ntfy_topic
 from app.auth_gates import require_admin, require_user
 from app.deps import get_auth, get_database
 from app.request_helpers import read_json_object, write_audit_log
@@ -29,6 +29,7 @@ async def update_profile(request: Request, auth=Depends(get_auth)):
             first_name=payload.get('first_name'),
             last_name=payload.get('last_name'),
             email=payload.get('email'),
+            ntfy_topic=payload.get('ntfy_topic'),
             timezone_name=payload.get('timezone'),
             date_format=payload.get('date_format'),
             time_format=payload.get('time_format'),
@@ -79,6 +80,8 @@ async def create_user(request: Request, db=Depends(get_database), auth=Depends(g
     require_admin(request)
     payload = await read_json_object(request)
     try:
+        # Validate before creating so a bad topic does not leave a half-made user.
+        ntfy_topic = normalize_ntfy_topic(payload.get('ntfy_topic', ''))
         user = await run_in_threadpool(
             auth.create_user,
             payload.get('username', ''),
@@ -88,6 +91,8 @@ async def create_user(request: Request, db=Depends(get_database), auth=Depends(g
             last_name=payload.get('last_name', ''),
             email=payload.get('email', ''),
         )
+        if ntfy_topic:
+            user = await run_in_threadpool(auth.update_user, int(user['id']), ntfy_topic=ntfy_topic)
         write_audit_log(request, db, 'create', 'user', user['id'], {'username': user['username'], 'role': user['role']})
         return user
     except AuthError as exc:
@@ -107,6 +112,8 @@ async def update_user(user_id: int, request: Request, db=Depends(get_database), 
         changes['last_name'] = payload['last_name']
     if 'email' in payload:
         changes['email'] = payload['email']
+    if 'ntfy_topic' in payload:
+        changes['ntfy_topic'] = payload['ntfy_topic']
     if 'role' in payload:
         changes['role'] = payload['role']
     if 'is_active' in payload:
@@ -124,6 +131,7 @@ async def update_user(user_id: int, request: Request, db=Depends(get_database), 
             role=payload.get('role'),
             is_active=payload.get('is_active'),
             password=payload.get('password'),
+            ntfy_topic=payload.get('ntfy_topic'),
         )
         write_audit_log(request, db, 'update', 'user', user_id, {'target_username': user.get('username'), **changes})
         return user

@@ -17,12 +17,18 @@ router = APIRouter()
 
 
 @router.get('/api/settings/alert-push')
-def get_push_notification_settings(settings=Depends(get_redacted_push_notification_settings)):
+def get_push_notification_settings(request: Request, settings=Depends(get_redacted_push_notification_settings)):
     # The dep strips ``password`` for non-admin callers (see
     # ``app.deps.get_redacted_push_notification_settings``). Admin
     # still receives the full dict so the ntfy credentials round-trip
     # through PUT.
-    return settings
+    #
+    # ``user_topic`` is the CALLER's own ntfy topic (set on their profile):
+    # pushes from alerts that name this user go there, while ``topic`` keeps
+    # the pushes for alerts that name nobody. The Android app subscribes to
+    # both. It is per-caller and read-only here (PUT ignores it).
+    user = getattr(request.state, 'user', None) or {}
+    return {**settings, 'user_topic': str(user.get('ntfy_topic') or '')}
 
 
 @router.put('/api/settings/alert-push')

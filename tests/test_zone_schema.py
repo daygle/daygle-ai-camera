@@ -332,7 +332,7 @@ def test_normalize_zone_alert_schedules_ignores_rule_level_fields_and_keeps_mult
     }]})[0]
     assert bare['alert_schedules'] == [{
         'id': 'schedule-1', 'email_enabled': False, 'push_enabled': False,
-        'email_recipients': [], 'notify_start': None, 'notify_end': None,
+        'email_recipients': [], 'push_recipients': [], 'notify_start': None, 'notify_end': None,
     }]
     for key in ('email_enabled', 'push_enabled', 'email_recipients', 'notify_start'):
         assert key not in bare

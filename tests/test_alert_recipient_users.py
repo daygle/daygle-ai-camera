@@ -103,3 +103,132 @@ def test_camera_offline_settings_keep_user_recipients(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+# ─── Push recipients: users' own ntfy topics ────────────────────────────────
+
+def test_normalize_push_recipients_keeps_only_user_references():
+    from app.utils import normalize_push_recipients
+
+    assert normalize_push_recipients(['user:3', 'a@example.com', 'USER:3', 'topic-name', 'user:5']) == ['user:3', 'user:5']
+    assert normalize_push_recipients(None) == []
+
+
+def test_resolve_push_topics_uses_current_active_user_topics():
+    from app.alert_recipients import resolve_push_topics
+
+    users = [
+        {'id': 1, 'ntfy_topic': 'alice-phone', 'is_active': 1},
+        {'id': 2, 'ntfy_topic': 'bob-phone', 'is_active': 0},
+        {'id': 3, 'ntfy_topic': '', 'is_active': 1},
+        {'id': 4, 'ntfy_topic': 'alice-phone', 'is_active': 1},
+    ]
+    assert resolve_push_topics(['user:1', 'user:2', 'user:3', 'user:4', 'user:99'], users) == ['alice-phone']
+    assert resolve_push_topics([], users) == []
+
+
+def test_ntfy_topic_is_validated_and_listed(tmp_path, monkeypatch):
+    import pytest
+
+    _load_app(tmp_path, monkeypatch)
+    # Imported after _load_app, which re-imports the app.* namespace.
+    from app.auth import AuthError
+
+    auth = sys.modules['app.state'].auth
+    user = auth.create_user('carol', 'Correct-Horse-Battery-9')
+    assert auth.update_user(int(user['id']), ntfy_topic='  carol_phone-1 ')['ntfy_topic'] == 'carol_phone-1'
+    assert [u['ntfy_topic'] for u in auth.list_users() if u['id'] == user['id']] == ['carol_phone-1']
+    with pytest.raises(AuthError):
+        auth.update_user(int(user['id']), ntfy_topic='bad/topic')
+    assert auth.update_profile(int(user['id']), ntfy_topic='')['ntfy_topic'] == ''
+
+
+def _capture_pushes(monkeypatch, _ad):
+    captured: list[object] = []
+
+    class FakePushNotificationService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_alert(self, alert, *, event_id, topics=None, **_kwargs):
+            captured.append(topics)
+
+    monkeypatch.setattr(_ad, 'effective_push_notification_settings', lambda: {'enabled': True})
+    monkeypatch.setattr(_ad, 'PushNotificationService', FakePushNotificationService)
+    monkeypatch.setattr(
+        _ad._state.database, 'get_event',
+        lambda _event_id: {'metadata': {}, 'snapshot_path': None, 'created_at': ''},
+    )
+    return captured
+
+
+def test_deliver_push_notifications_targets_chosen_users_topics(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.alert_dispatch as _ad
+
+    auth = sys.modules['app.state'].auth
+    alice = auth.create_user('alice', 'Correct-Horse-Battery-9')
+    auth.update_user(int(alice['id']), ntfy_topic='alice-phone')
+    captured = _capture_pushes(monkeypatch, _ad)
+    triggered = [{'label': 'person', 'rule_name': 'Gate person', 'confidence': 0.9, 'message': 'Person'}]
+    rule = {'name': 'Gate person', 'push_enabled': True}
+
+    # Nobody chosen: the shared Settings topic (topics=[]).
+    _ad.deliver_push_notifications(triggered, 1, rules=[rule])
+    # A chosen user: their own topic, which follows profile changes.
+    _ad.deliver_push_notifications(triggered, 2, rules=[{**rule, 'push_recipients': [f"user:{alice['id']}"]}])
+    auth.update_user(int(alice['id']), ntfy_topic='alice-new')
+    _ad.deliver_push_notifications(triggered, 3, rules=[{**rule, 'push_recipients': [f"user:{alice['id']}"]}])
+    # Chosen but unable to receive (deactivated): nobody, no shared fallback.
+    auth.update_user(int(alice['id']), is_active=False)
+    _ad.deliver_push_notifications(triggered, 4, rules=[{**rule, 'push_recipients': [f"user:{alice['id']}"]}])
+    assert captured == [[], ['alice-phone'], ['alice-new']]
+
+
+def test_push_service_delivers_once_per_topic(monkeypatch):
+    from app.push_notifications import PushNotificationError, PushNotificationService
+
+    service = PushNotificationService({'enabled': True, 'server_url': 'https://ntfy.example', 'topic': 'shared'})
+    sent: list[str | None] = []
+
+    def fake_deliver(title, body, *, tags=None, topic=None):
+        sent.append(topic)
+        if topic == 'broken':
+            raise PushNotificationError('boom')
+
+    monkeypatch.setattr(service, '_deliver', fake_deliver)
+    import pytest
+
+    service._deliver_to_topics('t', 'b', topics=None)
+    # A failing topic does not stop the rest, and is reported at the end.
+    with pytest.raises(PushNotificationError, match='broken'):
+        service._deliver_to_topics('t', 'b', topics=['a', 'broken', 'b', 'a'])
+    assert sent == [None, 'a', 'broken', 'b']
+
+
+def test_profile_topic_is_returned_as_user_topic_on_push_settings(tmp_path, monkeypatch):
+    from tests.support import LocalClient, _login, _server, _setup_admin
+
+    app, _ = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, payload = client.request(
+            '/api/profile', method='PUT', json_body={'ntfy_topic': 'admin-phone'},
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200 and payload['ntfy_topic'] == 'admin-phone'
+        status, _headers, payload = client.request(
+            '/api/profile', method='PUT', json_body={'ntfy_topic': 'no spaces'},
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 400
+        status, _headers, payload = client.request('/api/settings/alert-push')
+        assert status == 200 and payload['user_topic'] == 'admin-phone'
+        status, _headers, payload = client.request('/api/auth/me')
+        assert payload['user']['ntfy_topic'] == 'admin-phone'
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

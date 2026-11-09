@@ -159,6 +159,7 @@ def test_deliver_push_notifications_passes_all_triggered_labels(tmp_path, monkey
             camera_id=None,
             triggered_labels=None,
             detected_at=None,
+            topics=None,
         ):
             captured.append({
                 'alert': alert,
@@ -264,7 +265,7 @@ def test_deliver_push_notifications_unknown_face_uses_unknown_rule_push(tmp_path
             self.settings = settings
 
         def send_alert(self, alert, *, event_id, camera_name=None, camera_id=None,
-                       triggered_labels=None, detected_at=None):
+                       triggered_labels=None, detected_at=None, topics=None):
             captured.append({'alert': alert, 'event_id': event_id})
 
     import app.alert_dispatch as _ad

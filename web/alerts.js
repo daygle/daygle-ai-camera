@@ -55,6 +55,7 @@ function defaultPeopleRule(personId, personName) {
     email_enabled: false,
     push_enabled: false,
     email_recipients: '',
+    push_recipients: [],
     min_confidence: null,
     camera_id: cameraId,
     zone_id: zoneId,
@@ -111,6 +112,7 @@ function defaultAlertSchedule() {
     email_enabled: false,
     push_enabled: false,
     email_recipients: [],
+    push_recipients: [],
     notify_start: null,
     notify_end: null,
   };
@@ -131,6 +133,7 @@ function ensureAlertSchedules(rule) {
       email_enabled: schedule.email_enabled === true,
       push_enabled: schedule.push_enabled === true,
       email_recipients: normalizeEmailList(schedule.email_recipients),
+      push_recipients: normalizeEmailList(schedule.push_recipients),
       notify_start: schedule.notify_start || null,
       notify_end: schedule.notify_end || null,
     };
@@ -145,6 +148,7 @@ function ensureAlertSchedules(rule) {
 // The recipient picker helpers (toRecipientRefs, renderRecipientPicker,
 // pickedRecipients) live in web/utils.js, shared with the Settings page's
 // camera offline alerts.
+const PUSH_PICKER = { channel: 'push', emptyNote: 'With nobody ticked, pushes go to the shared topic set in Settings.' };
 // Converts every stored recipient list on the page to user references (see
 // toRecipientRefs). Runs once after load so the page and the next save use them.
 function migrateRecipients() {
@@ -164,9 +168,9 @@ function migrateRecipients() {
 function defaultRule(label = 'person', type = alertType) {
   if (type === 'sound') {
     const sound = soundClasses.find((item) => item.id === label);
-    return { class: label, name: sound?.label || label, enabled: true, record_on_detect: true, confidence_threshold: sound?.default_threshold ?? 0.35, cooldown_seconds: sound?.default_cooldown ?? 30, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null };
+    return { class: label, name: sound?.label || label, enabled: true, record_on_detect: true, confidence_threshold: sound?.default_threshold ?? 0.35, cooldown_seconds: sound?.default_cooldown ?? 30, email_enabled: false, email_recipients: [], push_enabled: false, push_recipients: [], active_start: null, active_end: null, notify_start: null, notify_end: null };
   }
-  return { id: `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, label, enabled: true, record_on_detect: true, min_confidence: label === 'motion' || label === 'face' ? 0.45 : 0.5, max_confidence: 1, ai_verify: false, ai_verify_skip_above: 1, email_enabled: false, email_recipients: [], push_enabled: false, active_start: null, active_end: null, notify_start: null, notify_end: null, alert_schedules: [defaultAlertSchedule()] };
+  return { id: `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, label, enabled: true, record_on_detect: true, min_confidence: label === 'motion' || label === 'face' ? 0.45 : 0.5, max_confidence: 1, ai_verify: false, ai_verify_skip_above: 1, email_enabled: false, email_recipients: [], push_enabled: false, push_recipients: [], active_start: null, active_end: null, notify_start: null, notify_end: null, alert_schedules: [defaultAlertSchedule()] };
 }
 
 // The rule's detect window is edited on the Zones page; shown here because
@@ -188,6 +192,7 @@ function renderObjectSchedules(rule, ruleIndex, schedules) {
         <label><span>Alert Until</span>${timeSelect(schedule.notify_end, 'data-field="notify_end"')}</label>
       </div>
       ${renderRecipientPicker(schedule.email_recipients, alertUsers)}
+      ${renderRecipientPicker(schedule.push_recipients, alertUsers, PUSH_PICKER)}
     </section>`).join('')}<button class="secondary alerts-schedule-add" data-add-schedule="${ruleIndex}" type="button">＋ Add Schedule</button></div>`;
 }
 
@@ -369,6 +374,7 @@ function renderPolicies() {
         ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Alert From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Alert Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`
         : `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Alert From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Alert Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`}
       ${alertType === 'object' ? '' : renderRecipientPicker(rule.email_recipients, alertUsers)}
+      ${alertType === 'object' ? '' : renderRecipientPicker(rule.push_recipients, alertUsers, PUSH_PICKER)}
       <p class="muted alerts-policy-note">${policyNote}</p>
     </article></td></tr>`;
   }).join('')}</tbody></table></div>`;
@@ -424,14 +430,15 @@ function renderPolicies() {
   $('alertsList').querySelectorAll('[data-recipient-picker]').forEach((picker) => picker.addEventListener('change', () => {
     const policyRow = picker.closest('[data-policy-details-for]');
     const rule = rules[Number(policyRow.dataset.policyDetailsFor)];
-    const emails = pickedRecipients(picker);
+    const picked = pickedRecipients(picker);
+    const key = picker.dataset.recipientPicker === 'push' ? 'push_recipients' : 'email_recipients';
     const scheduleEntry = alertType === 'object' ? picker.closest('[data-schedule-index]') : null;
     if (scheduleEntry) {
-      ensureAlertSchedules(rule)[Number(scheduleEntry.dataset.scheduleIndex)].email_recipients = emails;
+      ensureAlertSchedules(rule)[Number(scheduleEntry.dataset.scheduleIndex)][key] = picked;
       ensureAlertSchedules(rule);
     } else {
-      // People (face) rules store recipients as a comma-separated string.
-      rule.email_recipients = alertType === 'people' ? emails.join(', ') : emails;
+      // People (face) rules store email recipients as a comma-separated string.
+      rule[key] = alertType === 'people' && key === 'email_recipients' ? picked.join(', ') : picked;
     }
   }));
   $('alertsList').querySelectorAll('[data-add-schedule]').forEach((button) => button.addEventListener('click', () => {

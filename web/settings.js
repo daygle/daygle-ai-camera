@@ -403,6 +403,13 @@ function renderCameraOffline(settings) {
       emptyNote: 'With nobody ticked, offline emails go to the From address set under Email Alerts.',
     });
   }
+  const pushPicker = document.getElementById('cameraOfflinePushRecipients');
+  if (pushPicker) {
+    pushPicker.innerHTML = renderRecipientPicker(settings?.push_recipients || [], recipientUsers, {
+      channel: 'push',
+      emptyNote: 'With nobody ticked, offline pushes go to the shared topic set under Push Notifications.',
+    });
+  }
 }
 
 // The GPU Health thresholds only matter when the host has an NVIDIA GPU, so
@@ -666,6 +673,8 @@ document.getElementById('cameraOfflineForm')?.addEventListener('submit', guard(a
   if (!Number.isFinite(data.offline_delay_minutes)) data.offline_delay_minutes = 1;
   const picker = document.getElementById('cameraOfflineRecipients');
   if (picker) data.recipients = pickedRecipients(picker);
+  const pushPicker = document.getElementById('cameraOfflinePushRecipients');
+  if (pushPicker) data.push_recipients = pickedRecipients(pushPicker);
   const updated = await api('/api/settings/camera-offline', { method: 'PUT', body: JSON.stringify(data) });
   renderCameraOffline(updated);
   setMessage('Camera offline alert settings saved.');

@@ -24,7 +24,7 @@ from fastapi import HTTPException
 import app.state as _state
 from app.config_facades import effective_face_recognition_config
 from app.runtime_config import cached_snapshot
-from app.utils import normalize_bool_setting as _coerce_bool
+from app.utils import normalize_bool_setting as _coerce_bool, normalize_push_recipients
 
 logger = logging.getLogger('daygle.ai')
 
@@ -104,6 +104,8 @@ def _validate_rule(rule: dict[str, Any]) -> dict[str, Any]:
         'email_enabled': _coerce_bool(rule.get('email_enabled'), False),
         'push_enabled': _coerce_bool(rule.get('push_enabled'), False),
         'email_recipients': _normalize_recipients_field(rule.get('email_recipients')),
+        # Users whose own ntfy topic gets this rule's pushes (``user:<id>``).
+        'push_recipients': normalize_push_recipients(rule.get('push_recipients')),
         'min_confidence': _coerce_optional_float(rule.get('min_confidence')),
         # Optional scoping (People card on the Zones page). Empty means the
         # rule applies on every camera / any zone. A zone-scoped unknown rule uses an id of ``_unknown:<zone>``

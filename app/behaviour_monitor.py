@@ -742,7 +742,7 @@ def _emit_behaviour_event(
     *details* is the monitor-specific metadata; *fire* supplies the zone.
     """
     from app.alert_dispatch import _rule_notify_active_now, deliver_alert_notifications
-    from app.utils import normalize_bool_setting, normalize_email_recipients
+    from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_push_recipients
 
     email_enabled = normalize_bool_setting(rule.get('email_enabled'), False)
     push_enabled = normalize_bool_setting(rule.get('push_enabled'), False)
@@ -761,6 +761,7 @@ def _emit_behaviour_event(
         'email_enabled': email_enabled,
         'push_enabled': push_enabled,
         'email_recipients': normalize_email_recipients(rule.get('email_recipients') or []),
+        'push_recipients': normalize_push_recipients(rule.get('push_recipients') or []),
         'notify_start': str(rule.get('notify_start') or '').strip() or None,
         'notify_end': str(rule.get('notify_end') or '').strip() or None,
     }

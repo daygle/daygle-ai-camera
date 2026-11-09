@@ -158,7 +158,7 @@ from app.camera_policy import camera_policy
 # Tracks zones that have already logged an unexpected pixel-motion error so we
 # don't flood logs on every frame. Cleared on success to allow self-healing.
 _zone_pixel_motion_errors: set[str] = set()
-from app.utils import normalize_email_recipients
+from app.utils import normalize_email_recipients, normalize_push_recipients
 from app.zone_schema import (
     BOX_LIMIT_KEYS,
     canonical_label,
@@ -874,6 +874,7 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                     'enabled': True,
                     'email_enabled': bool(schedule.get('email_enabled', False)),
                     'email_recipients': normalize_email_recipients(schedule.get('email_recipients', [])),
+                    'push_recipients': normalize_push_recipients(schedule.get('push_recipients', [])),
                     'push_enabled': bool(schedule.get('push_enabled', False)),
                     'active_start': rule.get('active_start'),
                     'active_end': rule.get('active_end'),
