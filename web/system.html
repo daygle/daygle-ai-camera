@@ -14,7 +14,7 @@
       <div>
         <p class="eyebrow">Administrator</p>
         <h1>System</h1>
-        <p class="muted">Live health of this server: processor, memory and the GPU running detection. Refreshes every 5 seconds. GPU temperature warning levels are set in Settings &rarr; Maintenance.</p>
+        <p class="muted">Live health of this server: processor, memory, storage and the GPU running detection. Refreshes every 5 seconds. GPU temperature warning levels are set in Settings &rarr; Maintenance.</p>
       </div>
       <div class="onnx-hero-mark hero-mark--slate" aria-hidden="true">
         <span class="onnx-hero-ring onnx-hero-ring-back"></span>
@@ -74,6 +74,18 @@
         <strong id="vramValue" class="stat-card-value">-</strong>
         <small class="muted stat-card-sub" id="vramSub">GPU memory usage</small>
       </article>
+    </section>
+
+    <section class="card" id="storageCard">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">💾</div>
+        <div>
+          <h2>Storage</h2>
+          <p class="settings-section-subtitle" id="storageSummary">Disk space and what recordings, snapshots and the database use.</p>
+        </div>
+      </div>
+      <div id="storageVolumes" class="storage-list"></div>
+      <div id="storageUsage" class="storage-usage"></div>
     </section>
 
     <section class="card" id="videoDecodeCard">

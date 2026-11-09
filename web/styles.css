@@ -7998,4 +7998,16 @@ main:has(#liveCameraEmpty:not([hidden])) .live-controls-card { display: none; }
  * are no cameras to list, and the "No NVIDIA GPU" line reads as a note
  * rather than stray body text. */
 #videoDecodeCard:has(> .decode-list:empty) > .settings-section-header { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+/* System > Storage card: one meter per disk, then what each kind of media uses. */
+.storage-list { display: grid; gap: 12px; margin-top: 12px; }
+.storage-volume-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 14px; }
+.storage-volume-head span { color: var(--muted); font-size: 13px; }
+.storage-meter { height: 8px; margin-top: 6px; border-radius: 999px; background: color-mix(in srgb, var(--text) 10%, transparent); overflow: hidden; }
+.storage-meter-fill { height: 100%; border-radius: 999px; background: var(--accent); transition: width 0.4s ease; }
+.storage-meter-fill.is-warn { background: var(--warning); }
+.storage-meter-fill.is-danger { background: var(--danger); }
+.storage-usage { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-top: 14px; }
+.storage-usage-item { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.storage-usage-item strong { display: block; font-size: 16px; }
+.storage-usage-item span { color: var(--muted); font-size: 12px; }
 .system-note { margin: 0; padding: 12px 16px; border: 1px dashed var(--border); border-radius: 12px; font-size: 13px; background: var(--panel); }
