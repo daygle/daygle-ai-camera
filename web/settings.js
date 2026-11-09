@@ -378,7 +378,7 @@ function emailPayload(form) {
 function renderEmail(settings) {
   if (!emailForm) return;
   fillForm(emailForm, settings, FORM_DEFAULTS.email);
-  if (testEmailRecipient && !testEmailRecipient.value) testEmailRecipient.value = settings?.from_address || '';
+  renderTestEmailRecipients();
 }
 
 function pushPayload(form) {
@@ -390,9 +390,24 @@ function renderPush(settings) {
   fillForm(pushForm, settings, FORM_DEFAULTS.push);
 }
 
-// Users offered by the camera offline recipient picker (shared with the
-// Alerts page, see renderRecipientPicker in web/utils.js).
+// Users offered by the camera offline and test email recipient pickers
+// (shared with the Alerts page, see renderRecipientPicker in web/utils.js).
 let recipientUsers = [];
+
+// The test email goes to the ticked users. Ticks survive a re-render (e.g.
+// after saving the email settings); the first render ticks the signed-in user
+// when they have an address.
+function renderTestEmailRecipients() {
+  if (!testEmailRecipient) return;
+  const rendered = testEmailRecipient.querySelector('[data-recipient-picker]');
+  const me = window.daygleAuth?.user;
+  const selected = rendered ? pickedRecipients(testEmailRecipient)
+    : recipientUsers.some((user) => user.id === me?.id && String(user.email || '').includes('@')) ? [`user:${me.id}`] : [];
+  testEmailRecipient.innerHTML = renderRecipientPicker(selected, recipientUsers, {
+    emptyNote: 'With nobody ticked, the test email goes to the From address.',
+    legend: 'Test Email Recipients',
+  });
+}
 
 function renderCameraOffline(settings) {
   const form = document.getElementById('cameraOfflineForm');
@@ -695,19 +710,17 @@ testPushBtn?.addEventListener('click', guard(async () => {
 }));
 
 testEmailBtn?.addEventListener('click', guard(async () => {
-  const recipient = testEmailRecipient.value.trim() || emailForm.elements.from_address.value.trim();
-  if (!recipient) {
-    setMessage('Enter a test recipient email address.');
-    return;
-  }
+  const recipients = pickedRecipients(testEmailRecipient);
   testEmailBtn.disabled = true;
   setMessage('Sending test email...');
   try {
-    await api('/api/settings/alert-email/test', {
+    // Ticked users resolve to their current address server-side; nobody
+    // ticked sends to the From address.
+    const result = await api('/api/settings/alert-email/test', {
       method: 'POST',
-      body: JSON.stringify({ settings: emailPayload(emailForm), recipient }),
+      body: JSON.stringify({ settings: emailPayload(emailForm), recipients }),
     });
-    setMessage(`Test email sent to ${recipient}.`);
+    setMessage(`Test email sent to ${(result.recipients || []).join(', ')}.`);
   } finally {
     testEmailBtn.disabled = false;
   }

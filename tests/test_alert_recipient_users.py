@@ -232,3 +232,52 @@ def test_profile_topic_is_returned_as_user_topic_on_push_settings(tmp_path, monk
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_test_email_goes_to_picked_users_or_the_from_address(tmp_path, monkeypatch):
+    from tests.support import LocalClient, _login, _server, _setup_admin
+
+    app, _ = _load_app(tmp_path, monkeypatch)
+    sent: list[str] = []
+
+    class FakeEmailAlertService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_test(self, recipient):
+            sent.append(recipient)
+
+    import app.api.alert_email_router as alert_email_router_module
+    monkeypatch.setattr(alert_email_router_module, 'EmailAlertService', FakeEmailAlertService)
+    settings = {
+        'enabled': True, 'host': 'smtp.example.com', 'port': 587,
+        'from_address': 'alerts@example.com', 'use_tls': True, 'use_ssl': False,
+    }
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        # Created after the first-run admin setup, which needs an empty user table.
+        auth = sys.modules['app.state'].auth
+        alice = auth.create_user('alice', 'Correct-Horse-Battery-9', email='alice@example.com')
+        bob = auth.create_user('bob', 'Correct-Horse-Battery-9', email='bob@example.com')
+        auth.update_user(int(bob['id']), is_active=False)
+
+        def send(recipients):
+            return client.request(
+                '/api/settings/alert-email/test', method='POST',
+                json_body={'settings': settings, 'recipients': recipients},
+                headers={'X-CSRF-Token': csrf},
+            )
+
+        status, _headers, payload = send([f"user:{alice['id']}", f"user:{bob['id']}"])
+        assert status == 200 and payload == {'ok': True, 'recipients': ['alice@example.com']}
+        status, _headers, payload = send([])
+        assert status == 200 and payload['recipients'] == ['alerts@example.com']
+        status, _headers, _payload = send([f"user:{bob['id']}"])
+        assert status == 400
+        assert sent == ['alice@example.com', 'alerts@example.com']
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

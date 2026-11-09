@@ -1652,15 +1652,16 @@ function recipientOptions(selected, users, channel = 'email') {
 
 // ``channel`` is 'email' or 'push'. ``emptyNote`` is shown under the list
 // (e.g. where the alert falls back to a default address or topic).
+// ``legend`` overrides the channel's heading.
 // eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
-function renderRecipientPicker(selected, users, { emptyNote = '', channel = 'email' } = {}) {
+function renderRecipientPicker(selected, users, { emptyNote = '', channel = 'email', legend = '' } = {}) {
   const config = RECIPIENT_CHANNELS[channel];
   const options = recipientOptions(selected, users, channel);
   const body = options.length
     ? options.map((option) => `<label class="alerts-recipient-option${option.orphan ? ' is-orphan' : ''}" title="${escapeHtml(option.orphan ? `No ${config.noun} goes to this entry from the user list. Untick it to remove it.` : option.detail)}"><input type="checkbox" data-recipient value="${escapeHtml(option.value)}" ${option.checked ? 'checked' : ''}><span class="alerts-recipient-name">${escapeHtml(option.name)}</span><span class="alerts-recipient-email">${escapeHtml(option.detail)}</span></label>`).join('')
     : `<p class="form-help muted">${config.none}</p>`;
   const note = emptyNote ? `<p class="form-help muted alerts-recipient-empty-note">${escapeHtml(emptyNote)}</p>` : '';
-  return `<fieldset class="alerts-recipient-field" data-recipient-picker="${channel}"><legend>${config.legend}</legend><div class="alerts-recipient-list">${body}</div>${note}</fieldset>`;
+  return `<fieldset class="alerts-recipient-field" data-recipient-picker="${channel}"><legend>${escapeHtml(legend || config.legend)}</legend><div class="alerts-recipient-list">${body}</div>${note}</fieldset>`;
 }
 
 // eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
