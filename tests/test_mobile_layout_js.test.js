@@ -53,8 +53,7 @@ test('every page that holds a wide table resets its grid-item minimum size', () 
 });
 
 test('the camera-models assignment table is marked up for the card grid', () => {
-  // The second card on the page is the one holding the table; the first (the
-  // default-model summary) must not be the one that gets the class.
+  // The default model now sits in the same card as the table.
   assert.match(pages['camera-models'].html, /<section class="card camera-models-card">/);
   assert.match(pages['camera-models'].html, /<div class="audit-table-wrap">/);
 });
@@ -63,7 +62,7 @@ test('the camera-models assignment table is marked up for the card grid', () => 
 
 const stacked = [
   { page: 'users', table: '.users-table', labels: ['Account', 'Role', 'Status', 'Last login', 'Actions'] },
-  { page: 'camera-models', table: '#cameraModelsTable', labels: ['Camera', 'Current model', 'Assign model', 'Actions'] },
+  { page: 'camera-models', table: '#cameraModelsTable', labels: ['Camera', 'Model', 'Status'] },
   { page: 'alerts', table: '.alerts-policy-table', labels: ['Policy', 'Scope', 'Enabled', 'Email', 'Push', 'Actions'] },
 ];
 
@@ -100,11 +99,10 @@ test('users: the account cell heads its card and the actions get full-width targ
   assert.match(html, /td\.user-last-login \{ min-width: 0; white-space: normal; \}/);
 });
 
-test('camera-models: the assign select and its buttons fill the stacked card', () => {
+test('camera-models: each camera stacks into name + status over a full-width picker', () => {
   const { html } = pages['camera-models'];
-  assert.match(html, /\.camera-model-select \{ max-width: none; \}/);
-  assert.match(html, /\.camera-model-actions \{ display: grid; grid-template-columns: 1fr; \}/);
-  assert.match(html, /\.camera-model-actions button \{ min-height: 40px; \}/);
+  assert.match(html, /grid-template-areas: "camera status" "model model";/);
+  assert.match(html, /\.camera-model-select \{ max-width: none; min-height: 40px; \}/);
 });
 
 test('alerts: the toolbar becomes one column and the toggles keep a label', () => {
