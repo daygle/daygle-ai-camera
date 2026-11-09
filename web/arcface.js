@@ -48,19 +48,27 @@ function setModelMessage(modelId, text, type = 'info') {
   }
 }
 
+// Status and model list load separately; keep both so the status strip can
+// name the active model by its catalog label instead of a bare filename.
+let lastArcfaceStatus = null;
+let lastArcfaceModels = [];
+
 function renderStatus(status) {
-  const modelName = status.model_path ? status.model_path.split('/').pop() : '-';
+  if (status) lastArcfaceStatus = status;
+  status = lastArcfaceStatus;
+  if (!status) return;
+  const fileName = status.model_path ? status.model_path.split('/').pop() : '';
+  const activeModel = lastArcfaceModels.find((m) => m.active);
+  const modelName = activeModel?.label || fileName || 'None selected';
   const rows = [
-    ['Enabled', yesNo(status.enabled)],
-    ['Model Loaded', yesNo(status.model_loaded)],
-    ['Active Model', modelName],
-    ['Embedding Size', status.embedding_dim ? String(status.embedding_dim) : '-'],
-    ['Enrolled People', String(status.enrolled_people ?? 0)],
-    ['Enrolled Faces', String(status.enrolled_faces ?? 0)],
+    safeHtml`<div><span>Face Recognition</span><strong class="ai-mode ${status.enabled ? 'onnx-active' : 'ai-disabled'}">${status.enabled ? 'Enabled' : 'Disabled'}</strong></div>`,
+    safeHtml`<div><span>Embedding Model</span><strong>${modelName}</strong></div>`,
+    safeHtml`<div><span>Model Loaded</span><strong>${yesNo(status.model_loaded)}${status.embedding_dim ? ` · ${status.embedding_dim}-d` : ''}</strong></div>`,
+    safeHtml`<div><span>Enrolled</span><strong>${String(status.enrolled_people ?? 0)} people · ${String(status.enrolled_faces ?? 0)} faces</strong></div>`,
   ];
-  let html = rows.map(([k, v]) => safeHtml`<div><span>${k}</span><strong>${v}</strong></div>`).join('');
+  let html = rows.join('');
   if (status.enabled && !status.model_loaded && status.unavailable_reason) {
-    html += safeHtml`<div><span>Reason</span><strong>${status.unavailable_reason}</strong></div>`;
+    html += safeHtml`<div class="wide"><span>Reason</span><strong>${status.unavailable_reason}</strong></div>`;
   }
   arcfaceStatusPanel.innerHTML = html;
 }
@@ -78,7 +86,77 @@ async function loadStatus() {
 // Mirrors the models page card format (web/models.js): an active/
 // installed/available card state, a status badge, license/dimension badges,
 // a size indicator, and a Download / Use / Refresh / Delete action set.
+function arcfaceCardHtml(model, maxMb) {
+  const id = escapeHtml(model.id);
+  const isActive = !!model.active;
+  const canDelete = model.can_delete !== false;
+  const cardClass = `model-card ${isActive ? 'model-card-active' : 'model-card-installed'}`;
+  const statusHtml = isActive
+    ? '<span class="model-status model-status-active">● Active</span>'
+    : '<span class="model-status model-status-installed">○ Installed</span>';
+  const barWidth = Math.min(100, Math.round(((model.approx_mb || 0) / maxMb) * 100));
+  // Update = re-download the trusted catalog file (repair / refresh).
+  // These are fixed pre-built files with no version feed, so unlike the
+  // ONNX page there is no "update available" state to discover.
+  const refreshBtn = `<button class="btn-warning model-action-btn" data-action="update" data-model-id="${id}" title="Re-download this model's file (repair / refresh)">↻ Refresh</button>`;
+  let actionsHtml;
+  if (isActive && !canDelete) {
+    actionsHtml = `<button class="btn-success model-action-btn" disabled>✓ In Use</button>${refreshBtn}`;
+  } else {
+    actionsHtml = `
+      ${isActive ? '<button class="btn-success model-action-btn" disabled>✓ In Use</button>' : `<button class="btn-success model-action-btn" data-action="select" data-model-id="${id}">▶ Use</button>`}
+      ${refreshBtn}
+      <button class="btn-danger model-action-btn" data-action="delete" data-model-id="${id}">✕ Delete</button>`;
+  }
+  return `
+    <div class="${cardClass}" id="model-card-${id}">
+      <div class="model-card-header">
+        <div class="model-card-title">
+          <h3>${escapeHtml(model.label)}</h3>
+          <div class="model-card-meta">${statusHtml}</div>
+        </div>
+        <div class="model-card-size">
+          <span class="model-size-value">~${escapeHtml(String(model.approx_mb))} MB</span>
+          <div class="model-size-bar"><div class="model-size-fill" style="width:${barWidth}%"></div></div>
+        </div>
+      </div>
+      <p class="model-card-desc">${escapeHtml(model.description)}</p>
+      ${arcfaceBadgesHtml(model)}
+      <div class="model-card-message model-card-message-hidden"></div>
+      <div class="model-card-actions">${actionsHtml}</div>
+    </div>`;
+}
+
+function arcfaceBadgesHtml(model) {
+  return `
+    <div class="model-card-meta">
+      <span class="arcface-badge" title="Output embedding dimension">${escapeHtml(String(model.dim))}-d embeddings</span>
+      <span class="arcface-badge" title="Model input size">${escapeHtml(String(model.input_size))}×${escapeHtml(String(model.input_size))} input</span>
+      <span class="model-badge" title="License">⚖ ${escapeHtml(model.license)}</span>
+    </div>`;
+}
+
+// Not-installed models: the same compact catalog row the object library uses.
+function arcfaceCatalogRowHtml(model) {
+  const id = escapeHtml(model.id);
+  return `
+    <div class="model-catalog-row" id="model-card-${id}">
+      <div class="model-catalog-main">
+        <div class="model-catalog-title"><h4>${escapeHtml(model.label)}</h4></div>
+        <p class="model-card-desc">${escapeHtml(model.description)}</p>
+        ${arcfaceBadgesHtml(model)}
+      </div>
+      <span class="model-catalog-size">~${escapeHtml(String(model.approx_mb))} MB</span>
+      <div class="model-card-actions model-catalog-actions">
+        <button class="btn-info model-action-btn" data-action="download" data-model-id="${id}">⬇ Download</button>
+      </div>
+      <div class="model-card-message model-card-message-hidden"></div>
+    </div>`;
+}
+
 function renderModels(models) {
+  lastArcfaceModels = models;
+  renderStatus();
   if (!models.length) {
     arcfaceModelList.innerHTML = '';
     arcfaceModelCount.textContent = '0 installed · 0 available';
@@ -88,65 +166,26 @@ function renderModels(models) {
   }
   arcfaceModelsMessage.hidden = true;
   arcfaceModelsCard.hidden = false;
-  const installedCount = models.filter((m) => m.installed).length;
-  arcfaceModelCount.textContent = `${installedCount} installed · ${models.length} available`;
+  const installed = models.filter((m) => m.installed);
+  const available = models.filter((m) => !m.installed);
+  arcfaceModelCount.textContent = `${installed.length} installed · ${models.length} available`;
   const maxMb = Math.max(1, ...models.map((m) => m.approx_mb || 0));
-  arcfaceModelList.innerHTML = models.map((model) => {
-    const id = escapeHtml(model.id);
-    const isInstalled = !!model.installed;
-    const isActive = !!model.active;
-    const canDelete = model.can_delete !== false;
-
-    let cardClass = 'model-card';
-    if (isActive) cardClass += ' model-card-active';
-    else if (isInstalled) cardClass += ' model-card-installed';
-    else cardClass += ' model-card-available';
-
-    let statusHtml = '';
-    if (isActive) statusHtml = '<span class="model-status model-status-active">● Active</span>';
-    else if (isInstalled) statusHtml = '<span class="model-status model-status-installed">○ Installed</span>';
-
-    const sizeMb = `~${escapeHtml(String(model.approx_mb))} MB`;
-    const barWidth = Math.min(100, Math.round(((model.approx_mb || 0) / maxMb) * 100));
-
-    // Update = re-download the trusted catalog file (repair / refresh).
-    // These are fixed pre-built files with no version feed, so unlike the
-    // ONNX page there is no "update available" state to discover.
-    const refreshBtn = `<button class="btn-warning model-action-btn" data-action="update" data-model-id="${id}" title="Re-download this model's file (repair / refresh)">↻ Refresh</button>`;
-    let actionsHtml;
-    if (!isInstalled) {
-      actionsHtml = `<button class="btn-info model-action-btn" data-action="download" data-model-id="${id}">⬇ Download (~${escapeHtml(String(model.approx_mb))} MB)</button>`;
-    } else if (isActive && !canDelete) {
-      actionsHtml = `<button class="btn-success model-action-btn" disabled>✓ In Use</button>${refreshBtn}`;
-    } else {
-      actionsHtml = `
-        <button class="btn-success model-action-btn" data-action="select" data-model-id="${id}">▶ Use</button>
-        ${refreshBtn}
-        <button class="btn-danger model-action-btn" data-action="delete" data-model-id="${id}">✕ Delete</button>`;
-    }
-
-    return `
-      <div class="${cardClass}" id="model-card-${id}">
-        <div class="model-card-header">
-          <div class="model-card-title">
-            <h3>${escapeHtml(model.label)}</h3>
-            <div class="model-card-meta">${statusHtml}</div>
-          </div>
-          <div class="model-card-size">
-            <span class="model-size-value">${sizeMb}</span>
-            <div class="model-size-bar"><div class="model-size-fill" style="width:${barWidth}%"></div></div>
-          </div>
-        </div>
-        <p class="model-card-desc">${escapeHtml(model.description)}</p>
-        <div class="model-card-meta">
-          <span class="arcface-badge" title="Output embedding dimension">${escapeHtml(String(model.dim))}-d embeddings</span>
-          <span class="arcface-badge" title="Model input size">${escapeHtml(String(model.input_size))}×${escapeHtml(String(model.input_size))} input</span>
-          <span class="model-badge" title="License">⚖ ${escapeHtml(model.license)}</span>
-        </div>
-        <div class="model-card-message model-card-message-hidden"></div>
-        <div class="model-card-actions">${actionsHtml}</div>
-      </div>`;
-  }).join('');
+  const sections = [];
+  if (installed.length) {
+    sections.push(`
+      <div class="model-library-section">
+        <h3 class="model-library-section-title">Installed <span class="model-library-section-count">${installed.length}</span></h3>
+        <div class="model-card-grid">${installed.map((m) => arcfaceCardHtml(m, maxMb)).join('')}</div>
+      </div>`);
+  }
+  if (available.length) {
+    sections.push(`
+      <div class="model-library-section">
+        <h3 class="model-library-section-title">${installed.length ? 'More models' : 'Available models'} <span class="model-library-section-count">${available.length}</span></h3>
+        <div class="model-catalog-list">${available.map(arcfaceCatalogRowHtml).join('')}</div>
+      </div>`);
+  }
+  arcfaceModelList.innerHTML = sections.join('');
 }
 
 // Every mutating endpoint returns the combined status + models payload, so a

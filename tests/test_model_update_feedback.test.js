@@ -53,7 +53,9 @@ test('a card message survives the list rebuilds that follow it', () => {
   assert.match(source, /modelCardMessages\[modelId\] = \{ text, type \}/);
   assert.match(source, /const storedMessage = modelCardMessages\[cardKey\]/);
   // A deleted card must not leave its message behind for a reinstall.
-  assert.match(actionBlock, /delete modelCardMessages\[modelId\]/);
+  // One card holds every size of a model, so the variant key is resolved
+  // to that card first.
+  assert.match(actionBlock, /delete modelCardMessages\[modelCardId\(modelId\)\]/);
 });
 
 test('a finished update clears the badge on the catalog id too', () => {
@@ -94,7 +96,10 @@ test('installed cards show how the model file was exported', () => {
   for (const field of ['precision', 'simplified', 'opset', 'ultralytics_version']) {
     assert.match(block, new RegExp(`info\\.${field}`), `export line no longer shows ${field}`);
   }
-  // Only installed cards carry export info; catalog cards stay unchanged.
-  assert.match(source, /isInstalled \? modelExportInfoHtml\(m\.export_info\) : ''/);
+  // Only installed sizes carry export info; catalog rows stay unchanged.
+  const variantRow = source.slice(source.indexOf('function renderVariantRow'), source.indexOf('function renderInstalledCard'));
+  const catalogRow = source.slice(source.indexOf('function renderCatalogRow'), source.indexOf('function renderCatalog('));
+  assert.match(variantRow, /modelExportInfoHtml\(m\.export_info\)/);
+  assert.doesNotMatch(catalogRow, /modelExportInfoHtml/);
   assert.match(block, /escapeHtml\(/);
 });
