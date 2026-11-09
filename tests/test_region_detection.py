@@ -208,3 +208,22 @@ def test_dedup_keeps_nested_box_of_different_label():
         {'label': 'backpack', 'confidence': 0.7, 'box': {'x': 0.12, 'y': 0.2, 'width': 0.08, 'height': 0.1}},
     ]
     assert len(rd._dedup_by_iou(dets, 0.5)) == 2
+
+
+def test_dedup_drops_top_bottom_split_of_one_person():
+    """A crop/tile that saw a person's upper body next to a full-frame box of
+    their lower body: same column, IoU ~0.40, containment ~0.59."""
+    dets = [
+        {'label': 'person', 'confidence': 0.92, 'box': {'x': 0.400, 'y': 0.397, 'width': 0.1775, 'height': 0.540}},
+        {'label': 'person', 'confidence': 0.88, 'box': {'x': 0.380, 'y': 0.241, 'width': 0.195, 'height': 0.455}},
+    ]
+    kept = rd._dedup_by_iou(dets, 0.5)
+    assert len(kept) == 1 and kept[0]['confidence'] == 0.92
+
+
+def test_dedup_keeps_side_by_side_people():
+    dets = [
+        {'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.6}},
+        {'label': 'person', 'confidence': 0.8, 'box': {'x': 0.24, 'y': 0.12, 'width': 0.2, 'height': 0.6}},
+    ]
+    assert len(rd._dedup_by_iou(dets, 0.5)) == 2

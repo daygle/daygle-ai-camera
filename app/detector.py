@@ -66,6 +66,38 @@ def load_labels(labels_path: str | Path | None, fallback: list[str] | None = Non
 # overlap (people walking side by side, cars in a row) to stay separate.
 CONTAINMENT_THRESHOLD = 0.8
 
+# Stacked-split duplicates: the head can also split one object into an upper
+# and a lower box (head-to-waist plus chest-to-feet on a person in a doorway).
+# Neither box is nested in the other (~60% containment) and the IoU is ~0.4,
+# so both rules above miss it. Such a pair shares one column: the boxes cover
+# nearly the same horizontal span, have similar widths and overlap heavily top
+# to bottom. Two people side by side fail the column test; a second person
+# standing further back fails it unless at least half of them is hidden
+# behind the first, in which case one box is all an operator can act on.
+STACKED_COLUMN_THRESHOLD = 0.85   # x-overlap / narrower width
+STACKED_WIDTH_RATIO = 0.75        # narrower width / wider width
+STACKED_VERTICAL_THRESHOLD = 0.5  # y-overlap / shorter height
+
+
+def is_stacked_split(
+    inter_w: Any, inter_h: Any, w_a: Any, h_a: Any, w_b: Any, h_b: Any,
+) -> Any:
+    """True where two same-class boxes look like one object split top/bottom.
+
+    Works on scalars or numpy arrays (elementwise). ``inter_w`` / ``inter_h``
+    are the clipped (non-negative) intersection extents.
+    """
+    narrower = np.minimum(w_a, w_b)
+    wider = np.maximum(w_a, w_b)
+    shorter = np.minimum(h_a, h_b)
+    return (
+        (inter_w >= STACKED_COLUMN_THRESHOLD * narrower)
+        & (narrower >= STACKED_WIDTH_RATIO * wider)
+        & (inter_h >= STACKED_VERTICAL_THRESHOLD * shorter)
+        & (narrower > 0)
+        & (shorter > 0)
+    )
+
 
 def non_max_suppression(
     boxes: np.ndarray,
@@ -73,14 +105,17 @@ def non_max_suppression(
     classes: np.ndarray,
     iou_threshold: float,
     containment_threshold: float = CONTAINMENT_THRESHOLD,
+    suppress_stacked: bool = True,
 ) -> list[int]:
-    """Class-aware greedy NMS with nested-box suppression.
+    """Class-aware greedy NMS with nested- and stacked-box suppression.
 
     Keeps the highest-scoring box of each class and drops any remaining box of
-    that class that either overlaps it by more than ``iou_threshold`` (IoU) or
+    that class that either overlaps it by more than ``iou_threshold`` (IoU),
     lies mostly inside it / mostly contains it -- intersection over the
-    smaller of the two areas >= ``containment_threshold``. Pass a
-    ``containment_threshold`` above 1 to disable the containment rule.
+    smaller of the two areas >= ``containment_threshold`` -- or is the other
+    half of a top/bottom split of the same object (see ``is_stacked_split``).
+    Pass a ``containment_threshold`` above 1 to disable the containment rule
+    and ``suppress_stacked=False`` to disable the stacked rule.
     """
     if boxes.size == 0:
         return []
@@ -109,13 +144,20 @@ def non_max_suppression(
             yy1 = np.maximum(boxes[current, 1], boxes[rest, 1])
             xx2 = np.minimum(boxes[current, 2], boxes[rest, 2])
             yy2 = np.minimum(boxes[current, 3], boxes[rest, 3])
-            intersection = np.maximum(0, xx2 - xx1) * np.maximum(0, yy2 - yy1)
+            inter_w = np.maximum(0, xx2 - xx1)
+            inter_h = np.maximum(0, yy2 - yy1)
+            intersection = inter_w * inter_h
             current_area = max(0.0, float(areas[current]))
             union = current_area + rest_areas - intersection
             ious = intersection / np.maximum(union, 1e-9)
             smaller_area = np.minimum(current_area, rest_areas)
             containment = intersection / np.maximum(smaller_area, 1e-9)
             survivors = (ious <= iou_threshold) & (containment < containment_threshold)
+            if suppress_stacked:
+                survivors &= ~is_stacked_split(
+                    inter_w, inter_h,
+                    widths[current], heights[current], widths[rest], heights[rest],
+                )
             ordered = rest[survivors]
             class_areas = rest_areas[survivors]
     return keep

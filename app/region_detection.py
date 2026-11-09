@@ -20,7 +20,7 @@ import logging
 import math
 from typing import Any
 
-from app.detector import CONTAINMENT_THRESHOLD
+from app.detector import CONTAINMENT_THRESHOLD, is_stacked_split
 
 
 logger = logging.getLogger("daygle.ai")
@@ -84,7 +84,9 @@ def _dedup_by_iou(
     ``containment_threshold``). The containment rule catches a crop or tile
     that only saw part of an object (e.g. a person's legs): its box sits
     inside the full-frame box with a low IoU and would otherwise survive as a
-    second box on the same object.
+    second box on the same object. A same-label box that is the other half of
+    a top/bottom split of the same object (``is_stacked_split``) is dropped
+    too.
 
     The region/tile default remains 0.5 deliberately: it only suppresses boxes
     with substantial overlap (roughly duplicate views of one object), while
@@ -108,7 +110,9 @@ def _dedup_by_iou(
         if union > 0 and inter / union >= iou_threshold:
             return True
         smaller = min(area_a, area_b)
-        return smaller > 0 and inter / smaller >= containment_threshold
+        if smaller > 0 and inter / smaller >= containment_threshold:
+            return True
+        return bool(is_stacked_split(iw, ih, ax2 - ax1, ay2 - ay1, bx2 - bx1, by2 - by1))
 
     ordered = sorted(detections, key=lambda d: float(d.get("confidence") or 0.0), reverse=True)
     kept: list[dict[str, Any]] = []
