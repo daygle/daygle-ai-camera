@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -185,6 +186,33 @@ def normalize_bool_setting(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {'1', 'true', 'yes', 'on', 'enabled'}
 
 
+# An alert recipient is either a literal email address or a reference to a
+# user account, stored as ``user:<id>``. User references are resolved to the
+# user's current address when the alert is sent (see
+# ``app.alert_dispatch.resolve_email_recipients``), so a user changing their
+# email, or being deactivated, takes effect without editing every rule.
+_USER_RECIPIENT_RE = re.compile(r'^user:(\d+)$', re.IGNORECASE)
+
+
+def user_recipient_id(value: Any) -> int | None:
+    """Return the user id of a ``user:<id>`` recipient token, else ``None``."""
+    match = _USER_RECIPIENT_RE.match(str(value or '').strip())
+    return int(match.group(1)) if match else None
+
+
+def normalize_recipient_entry(value: Any) -> str:
+    """Canonical form of one recipient entry, or ``''`` if it is not valid.
+
+    Keeps email addresses (anything with an ``@``) as typed and lower-cases
+    ``user:<id>`` tokens.
+    """
+    recipient = str(value or '').strip()
+    user_id = user_recipient_id(recipient)
+    if user_id is not None:
+        return f'user:{user_id}'
+    return recipient if '@' in recipient else ''
+
+
 def normalize_email_recipients(value: Any) -> list[str]:
     raw_recipients = value.split(',') if isinstance(value, str) else value
     if not isinstance(raw_recipients, list):
@@ -192,8 +220,8 @@ def normalize_email_recipients(value: Any) -> list[str]:
     recipients: list[str] = []
     seen: set[str] = set()
     for raw_recipient in raw_recipients:
-        recipient = str(raw_recipient).strip()
-        if recipient and '@' in recipient and (recipient.lower() not in seen):
+        recipient = normalize_recipient_entry(raw_recipient)
+        if recipient and (recipient.lower() not in seen):
             recipients.append(recipient)
             seen.add(recipient.lower())
     return recipients

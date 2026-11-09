@@ -40,6 +40,7 @@ from app.email_alerts import EmailAlertService, EmailAlertError
 from app.live_snapshot import filter_object_priority_detections, render_live_snapshot_jpeg_overlay
 from app.media_utils import safe_storage_path
 from app.push_notifications import PushNotificationService, PushNotificationError
+from app.alert_recipients import resolve_email_recipients
 
 logger = logging.getLogger('daygle.ai')
 
@@ -471,6 +472,13 @@ def deliver_email_alerts(
 
     def _send_rule_email(recipients: list[str], alert: dict[str, Any], kind: str) -> None:
         """Send one rule's email; per-recipient failures log and continue."""
+        recipients = resolve_email_recipients(recipients)
+        if not recipients:
+            logger.debug(
+                'No email sent for event %s rule %r: none of its recipients has an active address',
+                event_id, alert.get('rule_name'),
+            )
+            return
         try:
             mailer.send_alert(
                 alert,

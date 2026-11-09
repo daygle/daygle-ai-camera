@@ -390,9 +390,19 @@ function renderPush(settings) {
   fillForm(pushForm, settings, FORM_DEFAULTS.push);
 }
 
+// Users offered by the camera offline recipient picker (shared with the
+// Alerts page, see renderRecipientPicker in web/utils.js).
+let recipientUsers = [];
+
 function renderCameraOffline(settings) {
   const form = document.getElementById('cameraOfflineForm');
   fillForm(form, settings, FORM_DEFAULTS.cameraOffline);
+  const picker = document.getElementById('cameraOfflineRecipients');
+  if (picker) {
+    picker.innerHTML = renderRecipientPicker(toRecipientRefs(settings?.recipients || [], recipientUsers), recipientUsers, {
+      emptyNote: 'With nobody ticked, offline emails go to the From address set under Email Alerts.',
+    });
+  }
 }
 
 // The GPU Health thresholds only matter when the host has an NVIDIA GPU, so
@@ -410,12 +420,16 @@ async function loadSettings() {
   // script-load time and populated window.daygleAuth.{user, csrfToken}; the
   // shared api() below picks up the CSRF token automatically.
   await window.daygleAuthReady;
-  const [settings, emailSettings, pushSettings, cameraOfflineSettings] = await Promise.all([
+  const [settings, emailSettings, pushSettings, cameraOfflineSettings, users] = await Promise.all([
     api('/api/settings/system'),
     api('/api/settings/alert-email'),
     api('/api/settings/alert-push'),
     api('/api/settings/camera-offline'),
+    // Only the offline recipient picker needs users; without them it still
+    // lists the stored recipients.
+    api('/api/users').catch(() => []),
   ]);
+  recipientUsers = Array.isArray(users) ? users : (users?.users || []);
   const versionEl = document.getElementById('currentVersion');
   if (versionEl && settings.version) versionEl.textContent = settings.version;
   fillForm(forms.live, settings.live, FORM_DEFAULTS.live);
@@ -650,6 +664,8 @@ document.getElementById('cameraOfflineForm')?.addEventListener('submit', guard(a
   const data = payloadFor(form);
   // Offline delay must be a positive integer; fall back to 1 when left blank.
   if (!Number.isFinite(data.offline_delay_minutes)) data.offline_delay_minutes = 1;
+  const picker = document.getElementById('cameraOfflineRecipients');
+  if (picker) data.recipients = pickedRecipients(picker);
   const updated = await api('/api/settings/camera-offline', { method: 'PUT', body: JSON.stringify(data) });
   renderCameraOffline(updated);
   setMessage('Camera offline alert settings saved.');

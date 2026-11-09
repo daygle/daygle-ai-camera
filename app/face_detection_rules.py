@@ -81,17 +81,17 @@ def _coerce_detection_confidence(value: Any) -> float:
 
 def _normalize_recipients_field(value: Any) -> str:
     """Normalise ``email_recipients`` (a list or comma-separated string) to a
-    clean comma-separated string."""
+    clean comma-separated string of addresses and ``user:<id>`` tokens."""
     if isinstance(value, list):
         parts = value
     elif isinstance(value, str):
         parts = value.split(',')
     else:
         parts = []
-    return ', '.join(
-        addr.strip() for addr in parts
-        if addr.strip() and '@' in addr
-    )
+    from app.utils import normalize_recipient_entry
+
+    entries = (normalize_recipient_entry(addr) for addr in parts)
+    return ', '.join(entry for entry in entries if entry)
 
 
 def _validate_rule(rule: dict[str, Any]) -> dict[str, Any]:
@@ -258,7 +258,8 @@ def face_rule_notify_active_now(rule: dict[str, Any]) -> bool:
 
 
 def face_rule_email_recipients(rule: dict[str, Any]) -> list[str]:
-    """Parse the ``email_recipients`` field into a list of addresses.
+    """Parse the ``email_recipients`` field into a list of addresses and
+    ``user:<id>`` tokens (resolved to addresses at send time).
 
     Handles both clean comma-separated strings and corrupted Python repr
     strings (e.g. ``"['glen@daygle.net']"``) that were stored before the

@@ -1550,6 +1550,99 @@ function normalizeEmailList(value) {
   return source.map((recipient) => String(recipient).trim()).filter(Boolean);
 }
 
+// ─── Email recipient picker (Alerts page, Settings > camera offline) ───────
+// Email recipients are picked from the system's users rather than typed in.
+// A ticked user is stored as ``user:<id>`` and the server looks up that
+// user's current address when it sends (app/alert_recipients.py), so a
+// changed address or a deactivated user takes effect without editing every
+// alert. A plain address left over from before
+// this picker is converted to its user on load when it matches one; any that
+// match no user are kept and listed so they can be unticked, never dropped.
+const USER_RECIPIENT_RE = /^user:(\d+)$/i;
+
+function userRecipientId(value) {
+  const match = USER_RECIPIENT_RE.exec(String(value || '').trim());
+  return match ? Number(match[1]) : null;
+}
+
+function userDisplayName(user) {
+  const fullName = [user.first_name, user.last_name].map((part) => String(part || '').trim()).filter(Boolean).join(' ');
+  return fullName || String(user.username || '').trim() || String(user.email || '').trim() || `User ${user.id}`;
+}
+
+function isRecipientUser(user) {
+  return Boolean(user) && user.is_active !== false && user.is_active !== 0 && String(user.email || '').includes('@');
+}
+
+// Swap plain addresses that belong to an active user for that user's
+// reference, keeping order and dropping duplicates. Strings (people rules
+// store a comma-separated string) come back as strings.
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function toRecipientRefs(value, users) {
+  const byEmail = new Map();
+  (users || []).filter(isRecipientUser).forEach((user) => {
+    const key = String(user.email).trim().toLowerCase();
+    if (!byEmail.has(key)) byEmail.set(key, `user:${user.id}`);
+  });
+  const seen = new Set();
+  const refs = [];
+  normalizeEmailList(value).forEach((entry) => {
+    const id = userRecipientId(entry);
+    const ref = id !== null ? `user:${id}` : (byEmail.get(entry.toLowerCase()) || entry);
+    if (seen.has(ref.toLowerCase())) return;
+    seen.add(ref.toLowerCase());
+    refs.push(ref);
+  });
+  return Array.isArray(value) ? refs : refs.join(', ');
+}
+
+function recipientOptions(selected, users) {
+  const chosen = normalizeEmailList(selected).map((entry) => {
+    const id = userRecipientId(entry);
+    return id !== null ? `user:${id}` : entry;
+  });
+  const chosenKeys = new Set(chosen.map((entry) => entry.toLowerCase()));
+  const options = (users || []).filter(isRecipientUser)
+    .map((user) => ({ value: `user:${user.id}`, name: userDisplayName(user), detail: String(user.email).trim(), checked: chosenKeys.has(`user:${user.id}`), orphan: false }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const listed = new Set(options.map((option) => option.value));
+  chosen.forEach((entry) => {
+    if (listed.has(entry.toLowerCase())) return;
+    listed.add(entry.toLowerCase());
+    const id = userRecipientId(entry);
+    if (id === null) {
+      options.push({ value: entry, name: entry, detail: 'Not a user', checked: true, orphan: true });
+      return;
+    }
+    const user = (users || []).find((item) => Number(item.id) === id);
+    options.push({
+      value: entry,
+      name: user ? userDisplayName(user) : `Deleted user #${id}`,
+      detail: !user ? 'Gets no email' : user.is_active === false || user.is_active === 0 ? 'Inactive, gets no email' : 'No email address',
+      checked: true,
+      orphan: true,
+    });
+  });
+  return options;
+}
+
+// ``emptyNote`` is shown under the list when nothing is ticked (e.g. where
+// the alert falls back to a default address).
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function renderRecipientPicker(selected, users, { emptyNote = '' } = {}) {
+  const options = recipientOptions(selected, users);
+  const body = options.length
+    ? options.map((option) => `<label class="alerts-recipient-option${option.orphan ? ' is-orphan' : ''}" title="${escapeHtml(option.orphan ? 'No email goes to this entry from the user list. Untick it to remove it.' : option.detail)}"><input type="checkbox" data-recipient value="${escapeHtml(option.value)}" ${option.checked ? 'checked' : ''}><span class="alerts-recipient-name">${escapeHtml(option.name)}</span><span class="alerts-recipient-email">${escapeHtml(option.detail)}</span></label>`).join('')
+    : '<p class="form-help muted">No users have an email address yet. Add one on the <a href="/users">Users</a> page.</p>';
+  const note = emptyNote ? `<p class="form-help muted alerts-recipient-empty-note">${escapeHtml(emptyNote)}</p>` : '';
+  return `<fieldset class="alerts-recipient-field" data-recipient-picker><legend>Email Recipients</legend><div class="alerts-recipient-list">${body}</div>${note}</fieldset>`;
+}
+
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
+function pickedRecipients(picker) {
+  return [...picker.querySelectorAll('input[data-recipient]:checked')].map((input) => input.value);
+}
+
 // ─── Behavioural tripwire (Tier 1: directional line-crossing) ───────────────
 // Pure geometry + normalisation for the per-zone "tripwire" line drawn on the
 // Zones canvas (web/zones.js) and stored on ``zone.tripwire``. Mirrors the

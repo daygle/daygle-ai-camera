@@ -19,6 +19,7 @@ from app.ai_verification import submit_alert_notification_with_verification, sub
 from app.alert_dispatch import (
     _rule_notify_active_now,
     compute_minimum_rule_confidence,
+    resolve_email_recipients,
 )
 from app.camera_health import _check_cameras_health
 from app.camera_instance import read_ingest_frame
@@ -2116,7 +2117,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         and str(rule.get('name') or '') in triggered_rule_names
         and _rule_notify_active_now(rule.get('schedule') or rule)
     ]
-    email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
+    email_recipients = sorted(resolve_email_recipients([recipient for rule in email_rules for recipient in rule.get('email_recipients', [])])) if email_rules else []
     update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Event recorded without an alert: no alert rule notifies for what is new in view.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, _state.camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
     _telemetry_finish(_telemetry_mode, event_created=event_id is not None)
     return event_id
