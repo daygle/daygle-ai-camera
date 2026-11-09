@@ -388,25 +388,33 @@ function pushPayload(form) {
 function renderPush(settings) {
   if (!pushForm) return;
   fillForm(pushForm, settings, FORM_DEFAULTS.push);
+  renderTestPushRecipients();
 }
 
 // Users offered by the camera offline and test email recipient pickers
 // (shared with the Alerts page, see renderRecipientPicker in web/utils.js).
 let recipientUsers = [];
 
-// The test email goes to the ticked users. Ticks survive a re-render (e.g.
-// after saving the email settings); the first render ticks the signed-in user
-// when they have an address.
+// The test email / notification goes to the ticked users. Ticks survive a
+// re-render (e.g. after saving the settings); the first render ticks the
+// signed-in user when they can receive on that channel.
+function renderTestRecipients(container, channel, legend, emptyNote) {
+  if (!container) return;
+  const rendered = container.querySelector('[data-recipient-picker]');
+  const me = recipientUsers.find((user) => user.id === window.daygleAuth?.user?.id);
+  const canReceive = channel === 'push' ? String(me?.ntfy_topic || '').trim() : String(me?.email || '').includes('@');
+  const selected = rendered ? pickedRecipients(container) : (canReceive ? [`user:${me.id}`] : []);
+  container.innerHTML = renderRecipientPicker(selected, recipientUsers, { channel, legend, emptyNote });
+}
+
 function renderTestEmailRecipients() {
-  if (!testEmailRecipient) return;
-  const rendered = testEmailRecipient.querySelector('[data-recipient-picker]');
-  const me = window.daygleAuth?.user;
-  const selected = rendered ? pickedRecipients(testEmailRecipient)
-    : recipientUsers.some((user) => user.id === me?.id && String(user.email || '').includes('@')) ? [`user:${me.id}`] : [];
-  testEmailRecipient.innerHTML = renderRecipientPicker(selected, recipientUsers, {
-    emptyNote: 'With nobody ticked, the test email goes to the From address.',
-    legend: 'Test Email Recipients',
-  });
+  renderTestRecipients(testEmailRecipient, 'email', 'Test Email Recipients',
+    'With nobody ticked, the test email goes to the From address.');
+}
+
+function renderTestPushRecipients() {
+  renderTestRecipients(document.getElementById('testPushRecipients'), 'push', 'Test Notification Recipients',
+    'With nobody ticked, the test notification goes to the topic above.');
 }
 
 function renderCameraOffline(settings) {
@@ -699,11 +707,14 @@ testPushBtn?.addEventListener('click', guard(async () => {
   testPushBtn.disabled = true;
   setMessage('Sending test notification...');
   try {
-    await api('/api/settings/alert-push/test', {
+    // Ticked users get it on their own topics; nobody ticked sends to the
+    // shared topic.
+    const recipients = pickedRecipients(document.getElementById('testPushRecipients'));
+    const result = await api('/api/settings/alert-push/test', {
       method: 'POST',
-      body: JSON.stringify({ settings: pushPayload(pushForm) }),
+      body: JSON.stringify({ settings: pushPayload(pushForm), recipients }),
     });
-    setMessage('Test notification sent.');
+    setMessage(`Test notification sent to ${(result.topics || []).join(', ')}.`);
   } finally {
     testPushBtn.disabled = false;
   }

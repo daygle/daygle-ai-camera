@@ -281,3 +281,40 @@ def test_test_email_goes_to_picked_users_or_the_from_address(tmp_path, monkeypat
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_test_push_goes_to_picked_users_topics_or_the_shared_topic(tmp_path, monkeypatch):
+    from tests.support import LocalClient, _login, _server, _setup_admin
+
+    app, _ = _load_app(tmp_path, monkeypatch)
+    sent: list[object] = []
+    import app.push_notifications as push_module
+    monkeypatch.setattr(push_module.PushNotificationService, 'send_test', lambda self, topics=None: sent.append(topics))
+    settings = {'enabled': True, 'server_url': 'https://ntfy.sh', 'topic': 'shared-topic'}
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        auth = sys.modules['app.state'].auth
+        alice = auth.create_user('alice', 'Correct-Horse-Battery-9')
+        auth.update_user(int(alice['id']), ntfy_topic='alice-phone')
+        bob = auth.create_user('bob', 'Correct-Horse-Battery-9')  # no topic
+
+        def send(recipients):
+            return client.request(
+                '/api/settings/alert-push/test', method='POST',
+                json_body={'settings': settings, 'recipients': recipients},
+                headers={'X-CSRF-Token': csrf},
+            )
+
+        status, _headers, payload = send([f"user:{alice['id']}", f"user:{bob['id']}"])
+        assert status == 200 and payload == {'ok': True, 'topics': ['alice-phone']}
+        status, _headers, payload = send([])
+        assert status == 200 and payload['topics'] == ['shared-topic']
+        status, _headers, _payload = send([f"user:{bob['id']}"])
+        assert status == 400
+        assert sent == [['alice-phone'], []]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
