@@ -4,7 +4,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>YAMNet TFLite - Daygle AI Camera</title>
+  <title>Sound Model - Daygle AI Camera</title>
+  <link rel="stylesheet" href="/static/model-card-messages.css" />
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
@@ -13,8 +14,8 @@
     <header class="hero">
       <div>
         <p class="eyebrow">Intelligence</p>
-        <h1>YAMNet TFLite</h1>
-        <p class="muted">CPU-only YAMNet TFLite backend and model status. See Sound Detection for per-camera diagnostics.</p>
+        <h1>Sound Model</h1>
+        <p class="muted">The audio model that recognises sounds on your cameras. Which sounds each camera listens for is set under <a href="/detection/sounds">Detection → Sounds</a>.</p>
       </div>
       <div class="onnx-hero-mark hero-mark--violet" aria-hidden="true">
         <span class="onnx-hero-ring onnx-hero-ring-back"></span>
@@ -23,34 +24,39 @@
       </div>
     </header>
 
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">🔊</div>
-        <div>
-          <h2>Backend Status</h2>
-          <p class="settings-section-subtitle">YAMNet TFLite runs on CPU. If it is unavailable, sound alerts are not emitted.</p>
+    <section class="card model-library-card" id="soundModelCard" aria-labelledby="soundLibraryTitle">
+      <div class="model-library-header">
+        <div class="settings-section-icon" aria-hidden="true">🔊</div>
+        <div class="model-library-header-copy">
+          <span class="model-library-kicker">Audio model</span>
+          <h2 id="soundLibraryTitle">Sound detection</h2>
+          <p>Classifies what each sound-enabled camera hears (dog bark, glass breaking, alarms…) so sound rules can alert on it. Runs on the CPU.</p>
+        </div>
+        <div class="model-library-toolbar-actions">
+          <button id="refreshSoundStatusBtn" class="secondary" type="button">Refresh</button>
+          <button id="checkYamnetUpdateBtn" class="btn-info model-update-check-btn" type="button" hidden>
+            <span class="button-icon" aria-hidden="true">↻</span><span class="model-update-check-label">Check for updates</span>
+          </button>
         </div>
       </div>
-      <div id="yamnetMessage" class="muted"></div>
-      <div id="soundStatusPanel" class="status-panel yamnet-status-grid"></div>
-      <div class="button-row">
-        <button id="refreshSoundStatusBtn" class="secondary" type="button">Refresh</button>
-      </div>
-    </section>
-
-    <section class="card yamnet-model-card">
-      <div class="settings-section-header yamnet-model-section-header">
-        <div class="settings-section-icon" aria-hidden="true">📦</div>
-        <div>
-          <h2>Model</h2>
-          <p class="settings-section-subtitle">The audio classification engine used by sound-enabled cameras.</p>
+      <!-- One notice explains whatever is wrong and what to do next, so the
+           status and the model card can never disagree. -->
+      <div id="yamnetMessage" class="yamnet-notice" role="status" hidden></div>
+      <div id="soundStatusPanel" class="status-panel model-status-strip" aria-label="Sound detection status"></div>
+      <div id="yamnetModelUpdatesMessage" class="model-library-message" role="status" aria-live="polite"></div>
+      <div class="model-card" id="yamnetModelCard">
+        <div class="model-card-header">
+          <div class="model-card-title">
+            <h3>YAMNet <span class="yamnet-model-engine">TensorFlow Lite</span></h3>
+            <div class="model-card-meta" id="yamnetModelBadges"></div>
+          </div>
+          <div class="model-card-size"><span class="model-size-value" id="yamnetModelSize"></span></div>
         </div>
-        <span class="yamnet-model-engine-badge">TFLite · CPU</span>
-      </div>
-      <div id="yamnetModelInfo" class="yamnet-model-info" aria-live="polite"></div>
-      <div class="yamnet-model-actions">
-        <button id="checkYamnetUpdateBtn" class="btn-info" type="button">Check for Update</button>
-        <button id="reloadYamnetModelBtn" type="button" hidden>Update Model</button>
+        <p class="model-card-desc">Google's YAMNet audio classifier, trained on 521 everyday sound classes. One model serves every camera.</p>
+        <div id="yamnetModelInfo" class="yamnet-model-details" aria-live="polite"></div>
+        <div class="model-card-actions">
+          <button id="reloadYamnetModelBtn" class="btn-warning model-action-btn" type="button" hidden>Update model</button>
+        </div>
       </div>
     </section>
 

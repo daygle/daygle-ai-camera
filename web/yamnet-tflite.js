@@ -1,18 +1,23 @@
+// Sound Model page (web/yamnet-tflite.html, /models/sound).
+//
+// One card, laid out like Object/Face Models: a status strip, the single
+// YAMNet model card, and ONE notice that explains whatever is wrong and what
+// to do next. The status and the model used to live in two cards that could
+// contradict each other (a red "runtime missing" panel above an amber "will
+// download automatically" card); both now render from the same snapshot.
+// Per-camera detector status lives on /detection/sounds.
+
 const messageEl = document.getElementById('yamnetMessage');
 const statusPanel = document.getElementById('soundStatusPanel');
-// Per-camera detector status now lives on /sounds. This page only owns the
-// backend and model diagnostics.
 const refreshBtn = document.getElementById('refreshSoundStatusBtn');
 const yamnetModelInfo = document.getElementById('yamnetModelInfo');
+const yamnetModelBadges = document.getElementById('yamnetModelBadges');
+const yamnetModelSize = document.getElementById('yamnetModelSize');
+const yamnetModelUpdatesMessage = document.getElementById('yamnetModelUpdatesMessage');
 const checkYamnetUpdateBtn = document.getElementById('checkYamnetUpdateBtn');
 const reloadYamnetModelBtn = document.getElementById('reloadYamnetModelBtn');
 
-// api() is provided by web/utils.js (loaded before this script). yamnet-tflite
-// is a read-only status page (no POST/PUT/DELETE), so the CSRF/Content-Type
-// rules in utils.js's api() simply don't fire here. The thin local wrapper
-// that only handled 401 redirects was removed; utils.js's api() throws on 401
-// after redirecting to /login, which is what every refresh path here already
-// surfaces via the .catch(err) on loadSoundStatus().
+// api() is provided by web/utils.js (loaded before this script).
 
 function titleCaseWords(value) {
   return String(value || '')
@@ -35,30 +40,18 @@ function displayValue(value, fallback = 'None') {
   return titleCaseWords(String(value));
 }
 
-function yesNo(value) {
-  return value ? 'Yes' : 'No';
-}
-
 function percentValue(value) {
   const number = Number(value);
-  return Number.isFinite(number) ? `${Math.round(number * 100)}%` : 'None';
+  return Number.isFinite(number) ? `${Math.round(number * 100)}%` : '';
 }
 
-function backendTone(backend) {
-  const normalized = String(backend || '').toLowerCase();
-  if (normalized === 'yamnet' || normalized === 'yamnet_tflite') return 'status-ok';
-  if (normalized === 'loading') return 'status-warning';
-  if (normalized === 'unavailable') return 'status-error';
-  return 'status-error';
-}
-
-function backendNote(backend, reason = '') {
-  const normalized = String(backend || '').toLowerCase();
-  if (normalized === 'yamnet' || normalized === 'yamnet_tflite') return 'YAMNet TFLite CPU audio classification is active.';
-  if (normalized === 'loading') return 'YAMNet is still loading.';
-  if (normalized === 'unavailable') return reason || 'YAMNet TFLite is unavailable; sound alerts will not be emitted.';
-  if (!normalized || normalized === 'none') return 'No sound detector backend is currently active.';
-  return `Sound backend reported ${displayValue(backend)}.`;
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  let size = bytes;
+  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+  return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
 function soundConfig(camera) {
@@ -74,146 +67,199 @@ function soundEnabled(camera) {
   return sound.enabled === true && enabledSoundRules(camera).length > 0;
 }
 
-function renderOverall(status, enabledCameras) {
-  const backend = status.backend || 'none';
-  statusPanel.className = `status-panel yamnet-status-grid ${backendTone(backend)}`;
-  // Five short diagnostics sit in one responsive row (auto-fit grid). The
-  // full-width "Status Detail" note only renders when the backend is not in
-  // a healthy active state (or carries a diagnostic reason) -- a healthy
-  // panel doesn't need a whole row saying it's active.
-  const activeBackend = backend === 'yamnet' || backend === 'yamnet_tflite';
-  const detailNote = backendNote(backend, status.backend_reason);
-  statusPanel.innerHTML = `
-    <div><span>Backend</span><strong>${escapeHtml(displayValue(backend, 'None'))}</strong></div>
-    <div><span>Running</span><strong>${escapeHtml(yesNo(status.running))}</strong></div>
-    <div><span>Sound Cameras</span><strong>${escapeHtml(enabledCameras.length)}</strong></div>
-    <div><span>Last Sound</span><strong>${escapeHtml(status.last_class_label || displayValue(status.last_class, 'None'))}</strong></div>
-    <div><span>Last Confidence</span><strong>${escapeHtml(percentValue(status.last_confidence))}</strong></div>
-    ${(!activeBackend || status.backend_reason) ? `<div class="wide"><span>Status Detail</span><strong>${escapeHtml(detailNote)}</strong></div>` : ''}
-  `;
+// Latest snapshot of everything the card renders from.
+const snapshot = { status: null, enabledCameras: [], info: null, error: null };
+
+function modelState(info) {
+  if (!info) return 'unknown';
+  if (info.available) return 'active';
+  if (info.sha256) return 'installed';
+  return 'missing';
 }
 
-async function loadSoundStatus() {
+// The one overall state, plus the notice (if any) that explains it. Order
+// matters: the first thing that blocks sound detection is the one reported.
+function overallState() {
+  const { status, enabledCameras, info, error } = snapshot;
+  if (error) {
+    return { label: 'Unknown', tone: 'model-failed', notice: { tone: 'is-error', title: 'Could not load the sound status', bodyHtml: escapeHtml(error) } };
+  }
+  const backend = String(status?.backend || '').toLowerCase();
+  const model = modelState(info);
+  if (!enabledCameras.length) {
+    return {
+      label: 'Off',
+      tone: 'ai-disabled',
+      notice: {
+        tone: 'is-info',
+        title: 'No camera is listening for sounds yet',
+        bodyHtml: `Add a sound rule to a camera under <a href="/detection/sounds">Detection → Sounds</a>.${model === 'missing' ? ' The model downloads automatically the first time a sound rule runs.' : ''}`,
+      },
+    };
+  }
+  if (backend === 'unavailable') {
+    const reason = status?.backend_reason || 'The YAMNet backend could not start.';
+    const runtimeMissing = /runtime|litert|tflite_runtime|not installed/i.test(reason);
+    return {
+      label: 'Unavailable',
+      tone: 'model-failed',
+      notice: {
+        tone: 'is-error',
+        title: 'Sound detection is not running - no sound alerts are sent',
+        // The reason is server text, so it is escaped. The backend's own
+        // message already names the package to install; add the step it
+        // leaves out.
+        bodyHtml: escapeHtml(reason) + (runtimeMissing ? ' After installing it, restart the server.' : ''),
+      },
+    };
+  }
+  if (backend === 'loading') {
+    return {
+      label: 'Loading',
+      tone: 'model-missing',
+      notice: { tone: '', title: 'YAMNet is loading', bodyHtml: model === 'missing' ? 'The model is downloading for the first time - this can take a minute.' : 'This usually takes a few seconds.' },
+    };
+  }
+  if ((backend === 'yamnet' || backend === 'yamnet_tflite') && status?.running) {
+    return { label: 'Running', tone: 'onnx-active', notice: null };
+  }
+  return {
+    label: displayValue(status?.detector_status || 'stopped'),
+    tone: 'ai-disabled',
+    notice: { tone: '', title: 'Sound detection is not running yet', bodyHtml: 'Sound-enabled cameras start their detector with the camera stream. Check the per-camera status under Detection → Sounds.' },
+  };
+}
+
+function renderNotice(notice) {
+  if (!notice) {
+    messageEl.hidden = true;
+    messageEl.innerHTML = '';
+    return;
+  }
+  // bodyHtml is built from fixed copy plus escaped server text.
+  messageEl.className = `yamnet-notice ${notice.tone}`;
+  messageEl.innerHTML = `<strong>${escapeHtml(notice.title)}</strong><p>${notice.bodyHtml}</p>`;
+  messageEl.hidden = false;
+}
+
+function renderOverall() {
+  const { status, enabledCameras } = snapshot;
+  const state = overallState();
+  const lastLabel = status?.last_class_label || (status?.last_class ? displayValue(status.last_class) : '');
+  const lastConfidence = percentValue(status?.last_confidence);
+  const lastHeard = lastLabel ? (lastConfidence ? `${lastLabel} · ${lastConfidence}` : lastLabel) : 'Nothing yet';
+  statusPanel.innerHTML = `
+    <div><span>Status</span><strong class="ai-mode ${escapeHtml(state.tone)}">${escapeHtml(state.label)}</strong></div>
+    <div><span>Sound cameras</span><strong><a href="/detection/sounds">${escapeHtml(enabledCameras.length)} →</a></strong></div>
+    <div><span>Last heard</span><strong>${escapeHtml(lastHeard)}</strong></div>
+  `;
+  renderNotice(state.notice);
+}
+
+function renderModel() {
+  const info = snapshot.info;
+  const model = modelState(info);
+  const badges = {
+    active: '<span class="model-status model-status-active">● Active</span>',
+    installed: '<span class="model-status model-status-installed">○ Installed · not loaded</span>',
+    missing: '<span class="model-status model-status-installed">Not downloaded</span>',
+    unknown: '',
+  };
+  yamnetModelBadges.innerHTML = badges[model];
+  yamnetModelSize.textContent = info?.model_size ? formatBytes(info.model_size) : '';
+  // Nothing to compare against until a model is installed, and each check
+  // downloads the whole file, so only offer it once there is one.
+  if (checkYamnetUpdateBtn) checkYamnetUpdateBtn.hidden = model !== 'active' && model !== 'installed';
+  if (model === 'missing') {
+    yamnetModelInfo.textContent = 'Not downloaded yet - it downloads automatically the first time a camera\'s sound rule runs.';
+    return;
+  }
+  if (model === 'unknown') {
+    yamnetModelInfo.textContent = '';
+    return;
+  }
+  const installedAt = info.installed_at ? escapeHtml(new Date(info.installed_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })) : '';
+  const hashText = info.sha256 ? escapeHtml(info.sha256) : '';
+  const shortHash = info.sha256 ? escapeHtml(`${info.sha256.slice(0, 8)}…${info.sha256.slice(-4)}`) : '';
+  yamnetModelInfo.innerHTML = [
+    installedAt ? `<span>Installed <strong>${installedAt}</strong></span>` : '',
+    hashText ? `<span class="yamnet-model-hash">SHA-256 <code title="${hashText}">${shortHash}</code><button type="button" class="secondary" data-copy-hash="${hashText}" aria-label="Copy the full SHA-256">Copy</button></span>` : '',
+  ].filter(Boolean).join('');
+}
+
+function render() {
+  renderOverall();
+  renderModel();
+}
+
+async function loadAll() {
   await window.daygleAuthReady;
-  messageEl.textContent = '';
   refreshBtn.disabled = true;
   try {
     // Camera names are viewer-visible; avoid the admin-gated
     // /api/settings/system (403 for non-admin roles).
-    const [settings, overall] = await Promise.all([
+    const [settings, status, info] = await Promise.all([
       api('/api/config'),
       api('/api/sound/status'),
+      api('/api/sound/model/info'),
     ]);
     const cameras = settings.cameras || (settings.camera ? [settings.camera] : []);
-    const enabledCameras = cameras.filter(soundEnabled);
-    renderOverall(overall, enabledCameras);
+    snapshot.status = status;
+    snapshot.enabledCameras = cameras.filter(soundEnabled);
+    snapshot.info = info;
+    snapshot.error = null;
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
-    messageEl.textContent = error.message;
-    statusPanel.className = 'status-panel yamnet-status-grid status-error';
-    statusPanel.innerHTML = `<div><span>Status</span><strong>${escapeHtml(error.message)}</strong></div>`;
-    // Camera-by-camera diagnostics are rendered on /sounds.
+    snapshot.error = error.message;
   } finally {
     refreshBtn.disabled = false;
   }
+  render();
 }
 
-// ─── YAMNet model management ──────────────────────────────────────────────
-function formatBytes(bytes) {
-  if (!bytes) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let i = 0;
-  let size = bytes;
-  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
-  return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
-}
-
+// ─── Updates ──────────────────────────────────────────────────────────────
 let pendingUpdate = null;
 
-async function loadYamnetModelInfo() {
-  try {
-    const info = await api('/api/sound/model/info');
-    if (!yamnetModelInfo) return;
-    if (!info.available && !info.sha256) {
-      yamnetModelInfo.innerHTML = `
-        <div class="yamnet-model-empty">
-          <div class="yamnet-model-empty-icon" aria-hidden="true">∿</div>
-          <div class="yamnet-model-empty-copy">
-            <strong>Model not installed yet</strong>
-            <p class="muted">YAMNet will download automatically when sound detection is first enabled.</p>
-          </div>
-          <span class="yamnet-model-status-pill status-warning">Not installed</span>
-        </div>`;
-      return;
-    }
-    const installedAt = info.installed_at ? escapeHtml(new Date(info.installed_at).toLocaleDateString()) : '';
-    const statusLabel = info.available ? 'Model Loaded' : 'Model File Found';
-    const statusClass = info.available ? 'status-ok' : 'status-warning';
-    const sizeText = info.model_size ? escapeHtml(formatBytes(info.model_size)) : 'Unknown';
-    const hashText = info.sha256 ? escapeHtml(info.sha256) : 'Not available';
-    const installedText = installedAt || 'Unknown';
-    yamnetModelInfo.innerHTML = `
-      <div class="yamnet-model-overview">
-        <div class="yamnet-model-state">
-          <span class="yamnet-model-orb ${statusClass}" aria-hidden="true"></span>
-          <div>
-            <span class="yamnet-model-status-pill ${statusClass}">${statusLabel}</span>
-            <p class="yamnet-model-caption">${info.available ? 'Ready for CPU audio classification.' : 'The file is present but the detector is not currently loaded.'}</p>
-          </div>
-        </div>
-        <div class="yamnet-model-specs">
-          <div class="yamnet-model-spec">
-            <span>File size</span>
-            <strong>${sizeText}</strong>
-          </div>
-          <div class="yamnet-model-spec">
-            <span>Installed</span>
-            <strong>${installedText}</strong>
-          </div>
-          <div class="yamnet-model-spec yamnet-model-spec-wide">
-            <span>SHA-256</span>
-            <code title="${hashText}">${hashText}</code>
-          </div>
-        </div>
-      </div>`;
-  } catch (err) {
-    if (window.daygleAuth?.redirecting) return;
-    if (yamnetModelInfo) yamnetModelInfo.innerHTML = `<p class="muted">Could not load model info: ${escapeHtml(err.message)}</p>`;
-  }
+function setUpdatesMessage(text, tone) {
+  yamnetModelUpdatesMessage.textContent = text;
+  yamnetModelUpdatesMessage.className = `model-library-message ${tone}`;
 }
 
 async function checkYamnetUpdate() {
   if (!checkYamnetUpdateBtn) return;
+  const label = checkYamnetUpdateBtn.querySelector('.model-update-check-label');
   checkYamnetUpdateBtn.disabled = true;
-  checkYamnetUpdateBtn.textContent = 'Checking…';
+  checkYamnetUpdateBtn.classList.add('is-checking');
+  if (label) label.textContent = 'Checking…';
+  setUpdatesMessage('Checking for a newer YAMNet model…', 'is-loading');
   try {
     const result = await api('/api/sound/model/check', { method: 'POST' });
     if (result.error) {
-      window.showToast?.(`Update check failed: ${result.error}`, true);
+      setUpdatesMessage(`Update check failed: ${result.error}`, 'is-error');
     } else if (result.update_available) {
       pendingUpdate = result;
-      if (reloadYamnetModelBtn) {
-        reloadYamnetModelBtn.hidden = false;
-        reloadYamnetModelBtn.textContent = `Update Model (${formatBytes(result.latest_size)})`;
-      }
-      window.showToast?.('A newer YAMNet model is available!');
+      reloadYamnetModelBtn.hidden = false;
+      reloadYamnetModelBtn.textContent = `↻ Update model (${formatBytes(result.latest_size)})`;
+      setUpdatesMessage('A newer YAMNet model is available.', 'is-success');
     } else {
       pendingUpdate = null;
-      if (reloadYamnetModelBtn) reloadYamnetModelBtn.hidden = true;
-      window.showToast?.('YAMNet model is up to date.');
+      reloadYamnetModelBtn.hidden = true;
+      setUpdatesMessage('The YAMNet model is up to date.', 'is-success');
     }
   } catch (err) {
     if (window.daygleAuth?.redirecting) return;
-    window.showToast?.(`Update check failed: ${err.message}`, true);
+    setUpdatesMessage(`Update check failed: ${err.message}`, 'is-error');
   } finally {
     checkYamnetUpdateBtn.disabled = false;
-    checkYamnetUpdateBtn.textContent = 'Check for Update';
+    checkYamnetUpdateBtn.classList.remove('is-checking');
+    if (label) label.textContent = 'Check for updates';
   }
 }
 
 async function reloadYamnetModel() {
   if (!reloadYamnetModelBtn || !pendingUpdate) return;
+  const original = reloadYamnetModelBtn.textContent;
   reloadYamnetModelBtn.disabled = true;
   reloadYamnetModelBtn.textContent = 'Updating…';
   checkYamnetUpdateBtn.disabled = true;
@@ -222,28 +268,35 @@ async function reloadYamnetModel() {
     if (result.ok) {
       pendingUpdate = null;
       reloadYamnetModelBtn.hidden = true;
-      window.showToast?.('YAMNet model updated successfully!');
-      await loadYamnetModelInfo();
-      await loadSoundStatus();
+      setUpdatesMessage('YAMNet model updated.', 'is-success');
+      window.showToast?.('YAMNet model updated.');
+      await loadAll();
     } else {
-      window.showToast?.('Failed to update YAMNet model.', true);
+      setUpdatesMessage('Failed to update the YAMNet model.', 'is-error');
+      window.showToast?.('Failed to update the YAMNet model.', true);
     }
   } catch (err) {
     if (window.daygleAuth?.redirecting) return;
+    setUpdatesMessage(`Update failed: ${err.message}`, 'is-error');
     window.showToast?.(`Update failed: ${err.message}`, true);
   } finally {
     reloadYamnetModelBtn.disabled = false;
-    reloadYamnetModelBtn.textContent = 'Update Model';
+    if (!reloadYamnetModelBtn.hidden) reloadYamnetModelBtn.textContent = original;
     checkYamnetUpdateBtn.disabled = false;
   }
 }
 
+yamnetModelInfo.addEventListener('click', async (event) => {
+  const button = event.target instanceof Element ? event.target.closest('button[data-copy-hash]') : null;
+  if (!button) return;
+  try {
+    await navigator.clipboard.writeText(button.getAttribute('data-copy-hash') || '');
+    window.showToast?.('SHA-256 copied.');
+  } catch {
+    window.showToast?.('Could not copy - select the hash instead.', true);
+  }
+});
 checkYamnetUpdateBtn?.addEventListener('click', checkYamnetUpdate);
 reloadYamnetModelBtn?.addEventListener('click', reloadYamnetModel);
-
-refreshBtn.addEventListener('click', () => {
-  loadSoundStatus();
-  loadYamnetModelInfo();
-});
-loadSoundStatus();
-loadYamnetModelInfo();
+refreshBtn.addEventListener('click', loadAll);
+loadAll();
