@@ -930,3 +930,87 @@ def test_nms_free_auto_collapses_stacked_person_boxes():
     res = det._postprocess_nms_free(out, SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
     assert len(res) == 1
     assert res[0]["confidence"] == pytest.approx(0.92)
+
+
+# -- stacked (top/bottom split) same-class boxes ----------------------------
+
+def test_nms_drops_top_bottom_split_of_one_person():
+    """The reported doorway frame: one person drawn as a head-to-waist box
+    (88%) and a chest-to-feet box (92%). IoU ~0.40 and containment ~0.59 slip
+    past both earlier rules; the stacked rule keeps only the stronger box."""
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [304, 108, 460, 312],   # upper body
+        [320, 178, 462, 420],   # lower body
+    ], dtype=np.float32)
+    scores = np.array([0.88, 0.92], dtype=np.float32)
+    classes = np.array([0, 0])
+    assert non_max_suppression(boxes, scores, classes, 0.45) == [1]
+
+
+def test_nms_stacked_rule_can_be_disabled():
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [304, 108, 460, 312],
+        [320, 178, 462, 420],
+    ], dtype=np.float32)
+    scores = np.array([0.88, 0.92], dtype=np.float32)
+    classes = np.array([0, 0])
+    assert sorted(non_max_suppression(boxes, scores, classes, 0.45, suppress_stacked=False)) == [0, 1]
+
+
+def test_nms_keeps_person_standing_further_back_in_same_column():
+    """A second person further back shares the column but mostly shows above
+    the nearer one (vertical overlap < half the shorter box): both kept."""
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [100, 200, 220, 500],   # near person
+        [110, 60, 210, 260],    # far person, 60px of 200px hidden
+    ], dtype=np.float32)
+    scores = np.array([0.9, 0.8], dtype=np.float32)
+    classes = np.array([0, 0])
+    assert sorted(non_max_suppression(boxes, scores, classes, 0.45)) == [0, 1]
+
+
+def test_nms_keeps_much_narrower_box_in_same_column():
+    """A child beside an adult: heavy vertical overlap, but the narrower box
+    only partly shares the column and the widths differ too much to be one
+    object split in two."""
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [100, 100, 220, 500],   # adult, width 120
+        [190, 300, 245, 500],   # child, width 55, x-overlap 30 of 55
+    ], dtype=np.float32)
+    scores = np.array([0.9, 0.8], dtype=np.float32)
+    classes = np.array([0, 0])
+    assert sorted(non_max_suppression(boxes, scores, classes, 0.45)) == [0, 1]
+
+
+def test_nms_stacked_rule_is_class_aware():
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [304, 108, 460, 312],
+        [320, 178, 462, 420],
+    ], dtype=np.float32)
+    scores = np.array([0.88, 0.92], dtype=np.float32)
+    classes = np.array([0, 1])
+    assert sorted(non_max_suppression(boxes, scores, classes, 0.45)) == [0, 1]
+
+
+def test_nms_free_auto_collapses_top_bottom_split_person():
+    """End to end on the NMS-free path with Automatic dedupe."""
+    det = OnnxYoloDetector(model_path="/does-not-exist.onnx", categories=LABELS,
+                           iou_threshold=0.45, nms_free=True,
+                           confidence_only_nms=_resolve_confidence_only_nms("auto"))
+    det.input_width = det.input_height = 640
+    out = np.zeros((300, 6), dtype=np.float32)
+    out[0] = [304, 108, 460, 312, 0.88, 0]
+    out[1] = [320, 178, 462, 420, 0.92, 0]
+    res = det._postprocess_nms_free(out, SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
+    assert len(res) == 1
+    assert res[0]["confidence"] == pytest.approx(0.92)

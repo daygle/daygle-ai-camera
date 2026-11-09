@@ -183,6 +183,10 @@ touch these. Change one at a time so you can attribute any per-frame impact.
   lower-confidence box that sits mostly (80%+ of its area) inside a stronger
   box of the same label, or mostly contains it. That catches a partial
   "legs" or "torso" box stacked on a full-body box, which plain IoU misses.
+  It also drops the other half of a top/bottom split: two same-label boxes
+  in the same column (nearly the same horizontal span and width) that overlap
+  by at least half the shorter box's height, such as a head-to-waist box and a
+  chest-to-feet box on one person. People side by side are not affected.
 - **Inference Threads** - CPU threads used per inference run. Leave blank to
   auto-detect (up to 4). More threads speed up each inference but use more CPU
   per camera.
@@ -283,7 +287,8 @@ overlapping duplicate views of one object while retaining nearby same-class
 boxes with lower overlap. It has not been tuned without a labeled camera set.
 The merge also drops a same-label box nested inside (or around) a stronger one
 -- 80%+ of the smaller box inside the larger -- so a crop that only saw part
-of an object does not add a second box on top of the full-frame one.
+of an object does not add a second box on top of the full-frame one, and the same
+top/bottom split rule applies.
 
 Tiled inference drops a tile detection whose remapped area exceeds `0.1` of the
 full frame because the full-frame pass is expected to be more reliable for a
