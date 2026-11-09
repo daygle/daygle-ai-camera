@@ -40,6 +40,7 @@ from app.email_alerts import EmailAlertService, EmailAlertError
 from app.live_snapshot import filter_object_priority_detections, render_live_snapshot_jpeg_overlay
 from app.media_utils import safe_storage_path
 from app.push_notifications import PushNotificationService, PushNotificationError
+from app.utils import user_recipient_id
 
 logger = logging.getLogger('daygle.ai')
 
@@ -361,6 +362,43 @@ def deliver_alert_notifications(
         logger.warning('Push notification delivery failed for event %s: %s', event_id, exc)
 
 
+def resolve_email_recipients(
+    recipients: list[str] | None,
+    users: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    """Turn a rule's recipients into the email addresses to send to now.
+
+    ``user:<id>`` entries resolve to that user's CURRENT email, so a changed
+    address is picked up straight away and a deactivated or deleted user, or
+    one without an address, is skipped. Literal addresses pass through.
+    Duplicates (case-insensitive) are dropped, keeping the first.
+    ``users`` defaults to the auth store's user list.
+    """
+    entries = [str(entry or '').strip() for entry in recipients or []]
+    if users is None and any(user_recipient_id(entry) is not None for entry in entries):
+        auth = getattr(_state, 'auth', None)
+        try:
+            users = auth.list_users() if auth is not None else []
+        except Exception as exc:  # the auth store is down: still send to literal addresses
+            logger.warning('Could not load users to resolve alert recipients: %s', exc)
+            users = []
+    users_by_id = {int(user['id']): user for user in users or [] if user.get('id') is not None}
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        user_id = user_recipient_id(entry)
+        if user_id is not None:
+            user = users_by_id.get(user_id)
+            if not user or not user.get('is_active', 1):
+                continue
+            entry = str(user.get('email') or '').strip()
+        if '@' not in entry or entry.lower() in seen:
+            continue
+        seen.add(entry.lower())
+        resolved.append(entry)
+    return resolved
+
+
 def deliver_email_alerts(
     triggered: list[dict[str, Any]],
     event_id: int,
@@ -471,6 +509,13 @@ def deliver_email_alerts(
 
     def _send_rule_email(recipients: list[str], alert: dict[str, Any], kind: str) -> None:
         """Send one rule's email; per-recipient failures log and continue."""
+        recipients = resolve_email_recipients(recipients)
+        if not recipients:
+            logger.debug(
+                'No email sent for event %s rule %r: none of its recipients has an active address',
+                event_id, alert.get('rule_name'),
+            )
+            return
         try:
             mailer.send_alert(
                 alert,
