@@ -557,6 +557,44 @@ def test_deliver_email_falls_back_to_from_address_when_no_recipients(ch, main_mo
     ]
 
 
+def _offline_with_recipients(ch, main_module, monkeypatch, recipients):
+    users = [
+        {'id': 1, 'email': 'alice@example.com', 'is_active': 1},
+        {'id': 2, 'email': 'bob@example.com', 'is_active': 0},
+    ]
+    monkeypatch.setattr(main_module._state, 'auth', type('FakeAuth', (), {'list_users': staticmethod(lambda: users)})())
+    monkeypatch.setattr(
+        main_module.database, 'get_setting',
+        lambda key: {'enabled': True, 'offline_delay_minutes': 10, 'recipients': recipients},
+    )
+    monkeypatch.setattr(ch, 'effective_push_notification_settings', lambda: {'enabled': False})
+    monkeypatch.setattr(
+        ch, 'effective_email_alert_settings',
+        lambda: {'enabled': True, 'from_address': 'alerts@example.com'},
+    )
+    main_module._state._camera_health_state['cam-1'] = {
+        'online': False, 'offline_since': time.time() - 600,
+        'offline_notified': False, 'recovery_notified': False,
+    }
+    ch._deliver_camera_offline_notification('cam-1', 'Front Yard', 'offline')
+
+
+def test_deliver_email_resolves_user_recipients(ch, main_module, monkeypatch, stub_delivery_services, stub_logger):
+    """``user:<id>`` recipients go to the user's current address; inactive
+    users are skipped."""
+    _push_calls, email_calls = stub_delivery_services
+    _offline_with_recipients(ch, main_module, monkeypatch, ['user:1', 'user:2', 'typed@example.com'])
+    assert [to for _subject, _settings, to in email_calls] == ['alice@example.com', 'typed@example.com']
+
+
+def test_deliver_email_no_fallback_when_chosen_users_have_no_address(ch, main_module, monkeypatch, stub_delivery_services, stub_logger):
+    """The From-address fallback is for "nobody configured", not for chosen
+    users who are inactive or deleted: then nobody is emailed."""
+    _push_calls, email_calls = stub_delivery_services
+    _offline_with_recipients(ch, main_module, monkeypatch, ['user:2', 'user:99'])
+    assert email_calls == []
+
+
 def test_deliver_recovery_event_uses_online_title(ch, main_module, monkeypatch, stub_delivery_services, stub_logger):
     push_calls, _email_calls = stub_delivery_services
     monkeypatch.setattr(

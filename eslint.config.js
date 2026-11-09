@@ -119,6 +119,11 @@ const WEB_SHARED_GLOBALS = {
   setFieldInactive: 'readonly',
   RECORDINGS_OVERLAY_TOGGLE_KEY: 'readonly',
   TIMELINE_OVERLAY_TOGGLE_KEY: 'readonly',
+  // web/utils.js - email recipient picker (Alerts page, Settings > camera
+  // offline alerts): users are stored as ``user:<id>`` references.
+  toRecipientRefs: 'readonly',
+  renderRecipientPicker: 'readonly',
+  pickedRecipients: 'readonly',
   // web/utils.js - behavioural tripwire geometry/normalisation (Zones canvas).
   tripwireDefaultLine: 'readonly',
   normalizeTripwire: 'readonly',

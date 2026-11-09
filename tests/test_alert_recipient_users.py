@@ -76,3 +76,30 @@ def test_deliver_email_alerts_follows_user_email_changes(tmp_path, monkeypatch):
     captured.clear()
     _ad.deliver_email_alerts(triggered, 3, rules=[{**rules[0], 'email_recipients': [f"user:{user['id']}"]}])
     assert captured == []
+
+
+def test_camera_offline_settings_keep_user_recipients(tmp_path, monkeypatch):
+    from tests.support import LocalClient, _login, _server, _setup_admin
+
+    app, _ = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, _payload = client.request(
+            '/api/settings/camera-offline',
+            method='PUT',
+            json_body={
+                'enabled': True, 'offline_delay_minutes': 2,
+                'recipients': ['User:4', 'ops@example.com', 'junk', 'user:4'],
+            },
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        status, _headers, payload = client.request('/api/settings/camera-offline')
+        assert status == 200
+        assert payload['recipients'] == ['user:4', 'ops@example.com']
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

@@ -104,10 +104,12 @@ from email.mime.text import MIMEText
 from typing import Any
 
 import app.state as _state
+from app.alert_recipients import resolve_email_recipients
 from app.config_facades import effective_email_alert_settings, effective_push_notification_settings
 from app.diagnostics import log_camera_diagnostic
 from app.email_alerts import EmailAlertService, _encode_subject, _stamp_originator_headers
 from app.push_notifications import PushNotificationService
+from app.utils import normalize_email_recipients
 
 logger = logging.getLogger('daygle.ai')
 
@@ -128,8 +130,7 @@ def effective_camera_offline_alert_settings() -> dict[str, Any]:
         settings['offline_delay_minutes'] = max(1, int(settings.get('offline_delay_minutes', 1)))
     except (TypeError, ValueError):
         settings['offline_delay_minutes'] = 1
-    if not isinstance(settings.get('recipients'), list):
-        settings['recipients'] = []
+    settings['recipients'] = normalize_email_recipients(settings.get('recipients'))
     return settings
 
 
@@ -235,8 +236,14 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
     if email_settings_obj.get('enabled'):
         try:
             mailer = EmailAlertService(email_settings_obj)
-            recipients = [r for r in settings.get('recipients') or [] if isinstance(r, str) and '@' in r]
-            if not recipients:
+            # Entries are addresses or ``user:<id>`` references, resolved to
+            # each user's current address. The From address is the fallback
+            # only when no recipients are configured at all: if every chosen
+            # user is deactivated or has no address, nobody is emailed, the
+            # same as rule alerts.
+            configured = [r for r in settings.get('recipients') or [] if isinstance(r, str) and r.strip()]
+            recipients = resolve_email_recipients(configured)
+            if not configured:
                 fallback = str(email_settings_obj.get('from_address') or '').strip()
                 if fallback and '@' in fallback:
                     recipients = [fallback]
