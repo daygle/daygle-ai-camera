@@ -8,67 +8,80 @@
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
   <style>
-    /* The assignment select shares the row with the action buttons; keep it
-       full-width inside its cell so long model labels stay readable. */
-    .camera-model-select { width: 100%; max-width: 320px; }
-    .camera-model-source { display: inline-flex; align-items: center; gap: 6px; }
-    /* Actions cell. Deliberately NOT .button-row: that class is the page-level
-       action bar, and inside .page-stack it draws a border-top rule plus extra
-       padding, which put a stray divider above the button in every table row. */
-    .camera-model-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .camera-model-actions button { min-width: 0; }
-    /* The card is a page-stack grid item, so a grid item's automatic minimum
-       size would let the table's min-content leak up and stretch the WHOLE
-       page sideways on a phone. Confine the overflow to the table's own box. */
-    .camera-models-card { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+    /* One card: default model in the header, then one row per camera with a
+       single model picker that saves on change. */
+    .camera-models-card { display: grid; gap: 14px; min-width: 0; grid-template-columns: minmax(0, 1fr); }
     .camera-models-card .audit-table-wrap { min-width: 0; }
-    /* Phones: camera name + current model + a select + two buttons cannot fit
-       four columns, and side-scrolling a 400px table on a 360px screen is worse
-       than stacking. Each row becomes a card and the column names come from
-       ``data-label`` on the cells - the same treatment the shared sheet gives
+    .camera-models-default {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 10px 16px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--muted-bg);
+    }
+    .camera-models-default-copy { min-width: 0; font-size: 14px; }
+    .camera-models-default-copy span { color: var(--muted); font-weight: 700; margin-right: 6px; }
+    .camera-models-default-copy strong { overflow-wrap: anywhere; }
+    .camera-models-default .button-link { white-space: nowrap; }
+    .camera-model-select { width: 100%; max-width: 380px; }
+    .camera-model-select:disabled { opacity: .6; }
+    .camera-model-camera strong { display: block; }
+    .camera-model-camera .muted { font-size: 12px; }
+    #cameraModelsTable td { vertical-align: middle; }
+    #cameraModelsTable th:last-child, #cameraModelsTable td.camera-model-status-cell { width: 1%; white-space: nowrap; }
+    /* Status pill. Not .status-badge: that uppercases its text, which turned
+       model names like "YOLO11s" into "YOLO11S". */
+    .camera-model-status {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 800;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .camera-model-status.is-dedicated { color: var(--accent); border-color: var(--accent); }
+    .camera-model-status.is-missing { color: var(--warning); border-color: var(--warning); }
+    .camera-model-status.is-saving { font-style: italic; }
+    .camera-models-note { margin: 0; font-size: 12.5px; color: var(--muted); }
+    /* Phones: each camera becomes a compact block - name and status on one
+       line, the model picker under them. Column names come from
+       ``data-label`` on the cells, the same treatment the shared sheet gives
        ``#logTable``. */
     @media (max-width: 700px) {
       #cameraModelsTable { display: block; }
       #cameraModelsTable thead { display: none; }
-      #cameraModelsTable tbody { display: grid; gap: 12px; }
+      #cameraModelsTable tbody { display: grid; gap: 10px; }
       #cameraModelsTable tbody tr {
         display: grid;
-        gap: 0;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "camera status" "model model";
+        align-items: center;
+        gap: 8px 12px;
         padding: 12px 14px;
         border: 1px solid var(--border);
         border-radius: 14px;
         background: rgba(255,255,255,.035);
       }
-      #cameraModelsTable tbody td {
-        display: grid;
-        grid-template-columns: minmax(96px, 34%) minmax(0, 1fr);
-        gap: 10px;
-        align-items: start;
-        padding: 8px 0;
-        border-bottom: 1px solid rgba(255,255,255,.07);
-      }
-      #cameraModelsTable tbody td:last-child { border-bottom: 0; padding-bottom: 0; }
-      #cameraModelsTable tbody td::before {
+      #cameraModelsTable tbody td { display: block; padding: 0; border: 0; width: auto; }
+      #cameraModelsTable tbody td.camera-model-camera { grid-area: camera; min-width: 0; }
+      #cameraModelsTable tbody td.camera-model-status-cell { grid-area: status; }
+      #cameraModelsTable tbody td.camera-model-select-cell { grid-area: model; }
+      #cameraModelsTable tbody td.camera-model-select-cell::before {
         content: attr(data-label);
+        display: block;
+        margin-bottom: 4px;
         color: var(--muted);
         font-size: 11px;
         font-weight: 800;
-        line-height: 1.5;
         text-transform: uppercase;
         letter-spacing: .05em;
       }
       /* Full-width cells (the empty-state row) have no label to show. */
-      #cameraModelsTable tbody td[colspan] { display: block; }
-      #cameraModelsTable .camera-model-select { max-width: none; }
-      /* Stack the actions and give them phone-sized tap targets. */
-      #cameraModelsTable .camera-model-actions { display: grid; grid-template-columns: 1fr; }
-      #cameraModelsTable .camera-model-actions button { min-height: 40px; }
-    }
-    /* Narrow phones: a 96px label column left the model pills and the model
-       picker ~110px, squashing the pills into circles and clipping the
-       select. Put each label above its value instead. */
-    @media (max-width: 420px) {
-      #cameraModelsTable tbody td { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+      #cameraModelsTable tbody td[colspan] {
+        display: block;
+        grid-column: 1 / -1;
+      }
+      #cameraModelsTable .camera-model-select { max-width: none; min-height: 40px; }
     }
   </style>
 </head>
@@ -87,27 +100,17 @@
       </div>
     </header>
 
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">🌐</div>
-        <div>
-          <h2>Default Model</h2>
-          <p class="settings-section-subtitle">Cameras without a dedicated assignment run this object-detection model.</p>
-        </div>
-      </div>
-      <div id="defaultModelInfo" class="muted" aria-live="polite"></div>
-      <div class="button-row">
-        <a class="button-link" href="/models">Manage Models</a>
-      </div>
-    </section>
-
     <section class="card camera-models-card">
       <div class="settings-section-header">
         <div class="settings-section-icon">📷</div>
         <div>
-          <h2>Camera Assignments</h2>
-          <p class="settings-section-subtitle">Assign, switch, or unassign the object-detection model each camera runs. Changes apply on the camera's next detection cycle - no restart needed.</p>
+          <h2>Camera assignments</h2>
+          <p class="settings-section-subtitle">Pick the object-detection model each camera runs. A change saves as soon as you pick it and applies on the camera's next detection cycle - no restart needed.</p>
         </div>
+      </div>
+      <div class="camera-models-default">
+        <div id="defaultModelInfo" class="camera-models-default-copy" aria-live="polite"></div>
+        <a class="button-link" href="/models">Manage models →</a>
       </div>
       <div id="cameraModelsMessage" class="muted" aria-live="polite"></div>
       <div class="audit-table-wrap">
@@ -115,14 +118,14 @@
           <thead>
             <tr>
               <th scope="col">Camera</th>
-              <th scope="col">Current Model</th>
-              <th scope="col">Assign Model</th>
-              <th scope="col">Actions</th>
+              <th scope="col">Model</th>
+              <th scope="col">Status</th>
             </tr>
           </thead>
           <tbody id="cameraModelsBody"></tbody>
         </table>
       </div>
+      <p class="camera-models-note">Only object models can be assigned here. Face-detection models run in their own pass alongside them - set that up on <a href="/models/faces">Face Models</a>.</p>
     </section>
 
   </main>
