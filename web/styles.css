@@ -35,6 +35,14 @@
 .alerts-channel-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-start; margin: 18px 0; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .alerts-channel-row label { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; }
 .alerts-recipient-field { margin-bottom: 18px; }
+.alerts-recipient-field[data-recipient-picker] { border: 0; padding: 0; min-width: 0; }
+.alerts-recipient-field > legend { padding: 0; margin-bottom: 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.alerts-recipient-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 14px; }
+.alerts-recipient-option { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 8px; min-width: 0; cursor: pointer; }
+.alerts-recipient-option input { grid-row: span 2; margin: 0; }
+.alerts-recipient-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alerts-recipient-email { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alerts-recipient-option.is-orphan .alerts-recipient-email { font-style: italic; }
 .alerts-policy-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .alerts-policy-head { margin-bottom: 18px; }
 .alerts-policy h3 { margin: 4px 0 0; }

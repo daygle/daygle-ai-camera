@@ -3,6 +3,7 @@ requireElements(['cameraSelect', 'zoneSelect', 'alertTypeSelect', 'addAlertBtn',
 let cameras = [];
 let soundClasses = [];
 let enrolledPeople = [];
+let alertUsers = [];
 let faceRulesPayload = { rules: [] };
 let cameraIndex = 0;
 let zoneIndex = 0;
@@ -141,6 +142,54 @@ function ensureAlertSchedules(rule) {
   return rule.alert_schedules;
 }
 
+// Email recipients are picked from the system's users rather than typed in.
+// The rule still stores plain addresses (so the backend and older configs
+// are unchanged); the picker just ticks the users whose address is stored.
+// An address that matches no current user (typed in before this picker, or
+// a user who was since removed or changed address) is kept and listed so it
+// can be unticked, never silently dropped.
+function recipientUsers(users) {
+  return (users || [])
+    .filter((user) => user && user.is_active !== false && user.is_active !== 0 && String(user.email || '').includes('@'))
+    .map((user) => {
+      const fullName = [user.first_name, user.last_name].map((part) => String(part || '').trim()).filter(Boolean).join(' ');
+      return { email: String(user.email).trim(), name: fullName || String(user.username || '').trim() || String(user.email).trim(), username: String(user.username || '').trim() };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function recipientOptions(selected, users) {
+  const chosen = normalizeEmailList(selected);
+  const chosenKeys = new Set(chosen.map((email) => email.toLowerCase()));
+  const seen = new Set();
+  const options = [];
+  recipientUsers(users).forEach((user) => {
+    const key = user.email.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    options.push({ ...user, checked: chosenKeys.has(key), orphan: false });
+  });
+  chosen.forEach((email) => {
+    const key = email.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    options.push({ email, name: email, username: '', checked: true, orphan: true });
+  });
+  return options;
+}
+
+function renderRecipientPicker(selected) {
+  const options = recipientOptions(selected, alertUsers);
+  const body = options.length
+    ? options.map((option) => `<label class="alerts-recipient-option${option.orphan ? ' is-orphan' : ''}" title="${escapeHtml(option.orphan ? 'This address does not belong to any active user. Untick it to stop sending to it.' : option.email)}"><input type="checkbox" data-recipient value="${escapeHtml(option.email)}" ${option.checked ? 'checked' : ''}><span class="alerts-recipient-name">${escapeHtml(option.name)}</span>${option.orphan ? '<span class="alerts-recipient-email">Not a user</span>' : `<span class="alerts-recipient-email">${escapeHtml(option.email)}</span>`}</label>`).join('')
+    : '<p class="form-help muted">No users have an email address yet. Add one on the <a href="/users">Users</a> page.</p>';
+  return `<fieldset class="alerts-recipient-field" data-recipient-picker><legend>Email Recipients</legend><div class="alerts-recipient-list">${body}</div></fieldset>`;
+}
+
+function pickedRecipients(picker) {
+  return [...picker.querySelectorAll('input[data-recipient]:checked')].map((input) => input.value);
+}
+
 function defaultRule(label = 'person', type = alertType) {
   if (type === 'sound') {
     const sound = soundClasses.find((item) => item.id === label);
@@ -167,7 +216,7 @@ function renderObjectSchedules(rule, ruleIndex, schedules) {
         <label><span>Alert From</span>${timeSelect(schedule.notify_start, 'data-field="notify_start"')}</label>
         <label><span>Alert Until</span>${timeSelect(schedule.notify_end, 'data-field="notify_end"')}</label>
       </div>
-      <label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(schedule.email_recipients.join(', '))}" placeholder="alerts@example.com, me@example.com"></label>
+      ${renderRecipientPicker(schedule.email_recipients)}
     </section>`).join('')}<button class="secondary alerts-schedule-add" data-add-schedule="${ruleIndex}" type="button">＋ Add Schedule</button></div>`;
 }
 
@@ -348,7 +397,7 @@ function renderPolicies() {
       ${alertType === 'object' ? renderObjectSchedules(rule, index, schedules) : people ? '' : behaviour
         ? `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Alert From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Alert Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`
         : `<div class="alerts-policy-grid alerts-schedule-grid"><label><span>Detect From</span>${timeSelect(rule.active_start, 'data-field="active_start"')}</label><label><span>Detect Until</span>${timeSelect(rule.active_end, 'data-field="active_end"')}</label><label><span>Alert From</span>${timeSelect(rule.notify_start, 'data-field="notify_start"')}</label><label><span>Alert Until</span>${timeSelect(rule.notify_end, 'data-field="notify_end"')}</label></div>`}
-      ${alertType === 'object' ? '' : `<label class="alerts-recipient-field"><span>Email Recipients</span><input data-field="email_recipients" type="text" value="${escapeHtml(Array.isArray(rule.email_recipients) ? rule.email_recipients.join(', ') : rule.email_recipients || '')}" placeholder="alerts@example.com, me@example.com"></label>`}
+      ${alertType === 'object' ? '' : renderRecipientPicker(rule.email_recipients)}
       <p class="muted alerts-policy-note">${policyNote}</p>
     </article></td></tr>`;
   }).join('')}</tbody></table></div>`;
@@ -363,7 +412,6 @@ function renderPolicies() {
     const details = $('alertsList').querySelector(`[data-policy-details-for="${index}"]`);
     if (schedule) {
       if (field.type === 'checkbox') schedule[key] = field.checked;
-      else if (key === 'email_recipients') schedule.email_recipients = normalizeEmailList(field.value);
       else schedule[key] = field.value || null;
       ensureAlertSchedules(rule);
       [summary, details].forEach((container) => container?.querySelectorAll(`[data-field="${key}"]`).forEach((matchingField) => {
@@ -375,8 +423,7 @@ function renderPolicies() {
           const state = matchingField.closest('label')?.querySelector('span');
           if (state && isSummary) state.textContent = aggregate ? 'On' : 'Off';
         } else if (matchingField !== field && matchingField.closest('[data-schedule-index]') === scheduleEntry) {
-          if (key === 'email_recipients') matchingField.value = schedule.email_recipients.join(', ');
-          else matchingField.value = schedule[key] || '';
+          matchingField.value = schedule[key] || '';
         }
       }));
     } else if (field.type === 'checkbox') {
@@ -394,8 +441,7 @@ function renderPolicies() {
       if (key === 'enabled') {
         details?.querySelector('.alerts-policy')?.classList.toggle('is-enabled', rule.enabled !== false);
       }
-    } else if (key === 'email_recipients') rule[key] = alertType === 'people' ? field.value : field.value.split(',').map((item) => item.trim()).filter(Boolean);
-    else if (key === 'person_id') {
+    } else if (key === 'person_id') {
       rule.person_id = field.value || null;
       rule.name = enrolledPeople.find((person) => String(person.id) === field.value)?.name || 'Unknown Person';
       $('alertsList').querySelector(`.alerts-policy-row[data-rule-index="${index}"] .alerts-policy-name strong`).textContent = ruleLabel(rule);
@@ -403,6 +449,19 @@ function renderPolicies() {
     } else rule[key] = field.value || null;
     if (key === 'class') rule.name = soundClasses.find((sound) => sound.id === field.value)?.label || field.value;
     if (summary) updatePolicyStatus(summary, rule);
+  }));
+  $('alertsList').querySelectorAll('[data-recipient-picker]').forEach((picker) => picker.addEventListener('change', () => {
+    const policyRow = picker.closest('[data-policy-details-for]');
+    const rule = rules[Number(policyRow.dataset.policyDetailsFor)];
+    const emails = pickedRecipients(picker);
+    const scheduleEntry = alertType === 'object' ? picker.closest('[data-schedule-index]') : null;
+    if (scheduleEntry) {
+      ensureAlertSchedules(rule)[Number(scheduleEntry.dataset.scheduleIndex)].email_recipients = emails;
+      ensureAlertSchedules(rule);
+    } else {
+      // People (face) rules store recipients as a comma-separated string.
+      rule.email_recipients = alertType === 'people' ? emails.join(', ') : emails;
+    }
   }));
   $('alertsList').querySelectorAll('[data-add-schedule]').forEach((button) => button.addEventListener('click', () => {
     const rule = rules[Number(button.dataset.addSchedule)];
@@ -532,9 +591,13 @@ $('saveAlertsBtn').addEventListener('click', async () => {
 
 (async function init() {
   try {
-    const [cameraPayload, soundPayload, peoplePayload, rulesPayload] = await Promise.all([
+    const [cameraPayload, soundPayload, peoplePayload, rulesPayload, usersPayload] = await Promise.all([
       api('/api/cameras'), api('/api/sound/classes'), api('/api/persons'), api('/api/settings/face-detection-rules'),
+      // The recipient picker lists users; if this fails the page still works
+      // and already-stored addresses stay listed and ticked.
+      api('/api/users').catch(() => []),
     ]);
+    alertUsers = Array.isArray(usersPayload) ? usersPayload : (usersPayload?.users || []);
     cameras = cameraPayload.cameras || [];
     soundClasses = soundPayload.classes || [];
     enrolledPeople = peoplePayload.persons || [];

@@ -18,8 +18,9 @@ const sandbox = {
   },
 };
 vm.createContext(sandbox);
-vm.runInContext(`${source.slice(start, end)}; globalThis.ensureAlertSchedules = ensureAlertSchedules;`, sandbox);
+vm.runInContext(`${source.slice(start, end)}; globalThis.ensureAlertSchedules = ensureAlertSchedules; globalThis.recipientOptions = recipientOptions;`, sandbox);
 const ensureAlertSchedules = sandbox.ensureAlertSchedules;
+const recipientOptions = sandbox.recipientOptions;
 const rehome = (value) => JSON.parse(JSON.stringify(value));
 
 test('a rule without schedules gets one empty schedule; rule-level fields are ignored', () => {
@@ -102,4 +103,27 @@ test('policy status shows In Schedule (Alert) only when a detecting rule will se
   // The rule's detect window gates every schedule.
   assert.equal(status([{ push_enabled: true }], { active_start: '05:00', active_end: '20:00' }).className, 'is-in-schedule-alert');
   assert.equal(status([{ push_enabled: true }], { active_start: '20:00', active_end: '05:00' }).label, 'Outside Schedule');
+});
+
+test('recipient picker lists active users with an email and ticks the stored ones', () => {
+  const users = [
+    { username: 'zed', first_name: 'Zed', last_name: 'Smith', email: 'zed@example.com', is_active: 1 },
+    { username: 'amy', first_name: '', last_name: '', email: 'Amy@Example.com', is_active: 1 },
+    { username: 'noemail', email: '', is_active: 1 },
+    { username: 'gone', email: 'gone@example.com', is_active: 0 },
+  ];
+  const options = rehome(recipientOptions(['amy@example.com'], users));
+  assert.deepEqual(options.map(({ email, name, checked, orphan }) => ({ email, name, checked, orphan })), [
+    { email: 'Amy@Example.com', name: 'amy', checked: true, orphan: false },
+    { email: 'zed@example.com', name: 'Zed Smith', checked: false, orphan: false },
+  ]);
+});
+
+test('stored addresses that match no active user stay listed and ticked', () => {
+  const users = [{ username: 'gone', email: 'gone@example.com', is_active: 0 }];
+  const options = rehome(recipientOptions('gone@example.com, typed@example.com', users));
+  assert.deepEqual(options.map(({ email, checked, orphan }) => ({ email, checked, orphan })), [
+    { email: 'gone@example.com', checked: true, orphan: true },
+    { email: 'typed@example.com', checked: true, orphan: true },
+  ]);
 });
