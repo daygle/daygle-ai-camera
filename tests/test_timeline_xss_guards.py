@@ -63,12 +63,12 @@ class _YamnetTfliteFileGuard(unittest.TestCase):
     def test_model_and_status_outputs_remain_escaped(self) -> None:
         source = _read(self.path)
         for substring in (
-            '${escapeHtml(yesNo(status.running))}',
+            '${escapeHtml(state.label)}',
             '${escapeHtml(enabledCameras.length)}',
-            '${escapeHtml(percentValue(status.last_confidence))}',
-            "const sizeText = info.model_size ? escapeHtml(formatBytes(info.model_size)) : 'Unknown';",
-            "const hashText = info.sha256 ? escapeHtml(info.sha256) : 'Not available';",
-            "const installedAt = info.installed_at ? escapeHtml(new Date(info.installed_at).toLocaleDateString()) : '';",
+            '${escapeHtml(lastHeard)}',
+            "const hashText = info.sha256 ? escapeHtml(info.sha256) : '';",
+            'bodyHtml: escapeHtml(reason)',
+            "const installedAt = info.installed_at ? escapeHtml(new Date(info.installed_at)",
         ):
             self.assertIn(substring, source)
 

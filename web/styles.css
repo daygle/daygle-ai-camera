@@ -405,8 +405,8 @@ h2 { margin: 0; font-size: 20px; }
 }
 .card:hover { border-color: color-mix(in srgb, var(--accent) 36%, transparent); box-shadow: 0 22px 60px rgba(0,0,0,.40); }
 
-/* Gradient hairline across the top of every card (the yamnet-model-card
-   accent bar, generalized). Drawn as a small background layer pinned to the
+/* Gradient hairline across the top of every card (the old YAMNet
+   model-card accent bar, generalized). Drawn as a small background layer pinned to the
    top instead of an ::after so cards can keep visible overflow -- the /objects
    multi-select dropdown overflows its card. */
 .card::before {
@@ -900,239 +900,44 @@ input[type="file"] { padding: 10px; }
     text-align: left;
   }
 }
-/* YAMNet backend-status panel (yamnet-tflite.html #soundStatusPanel):
-   5 short diagnostics fit one responsive auto-fit row on desktop (the old
-   fixed 4-up grid no longer fits after the Detector Status trim), narrowing
-   gracefully as the card shrinks and dropping to 2-up on phones via the
-   rule below. The tone-variant selectors repeat at matching specificity so
-   they beat the generic .status-panel 1fr resets. */
-.yamnet-status-grid.status-panel,
-.yamnet-status-grid.status-panel.status-ok,
-.yamnet-status-grid.status-panel.status-warning,
-.yamnet-status-grid.status-panel.status-error {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-}
-
-/* ─── YAMNet model card ────────────────────────────────────────────────────── */
-/* The yamnet-model-card look was promoted to the base .card (tinted border,
-   corner glow, top hairline); these rules keep only what is still unique. */
-.yamnet-model-card {
-  overflow: hidden;
-}
-.yamnet-model-section-header {
-  align-items: center;
-  gap: 14px;
-}
-.yamnet-model-section-header > div:not(.settings-section-icon) {
-  flex: 1;
-  min-width: 0;
-}
-.yamnet-model-engine-badge {
-  flex-shrink: 0;
-  padding: 7px 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
-  border-radius: 999px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  font-size: 11px;
-  font-weight: 850;
-  letter-spacing: .04em;
-  white-space: nowrap;
-}
-.yamnet-model-info {
-  margin-top: 6px;
-}
-.yamnet-model-overview {
+/* ─── Sound Model page (yamnet-tflite.html) ───────────────────────────────── */
+/* Same library card as Object/Face Models: header, status strip, one model
+   card. Only the bits unique to the single YAMNet model live here. */
+.yamnet-notice {
   display: grid;
-  grid-template-columns: minmax(220px, .85fr) minmax(0, 1.7fr);
-  gap: 14px;
-  align-items: stretch;
-}
-.yamnet-model-state {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  min-height: 116px;
-  padding: 18px;
+  gap: 4px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
   border-radius: 10px;
-  background: rgba(0,0,0,.12);
+  background: var(--muted-bg);
+  font-size: 13px;
 }
-.yamnet-model-orb {
-  position: relative;
-  flex: 0 0 15px;
-  width: 15px;
-  height: 15px;
-  border-radius: 999px;
-  background: var(--muted);
-  box-shadow: 0 0 0 6px rgba(145,161,186,.1);
-}
-.yamnet-model-orb::after {
-  position: absolute;
-  inset: -5px;
-  border: 1px solid currentColor;
-  border-radius: inherit;
-  content: '';
-  opacity: .35;
-  animation: yamnet-model-pulse 2.2s ease-out infinite;
-}
-.yamnet-model-orb.status-ok {
-  color: var(--success);
-  background: var(--success);
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--success) 10%, transparent), 0 0 22px color-mix(in srgb, var(--success) 32%, transparent);
-}
-.yamnet-model-orb.status-warning {
-  color: #f8c55d;
-  background: #f8c55d;
-  box-shadow: 0 0 0 6px rgba(248,197,93,.1), 0 0 22px rgba(248,197,93,.22);
-}
-.yamnet-model-status-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 850;
-  white-space: nowrap;
-}
-.yamnet-model-status-pill.status-ok {
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 32%, transparent);
-  background: color-mix(in srgb, var(--success) 10%, transparent);
-}
-.yamnet-model-status-pill.status-warning {
-  color: #f8c55d;
-  border-color: rgba(248,197,93,.32);
-  background: rgba(248,197,93,.1);
-}
-.yamnet-model-caption {
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-.yamnet-model-specs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-.yamnet-model-spec {
+.yamnet-notice[hidden] { display: none; }
+.yamnet-notice.is-error { border-left-color: var(--danger); }
+.yamnet-notice.is-info { border-left-color: var(--accent); }
+.yamnet-notice strong { font-size: 14px; }
+.yamnet-notice p { margin: 0; color: var(--muted); }
+.yamnet-notice code { overflow-wrap: anywhere; }
+.yamnet-model-details {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-width: 0;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: rgba(255,255,255,.035);
-}
-.yamnet-model-spec span {
-  margin-bottom: 6px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 850;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.yamnet-model-spec strong {
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 850;
-}
-.yamnet-model-spec-wide {
-  grid-column: 1 / -1;
-}
-.yamnet-model-spec code {
-  display: block;
-  overflow: hidden;
-  color: var(--accent);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.yamnet-model-actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 10px;
   flex-wrap: wrap;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-.yamnet-model-actions button {
-  min-width: 150px;
-}
-.yamnet-model-empty {
-  display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px;
-  border: 1px dashed rgba(248,197,93,.35);
-  border-radius: 10px;
-  background: rgba(248,197,93,.055);
+  gap: 6px 14px;
+  font-size: 12.5px;
+  color: var(--muted);
 }
-.yamnet-model-empty-icon {
-  display: grid;
-  flex: 0 0 42px;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  border: 1px solid rgba(248,197,93,.3);
-  border-radius: 13px;
-  color: #f8c55d;
-  background: rgba(248,197,93,.1);
-  font-size: 25px;
-  line-height: 1;
+.yamnet-model-details strong { color: var(--text); font-weight: 800; }
+.yamnet-model-hash { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.yamnet-model-hash code { font-size: 12px; }
+.yamnet-model-hash button {
+  min-height: 0;
+  padding: 2px 8px;
+  font-size: 11px;
 }
-.yamnet-model-empty-copy {
-  flex: 1;
-  min-width: 0;
-}
-.yamnet-model-empty-copy strong {
-  color: var(--text);
-  font-size: 14px;
-}
-.yamnet-model-empty-copy p {
-  margin: 5px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
-}
-@keyframes yamnet-model-pulse {
-  0% { transform: scale(.7); opacity: .7; }
-  70%, 100% { transform: scale(1.55); opacity: 0; }
-}
-/* Light-mode card treatment was promoted to :root.light .card. */
-:root.light .yamnet-model-state { background: color-mix(in srgb, var(--accent) 3.5%, transparent); }
-:root.light .yamnet-model-spec { background: rgba(255,255,255,.7); }
-:root.light .yamnet-model-engine-badge { color: #0369a1; background: color-mix(in srgb, var(--accent) 7%, transparent); }
-:root.light .yamnet-model-status-pill.status-warning { color: #a16207; }
-:root.light .yamnet-model-empty { background: rgba(245,158,11,.07); }
-@media (prefers-reduced-motion: reduce) {
-  .yamnet-model-orb::after { animation: none; }
-}
-@media (max-width: 760px) {
-  .yamnet-model-overview { grid-template-columns: 1fr; }
-}
-@media (max-width: 520px) {
-  .yamnet-model-section-header { align-items: flex-start; flex-wrap: wrap; }
-  .yamnet-model-engine-badge { margin-left: 0; }
-  .yamnet-model-specs { grid-template-columns: 1fr; }
-  .yamnet-model-spec-wide { grid-column: auto; }
-  .yamnet-model-actions { align-items: stretch; flex-direction: column; }
-  .yamnet-model-actions button { width: 100%; }
-  .yamnet-model-empty {
-    display: grid;
-    grid-template-columns: 42px minmax(0, 1fr);
-    align-items: start;
-  }
-  .yamnet-model-empty .yamnet-model-status-pill {
-    grid-column: 2;
-    justify-self: start;
-  }
-}
+#yamnetModelCard .model-card-actions:not(:has(button:not([hidden]))) { display: none; }
+.status-panel.model-status-strip a { color: inherit; }
+.yamnet-model-engine { margin-left: 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
 /* Playback-card details (recordings / dashboard / alerts / timeline): the
    shared .status-panel stays 2-up for the health/status panels on the
    profile, onnx, settings and yamnet pages, but the clip details carry up to
@@ -1217,7 +1022,6 @@ input[type="file"] { padding: 10px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
 
   .form-grid, .user-row { grid-template-columns: 1fr; }
-  .yamnet-status-grid.status-panel { grid-template-columns: 1fr; }
 
   .timeline-controls-card .settings-section-header { flex-wrap: wrap; }
   .timeline-controls-actions { margin: 0; width: 100%; justify-content: stretch; flex-wrap: wrap; }
@@ -5356,17 +5160,6 @@ button.activity-item-action.activity-item-action-delete:hover {
   #soundCameraStatusList .rule-table tbody,
   #soundCameraStatusList .rule-table tr { min-width: 0; }
   #soundCameraStatusList .rule-table .cell-label { white-space: normal; }
-  /* The Backend Status grid keeps its multi-column layout via the
-     `.status-ok/.warning/.error` variants (specificity 0,3,0), which the
-     general `.status-panel` 1fr reset can't override, so on phones the
-     values wrap mid-word ("YAM Net TFLi te"). Drop it to 2 columns here at
-     matching specificity. */
-  .yamnet-status-grid.status-panel,
-  .yamnet-status-grid.status-panel.status-ok,
-  .yamnet-status-grid.status-panel.status-warning,
-  .yamnet-status-grid.status-panel.status-error {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 /* ─── Custom tooltip ──────────────────────────────────────────────────────── */
