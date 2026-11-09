@@ -1,7 +1,9 @@
 // system.js - Admin > System > Health (system.html). Admin-only.
 // Host CPU / load / RAM and the NVIDIA GPU (temperature, utilisation, VRAM)
-// from /api/system/resources, refreshed every 5 seconds. Moved here from the
-// old dashboard. Uses api() / startPageInterval from utils.js.
+// from /api/system/resources, refreshed every 5 seconds, and disk space and
+// media usage from /api/system/storage, refreshed every minute (the server
+// caches its folder sizes that long). Moved here from the old dashboard.
+// Uses api() / startPageInterval from utils.js.
 
 const els = {
   cpuValue: document.getElementById('cpuValue'),
@@ -19,6 +21,9 @@ const els = {
   gpuNote: document.getElementById('systemGpuNote'),
   decodeSummary: document.getElementById('videoDecodeSummary'),
   decodeCameras: document.getElementById('videoDecodeCameras'),
+  storageSummary: document.getElementById('storageSummary'),
+  storageVolumes: document.getElementById('storageVolumes'),
+  storageUsage: document.getElementById('storageUsage'),
 };
 
 // ─── System resource cards (CPU / Load / RAM) ───────────────────────────────
@@ -165,6 +170,86 @@ function renderVramStatus(gpu) {
   }
 }
 
+// ─── Storage card ───────────────────────────────────────────────────────────
+// One meter per disk holding server data (folders on the same disk are listed
+// together), then the bytes recordings, snapshots, events and the database
+// use, and how full recordings are against the retention cap.
+const STORAGE_LABELS = { recordings: 'Recordings', snapshots: 'Snapshots', events: 'Events', database: 'Database' };
+const STORAGE_WARN_PERCENT = 85;
+const STORAGE_DANGER_PERCENT = 95;
+
+// Binary units, like the RAM card: B, KB, MB, GB, TB.
+function formatBytes(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value < 0) return '-';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return unit === 0 ? `${size} B` : `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unit]}`;
+}
+
+function storageLevel(percent) {
+  if (!Number.isFinite(percent)) return '';
+  if (percent >= STORAGE_DANGER_PERCENT) return 'is-danger';
+  if (percent >= STORAGE_WARN_PERCENT) return 'is-warn';
+  return '';
+}
+
+function storageSummaryText(status) {
+  const recordings = status?.usage?.recordings_bytes;
+  const cap = status?.retention?.max_storage_bytes;
+  const days = status?.retention?.retention_days;
+  const parts = [];
+  if (Number.isFinite(recordings) && Number.isFinite(cap) && cap > 0) {
+    parts.push(`Recordings use ${formatBytes(recordings)} of the ${formatBytes(cap)} limit`);
+  } else if (Number.isFinite(recordings)) {
+    parts.push(`Recordings use ${formatBytes(recordings)}`);
+  }
+  if (Number.isFinite(days)) parts.push(`kept for ${days} day${days === 1 ? '' : 's'}`);
+  if (status?.retention?.auto_purge_enabled === false) parts.push('auto-purge is off');
+  return parts.length ? `${parts.join(', ')}.` : 'Disk space and what recordings, snapshots and the database use.';
+}
+
+function renderStorage(status) {
+  if (!status) return;
+  if (els.storageSummary) els.storageSummary.textContent = storageSummaryText(status);
+  const volumes = Array.isArray(status.volumes) ? status.volumes : [];
+  if (els.storageVolumes) {
+    els.storageVolumes.innerHTML = volumes.map((volume) => {
+      const holds = (volume.holds || []).map((key) => STORAGE_LABELS[key] || key).join(' · ');
+      const percent = Number(volume.percent);
+      const width = Number.isFinite(percent) ? Math.min(100, Math.max(0, percent)) : 0;
+      return '<div class="storage-volume">'
+        + `<div class="storage-volume-head"><strong>${escapeHtml(holds || 'Disk')}</strong>`
+        + `<span>${escapeHtml(formatBytes(volume.used_bytes))} of ${escapeHtml(formatBytes(volume.total_bytes))} used`
+        + ` · ${escapeHtml(formatBytes(volume.free_bytes))} free</span></div>`
+        + `<div class="storage-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${width}" aria-label="${escapeHtml(holds || 'Disk')} ${width}% used">`
+        + `<div class="storage-meter-fill ${storageLevel(percent)}" style="width: ${width}%"></div></div>`
+        + '</div>';
+    }).join('');
+  }
+  if (els.storageUsage) {
+    const usage = status.usage || {};
+    els.storageUsage.innerHTML = Object.keys(STORAGE_LABELS)
+      .filter((key) => Number.isFinite(usage[`${key}_bytes`]))
+      .map((key) => `<div class="storage-usage-item"><strong>${escapeHtml(formatBytes(usage[`${key}_bytes`]))}</strong>`
+        + `<span>${STORAGE_LABELS[key]}</span></div>`)
+      .join('');
+  }
+}
+
+async function loadSystemStorage() {
+  try {
+    renderStorage(await api('/api/system/storage'));
+  } catch (_err) {
+    if (window.daygleAuth?.redirecting) return;
+  }
+}
+
 async function loadSystemResources() {
   try {
     const res = await api('/api/system/resources');
@@ -178,7 +263,8 @@ async function loadSystemResources() {
 
 (async function initSystemPage() {
   await window.daygleAuthReady;
-  await loadSystemResources();
+  await Promise.all([loadSystemResources(), loadSystemStorage()]);
   if (els.gpuNote) els.gpuNote.hidden = !(els.gpuCard?.hidden);
   startPageInterval(() => { loadSystemResources().catch(() => {}); }, 5000);
+  startPageInterval(() => { loadSystemStorage().catch(() => {}); }, 60000);
 })();

@@ -10,9 +10,16 @@ from fastapi import APIRouter, Depends, Query, Request
 
 import app.state as _state
 from app.auth_gates import require_admin
-from app.config_facades import effective_ai_config, effective_live_config, effective_system_config
+from app.config_facades import (
+    effective_ai_config,
+    effective_live_config,
+    effective_recording_config,
+    effective_storage_config,
+    effective_system_config,
+)
 from app.deps import get_cameras_config, get_database
 from app.sound_detector import SOUND_CLASSES
+from app.storage_metrics import storage_status
 from app.system_metrics import GPU_TEMP_CRITICAL_C, GPU_TEMP_WARN_C, system_resources
 
 router = APIRouter()
@@ -53,6 +60,33 @@ def system_resources_status(request: Request):
     )
     result['video_decode'] = video_decode_status()
     return result
+
+
+@router.get('/api/system/storage')
+def system_storage_status(request: Request):
+    """Disk space and media usage for the System page's Storage card (admin).
+
+    Reads the folders from the live storage and recording services, so it
+    reports exactly where media is being written. A sync handler: FastAPI
+    runs it in the threadpool, so a cold directory walk never blocks the
+    event loop.
+    """
+    require_admin(request)
+    storage_config = effective_storage_config()
+    storage = getattr(_state, 'storage', None)
+    recorder = getattr(_state, 'recording_service', None)
+    data_dir = Path(getattr(storage, 'data_dir', None) or storage_config.get('data_dir') or 'data')
+    locations = {
+        'recordings': Path(getattr(recorder, 'recordings_dir', None) or storage_config.get('recordings_dir') or data_dir / 'recordings'),
+        'snapshots': Path(getattr(storage, 'snapshots_dir', None) or storage_config.get('snapshots_dir') or data_dir / 'snapshots'),
+        'events': Path(getattr(storage, 'events_dir', None) or storage_config.get('events_dir') or data_dir / 'events'),
+    }
+    database = storage_config.get('database')
+    return storage_status(
+        locations,
+        Path(database) if database else None,
+        retention=effective_recording_config(),
+    )
 
 
 def video_decode_status() -> dict:

@@ -1272,6 +1272,46 @@ def test_system_resources_endpoint(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_system_storage_endpoint(tmp_path, monkeypatch):
+    """/api/system/storage reports disks, media usage and retention; admin only."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        status, _headers, payload = client.request("/api/system/storage")
+        assert status == 200
+        assert set(payload) == {"volumes", "usage", "retention", "usage_cached_seconds"}
+        assert set(payload["usage"]) == {"recordings_bytes", "snapshots_bytes", "events_bytes", "database_bytes"}
+        # The test database lives in tmp_path, so it is non-empty and on disk.
+        assert payload["usage"]["database_bytes"] > 0
+        assert payload["volumes"], "the data folders sit on at least one filesystem"
+        volume = payload["volumes"][0]
+        assert volume["used_bytes"] <= volume["total_bytes"]
+        assert 0 <= volume["percent"] <= 100
+        held = [label for v in payload["volumes"] for label in v["holds"]]
+        assert sorted(held) == sorted(set(held)), "each folder is listed under one volume"
+        assert set(payload["retention"]) == {"max_storage_bytes", "retention_days", "auto_purge_enabled"}
+
+        anon = LocalClient(base_url)
+        assert anon.request("/api/system/storage")[0] == 401
+
+        client.request(
+            "/api/users",
+            method="POST",
+            json_body={"username": "viewer", "password": "Viewer123!", "role": "viewer"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        viewer_client = LocalClient(base_url)
+        _login(viewer_client, "viewer", "Viewer123!")
+        assert viewer_client.request("/api/system/storage")[0] == 403
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_label_groups_settings_update(tmp_path, monkeypatch):
     """GET/PUT /api/settings/label_groups persists create/edit/remove of groups."""
     app, _database_path = _load_app(tmp_path, monkeypatch)
