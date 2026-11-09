@@ -104,18 +104,18 @@ from email.mime.text import MIMEText
 from typing import Any
 
 import app.state as _state
-from app.alert_recipients import resolve_email_recipients
+from app.alert_recipients import resolve_email_recipients, resolve_push_topics
 from app.config_facades import effective_email_alert_settings, effective_push_notification_settings
 from app.diagnostics import log_camera_diagnostic
 from app.email_alerts import EmailAlertService, _encode_subject, _stamp_originator_headers
 from app.push_notifications import PushNotificationService
-from app.utils import normalize_email_recipients
+from app.utils import normalize_email_recipients, normalize_push_recipients
 
 logger = logging.getLogger('daygle.ai')
 
 
 def effective_camera_offline_alert_settings() -> dict[str, Any]:
-    settings = {'enabled': False, 'offline_delay_minutes': 1, 'recipients': []}
+    settings = {'enabled': False, 'offline_delay_minutes': 1, 'recipients': [], 'push_recipients': []}
     db = _state.database
     override = db.get_setting('camera_offline_alert') if db is not None else None
     if isinstance(override, dict):
@@ -131,6 +131,7 @@ def effective_camera_offline_alert_settings() -> dict[str, Any]:
     except (TypeError, ValueError):
         settings['offline_delay_minutes'] = 1
     settings['recipients'] = normalize_email_recipients(settings.get('recipients'))
+    settings['push_recipients'] = normalize_push_recipients(settings.get('push_recipients'))
     return settings
 
 
@@ -229,7 +230,12 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
     if push_settings_obj.get('enabled'):
         try:
             notifier = PushNotificationService(push_settings_obj)
-            notifier._deliver(title, body)
+            # Chosen users' own ntfy topics; the shared Settings topic only
+            # when nobody is chosen (as for the email From-address fallback).
+            push_recipients = settings.get('push_recipients') or []
+            topics = resolve_push_topics(push_recipients)
+            if topics or not push_recipients:
+                notifier._deliver_to_topics(title, body, topics=topics)
         except Exception as exc:
             logger.warning('Push notify failed for camera %s %s: %s', camera_id, event_type, exc)
     email_settings_obj = effective_email_alert_settings()

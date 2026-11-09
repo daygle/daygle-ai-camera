@@ -54,7 +54,7 @@ import re
 from typing import Any
 
 from app.sound_detector import DEFAULT_RULES, SOUND_CLASSES
-from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_hhmm
+from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_push_recipients, normalize_hhmm
 
 
 CAMERA_MOTION_PROFILE_FIELDS = (
@@ -391,6 +391,7 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
             'cooldown_seconds': cooldown,
             'email_enabled': normalize_bool_setting(r.get('email_enabled'), False),
             'email_recipients': normalize_email_recipients(r.get('email_recipients', [])),
+            'push_recipients': normalize_push_recipients(r.get('push_recipients', [])),
             'push_enabled': normalize_bool_setting(r.get('push_enabled'), False),
             # Zero-pad the active/notify windows exactly like the zone-rule path
             # (app.zone_schema): both are compared lexically against the current

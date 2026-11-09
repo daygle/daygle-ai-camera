@@ -88,7 +88,7 @@ from typing import Any
 
 from app.camera_id import normalize_camera_id
 from app.label_groups import cached_label_groups
-from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_hhmm
+from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_push_recipients, normalize_hhmm
 
 
 # ``HH:MM`` normalisation lives in ``app.utils`` (canonical home for the
@@ -406,6 +406,7 @@ def normalize_zone_alert_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]
             'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
             'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
             'email_recipients': normalize_email_recipients(raw.get('email_recipients', [])),
+            'push_recipients': normalize_push_recipients(raw.get('push_recipients', [])),
             'notify_start': _normalize_hhmm(raw.get('notify_start')),
             'notify_end': _normalize_hhmm(raw.get('notify_end')),
         })
@@ -415,6 +416,7 @@ def normalize_zone_alert_schedules(rule: dict[str, Any]) -> list[dict[str, Any]]
             'email_enabled': False,
             'push_enabled': False,
             'email_recipients': [],
+            'push_recipients': [],
             'notify_start': None,
             'notify_end': None,
         })
@@ -594,6 +596,7 @@ def normalize_zone_tripwire(zone: dict[str, Any]) -> dict[str, Any] | None:
             "record_on_detect": bool,
             "email_enabled": bool,
             "email_recipients": [str, ...],
+            "push_recipients": ["user:<id>", ...],
             "push_enabled": bool,
         }
 
@@ -626,6 +629,7 @@ def normalize_zone_tripwire(zone: dict[str, Any]) -> dict[str, Any] | None:
         'record_on_detect': normalize_bool_setting(raw.get('record_on_detect'), True),
         'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
+        'push_recipients': normalize_push_recipients(raw.get('push_recipients')),
         'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
         # Optional quiet-hours window for notifications (HH:MM, lexically
         # compared by _rule_notify_active_now). None = notify any time. The
@@ -653,6 +657,7 @@ def normalize_zone_loiter(zone: dict[str, Any]) -> dict[str, Any] | None:
             "record_on_detect": bool,
             "email_enabled": bool,
             "email_recipients": [str, ...],
+            "push_recipients": ["user:<id>", ...],
             "push_enabled": bool,
             "notify_start": str | None,   # HH:MM quiet-hours window (notify only)
             "notify_end": str | None,
@@ -694,6 +699,7 @@ def normalize_zone_loiter(zone: dict[str, Any]) -> dict[str, Any] | None:
         'record_on_detect': normalize_bool_setting(raw.get('record_on_detect'), True),
         'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
+        'push_recipients': normalize_push_recipients(raw.get('push_recipients')),
         'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
         # Optional quiet-hours window for notifications (HH:MM, gates email/push
         # only; the anomaly is still detected/recorded when enabled), matching
@@ -719,6 +725,7 @@ def normalize_zone_time(zone: dict[str, Any]) -> dict[str, Any] | None:
             "record_on_detect": bool,
             "email_enabled": bool,
             "email_recipients": [str, ...],
+            "push_recipients": ["user:<id>", ...],
             "push_enabled": bool,
             "notify_start": str | None, # HH:MM quiet-hours window (notify only)
             "notify_end": str | None,
@@ -753,6 +760,7 @@ def normalize_zone_time(zone: dict[str, Any]) -> dict[str, Any] | None:
         'record_on_detect': normalize_bool_setting(raw.get('record_on_detect'), True),
         'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
+        'push_recipients': normalize_push_recipients(raw.get('push_recipients')),
         'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
         'notify_start': normalize_hhmm(raw.get('notify_start')),
         'notify_end': normalize_hhmm(raw.get('notify_end')),
@@ -775,6 +783,7 @@ def normalize_zone_activity(zone: dict[str, Any]) -> dict[str, Any] | None:
             "record_on_detect": bool,
             "email_enabled": bool,
             "email_recipients": [str, ...],
+            "push_recipients": ["user:<id>", ...],
             "push_enabled": bool,
             "notify_start": str | None, # HH:MM quiet-hours window (notify only)
             "notify_end": str | None,
@@ -811,6 +820,7 @@ def normalize_zone_activity(zone: dict[str, Any]) -> dict[str, Any] | None:
         'record_on_detect': normalize_bool_setting(raw.get('record_on_detect'), True),
         'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
+        'push_recipients': normalize_push_recipients(raw.get('push_recipients')),
         'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
         'notify_start': normalize_hhmm(raw.get('notify_start')),
         'notify_end': normalize_hhmm(raw.get('notify_end')),
@@ -839,6 +849,7 @@ def normalize_zone_ai_tags(zone: dict[str, Any]) -> dict[str, Any] | None:
             "cooldown_seconds": int,
             "email_enabled": bool,
             "email_recipients": [str, ...],
+            "push_recipients": ["user:<id>", ...],
             "push_enabled": bool,
             "notify_start": str | None,   # HH:MM quiet-hours window
             "notify_end": str | None,
@@ -874,6 +885,7 @@ def normalize_zone_ai_tags(zone: dict[str, Any]) -> dict[str, Any] | None:
         'cooldown_seconds': cooldown,
         'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
         'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
+        'push_recipients': normalize_push_recipients(raw.get('push_recipients')),
         'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
         'notify_start': _strict_hhmm(raw.get('notify_start')),
         'notify_end': _strict_hhmm(raw.get('notify_end')),

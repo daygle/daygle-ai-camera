@@ -10,7 +10,7 @@ from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.camera_health import effective_camera_offline_alert_settings
 from app.deps import get_database
-from app.utils import normalize_bool_setting, normalize_email_recipients
+from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_push_recipients
 
 router = APIRouter()
 
@@ -33,4 +33,6 @@ async def update_camera_offline_alert_settings(request: Request, db=Depends(get_
         validated['offline_delay_minutes'] = 1
     # Email addresses and ``user:<id>`` references (resolved at send time).
     validated['recipients'] = normalize_email_recipients(payload.get('recipients') or [])
+    # Users whose own ntfy topic gets the offline/online pushes.
+    validated['push_recipients'] = normalize_push_recipients(payload.get('push_recipients') or [])
     return db.set_setting('camera_offline_alert', validated, utc_now())

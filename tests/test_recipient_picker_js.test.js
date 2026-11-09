@@ -68,3 +68,21 @@ test('the rendered picker carries user references and the empty note', () => {
   assert.match(html, /Falls back to &lt;From&gt;/);
   assert.match(renderRecipientPicker([], []), /No users have an email address yet/);
 });
+
+test('the push picker lists users with a topic and flags those who cannot receive', () => {
+  const users = [
+    { id: 1, username: 'alice', email: 'a@example.com', ntfy_topic: 'alice-phone', is_active: 1 },
+    { id: 2, username: 'bob', email: 'b@example.com', ntfy_topic: '', is_active: 1 },
+    { id: 3, username: 'cy', ntfy_topic: 'cy-phone', is_active: 0 },
+  ];
+  const options = rehome(recipientOptions(['user:2', 'user:3'], users, 'push'));
+  assert.deepEqual(options.map(({ value, detail, checked, orphan }) => ({ value, detail, checked, orphan })), [
+    { value: 'user:1', detail: 'alice-phone', checked: false, orphan: false },
+    { value: 'user:2', detail: 'No push topic', checked: true, orphan: true },
+    { value: 'user:3', detail: 'Inactive, gets no push', checked: true, orphan: true },
+  ]);
+  const html = renderRecipientPicker([], users, { channel: 'push' });
+  assert.match(html, /data-recipient-picker="push"/);
+  assert.match(html, /Push Recipients/);
+  assert.match(renderRecipientPicker([], [{ id: 9, username: 'z', email: 'z@example.com' }], { channel: 'push' }), /No users have a push topic yet/);
+});

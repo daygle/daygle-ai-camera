@@ -1550,15 +1550,34 @@ function normalizeEmailList(value) {
   return source.map((recipient) => String(recipient).trim()).filter(Boolean);
 }
 
-// ─── Email recipient picker (Alerts page, Settings > camera offline) ───────
-// Email recipients are picked from the system's users rather than typed in.
-// A ticked user is stored as ``user:<id>`` and the server looks up that
-// user's current address when it sends (app/alert_recipients.py), so a
-// changed address or a deactivated user takes effect without editing every
-// alert. A plain address left over from before
-// this picker is converted to its user on load when it matches one; any that
-// match no user are kept and listed so they can be unticked, never dropped.
+// ─── Recipient picker (Alerts page, Settings > camera offline) ─────────────
+// Email and push recipients are picked from the system's users rather than
+// typed in. A ticked user is stored as ``user:<id>`` and the server looks up
+// that user's current email address or ntfy topic (set on their Profile) when
+// it sends (app/alert_recipients.py), so a change or a deactivated user takes
+// effect without editing every alert. A plain email address left over from
+// before this picker is converted to its user on load when it matches one;
+// entries that reach nobody are kept and listed so they can be unticked,
+// never dropped.
 const USER_RECIPIENT_RE = /^user:(\d+)$/i;
+
+// What each channel needs from a user, and how the picker words it.
+const RECIPIENT_CHANNELS = {
+  email: {
+    legend: 'Email Recipients',
+    contact: (user) => (String(user.email || '').includes('@') ? String(user.email).trim() : ''),
+    noun: 'email',
+    missing: 'No email address',
+    none: 'No users have an email address yet. Add one on the <a href="/users">Users</a> page.',
+  },
+  push: {
+    legend: 'Push Recipients',
+    contact: (user) => String(user.ntfy_topic || '').trim(),
+    noun: 'push',
+    missing: 'No push topic',
+    none: 'No users have a push topic yet. Each user sets one on their <a href="/profile">Profile</a> page (admins can on the <a href="/users">Users</a> page).',
+  },
+};
 
 function userRecipientId(value) {
   const match = USER_RECIPIENT_RE.exec(String(value || '').trim());
@@ -1570,8 +1589,12 @@ function userDisplayName(user) {
   return fullName || String(user.username || '').trim() || String(user.email || '').trim() || `User ${user.id}`;
 }
 
-function isRecipientUser(user) {
-  return Boolean(user) && user.is_active !== false && user.is_active !== 0 && String(user.email || '').includes('@');
+function isActiveUser(user) {
+  return Boolean(user) && user.is_active !== false && user.is_active !== 0;
+}
+
+function isRecipientUser(user, channel = 'email') {
+  return isActiveUser(user) && Boolean(RECIPIENT_CHANNELS[channel].contact(user));
 }
 
 // Swap plain addresses that belong to an active user for that user's
@@ -1580,7 +1603,7 @@ function isRecipientUser(user) {
 // eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
 function toRecipientRefs(value, users) {
   const byEmail = new Map();
-  (users || []).filter(isRecipientUser).forEach((user) => {
+  (users || []).filter((user) => isRecipientUser(user, 'email')).forEach((user) => {
     const key = String(user.email).trim().toLowerCase();
     if (!byEmail.has(key)) byEmail.set(key, `user:${user.id}`);
   });
@@ -1596,14 +1619,15 @@ function toRecipientRefs(value, users) {
   return Array.isArray(value) ? refs : refs.join(', ');
 }
 
-function recipientOptions(selected, users) {
+function recipientOptions(selected, users, channel = 'email') {
+  const config = RECIPIENT_CHANNELS[channel];
   const chosen = normalizeEmailList(selected).map((entry) => {
     const id = userRecipientId(entry);
     return id !== null ? `user:${id}` : entry;
   });
   const chosenKeys = new Set(chosen.map((entry) => entry.toLowerCase()));
-  const options = (users || []).filter(isRecipientUser)
-    .map((user) => ({ value: `user:${user.id}`, name: userDisplayName(user), detail: String(user.email).trim(), checked: chosenKeys.has(`user:${user.id}`), orphan: false }))
+  const options = (users || []).filter((user) => isRecipientUser(user, channel))
+    .map((user) => ({ value: `user:${user.id}`, name: userDisplayName(user), detail: config.contact(user), checked: chosenKeys.has(`user:${user.id}`), orphan: false }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const listed = new Set(options.map((option) => option.value));
   chosen.forEach((entry) => {
@@ -1618,7 +1642,7 @@ function recipientOptions(selected, users) {
     options.push({
       value: entry,
       name: user ? userDisplayName(user) : `Deleted user #${id}`,
-      detail: !user ? 'Gets no email' : user.is_active === false || user.is_active === 0 ? 'Inactive, gets no email' : 'No email address',
+      detail: !user ? `Gets no ${config.noun}` : !isActiveUser(user) ? `Inactive, gets no ${config.noun}` : config.missing,
       checked: true,
       orphan: true,
     });
@@ -1626,16 +1650,17 @@ function recipientOptions(selected, users) {
   return options;
 }
 
-// ``emptyNote`` is shown under the list when nothing is ticked (e.g. where
-// the alert falls back to a default address).
+// ``channel`` is 'email' or 'push'. ``emptyNote`` is shown under the list
+// (e.g. where the alert falls back to a default address or topic).
 // eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
-function renderRecipientPicker(selected, users, { emptyNote = '' } = {}) {
-  const options = recipientOptions(selected, users);
+function renderRecipientPicker(selected, users, { emptyNote = '', channel = 'email' } = {}) {
+  const config = RECIPIENT_CHANNELS[channel];
+  const options = recipientOptions(selected, users, channel);
   const body = options.length
-    ? options.map((option) => `<label class="alerts-recipient-option${option.orphan ? ' is-orphan' : ''}" title="${escapeHtml(option.orphan ? 'No email goes to this entry from the user list. Untick it to remove it.' : option.detail)}"><input type="checkbox" data-recipient value="${escapeHtml(option.value)}" ${option.checked ? 'checked' : ''}><span class="alerts-recipient-name">${escapeHtml(option.name)}</span><span class="alerts-recipient-email">${escapeHtml(option.detail)}</span></label>`).join('')
-    : '<p class="form-help muted">No users have an email address yet. Add one on the <a href="/users">Users</a> page.</p>';
+    ? options.map((option) => `<label class="alerts-recipient-option${option.orphan ? ' is-orphan' : ''}" title="${escapeHtml(option.orphan ? `No ${config.noun} goes to this entry from the user list. Untick it to remove it.` : option.detail)}"><input type="checkbox" data-recipient value="${escapeHtml(option.value)}" ${option.checked ? 'checked' : ''}><span class="alerts-recipient-name">${escapeHtml(option.name)}</span><span class="alerts-recipient-email">${escapeHtml(option.detail)}</span></label>`).join('')
+    : `<p class="form-help muted">${config.none}</p>`;
   const note = emptyNote ? `<p class="form-help muted alerts-recipient-empty-note">${escapeHtml(emptyNote)}</p>` : '';
-  return `<fieldset class="alerts-recipient-field" data-recipient-picker><legend>Email Recipients</legend><div class="alerts-recipient-list">${body}</div>${note}</fieldset>`;
+  return `<fieldset class="alerts-recipient-field" data-recipient-picker="${channel}"><legend>${config.legend}</legend><div class="alerts-recipient-list">${body}</div>${note}</fieldset>`;
 }
 
 // eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts

@@ -51,6 +51,7 @@ function buildEditForm(user) {
             <label><span>First Name</span><input name="first_name" value="${escapeHtml(user.first_name)}" /></label>
             <label><span>Last Name</span><input name="last_name" value="${escapeHtml(user.last_name)}" /></label>
             <label><span>Email</span><input name="email" type="email" value="${escapeHtml(user.email)}" /></label>
+            <label><span>Push Topic</span><input name="ntfy_topic" value="${escapeHtml(user.ntfy_topic || '')}" pattern="[-_A-Za-z0-9]{1,64}" maxlength="64" placeholder="Optional ntfy topic" /></label>
             <label><span>Role</span><select name="role"><option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>Viewer</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrator</option></select></label>
             <label><span>Account Status</span><select name="is_active"><option value="true" ${user.is_active ? 'selected' : ''}>Active</option><option value="false" ${!user.is_active ? 'selected' : ''}>Disabled</option></select></label>
             <label class="user-password-field"><span>New Password <small>(optional)</small></span><input name="password" type="password" placeholder="Leave blank to keep current" autocomplete="new-password" /></label>
@@ -137,6 +138,7 @@ async function saveEditedUser(event) {
     first_name: String(data.get('first_name') || '').trim(),
     last_name: String(data.get('last_name') || '').trim(),
     email: String(data.get('email') || '').trim(),
+    ntfy_topic: String(data.get('ntfy_topic') || '').trim(),
     role: data.get('role'),
     is_active: data.get('is_active') === 'true',
   };

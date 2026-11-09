@@ -24,6 +24,7 @@ function renderProfile(user) {
   profileForm.elements.first_name.value = u.first_name || '';
   profileForm.elements.last_name.value = u.last_name || '';
   profileForm.elements.email.value = u.email || '';
+  profileForm.elements.ntfy_topic.value = u.ntfy_topic || '';
   profileForm.elements.timezone.value = u.timezone || 'Australia/Sydney';
   profileForm.elements.date_format.value = u.date_format || 'locale';
   profileForm.elements.time_format.value = u.time_format || '24h';

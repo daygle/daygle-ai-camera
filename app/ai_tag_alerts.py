@@ -313,7 +313,7 @@ def _fire(event_id: int, event: dict[str, Any], camera: dict[str, Any], zone: di
         deliver_alert_notifications,
         submit_alert_notification,
     )
-    from app.utils import normalize_bool_setting, normalize_email_recipients
+    from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_push_recipients
 
     zone_name = str(zone.get('name') or zone.get('id') or 'zone')
     camera_name = str(camera.get('name') or camera.get('id') or 'camera')
@@ -323,6 +323,7 @@ def _fire(event_id: int, event: dict[str, Any], camera: dict[str, Any], zone: di
         'email_enabled': normalize_bool_setting(rule.get('email_enabled'), False),
         'push_enabled': normalize_bool_setting(rule.get('push_enabled'), False),
         'email_recipients': normalize_email_recipients(rule.get('email_recipients') or []),
+        'push_recipients': normalize_push_recipients(rule.get('push_recipients') or []),
         'notify_start': str(rule.get('notify_start') or '').strip() or None,
         'notify_end': str(rule.get('notify_end') or '').strip() or None,
     }

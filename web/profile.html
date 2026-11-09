@@ -51,6 +51,10 @@
           <input name="email" type="email" placeholder="Email address" />
         </label>
         <label>
+          <span>Push Topic <span class="info-tip" data-tip="Your own ntfy topic. Alerts that name you as a push recipient go here; subscribe to it in the Daygle app or the ntfy app. Letters, numbers, - and _ only. Leave blank to only get pushes sent to the shared topic." title="Your own ntfy topic. Alerts that name you as a push recipient go here; subscribe to it in the Daygle app or the ntfy app. Letters, numbers, - and _ only. Leave blank to only get pushes sent to the shared topic." tabindex="0" aria-label="Help: Your own ntfy topic. Alerts that name you as a push recipient go here; subscribe to it in the Daygle app or the ntfy app. Letters, numbers, - and _ only. Leave blank to only get pushes sent to the shared topic."></span></span>
+          <input name="ntfy_topic" placeholder="e.g. alice-phone-7f3k" pattern="[-_A-Za-z0-9]{1,64}" maxlength="64" autocomplete="off" />
+        </label>
+        <label>
           <span>Current Password <span class="info-tip" data-tip="Required only when changing your username or email. Leave blank for other changes." title="Required only when changing your username or email. Leave blank for other changes." tabindex="0" aria-label="Help: Required only when changing your username or email. Leave blank for other changes."></span></span>
           <input name="current_password" type="password" placeholder="Required to change username or email" autocomplete="current-password" />
         </label>

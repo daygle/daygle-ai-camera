@@ -131,8 +131,8 @@ def stub_delivery_services(ch, monkeypatch):
     class FakePush:
         def __init__(self, settings):
             self.settings = settings
-        def _deliver(self, title, body):
-            push_calls.append((title, body))
+        def _deliver_to_topics(self, title, body, *, tags=None, topics=None):
+            push_calls.append((title, body) if not topics else (title, body, list(topics)))
 
     class FakeEmail:
         def __init__(self, settings):
@@ -227,7 +227,7 @@ def test_effective_offline_alert_settings_defaults(ch, monkeypatch):
 
     monkeypatch.setattr(_app_state, 'database', _DB())
     out = ch.effective_camera_offline_alert_settings()
-    assert out == {'enabled': False, 'offline_delay_minutes': 1, 'recipients': []}
+    assert out == {'enabled': False, 'offline_delay_minutes': 1, 'recipients': [], 'push_recipients': []}
 
 
 def test_effective_offline_alert_settings_overrides_with_dict(ch, monkeypatch):
@@ -239,7 +239,7 @@ def test_effective_offline_alert_settings_overrides_with_dict(ch, monkeypatch):
 
     monkeypatch.setattr(_app_state, 'database', _DB())
     out = ch.effective_camera_offline_alert_settings()
-    assert out == {'enabled': True, 'offline_delay_minutes': 5, 'recipients': ['admin@example.com']}
+    assert out == {'enabled': True, 'offline_delay_minutes': 5, 'recipients': ['admin@example.com'], 'push_recipients': []}
 
 
 def test_effective_offline_alert_settings_ignores_non_dict_override(ch, monkeypatch):
@@ -251,7 +251,7 @@ def test_effective_offline_alert_settings_ignores_non_dict_override(ch, monkeypa
     monkeypatch.setattr(_app_state, 'database', _DB())
     # Non-dict override must not crash and must leave defaults intact.
     out = ch.effective_camera_offline_alert_settings()
-    assert out == {'enabled': False, 'offline_delay_minutes': 1, 'recipients': []}
+    assert out == {'enabled': False, 'offline_delay_minutes': 1, 'recipients': [], 'push_recipients': []}
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +593,32 @@ def test_deliver_email_no_fallback_when_chosen_users_have_no_address(ch, main_mo
     _push_calls, email_calls = stub_delivery_services
     _offline_with_recipients(ch, main_module, monkeypatch, ['user:2', 'user:99'])
     assert email_calls == []
+
+
+def test_deliver_push_targets_chosen_users_topics(ch, main_module, monkeypatch, stub_delivery_services, stub_logger):
+    """Offline pushes go to the chosen users' own ntfy topics; with users
+    chosen but none able to receive, nothing is pushed."""
+    push_calls, _email_calls = stub_delivery_services
+    users = [
+        {'id': 1, 'ntfy_topic': 'alice-phone', 'is_active': 1},
+        {'id': 2, 'ntfy_topic': 'bob-phone', 'is_active': 0},
+    ]
+    monkeypatch.setattr(main_module._state, 'auth', type('FakeAuth', (), {'list_users': staticmethod(lambda: users)})())
+    monkeypatch.setattr(ch, 'effective_push_notification_settings', lambda: {'enabled': True})
+    monkeypatch.setattr(ch, 'effective_email_alert_settings', lambda: {'enabled': False})
+    for push_recipients in (['user:1', 'user:2'], ['user:2']):
+        monkeypatch.setattr(
+            main_module.database, 'get_setting',
+            lambda key, pr=push_recipients: {'enabled': True, 'offline_delay_minutes': 10, 'push_recipients': pr},
+        )
+        main_module._state._camera_health_state['cam-1'] = {
+            'online': False, 'offline_since': time.time() - 600,
+            'offline_notified': False, 'recovery_notified': False,
+        }
+        ch._deliver_camera_offline_notification('cam-1', 'Front Yard', 'offline')
+    assert push_calls == [
+        ('Camera Offline: Front Yard', 'Camera Front Yard (cam-1) has gone offline.', ['alice-phone']),
+    ]
 
 
 def test_deliver_recovery_event_uses_online_title(ch, main_module, monkeypatch, stub_delivery_services, stub_logger):

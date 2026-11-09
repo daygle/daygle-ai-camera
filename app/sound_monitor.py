@@ -32,7 +32,7 @@ from app.alert_dispatch import (
     submit_sound_alert_notification,
 )
 from app.sound_detector import SOUND_CLASSES, SoundDetector
-from app.utils import normalize_bool_setting, normalize_email_recipients, build_stream_url
+from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_push_recipients, build_stream_url
 
 logger = logging.getLogger('daygle.ai')
 
@@ -79,6 +79,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
     fired_rule = next((r for r in sound_rules if r.get('class') == class_id), {})
     email_enabled = normalize_bool_setting(fired_rule.get('email_enabled'), False)
     email_recipients = normalize_email_recipients(fired_rule.get('email_recipients', []))
+    push_recipients = normalize_push_recipients(fired_rule.get('push_recipients', []))
     push_enabled = normalize_bool_setting(fired_rule.get('push_enabled'), False)
     notify_enabled = email_enabled or push_enabled
     message = f'{class_label} detected ({confidence:.0%} confidence)'
@@ -109,7 +110,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
             if rid is not None:
                 logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, camera_id)
     alert_payload = {'rule_name': rule_name, 'label': class_id, 'confidence': confidence, 'message': message}
-    notify_rule = {'name': rule_name, 'email_enabled': email_enabled, 'push_enabled': push_enabled, 'email_recipients': email_recipients, 'notify_start': str(fired_rule.get('notify_start') or '').strip() or None, 'notify_end': str(fired_rule.get('notify_end') or '').strip() or None}
+    notify_rule = {'name': rule_name, 'email_enabled': email_enabled, 'push_enabled': push_enabled, 'email_recipients': email_recipients, 'push_recipients': push_recipients, 'notify_start': str(fired_rule.get('notify_start') or '').strip() or None, 'notify_end': str(fired_rule.get('notify_end') or '').strip() or None}
     # Outside the rule's notify window no alert row was written and delivery
     # would drop the alert anyway, so the event is not flagged as an alert and
     # nothing is queued (matching the object-detection path).

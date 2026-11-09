@@ -40,7 +40,7 @@ from app.email_alerts import EmailAlertService, EmailAlertError
 from app.live_snapshot import filter_object_priority_detections, render_live_snapshot_jpeg_overlay
 from app.media_utils import safe_storage_path
 from app.push_notifications import PushNotificationService, PushNotificationError
-from app.alert_recipients import resolve_email_recipients
+from app.alert_recipients import resolve_email_recipients, resolve_push_topics
 
 logger = logging.getLogger('daygle.ai')
 
@@ -570,17 +570,20 @@ def deliver_push_notifications(
     def _resolve_face_rule_push(alert: dict) -> dict:
         return _face_rules_by_id_push.get(str(alert.get('face_rule_id') or ''), {})
 
-    def _unknown_push_active_for(alert: dict) -> bool:
+    def _unknown_push_rules_for(alert: dict) -> list[dict]:
+        """The fired scoped unknown rule(s) with push on and active now."""
         wanted = {str(rid) for rid in alert.get('face_rule_ids') or []}
-        return any(
-            _face_rule_active(r) and r.get('push_enabled')
-            for r in _face_rules_list_push
-            if str(r.get('id')) in wanted
-        )
+        return [
+            r for r in _face_rules_list_push
+            if str(r.get('id')) in wanted and _face_rule_active(r) and r.get('push_enabled')
+        ]
     all_triggered_labels = _all_triggered_labels(triggered)
     for alert in triggered:
         rule_name = str(alert.get('rule_name') or '')
         rule = rules_by_name.get(rule_name)
+        # Users chosen to receive this push (``user:<id>``), resolved below to
+        # their own ntfy topics. None chosen means the shared Settings topic.
+        push_recipients: list[str] = []
         # Zone rules (object / motion / zone-face) first -- same ordering
         # rationale as the email path above.
         if rule is not None:
@@ -601,22 +604,38 @@ def deliver_push_notifications(
                     rule.get('notify_end'),
                 )
                 continue
+            push_recipients = list(rule.get('push_recipients') or [])
         elif rule_name == 'Unknown face':
-            if not _unknown_push_active_for(alert):
+            _unknown_rules = _unknown_push_rules_for(alert)
+            if not _unknown_rules:
                 logger.debug(
                     'Push skipped for event %s rule %r: _unknown face rule push is off',
                     event_id,
                     rule_name,
                 )
                 continue
+            push_recipients = [
+                recipient for r in _unknown_rules for recipient in r.get('push_recipients') or []
+            ]
         elif str(alert.get('label') or '').lower() == 'face' and rule_name != 'Unknown face':
             # Face detection rule: check the per-person rule's push_enabled
             _fr = _resolve_face_rule_push(alert)
             if not _face_rule_active(_fr) or not _fr.get('push_enabled'):
                 logger.debug('Push skipped for event %s face-rule %r: push disabled', event_id, rule_name)
                 continue
+            push_recipients = list(_fr.get('push_recipients') or [])
         else:
             logger.debug('Push skipped for event %s: no rule found for %r', event_id, rule_name)
+            continue
+        topics = resolve_push_topics(push_recipients)
+        if push_recipients and not topics:
+            # Same as email: users were chosen but none can receive it now
+            # (deactivated, deleted or no topic), so nobody is pushed rather
+            # than falling back to the shared topic.
+            logger.debug(
+                'Push skipped for event %s rule %r: none of its users has an active push topic',
+                event_id, rule_name,
+            )
             continue
         try:
             notifier.send_alert(
@@ -626,6 +645,7 @@ def deliver_push_notifications(
                 camera_id=camera_id,
                 triggered_labels=all_triggered_labels,
                 detected_at=detected_at,
+                topics=topics,
             )
             logger.info('Push notification sent for event %s rule %r', event_id, rule_name)
         except PushNotificationError as exc:

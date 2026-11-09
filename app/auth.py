@@ -5,6 +5,7 @@ import hmac
 import importlib
 import importlib.util
 import logging
+import re
 import secrets
 import sqlite3
 from contextlib import contextmanager
@@ -127,6 +128,15 @@ class AuthError(Exception):
     pass
 
 
+def normalize_ntfy_topic(value: Any) -> str:
+    """A user's own ntfy topic: blank, or what ntfy accepts
+    (``[-_A-Za-z0-9]{1,64}``, as for the shared topic in Settings)."""
+    topic = str(value or '').strip()
+    if topic and not re.fullmatch(r'[-_A-Za-z0-9]{1,64}', topic):
+        raise AuthError('Push topic may only use letters, numbers, - and _ (up to 64 characters).')
+    return topic
+
+
 class AuthService:
     def __init__(self, database_path: str, config: dict[str, Any]) -> None:
         self.database_path = Path(database_path)
@@ -199,6 +209,7 @@ class AuthService:
                     date_format TEXT NOT NULL DEFAULT 'locale',
                     time_format TEXT NOT NULL DEFAULT '24h',
                     theme TEXT NOT NULL DEFAULT 'light',
+                    ntfy_topic TEXT NOT NULL DEFAULT '',
                     failed_attempts INTEGER NOT NULL DEFAULT 0,
                     locked_until TEXT,
                     created_at TEXT NOT NULL,
@@ -258,6 +269,13 @@ class AuthService:
             # The CREATE TABLE above already includes it for fresh installs.
             try:
                 db.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'light'")
+            except sqlite3.OperationalError as exc:
+                if 'duplicate column name' not in str(exc).lower():
+                    raise
+            # Migration: the user's own ntfy topic for push alerts sent to
+            # them (see app.alert_recipients.resolve_push_topics).
+            try:
+                db.execute("ALTER TABLE users ADD COLUMN ntfy_topic TEXT NOT NULL DEFAULT ''")
             except sqlite3.OperationalError as exc:
                 if 'duplicate column name' not in str(exc).lower():
                     raise
@@ -402,14 +420,14 @@ class AuthService:
     def list_users(self) -> list[dict[str, Any]]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT id, username, first_name, last_name, email, role, is_active, timezone, date_format, time_format, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users ORDER BY username"
+                "SELECT id, username, first_name, last_name, email, ntfy_topic, role, is_active, timezone, date_format, time_format, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users ORDER BY username"
             ).fetchall()
             return [dict(row) for row in rows]
 
     def get_user(self, user_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute(
-                "SELECT id, username, first_name, last_name, email, role, is_active, timezone, date_format, time_format, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users WHERE id = ?",
+                "SELECT id, username, first_name, last_name, email, ntfy_topic, role, is_active, timezone, date_format, time_format, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users WHERE id = ?",
                 (user_id,),
             ).fetchone()
             return dict(row) if row else None
@@ -425,6 +443,7 @@ class AuthService:
         role: str | None = None,
         is_active: bool | None = None,
         password: str | None = None,
+        ntfy_topic: str | None = None,
     ) -> dict[str, Any]:
         # Fetch the existing row FIRST so we can (a) fail early on a bad user_id,
         # (b) diff incoming role against the stored role to detect a REAL change,
@@ -440,6 +459,7 @@ class AuthService:
             ("email", email),
             ("role", role),
             ("password", password),
+            ("ntfy topic", ntfy_topic),
         ):
             if field_value is not None and not isinstance(field_value, str):
                 raise AuthError(f"{field_name.capitalize()} must be text.")
@@ -463,6 +483,9 @@ class AuthService:
         if email is not None:
             updates.append("email = ?")
             params.append(str(email).strip())
+        if ntfy_topic is not None:
+            updates.append("ntfy_topic = ?")
+            params.append(normalize_ntfy_topic(ntfy_topic))
         if role is not None:
             if role not in VALID_ROLES:
                 raise AuthError("Role must be admin or viewer.")
@@ -542,6 +565,7 @@ class AuthService:
         time_format: str | None = None,
         theme: str | None = None,
         current_password: str | None = None,
+        ntfy_topic: str | None = None,
     ) -> dict[str, Any]:
         # H4 fix: require ``current_password`` when the request would
         # change the user's email or username. Non-sensitive fields
@@ -564,6 +588,7 @@ class AuthService:
             ('time format', time_format),
             ('theme', theme),
             ('current password', current_password),
+            ('ntfy topic', ntfy_topic),
         ):
             if field_value is not None and not isinstance(field_value, str):
                 raise AuthError(f'{field_name.capitalize()} must be text.')
@@ -609,6 +634,9 @@ class AuthService:
         if email is not None:
             updates.append("email = ?")
             params.append(email.strip())
+        if ntfy_topic is not None:
+            updates.append("ntfy_topic = ?")
+            params.append(normalize_ntfy_topic(ntfy_topic))
         if timezone_name is not None:
             timezone_name = timezone_name.strip()
             if not timezone_name:
@@ -856,7 +884,7 @@ class AuthService:
             row = db.execute(
                 """
                 SELECT s.session_token, s.csrf_token, s.expires_at, s.absolute_expires_at, s.last_seen_at, s.created_at AS session_created_at, u.id, u.username, u.role, u.is_active,
-                       u.first_name, u.last_name, u.email, u.timezone, u.date_format, u.time_format, u.theme
+                       u.first_name, u.last_name, u.email, u.ntfy_topic, u.timezone, u.date_format, u.time_format, u.theme
                 FROM user_sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.session_token = ?
@@ -996,6 +1024,7 @@ class AuthService:
             "first_name": row["first_name"],
             "last_name": row["last_name"],
             "email": row["email"],
+            "ntfy_topic": row["ntfy_topic"] if "ntfy_topic" in row.keys() else "",
             "role": row["role"],
             "is_active": bool(row["is_active"]),
             "timezone": row["timezone"],

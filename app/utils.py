@@ -213,6 +213,13 @@ def normalize_recipient_entry(value: Any) -> str:
     return recipient if '@' in recipient else ''
 
 
+def normalize_push_recipients(value: Any) -> list[str]:
+    """Push recipients: ``user:<id>`` references only (a list or a
+    comma-separated string), canonical and de-duplicated. Each resolves to
+    that user's own ntfy topic when the push is sent."""
+    return [entry for entry in normalize_email_recipients(value) if user_recipient_id(entry) is not None]
+
+
 def normalize_email_recipients(value: Any) -> list[str]:
     raw_recipients = value.split(',') if isinstance(value, str) else value
     if not isinstance(raw_recipients, list):

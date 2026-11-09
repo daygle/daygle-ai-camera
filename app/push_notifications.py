@@ -58,7 +58,12 @@ class PushNotificationService:
         camera_id: str | None = None,
         triggered_labels: list[str] | None = None,
         detected_at: str | None = None,
+        topics: list[str] | None = None,
     ) -> None:
+        """Push one alert. ``topics`` are the chosen users' own ntfy topics
+        (see ``app.alert_recipients.resolve_push_topics``); ``None`` or empty
+        sends to the shared topic from Settings. A failing topic does not stop
+        delivery to the rest; the failures are raised together at the end."""
         if not self.configured():
             return
 
@@ -75,16 +80,32 @@ class PushNotificationService:
             detected_at=detected_at,
             motion_state=alert.get('motion_state'),
         )
-        self._deliver(content.subject, content.plain_text, tags=[f'{EVENT_TAG_PREFIX}{int(event_id)}'])
+        tags = [f'{EVENT_TAG_PREFIX}{int(event_id)}']
+        self._deliver_to_topics(content.subject, content.plain_text, tags=tags, topics=topics)
+
+    def _deliver_to_topics(
+        self, title: str, body: str, *, tags: list[str] | None = None, topics: list[str] | None = None,
+    ) -> None:
+        if not topics:
+            self._deliver(title, body, tags=tags)
+            return
+        errors: list[str] = []
+        for topic in dict.fromkeys(topics):
+            try:
+                self._deliver(title, body, tags=tags, topic=topic)
+            except PushNotificationError as exc:
+                errors.append(f'{topic}: {exc}')
+        if errors:
+            raise PushNotificationError('; '.join(errors))
 
     def send_test(self) -> None:
         if not self.configured():
             raise PushNotificationError("Push notifications are not configured.")
         self._deliver("Daygle AI Camera test notification", "If you received this, your push notification settings are working.")
 
-    def _deliver(self, title: str, body: str, *, tags: list[str] | None = None) -> None:
+    def _deliver(self, title: str, body: str, *, tags: list[str] | None = None, topic: str | None = None) -> None:
         server_url = str(self.settings.get("server_url", "")).rstrip("/")
-        topic = str(self.settings.get("topic", "")).strip()
+        topic = str(topic if topic else self.settings.get("topic", "")).strip()
         priority = str(self.settings.get("priority", "default")).strip() or "default"
         username = str(self.settings.get("username") or "").strip()
         password = str(self.settings.get("password") or "").strip()
