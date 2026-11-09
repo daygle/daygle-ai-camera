@@ -98,10 +98,16 @@ class PushNotificationService:
         if errors:
             raise PushNotificationError('; '.join(errors))
 
-    def send_test(self) -> None:
+    def send_test(self, topics: list[str] | None = None) -> None:
+        """Send the test notification to ``topics`` (users' own topics), or
+        to the shared topic when none are given."""
         if not self.configured():
             raise PushNotificationError("Push notifications are not configured.")
-        self._deliver("Daygle AI Camera test notification", "If you received this, your push notification settings are working.")
+        self._deliver_to_topics(
+            "Daygle AI Camera test notification",
+            "If you received this, your push notification settings are working.",
+            topics=topics,
+        )
 
     def _deliver(self, title: str, body: str, *, tags: list[str] | None = None, topic: str | None = None) -> None:
         server_url = str(self.settings.get("server_url", "")).rstrip("/")

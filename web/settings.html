@@ -379,6 +379,7 @@
         <label>
           <span>Password <span class="info-tip" data-tip="Required only if your NTFY server requires authentication." title="Required only if your NTFY server requires authentication." tabindex="0" aria-label="Help: Required only if your NTFY server requires authentication."></span></span>
           <input name="password" type="password" placeholder="Optional" autocomplete="new-password" /></label>
+        <div id="testPushRecipients" class="camera-offline-recipients"></div>
       </form>
       <div class="button-row">
         <button id="testPushBtn" class="btn-info" type="button">Send Test Notification</button>
@@ -454,9 +455,7 @@
             <option value="false">Disabled</option>
             <option value="true">Enabled</option>
           </select></label>
-        <label>
-          <span>Test Recipient <span class="info-tip" data-tip="Enter an address to send a test email to." title="Enter an address to send a test email to." tabindex="0" aria-label="Help: Enter an address to send a test email to."></span></span>
-          <input id="testEmailRecipient" type="email" placeholder="you@example.com" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore /></label>
+        <div id="testEmailRecipient" class="camera-offline-recipients"></div>
       </form>
       <div class="button-row">
         <button id="testEmailBtn" class="btn-info" type="button">Send Test Email</button>

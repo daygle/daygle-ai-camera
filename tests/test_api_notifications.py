@@ -883,7 +883,7 @@ def test_push_notification_test_endpoint(tmp_path, monkeypatch):
         csrf = _login(client)
         import app.main as main_module
         sent = []
-        monkeypatch.setattr(main_module.PushNotificationService, "send_test", lambda self: sent.append(self.settings))
+        monkeypatch.setattr(main_module.PushNotificationService, "send_test", lambda self, topics=None: sent.append(self.settings))
         status, _headers, payload = client.request(
             "/api/settings/alert-push/test",
             method="POST",
@@ -898,7 +898,8 @@ def test_push_notification_test_endpoint(tmp_path, monkeypatch):
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 200
-        assert payload == {"ok": True}
+        # Nobody picked: the shared topic.
+        assert payload == {"ok": True, "topics": ["daygle-test"]}
         assert len(sent) == 1
         assert sent[0]["topic"] == "daygle-test"
     finally:

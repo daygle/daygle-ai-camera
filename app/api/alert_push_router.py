@@ -6,12 +6,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
+from app.alert_recipients import resolve_push_topics
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.deps import get_database, get_redacted_push_notification_settings
 from app.payload_validators import validate_push_notification_settings
 from app.push_notifications import PushNotificationError, PushNotificationService
 from app.request_helpers import read_json_object, write_audit_log
+from app.utils import normalize_push_recipients
 
 router = APIRouter()
 
@@ -48,10 +50,19 @@ async def test_push_notification_settings(request: Request):
     settings = validate_push_notification_settings(
         payload.get('settings') if isinstance(payload.get('settings'), dict) else payload
     )
+    # Users picked in Settings (``user:<id>``) get the test on their own
+    # topics; nobody picked (or an older client sending no list) means the
+    # shared topic, as before.
+    configured = normalize_push_recipients(payload.get('recipients') or [])
+    topics = await run_in_threadpool(resolve_push_topics, configured) if configured else []
+    if configured and not topics:
+        raise HTTPException(
+            status_code=400, detail='None of the chosen users has an active push topic.'
+        )
     try:
-        await run_in_threadpool(PushNotificationService(settings).send_test)
+        await run_in_threadpool(PushNotificationService(settings).send_test, topics)
     except PushNotificationError as exc:
         raise HTTPException(
             status_code=400, detail=f'Test notification failed: {exc}'
         ) from exc
-    return {'ok': True}
+    return {'ok': True, 'topics': topics or [settings.get('topic')]}
