@@ -7,6 +7,57 @@
   <title>Sound Detection - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    /* One row per camera; picking a row opens its settings in the card below. */
+    .sound-cameras-header { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+    .sound-cameras-header > div:nth-child(2) { flex: 1 1 320px; min-width: 0; }
+    .sound-cameras-header #reloadSoundsBtn { margin-left: auto; }
+    #soundCameraStatusList .rule-table td { vertical-align: middle; }
+    #soundCameraStatusList tr[data-camera-row] { cursor: pointer; }
+    #soundCameraStatusList tr[data-camera-row]:hover td { background: var(--muted-bg); }
+    #soundCameraStatusList tr.is-selected td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+    #soundCameraStatusList tr.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+    .sound-camera-pick {
+      all: unset; cursor: pointer; font-weight: 800; color: var(--text);
+      border-radius: 6px;
+    }
+    .sound-camera-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .sound-health {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 800; white-space: nowrap;
+      border: 1px solid var(--border); color: var(--muted);
+    }
+    .sound-health.is-ok { color: var(--success); border-color: var(--success); }
+    .sound-health.is-warn { color: var(--warning); border-color: var(--warning); }
+    .sound-health.is-error { color: var(--danger); border-color: var(--danger); }
+    .sound-health-detail { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); max-width: 40ch; }
+    .sound-editor-title { margin: 0; }
+    .sound-editor-title small { font-size: 13px; font-weight: 600; color: var(--muted); margin-left: 6px; }
+    .sound-health-banner {
+      display: grid; gap: 2px; padding: 10px 14px; margin-top: 14px;
+      border: 1px solid var(--border); border-left: 3px solid var(--border);
+      border-radius: 10px; background: var(--muted-bg); font-size: 13px;
+    }
+    .sound-health-banner[hidden] { display: none; }
+    .sound-health-banner.is-ok { border-left-color: var(--success); }
+    .sound-health-banner.is-warn { border-left-color: var(--warning); }
+    .sound-health-banner.is-error { border-left-color: var(--danger); }
+    .sound-health-banner p { margin: 0; color: var(--muted); }
+    .sound-class-assign { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); display: grid; gap: 12px; }
+    .sound-class-assign h3 { margin: 0; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+    .sound-class-assign > p { margin: -6px 0 0; font-size: 13px; color: var(--muted); }
+    .sound-class-add { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+    .sound-class-add label { flex: 1 1 220px; min-width: 0; display: grid; gap: 6px; }
+    .sound-settings-card .form-grid input, .sound-settings-card .form-grid select, .sound-class-add select { height: 46px; padding-top: 0; padding-bottom: 0; }
+    @media (max-width: 700px) {
+      .sound-cameras-header #reloadSoundsBtn { margin-left: 0; width: 100%; }
+      /* Stacked rows are cards: mark the selected one by its border. */
+      #soundCameraStatusList tr.is-selected td { background: none; }
+      #soundCameraStatusList tr.is-selected td:first-child { box-shadow: none; }
+      #soundCameraStatusList tr.is-selected { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+    }
+  </style>
 </head>
 <body>
   <main class="shell page-stack sounds-shell">
@@ -14,7 +65,7 @@
       <div>
         <p class="eyebrow">Monitoring</p>
         <h1>Sound Detection</h1>
-        <p class="muted">Configure per-camera audio detection and sound classes. Manage email, push, schedules, and sound alert policies on the Alerts page.</p>
+        <p class="muted">Choose which sounds each camera listens for. The audio model itself is on Models › Sound Model; alert delivery and schedules are on the Alerts page.</p>
       </div>
 
       <div class="onnx-hero-mark" aria-hidden="true">
@@ -25,32 +76,29 @@
     </header>
 
     <section class="card sound-detectors-card">
-      <div class="settings-section-header">
+      <div class="settings-section-header sound-cameras-header">
         <div class="settings-section-icon" aria-hidden="true">📡</div>
         <div>
-          <h2>Camera Sound Detectors</h2>
-          <p class="settings-section-subtitle">Current state, backend, and recent confidence scores for sound-enabled cameras.</p>
+          <h2>Cameras</h2>
+          <p class="settings-section-subtitle">What each camera is listening for and whether its sound detector is working. Pick a camera to change its settings below.</p>
         </div>
+        <button class="secondary" id="reloadSoundsBtn" type="button">Refresh</button>
       </div>
       <div id="soundCameraStatusList"></div>
     </section>
 
-    <section class="card sound-settings-card">
+    <section class="card sound-settings-card" id="soundEditorCard" aria-labelledby="soundEditorTitle">
       <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
         </div>
         <div>
-          <h2>Camera Audio Detection</h2>
-          <p class="settings-section-subtitle">Select a camera and enable audio detection on its RTSP stream. Sound alert policies, thresholds, schedules, recording, email, and push delivery are configured on the Alerts page.</p>
+          <h2 class="sound-editor-title" id="soundEditorTitle">Camera sound settings</h2>
+          <p class="settings-section-subtitle">Audio comes from the camera's RTSP stream. Alert delivery, schedules and email/push are set per class on the Alerts page.</p>
         </div>
       </div>
 
       <form class="form-grid" onsubmit="return false;">
-        <label>
-          <span>Camera</span>
-          <select id="soundCameraSelect" aria-label="Select camera"></select>
-        </label>
         <label>
           <span>Sound Detection <span class="info-tip" data-tip="Audio detection uses the camera's RTSP audio stream." title="Audio detection uses the camera's RTSP audio stream." tabindex="0" aria-label="Help: Audio detection uses the camera's RTSP audio stream."></span></span>
           <select id="soundEnabled" aria-label="Sound detection state">
@@ -62,18 +110,15 @@
           <input id="soundDetectionInterval" type="number" min="0.1" max="0.5" step="0.05" placeholder="0.5" aria-label="Sound detection interval in seconds" /></label>
       </form>
 
-      <div id="soundStatusPanel" style="margin-top:1rem"></div>
+      <!-- Same health verdict as the camera's row above: green only when the
+           detector is running AND the backend can classify. -->
+      <div id="soundStatusPanel" class="sound-health-banner" role="status" hidden></div>
 
-      <div class="sound-class-assign" style="margin-top:18px">
-        <div class="settings-section-header" style="margin-bottom:12px">
-          <div class="settings-section-icon" aria-hidden="true">🔖</div>
-          <div>
-            <h3 style="margin:0">Sound Classes</h3>
-            <p class="settings-section-subtitle" style="margin:2px 0 0">Choose which sounds this camera listens for, set each one's detection confidence, and whether it records. Schedules and email/push delivery are configured per class on the Alerts page.</p>
-          </div>
-        </div>
-        <div class="sound-class-add" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
-          <label style="flex:1;min-width:180px">
+      <div class="sound-class-assign">
+        <h3>Sound classes</h3>
+        <p>Which sounds this camera listens for, each one's minimum confidence, and whether it records.</p>
+        <div class="sound-class-add">
+          <label>
             <span>Add a sound class</span>
             <select id="soundClassSelect" aria-label="Select a sound class to add"></select>
           </label>
@@ -85,7 +130,6 @@
       <div id="soundMessage" class="muted cameras-list-status" style="margin-top:12px" aria-live="polite"></div>
 
       <div class="sound-editor-footer">
-        <button class="secondary" id="reloadSoundsBtn" type="button">Refresh</button>
         <button id="saveSoundSettingsBtn" type="button" class="primary">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
           Save Detection Settings

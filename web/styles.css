@@ -5141,19 +5141,11 @@ button.activity-item-action.activity-item-action-delete:hover {
   .sound-detectors-card #soundCameraStatusList > div { min-width: 0; }
 }
 @media (max-width: 600px) {
-  /* Hide less-critical columns (Configured, Rules, Last Sound, Recent Scores, Detail)
-     so the essential Camera / Backend / Running / Status columns remain readable. */
+  /* The Sound on/off column repeats the status pill ("Sound off"), so phones
+     drop it and keep Camera / Listening for / Status / Last heard. */
   #soundCameraStatusList .rule-table th:nth-child(2),
-  #soundCameraStatusList .rule-table td:nth-child(2),
-  #soundCameraStatusList .rule-table th:nth-child(3),
-  #soundCameraStatusList .rule-table td:nth-child(3),
-  #soundCameraStatusList .rule-table th:nth-child(7),
-  #soundCameraStatusList .rule-table td:nth-child(7),
-  #soundCameraStatusList .rule-table th:nth-child(8),
-  #soundCameraStatusList .rule-table td:nth-child(8),
-  #soundCameraStatusList .rule-table th:nth-child(9),
-  #soundCameraStatusList .rule-table td:nth-child(9) { display: none; }
-  /* With only 4 columns left, drop the 680px min-width floor the general
+  #soundCameraStatusList .rule-table td:nth-child(2) { display: none; }
+  /* With the columns trimmed, drop the 680px min-width floor the general
      rule-table mobile rule applies so they fit the phone width instead of
      forcing a horizontal scroll, and let the camera label wrap rather than
      push the row wide. */
