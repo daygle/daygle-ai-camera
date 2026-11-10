@@ -37,7 +37,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 logger = logging.getLogger('daygle.ai.detection')
 
@@ -60,7 +61,7 @@ class InferenceJob:
         self,
         camera_id: str,
         settings: dict[str, Any],
-        read_frame: Callable[[], Optional[tuple[Any, dict[str, Any]]]],
+        read_frame: Callable[[], tuple[Any, dict[str, Any]] | None],
         *,
         runner: Callable[[Any, dict[str, Any], dict[str, Any]], Any] | None = None,
         interval: float = 0.5,
@@ -191,7 +192,7 @@ class LiveInferenceScheduler:
         self,
         camera_id: str,
         settings: dict[str, Any],
-        read_frame: Callable[[], Optional[tuple[Any, dict[str, Any]]]],
+        read_frame: Callable[[], tuple[Any, dict[str, Any]] | None],
         *,
         runner: Callable[[Any, dict[str, Any], dict[str, Any]], Any] | None = None,
         interval: float = 0.5,

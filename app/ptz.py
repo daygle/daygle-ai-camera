@@ -55,7 +55,7 @@ _token_cache_lock = threading.Lock()
 
 def _wssec_header(username: str, password: str) -> str:
     nonce = os.urandom(16)
-    created = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    created = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%dT%H:%M:%S.000Z')
     digest = base64.b64encode(
         # ONVIF UsernameToken PasswordDigest is specified as SHA-1 over
         # nonce + created + password; this is protocol interoperability, not

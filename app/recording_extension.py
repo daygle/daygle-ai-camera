@@ -99,13 +99,14 @@ that Phase-29 has shipped.
 """
 
 from __future__ import annotations
+import contextlib
 import os
 
 import json
 import logging
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing import Any
 
@@ -211,7 +212,7 @@ def _extensions_payload(session: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     def iso(ts: float) -> str:
-        return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+        return datetime.fromtimestamp(float(ts), tz=UTC).isoformat()
 
     return {
         'original_end': iso(original) if original is not None else None,
@@ -275,9 +276,9 @@ def extend_active_rtsp_recording(
     try:
         event_dt = datetime.fromisoformat(str(event_time))
     except ValueError:
-        event_dt = datetime.now(timezone.utc)
+        event_dt = datetime.now(UTC)
     if event_dt.tzinfo is None:
-        event_dt = event_dt.replace(tzinfo=timezone.utc)
+        event_dt = event_dt.replace(tzinfo=UTC)
     config = recording_config or effective_recording_config()
     extension_step_seconds = max(
         0,
@@ -343,7 +344,7 @@ def extend_active_rtsp_recording(
             session['capture_deadline_ts'] = new_deadline
             new_run = _note_extension(session, event_dt.timestamp(), reason, label)
             start_ts = float(session.get('start_capture_ts') or new_deadline)
-            ended_at = datetime.fromtimestamp(new_deadline, tz=timezone.utc).isoformat()
+            ended_at = datetime.fromtimestamp(new_deadline, tz=UTC).isoformat()
             duration_seconds = max(1.0, new_deadline - start_ts)
         recording_id = int(session.get('recording_id'))
     if extended:
@@ -466,7 +467,7 @@ def continue_active_recording(
         last_object_ts = session.get('last_object_ts')
     config = recording_config or effective_recording_config()
     post_seconds = max(1, int(config.get('post_event_seconds', 15)))
-    event_time = datetime.fromtimestamp(frame_ts, tz=timezone.utc).isoformat()
+    event_time = datetime.fromtimestamp(frame_ts, tz=UTC).isoformat()
     still = [
         detection for detection in still_detections or []
         if isinstance(detection.get('track_id'), int) and detection['track_id'] in track_ids
@@ -516,10 +517,8 @@ def write_recording_detection_track(
         # Best-effort cleanup of the orphan tmp file so a future
         # successful write is not blocked by the junk sitting next to
         # the sidecar.
-        try:
+        with contextlib.suppress(OSError):
             tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise
 
 
@@ -535,7 +534,7 @@ def load_recording_detection_track(
         return None
     if not isinstance(data, list):
         return None
-    if not any((isinstance(sample, dict) and sample.get('detections') for sample in data)):
+    if not any(isinstance(sample, dict) and sample.get('detections') for sample in data):
         return None
     return data
 
@@ -578,12 +577,12 @@ def _recording_capture_window(recording: dict[str, Any]) -> tuple[float, float] 
     except ValueError:
         return None
     if started_at.tzinfo is None:
-        started_at = started_at.replace(tzinfo=timezone.utc)
+        started_at = started_at.replace(tzinfo=UTC)
     start_ts = started_at.timestamp()
     try:
         ended_at = datetime.fromisoformat(str(recording.get('ended_at') or ''))
         if ended_at.tzinfo is None:
-            ended_at = ended_at.replace(tzinfo=timezone.utc)
+            ended_at = ended_at.replace(tzinfo=UTC)
         end_ts = ended_at.timestamp()
     except ValueError:
         end_ts = start_ts + max(1.0, float(recording.get('duration_seconds') or 0))
@@ -702,10 +701,8 @@ def clear_runtime_media_directory(path_value: str | None) -> int:
     # expand into an rm-rf of a privileged tree. ``_safe_rmtree_no_follow``
     # handles this case AND any descendant symlinks.
     if path.is_symlink():
-        try:
+        with contextlib.suppress(OSError):
             path.unlink(missing_ok=True)
-        except OSError:
-            pass
         return 1
     deleted = 0
     for child in path.iterdir():
@@ -770,7 +767,7 @@ def _parse_chunk_start_time(file_path: Path) -> datetime | None:
     # length by the tz offset (e.g. a 1-hour chunk on a UTC+1 host collapsed to
     # ~0s, flooring to the 1.0s minimum). ``astimezone`` on a naive datetime
     # treats it as system-local; UTC hosts are unaffected (local == UTC).
-    return naive.astimezone(timezone.utc)
+    return naive.astimezone(UTC)
 
 
 def _make_continuous_chunk_callback(camera_id: str) -> Any:
@@ -779,7 +776,7 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
         try:
             started_at_dt = _parse_chunk_start_time(file_path)
             stat = file_path.stat()
-            mtime_dt = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+            mtime_dt = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
             if started_at_dt is None:
                 started_at_dt = mtime_dt - timedelta(
                     seconds=effective_recording_config().get('chunk_duration_seconds', 3600)
@@ -922,9 +919,9 @@ def start_rtsp_recording_capture(
     try:
         triggered_at = datetime.fromisoformat(str(event_time or utc_now()))
     except ValueError:
-        triggered_at = datetime.now(timezone.utc)
+        triggered_at = datetime.now(UTC)
     if triggered_at.tzinfo is None:
-        triggered_at = triggered_at.replace(tzinfo=timezone.utc)
+        triggered_at = triggered_at.replace(tzinfo=UTC)
     # Clamp the pre-roll so this clip does not reproduce footage the previous
     # clip for this camera already captured. Each event grabs pre_event_seconds
     # of buffered lead-in independently, so two clips close together (e.g. a long
@@ -1065,9 +1062,9 @@ def start_rtsp_recording_capture(
             _mark_capture_timing_final(capture_session)
             _state.database.update_recording_timing(
                 recording_id,
-                started_at=datetime.fromtimestamp(content_start_ts, tz=timezone.utc).isoformat(),
+                started_at=datetime.fromtimestamp(content_start_ts, tz=UTC).isoformat(),
                 ended_at=datetime.fromtimestamp(
-                    content_start_ts + content_seconds, tz=timezone.utc
+                    content_start_ts + content_seconds, tz=UTC
                 ).isoformat(),
                 duration_seconds=content_seconds,
             )

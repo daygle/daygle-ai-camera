@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from app.db.library_filters import recording_face_condition, recording_query_condition
@@ -141,7 +142,7 @@ class RecordingsMixin:
         # datetime assembled with ``.replace(tzinfo=...)``, f-string of local
         # time) through the same canonicaliser so the storage form stays
         # uniform. Idempotent on already-canonical input.
-        _now_raw = datetime.now(timezone.utc).isoformat()
+        _now_raw = datetime.now(UTC).isoformat()
         now = _normalize_iso_to_utc(_now_raw) or _now_raw
         for raw in labels:
             label = str(raw or '').strip().lower()
@@ -503,7 +504,7 @@ class RecordingsMixin:
         # a non-UTC tz suffix from upstream policy code).
         bound_older_than = _normalize_iso_to_utc(older_than) if older_than else None
         bound_grace_cutoff = _normalize_iso_to_utc(
-            (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+            (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
         )
         with self.write_slot(), self.connect() as db:
             purge_ids: set[int] = set()
@@ -562,10 +563,8 @@ class RecordingsMixin:
                     # A browser-playback transcode (HEVC/incompatible-audio
                     # cameras) is a second full copy of the clip; leaving it out
                     # let real disk use reach ~2x the configured cap.
-                    try:
+                    with contextlib.suppress(OSError):
                         size += recording_playback_sidecar_path(path).stat().st_size
-                    except OSError:
-                        pass
                     retained_bytes += size
                     if retained_bytes > max_storage_bytes:
                         purge_ids.add(recording_id)

@@ -31,7 +31,7 @@ class CameraPolicy:
     motion_zones: tuple[CompiledZone, ...]
 
     @classmethod
-    def compile(cls, settings: dict[str, Any]) -> "CameraPolicy":
+    def compile(cls, settings: dict[str, Any]) -> CameraPolicy:
         detection = settings.get("detection") or {}
         camera_labels = frozenset(normalize_label_list(detection.get("object_labels", [])))
         compiled: list[CompiledZone] = []

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import subprocess
-from datetime import date, datetime, timezone
+from datetime import date, datetime, UTC
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -119,7 +120,7 @@ def _log_date_range(date_from: str | None, date_to: str | None) -> tuple[date | 
 def _parse_entry(raw: dict) -> dict:
     ts_us = raw.get('__REALTIME_TIMESTAMP', '')
     try:
-        ts = datetime.fromtimestamp(int(ts_us) / 1_000_000, tz=timezone.utc).isoformat()
+        ts = datetime.fromtimestamp(int(ts_us) / 1_000_000, tz=UTC).isoformat()
     except (ValueError, TypeError):
         ts = ''
     priority = str(raw.get('PRIORITY', '6'))
@@ -198,6 +199,8 @@ def get_app_log(
             try:
                 entry = _parse_entry(json.loads(line))
             except Exception:
+                # Skip an unparseable journal line. Deliberately not logged:
+                # the warning would land in the very journal being read.
                 continue
             if _is_noise(entry):
                 continue
@@ -235,7 +238,7 @@ async def stream_app_log(request: Request):
                     break
                 try:
                     raw_line = await asyncio.wait_for(proc.stdout.readline(), timeout=30.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ': keepalive\n\n'
                     continue
                 except ValueError:
@@ -251,18 +254,17 @@ async def stream_app_log(request: Request):
                 try:
                     entry = _parse_entry(json.loads(line_str))
                 except Exception:
+                    # Skip it; logging here would feed back into this stream.
                     continue
                 if _is_noise(entry):
                     continue
                 yield f'data: {json.dumps(entry)}\n\n'
         finally:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 proc.terminate()
-            except ProcessLookupError:
-                pass
             try:
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 # Reap the killed child so it does not linger as a zombie.
                 await proc.wait()

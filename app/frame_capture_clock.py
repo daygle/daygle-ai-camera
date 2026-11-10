@@ -38,6 +38,7 @@ append-ordered and sliced by bisect.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import subprocess
@@ -126,10 +127,8 @@ def segment_list_args(camera_dir: Path) -> list[str]:
     would yield a plausible-looking but wrong capture time until the new
     process closed its first segment.
     """
-    try:
+    with contextlib.suppress(OSError):
         (camera_dir / SEGMENT_LIST_NAME).unlink(missing_ok=True)
-    except OSError:
-        pass
     return [
         '-segment_list', str(camera_dir / SEGMENT_LIST_NAME),
         '-segment_list_type', 'csv',

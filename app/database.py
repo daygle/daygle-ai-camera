@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Iterator
+from collections.abc import Callable, Iterator
 
 from app.db.alerts import AlertsMixin
 from app.db.audit import AuditLogMixin
@@ -176,77 +177,65 @@ class EventDatabase(
             # pre-video-link schema. New installs get it via the CREATE TABLE
             # block below, so use ALTER TABLE for the upgrade path and swallow
             # the "duplicate column" error that fires when the column exists.
-            try:
+            # Column already exists on upgrades from older schemas.
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE alert_history ADD COLUMN recording_id INTEGER REFERENCES recordings(id) ON DELETE SET NULL")
-            except sqlite3.OperationalError:
-                pass  # Column already exists on upgrades from older schemas.
-            try:
+            # Column already exists on upgrades from older schemas.
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE events ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass  # Column already exists on upgrades from older schemas.
-            try:
+            # Column already exists on upgrades from older schemas.
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE alert_history ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass  # Column already exists on upgrades from older schemas.
-            try:
+            # Column already exists on upgrades from pre-zone-name schema
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE detections ADD COLUMN zone_name TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists on upgrades from pre-zone-name schema
             # Migration: mark detections that fired a still-dwell alert (the
             # "still for N minutes" Objects page setting) so the UI can badge
             # them. New installs get the column via CREATE TABLE below.
-            try:
+            # Column already exists on upgrades from pre-still-alert schema
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE detections ADD COLUMN still_alert INTEGER NOT NULL DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass  # Column already exists on upgrades from pre-still-alert schema
-            try:
+            # Column already exists on upgrades from pre-still-alert schema
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE detections ADD COLUMN still_alert_minutes INTEGER")
-            except sqlite3.OperationalError:
-                pass  # Column already exists on upgrades from pre-still-alert schema
             # Migration: the share of pixels that changed for a motion
             # detection (NULL for objects and older motion rows).
-            try:
+            # Column already exists on upgrades from pre-motion-fraction schema
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE detections ADD COLUMN motion_fraction REAL")
-            except sqlite3.OperationalError:
-                pass  # Column already exists on upgrades from pre-motion-fraction schema
             # Migration: make "which clip this event belongs to" a first-class
             # link. A recording spans many events (a continuous clip accrues a
             # fresh event each time a new object/sound appears), so events carry
             # the recording_id rather than recordings pointing at a single
             # "primary" event. New installs get the column via the CREATE TABLE
             # block below; ALTER covers the upgrade path.
-            try:
+            # Column already exists on upgrades from older schemas.
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE events ADD COLUMN recording_id INTEGER REFERENCES recordings(id) ON DELETE SET NULL")
-            except sqlite3.OperationalError:
-                pass  # Column already exists on upgrades from older schemas.
             # Migration: track the best confidence seen for each recording label so
             # the recordings list can show a percentage for secondary objects that
             # were only detected after the trigger (their confidence otherwise lives
             # solely in the saved detection track, which the list does not load).
-            try:
+            # Column already exists on upgrades from older schemas.
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE recording_labels ADD COLUMN confidence REAL")
-            except sqlite3.OperationalError:
-                pass  # Column already exists on upgrades from older schemas.
             # Migration: add the immutable column to existing databases.
             # The CREATE TABLE below already includes it for fresh installs.
-            try:
+            # Column already exists on upgrades from older schemas.
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE audit_log ADD COLUMN immutable INTEGER NOT NULL DEFAULT 1")
-            except sqlite3.OperationalError:
-                pass  # Column already exists on upgrades from older schemas.
             # Migration: keep a small JPEG thumbnail of the enrolled face crop so
             # the People page can show what was enrolled (embeddings are opaque).
             # New installs get the column via the CREATE TABLE block below.
-            try:
+            # Column already exists on upgrades from older schemas.
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE person_faces ADD COLUMN thumbnail BLOB")
-            except sqlite3.OperationalError:
-                pass  # Column already exists on upgrades from older schemas.
             # Migration: what kept each recording going past its first
             # post-event window (JSON; see app.recording_extension), drawn as
             # markers on the playback bar. New installs get it via CREATE TABLE.
-            try:
+            # Column already exists (or the table is created below).
+            with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE recordings ADD COLUMN extensions TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists (or the table is created below).
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS events (

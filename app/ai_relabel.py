@@ -14,7 +14,7 @@ the new one. Every other rule condition still applies.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 import app.state as _state
@@ -168,7 +168,7 @@ def relabel_alerts(
 
 def _store(alerts: list[dict[str, Any]], event: dict[str, Any], event_id: int) -> None:
     database = _state.database
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     try:
         for alert in alerts:
             database.add_alert(

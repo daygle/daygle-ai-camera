@@ -265,3 +265,35 @@ def test_a_failed_capture_reaches_the_ai_log_as_a_warning(monkeypatch):
     assert [event['event_type'] for event in events] == ['face_capture_failed']
     assert events[0]['camera_id'] == 'cam'
     assert 'Failed to capture unknown face on camera cam' in events[0]['message']
+
+
+def test_capture_is_skipped_and_retried_when_the_cap_cannot_be_checked(monkeypatch):
+    """If the pending-capture count fails (database unavailable), the capture
+    is skipped rather than queued past the cap, and the track is released so a
+    later sighting offers it again."""
+    camera = 'cam-face-db-down'
+    face_identity.reset_camera_identities(camera)
+    import app.postprocess_pool as pool
+    accepted = []
+
+    def submit(_fn, *args, **_kw):
+        accepted.append(args[1])
+        return True
+
+    class _BrokenDatabase:
+        def count_unknown_faces(self, **_kw):
+            raise RuntimeError('database is locked')
+
+    # Patch the live module: ``_maybe_capture_unknown`` imports ``app.state``
+    # at call time, and an earlier test may have reloaded it.
+    import importlib
+    live_state = importlib.import_module('app.state')
+    monkeypatch.setattr(pool, 'enrichment_pool', lambda: SimpleNamespace(submit=submit))
+    monkeypatch.setattr(live_state, 'database', _BrokenDatabase())
+    crop = np.zeros((20, 20, 3), dtype=np.uint8)
+    face_identity._maybe_capture_unknown(camera, 7, {}, crop, None)
+    assert accepted == [], 'nothing is queued while the cap cannot be checked'
+    monkeypatch.setattr(live_state, 'database', None)
+    face_identity._maybe_capture_unknown(camera, 7, {}, crop, None)
+    assert accepted == [7], 'the skipped track is offered again on its next sighting'
+    face_identity.reset_camera_identities(camera)

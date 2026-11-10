@@ -483,17 +483,15 @@ class OnnxYoloDetector:
             if use_cuda and 'CUDAExecutionProvider' not in self.active_providers:
                 log_ai_diagnostic(
                     'ai_detector_startup',
-                    'GPU acceleration was requested (device={}) but the model is '
-                    'running on CPU (active_providers={}). ONNX Runtime could not '
+                    f'GPU acceleration was requested (device={self._device}) but the model is '
+                    f'running on CPU (active_providers={self.active_providers}). ONNX Runtime could not '
                     'initialize CUDA -- verify the NVIDIA driver is loaded '
                     '(nvidia-smi) and built for the running kernel, and that '
                     'the CUDA/cuDNN libraries it names above are installed '
                     '(on a Pascal GPU such as the Tesla P4, re-running '
                     'scripts/update.sh repairs them; see '
                     'docs/tesla-p4-gpu-setup.md). Inference will fall back to '
-                    'CPU and run slowly until this is resolved.'.format(
-                        self._device, self.active_providers,
-                    ),
+                    'CPU and run slowly until this is resolved.',
                     severity='warning',
                     details={'model_path': str(self.model_path), 'device': str(self._device)},
                 )

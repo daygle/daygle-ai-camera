@@ -98,6 +98,7 @@ State and service access:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from email.mime.text import MIMEText
@@ -313,10 +314,9 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                             # full rationale. Same disconnect graceful-
                             # teardown pattern as ``_send_via``'s
                             # reconnect path.
-                            try:
+                            # SMTP cleanup is best-effort after notification delivery.
+                            with contextlib.suppress(Exception):
                                 active_smtp.quit()
-                            except Exception:
-                                pass  # SMTP cleanup is best-effort after notification delivery.
                 except Exception as exc:
                     # Session-level (connect / TLS / login) failure: record so
                     # operators see it, but do NOT block the flag stamp below.

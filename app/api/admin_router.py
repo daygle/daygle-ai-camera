@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -124,7 +124,7 @@ def session_remaining(request: Request):
     expires_dt = _parse_iso_datetime(session.get('expires_at'))
     remaining = 0
     if expires_dt is not None:
-        remaining = max(0, int((expires_dt - datetime.now(timezone.utc)).total_seconds()))
+        remaining = max(0, int((expires_dt - datetime.now(UTC)).total_seconds()))
     return {'remaining_seconds': remaining, 'expires_at': session['expires_at']}
 
 

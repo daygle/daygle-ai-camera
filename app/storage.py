@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import os
 import secrets
 from pathlib import Path
@@ -26,7 +26,7 @@ class Storage:
         self.recordings_dir.mkdir(parents=True, exist_ok=True)
 
     def save_image_snapshot(self, image_bytes: bytes, original_filename: str | None = None) -> str:
-        created = datetime.now(timezone.utc)
+        created = datetime.now(UTC)
         suffix = Path(original_filename or '').suffix.lower()
         if suffix not in {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}:
             suffix = '.jpg'
