@@ -39,7 +39,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 # How long an idle worker parks on the condition variable before re-checking the
 # stop flag. Short enough that ``stop()`` is prompt, long enough that an idle

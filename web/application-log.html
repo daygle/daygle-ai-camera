@@ -46,6 +46,33 @@
           <option value="info">Info and above</option>
           <option value="debug">Debug (all)</option>
         </select>
+        <select id="filterSource" aria-label="Source">
+          <option value="">All sources</option>
+          <optgroup label="Cameras">
+            <option value="cameras">Cameras</option>
+            <option value="recording">Recording</option>
+            <option value="ptz">PTZ</option>
+          </optgroup>
+          <optgroup label="Detection & AI">
+            <option value="detection">Detection</option>
+            <option value="analysis">AI analysis</option>
+            <option value="models">Models</option>
+            <option value="faces">Faces</option>
+            <option value="sound">Sound</option>
+          </optgroup>
+          <optgroup label="Alerts">
+            <option value="alerts">Alerts & notifications</option>
+          </optgroup>
+          <optgroup label="System">
+            <option value="auth">Sign-in & security</option>
+            <option value="storage">Database & storage</option>
+            <option value="updates">Updates</option>
+            <option value="tunnel">Cloudflare Tunnel</option>
+            <option value="web">Web server</option>
+            <option value="core">App core</option>
+            <option value="other">Raw output</option>
+          </optgroup>
+        </select>
         <input id="filterSearch" type="search" placeholder="Search messages…" aria-label="Search messages" />
         <button id="applyFiltersBtn" type="button">Apply Filters</button>
         <button id="clearFiltersBtn" class="secondary" type="button">Reset Filters</button>
@@ -68,6 +95,7 @@
             <tr>
               <th>Time</th>
               <th>Level</th>
+              <th>Source</th>
               <th>Message</th>
             </tr>
           </thead>

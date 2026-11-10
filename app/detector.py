@@ -12,7 +12,7 @@ import numpy as np
 from app.diagnostics import log_ai_diagnostic
 from app.utils import normalize_bool_setting
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 
 class DetectorUnavailableError(RuntimeError):

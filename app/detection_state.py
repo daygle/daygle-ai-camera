@@ -96,7 +96,7 @@ _EXPECTED_MOTION_ERRORS = (ValueError, TypeError, MemoryError, OSError, cv2.erro
 # bad-frame condition so the camera source can be repaired separately.
 
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 # Per-camera throttle for the motion-gate diagnostic line below (keeps a
 # debug run from flooding the log at ~4 Hz per camera).
 _motion_log_last_at: dict[str, float] = {}

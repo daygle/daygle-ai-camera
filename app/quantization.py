@@ -65,7 +65,7 @@ from typing import Any
 import app.state as _state
 from app.diagnostics import log_ai_diagnostic
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.models')
 
 # Dynamic quantization can be requested by multiple detector reloads at once
 # (for example, a settings save racing with a camera worker). The temporary

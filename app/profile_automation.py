@@ -25,7 +25,7 @@ from app.recording_settings import (
     normalize_camera_profiles_with_legacy,
 )
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 
 _PROFILE_POLL_SECONDS = 30.0
 _ONVIF_POLL_SECONDS = 60.0

@@ -29,7 +29,7 @@ from app.object_settings import (
 )
 from app.request_helpers import admin_json_object, write_audit_log
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 router = APIRouter()
 

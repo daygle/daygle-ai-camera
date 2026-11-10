@@ -51,7 +51,7 @@ from app.recording_files import delete_recording_files, delete_snapshot_files
 from app.media_utils import safe_storage_path
 from app.utils import normalize_bool_setting
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.storage')
 
 DATABASE_RESTORE_REQUIRED_TABLES: set[str] = {'events', 'detections', 'app_settings', 'users'}
 DATABASE_RESTORE_LOCK: threading.Lock = threading.Lock()

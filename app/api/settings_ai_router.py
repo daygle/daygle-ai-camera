@@ -32,7 +32,7 @@ from app.model_management import (
 from app.request_helpers import read_json_object, write_audit_log
 from app.media_utils import ONE_PIXEL_PNG
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.models')
 
 router = APIRouter()
 

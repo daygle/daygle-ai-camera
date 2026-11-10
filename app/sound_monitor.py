@@ -34,7 +34,7 @@ from app.alert_dispatch import (
 from app.sound_detector import SOUND_CLASSES, SoundDetector
 from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_push_recipients, build_stream_url
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.sound')
 
 
 def _sound_status_reason(diagnostics: list[dict[str, Any]]) -> dict[str, Any] | None:

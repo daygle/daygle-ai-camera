@@ -31,7 +31,7 @@ from app.ai_verification import (
 )
 from app.diagnostics import log_ai_diagnostic
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.analysis')
 
 MAX_QUERY_CHARS = 300
 MAX_GROUPS = 6

@@ -26,7 +26,7 @@ from app.config_facades import effective_face_recognition_config
 from app.runtime_config import cached_snapshot
 from app.utils import normalize_bool_setting as _coerce_bool, normalize_push_recipients
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.faces')
 
 _DEFAULT_RULES: dict[str, Any] = {'rules': []}
 

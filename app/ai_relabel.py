@@ -21,7 +21,7 @@ import app.state as _state
 from app.diagnostics import log_ai_diagnostic
 from app.zone_schema import canonical_label, detection_within_box_limits, label_matches
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.analysis')
 
 MAX_RELABEL_CANDIDATES = 12
 # Never relabel to these: no object to alert on, or an identity rule.

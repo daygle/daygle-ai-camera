@@ -34,7 +34,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 # Rolling window of recent cycles retained per camera.
 WINDOW_SIZE = 50

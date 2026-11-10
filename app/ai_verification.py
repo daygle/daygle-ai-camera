@@ -44,7 +44,7 @@ from app.diagnostics import log_ai_diagnostic
 from app.runtime_config import cached_snapshot
 from app.zone_schema import label_matches
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.analysis')
 
 SETTINGS_KEY = 'ai_verification'
 

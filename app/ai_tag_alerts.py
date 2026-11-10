@@ -43,7 +43,7 @@ from typing import Any
 from app.diagnostics import log_ai_diagnostic
 import app.state as _state
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.alerts')
 
 _cooldowns: dict[str, float] = {}
 _cooldown_lock = threading.Lock()

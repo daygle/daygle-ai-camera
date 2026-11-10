@@ -152,7 +152,7 @@ from app.zone_detection import (
     zone_record_on_detect,
 )
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 
 
 def _no_object_match_reason(

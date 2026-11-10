@@ -16,7 +16,7 @@ import urllib.request
 from dataclasses import dataclass
 from html import escape as _xml_escape
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.ptz')
 
 VALID_COMMANDS = frozenset({
     'stop', 'up', 'down', 'left', 'right',

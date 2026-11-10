@@ -19,7 +19,7 @@ import app.state as _state
 from app import behaviour, behaviour_baseline
 from app.alert_dispatch import submit_alert_notification
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 # Per-crossing cooldown: last wall-clock fire time keyed by
 # ``camera|zone|direction|track`` so a subject straddling the line does not

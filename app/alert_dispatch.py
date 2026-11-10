@@ -42,7 +42,7 @@ from app.media_utils import safe_storage_path
 from app.push_notifications import PushNotificationService, PushNotificationError
 from app.alert_recipients import resolve_email_recipients, resolve_push_topics
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.alerts')
 
 _MIN_RULE_CONFIDENCE_TTL = 5.0
 _min_rule_confidence_cache: tuple[float, float, str | None] | None = None

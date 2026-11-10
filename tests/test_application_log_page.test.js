@@ -57,3 +57,17 @@ test('entries are listed newest first, like the other log pages', () => {
   assert.match(js, /applicationLogOutputWrap\.scrollTop = 0;/);
   assert.doesNotMatch(js, /scrollTop = applicationLogOutputWrap\.scrollHeight/);
 });
+
+test('entries can be filtered by a grouped Source', () => {
+  assert.match(html, /<select id="filterSource" aria-label="Source">/);
+  assert.match(html, /<optgroup label="Cameras">/);
+  assert.match(html, /<th>Source<\/th>/);
+  // Applied client-side to buffered and streamed rows alike.
+  assert.match(js, /tr\.dataset\.source !== activeSource/);
+  assert.match(js, /filterSource'\)\.addEventListener\('change'/);
+  // Every option has a friendly label for the Source column.
+  const select = html.match(/<select id="filterSource"[\s\S]*?<\/select>/)[0];
+  for (const [, value] of select.matchAll(/<option value="([^"]+)">/g)) {
+    assert.match(js, new RegExp(`\\n  ${value}: '`), `${value} has no SOURCE_LABELS entry`);
+  }
+});

@@ -58,7 +58,7 @@ from app.utils import (
 )
 from app.zone_schema import normalize_label_list, normalize_monitoring_zones
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 
 
 def normalize_camera_settings(

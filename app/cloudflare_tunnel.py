@@ -72,7 +72,7 @@ TUNNEL_RESTART_BACKOFF_MAX_SECONDS = 300.0
 # resets and the next failure gets a fast first retry again.
 TUNNEL_HEALTHY_UPTIME_SECONDS = 60.0
 
-logger = logging.getLogger("daygle.ai")
+logger = logging.getLogger('daygle.ai.tunnel')
 
 
 @dataclass(frozen=True)
