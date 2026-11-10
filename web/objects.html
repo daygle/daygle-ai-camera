@@ -7,6 +7,52 @@
   <title>Objects - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    /* Defaults: mode and motion colour side by side instead of a full-width
+       select stacked over a lone swatch. */
+    .objects-defaults { display: grid; grid-template-columns: minmax(0, 320px) auto; gap: 16px 24px; align-items: start; margin-top: 16px; }
+    .objects-defaults .motion-color-field { gap: 8px; }
+    .objects-defaults .box-color-cell { min-height: 46px; display: inline-flex; align-items: center; }
+    .objects-defaults label { display: grid; gap: 8px; color: var(--muted); font-weight: 800; }
+    .objects-defaults select { height: 46px; padding-top: 0; padding-bottom: 0; }
+    /* Groups: one table (members, mode, colour, edit/remove) + the add form. */
+    .groups-note { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
+    #groupModesBody td.group-actions-cell { width: 1%; white-space: nowrap; }
+    #groupModesBody .group-row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+    #groupModesBody .group-row-actions button { min-height: 34px; padding: 6px 12px; }
+    .group-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+    .group-form .group-form-fields { align-items: start; }
+    .group-form-fields label { display: grid; gap: 8px; align-content: start; }
+    .group-form-fields input, .group-form-fields .multi-select-toggle { height: 44px; }
+    .group-form .multi-select-chips:empty { display: none; }
+    /* Overrides: search + "Changed only" so the 80-class table is not a
+       7000px scroll; rows are compact. */
+    .objects-toolbar { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; margin: 14px 0 10px; }
+    .objects-toolbar input[type="search"] { flex: 1 1 240px; max-width: 360px; height: 40px; padding-top: 0; padding-bottom: 0; }
+    .objects-toolbar .toggle-control { margin: 0; font-size: 13px; }
+    .objects-toolbar-count { margin-left: auto; font-size: 12.5px; font-weight: 700; color: var(--muted); }
+    #objectsTableBody td { padding-top: 6px; padding-bottom: 6px; }
+    #objectsTableBody select { height: 36px; padding-top: 0; padding-bottom: 0; }
+    #objectsFilterEmpty { margin: 6px 0 0; }
+    /* Unsaved changes: a sticky bar instead of scrolling 80 rows to Save. */
+    .objects-save-bar {
+      position: sticky; bottom: 12px; z-index: 20;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+      padding: 10px 14px;
+      border: 1px solid var(--accent); border-radius: 12px;
+      background: var(--panel);
+      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    }
+    .objects-save-bar[hidden] { display: none; }
+    .objects-save-bar span { font-weight: 700; }
+    @media (max-width: 600px) {
+      .objects-defaults { grid-template-columns: minmax(0, 1fr); }
+      .objects-toolbar input[type="search"] { max-width: none; }
+      .objects-toolbar-count { margin-left: 0; }
+      .objects-save-bar button { width: 100%; }
+      #groupModesBody td.group-actions-cell { width: auto; white-space: normal; }
+    }
+  </style>
 </head>
 <body>
   <main class="shell page-stack">
@@ -15,9 +61,6 @@
         <p class="eyebrow">Monitoring workspace</p>
         <h1>Objects</h1>
         <p class="muted">Choose whether each object class counts when it is moving, standing still, or either, and alert when an object has been sitting still for a while - a package left in view, a pet that has settled down. Detection still runs on every cycle; per-area recording lives on Zones and notification policies live on Alerts.</p>
-      </div>
-      <div class="hero-action">
-        <button id="saveObjectsBtnHeader" type="button" class="primary" style="display:none">Save Changes</button>
       </div>
       <div class="onnx-hero-mark" aria-hidden="true">
         <span class="onnx-hero-ring onnx-hero-ring-back"></span>
@@ -30,11 +73,11 @@
       <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">◉</div>
         <div>
-          <h2>Detection Behavior</h2>
+          <h2>Defaults</h2>
           <p class="settings-section-subtitle">Set the default for every object, then override individual classes below. How "moving" is decided: an object is moving when its pixels are changing in the motion layer, and still when it has been absorbed into the background (a parked car, someone standing still).</p>
         </div>
       </div>
-      <form id="objectsForm" class="form-stack">
+      <form id="objectsForm" class="objects-defaults">
         <label>
           <span>Default Mode <span class="info-tip" data-tip="Applied to every object class unless overridden below. Moving Only (default) counts subjects while they are moving and ignores parked/still subjects (e.g. a car left in view). Moving &amp; Still counts both moving and stationary subjects. Still Only counts only stationary subjects." title="Applied to every object class unless overridden below. Moving Only (default) counts subjects while they are moving and ignores parked/still subjects (e.g. a car left in view). Moving &amp; Still counts both moving and stationary subjects. Still Only counts only stationary subjects." tabindex="0" aria-label="Help: Default detection mode for every object class"></span></span>
           <select name="default_mode">
@@ -53,16 +96,31 @@
       </form>
     </section>
 
-    <section class="card">
+    <section class="card" id="groupsCard">
       <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">🔖</div>
         <div>
-          <h2>Object Groups</h2>
-          <p class="settings-section-subtitle">A group is a single label that matches any of its member classes - add <code>animal</code> to a zone rule and it fires for <code>cat</code>, <code>dog</code>, or any other member. Create, edit, or remove groups here; they become available in the Zones page label pickers alongside ordinary classes.</p>
+          <h2>Groups</h2>
+          <p class="settings-section-subtitle">A group is one label that matches any of its member classes - add <code>animal</code> to a zone rule and it fires for <code>cat</code>, <code>dog</code>, or any other member. Give a group a detection mode and box colour and every member uses them, unless the class has its own override below. When a class is in several groups, the smallest group wins.</p>
         </div>
       </div>
       <div id="groupsMessage" class="muted" style="margin-bottom:8px"></div>
-      <div id="groupsList"></div>
+      <div id="groupModesEmpty" class="muted empty-message" hidden>No groups yet. Add one below - e.g. <code>vehicle</code> → <code>car, truck, bus</code>.</div>
+      <div id="groupModesTableWrap" class="cameras-table-wrap">
+        <table class="rule-table">
+          <thead>
+            <tr>
+              <th>Group</th>
+              <th>Members</th>
+              <th>Detection Mode</th>
+              <th>Box Colour</th>
+              <th class="group-actions-cell" aria-label="Actions"></th>
+            </tr>
+          </thead>
+          <tbody id="groupModesBody"></tbody>
+        </table>
+      </div>
+      <p class="groups-note">Adding, editing or removing a group saves straight away. Detection mode and box colour save with the other changes on this page.</p>
       <form id="groupForm" class="form-stack group-form" autocomplete="off">
         <div class="group-form-fields">
           <label>
@@ -95,31 +153,6 @@
 
     <section class="card">
       <div class="settings-section-header">
-        <div class="settings-section-icon" aria-hidden="true">🐾</div>
-        <div>
-          <h2>Group Behavior</h2>
-          <p class="settings-section-subtitle">Set one detection mode and box colour for a whole group and they apply to every member class - unless a class has its own override in Per-Object Overrides below. When a class belongs to several groups, the smallest (most specific) group wins.</p>
-        </div>
-      </div>
-      <div id="groupModesEmpty" class="muted empty-message" hidden>No groups yet. Create one in Object Groups above to set its behavior.</div>
-      <div id="groupModesTableWrap" class="cameras-table-wrap">
-        <table class="rule-table">
-          <thead>
-            <tr>
-              <th>Group</th>
-              <th>Members</th>
-              <th>Detection Mode</th>
-              <th>Effective</th>
-              <th>Box Colour</th>
-            </tr>
-          </thead>
-          <tbody id="groupModesBody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">🏷️</div>
         <div>
           <h2>Per-Object Overrides</h2>
@@ -127,6 +160,12 @@
         </div>
       </div>
       <div id="objectsMessage" class="muted" style="margin-bottom:8px"></div>
+      <div class="objects-toolbar">
+        <input type="search" id="objectsFilter" placeholder="Search objects…" aria-label="Search objects" autocomplete="off" />
+        <label class="toggle-control"><input type="checkbox" id="objectsChangedOnly" checked /><span>Changed only</span></label>
+        <span class="objects-toolbar-count" id="objectsCount" aria-live="polite"></span>
+      </div>
+      <p id="objectsFilterEmpty" class="muted empty-message" hidden></p>
       <div id="objectsTableWrap" class="cameras-table-wrap">
         <table class="rule-table">
           <thead>
@@ -143,9 +182,14 @@
       </div>
       <p id="objectsEmpty" class="muted empty-message" hidden>No labels are available yet. Install and load an ONNX model on the ONNX page first.</p>
       <div class="button-row" style="margin-top:16px">
-        <button type="button" id="saveObjectsBtn" class="primary">Save Objects</button>
+        <button type="button" id="saveObjectsBtn" class="primary">Save Changes</button>
       </div>
     </section>
+
+    <div class="objects-save-bar" id="objectsSaveBar" role="region" aria-label="Unsaved changes" hidden>
+      <span>You have unsaved changes on this page.</span>
+      <button id="saveObjectsBtnHeader" type="button" class="primary">Save Changes</button>
+    </div>
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
