@@ -10,6 +10,8 @@ all of their embeddings.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from starlette.concurrency import run_in_threadpool
 
@@ -22,7 +24,7 @@ from app.face_recognition import (
     encode_face_thumbnail,
 )
 from app.face_recognition_service import refresh_face_recognition_matcher
-from app.request_helpers import _read_uploaded_image, read_json_object, write_audit_log
+from app.request_helpers import _read_uploaded_image, admin_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -55,9 +57,8 @@ def list_persons(request: Request, db=Depends(get_database)):
 
 
 @router.post('/api/persons')
-async def create_person(request: Request, db=Depends(get_database)):
+def create_person(request: Request, db=Depends(get_database), payload: dict[str, Any] = Depends(admin_json_object)):
     require_admin(request)
-    payload = await read_json_object(request)
     name = _clean_name(payload.get('name'))
     notes = _clean_notes(payload.get('notes'))
     person_id = db.add_person(name, notes=notes)
@@ -76,11 +77,10 @@ def get_person(person_id: int, request: Request, db=Depends(get_database)):
 
 
 @router.patch('/api/persons/{person_id}')
-async def update_person(person_id: int, request: Request, db=Depends(get_database)):
+def update_person(person_id: int, request: Request, db=Depends(get_database), payload: dict[str, Any] = Depends(admin_json_object)):
     require_admin(request)
     if db.get_person(person_id) is None:
         raise HTTPException(status_code=404, detail='Person not found.')
-    payload = await read_json_object(request)
     name = _clean_name(payload.get('name')) if 'name' in payload else None
     notes = _clean_notes(payload.get('notes')) if 'notes' in payload else None
     db.update_person(person_id, name=name, notes=notes)

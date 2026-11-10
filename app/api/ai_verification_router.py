@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
@@ -17,7 +19,7 @@ from app.ai_verification import (
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.deps import get_database
-from app.request_helpers import read_json_object, write_audit_log
+from app.request_helpers import admin_json_object, read_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -30,9 +32,8 @@ def get_ai_verification_settings(request: Request):
 
 
 @router.put('/api/settings/ai-verification')
-async def update_ai_verification_settings(request: Request, db=Depends(get_database)):
+def update_ai_verification_settings(request: Request, db=Depends(get_database), payload: dict[str, Any] = Depends(admin_json_object)):
     require_admin(request)
-    payload = await read_json_object(request)
     settings = validate_ai_verification_settings(payload)
     db.set_setting(SETTINGS_KEY, settings, utc_now())
     write_audit_log(request, db, 'update', 'settings.ai_verification')

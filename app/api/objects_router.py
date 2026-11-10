@@ -9,6 +9,8 @@ page can render one row per class.
 
 from __future__ import annotations
 
+from typing import Any
+
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -25,7 +27,7 @@ from app.object_settings import (
     normalize_object_settings,
     overlay_box_colors,
 )
-from app.request_helpers import read_json_object, write_audit_log
+from app.request_helpers import admin_json_object, write_audit_log
 
 logger = logging.getLogger('daygle.ai')
 
@@ -56,9 +58,8 @@ def get_overlay_box_colors(request: Request):
 
 
 @router.put('/api/settings/objects')
-async def update_object_settings(request: Request, db=Depends(get_database)):
+def update_object_settings(request: Request, db=Depends(get_database), payload: dict[str, Any] = Depends(admin_json_object)):
     require_admin(request)
-    payload = await read_json_object(request)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Payload must be a JSON object.')
 

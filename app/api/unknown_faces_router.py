@@ -7,6 +7,8 @@ Admin-only - managing biometric data is an admin operation.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from app.api.persons_router import MAX_PERSON_NAME_LEN
@@ -14,7 +16,7 @@ from app.auth_gates import require_admin
 from app.db.unknown_faces import UnknownFaceAssignmentError
 from app.deps import get_database
 from app.face_recognition_service import refresh_face_recognition_matcher
-from app.request_helpers import read_json_object, write_audit_log
+from app.request_helpers import admin_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -49,10 +51,11 @@ def get_thumbnail(face_id: int, request: Request, db=Depends(get_database)):
 
 
 @router.post('/api/unknown-faces/{face_id}/assign')
-async def assign_unknown_face(
+def assign_unknown_face(
     face_id: int,
     request: Request,
     db=Depends(get_database),
+    payload: dict[str, Any] = Depends(admin_json_object),
 ):
     """Assign an unknown face to an enrolled person (or create a new person).
 
@@ -61,7 +64,6 @@ async def assign_unknown_face(
       {"name": "New Person"}        - create new person + assign
     """
     require_admin(request)
-    payload = await read_json_object(request)
 
     raw_person_id = payload.get('person_id')
     new_name = payload.get('name')

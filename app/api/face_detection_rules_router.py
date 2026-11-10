@@ -7,13 +7,15 @@ database alongside the other face-recognition settings.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Request
 
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.deps import get_database
 from app.face_detection_rules import effective_face_detection_rules, validate_face_detection_rules
-from app.request_helpers import read_json_object, write_audit_log
+from app.request_helpers import admin_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -25,9 +27,8 @@ def get_face_detection_rules(request: Request):
 
 
 @router.put('/api/settings/face-detection-rules')
-async def update_face_detection_rules(request: Request, db=Depends(get_database)):
+def update_face_detection_rules(request: Request, db=Depends(get_database), payload: dict[str, Any] = Depends(admin_json_object)):
     require_admin(request)
-    payload = await read_json_object(request)
     new_rules = validate_face_detection_rules(payload)
     db.set_setting('face_detection_rules', new_rules, utc_now())
     write_audit_log(request, db, 'update', 'settings.face_detection_rules')

@@ -19,7 +19,7 @@ from urllib.parse import parse_qs
 from fastapi import HTTPException, Request
 
 from app.auth import utc_now
-from app.auth_gates import _request_ip
+from app.auth_gates import _request_ip, require_admin
 from app.database import EventDatabase
 
 # Pre-auth form cap (see ``form_data``): generous ceiling for a login/setup
@@ -152,6 +152,20 @@ async def read_json_object(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Request body must be a JSON object.')
     return payload
+
+
+async def admin_json_object(request: Request) -> dict[str, Any]:
+    """FastAPI dependency: the admin gate, then the request's JSON-object body.
+
+    Lets an admin write route be a plain ``def``, which FastAPI runs in its
+    threadpool, instead of an ``async def`` whose synchronous SQLite writes
+    (up to the 30 s busy timeout while a recording or detection thread holds
+    the write lock) would stall the event loop and every live stream with it.
+    Only the body read needs the loop. The gate runs first so a non-admin
+    request is refused before its body is buffered.
+    """
+    require_admin(request)
+    return await read_json_object(request)
 
 
 async def form_data(request: Request) -> dict[str, str]:

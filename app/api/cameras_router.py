@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import json
 import logging
 import shutil
@@ -49,7 +51,7 @@ from app.profile_presets import (
     list_presets,
     normalize_preset,
 )
-from app.request_helpers import read_json_body, read_json_object, write_audit_log
+from app.request_helpers import admin_json_object, read_json_body, read_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -209,9 +211,8 @@ def list_camera_profile_presets(request: Request, db=Depends(get_database)):
 
 
 @router.post('/api/camera-profile-presets')
-async def create_camera_profile_preset(request: Request, db=Depends(get_database)):
+def create_camera_profile_preset(request: Request, db=Depends(get_database), payload: dict[str, Any] = Depends(admin_json_object)):
     require_admin(request)
-    payload = await read_json_object(request)
     existing = list_presets(db.get_setting('camera_profile_presets'))
     try:
         preset = create_preset(payload, existing)
