@@ -314,7 +314,7 @@ function renderStatus() {
 function renderEditor() {
   const camera = currentCamera();
   if (soundEditorTitle) {
-    soundEditorTitle.textContent = camera ? `${camera.name || camera.id} - sound settings` : 'Camera sound settings';
+    soundEditorTitle.textContent = camera ? `${camera.name || camera.id} - Sound Settings` : 'Camera Sound Settings';
   }
   soundEnabled.disabled = !camera;
   saveBtn.disabled = !camera;

@@ -241,11 +241,12 @@
     try {
       const status = await api('/api/settings/face-recognition');
       if (!status.enabled) {
-        emptyMsg.textContent = 'Nothing is being captured: face recognition is off. Turn it on in Settings above.';
+        // The settings card's status banner already explains why and what to
+        // do; say it once there and point at it here.
+        emptyMsg.textContent = 'Nothing is being captured - face recognition is off. See the status at the top of this page.';
         emptyMsg.classList.add('review-empty-problem');
       } else if (!status.model_loaded) {
-        const reason = status.unavailable_reason || 'the embedding model did not load';
-        emptyMsg.textContent = `Nothing is being captured: face recognition is enabled but not running (${reason}). Choose an embedding model under Models › Face Models, then Save the settings above.`;
+        emptyMsg.textContent = 'Nothing is being captured - face recognition is not running. See the status at the top of this page.';
         emptyMsg.classList.add('review-empty-problem');
       }
     } catch {
