@@ -108,10 +108,11 @@ def _hex_to_bgr(color: Any) -> tuple[int, int, int] | None:
 def _box_color_bgr(detection: dict[str, Any], box_colors: dict[str, str]) -> tuple[int, int, int]:
     """The BGR colour to draw ``detection`` in: the operator's per-label
     colour (Objects page) for an object, else the default teal. Motion boxes
-    are not an object type and always keep the default."""
-    if detection.get('motion_event') is True:
-        return _OVERLAY_BOX_BGR
+    use the reserved ``motion`` entry (Objects page, Motion Box Colour); other
+    generic trigger labels always keep the default."""
     label = str(detection.get('label') or '').strip().lower()
+    if detection.get('motion_event') is True or label == 'motion':
+        return _hex_to_bgr(box_colors.get('motion')) or _OVERLAY_BOX_BGR
     if not label or label in GENERIC_TRIGGER_LABELS:
         return _OVERLAY_BOX_BGR
     return _hex_to_bgr(box_colors.get(label)) or _OVERLAY_BOX_BGR
@@ -189,8 +190,9 @@ def render_live_snapshot_jpeg_overlay(
     """Return the frame with detection boxes drawn on it.
 
     ``box_colors`` maps a label to a ``#rrggbb`` box colour; when omitted the
-    operator's per-label colours from the Objects settings are used. Labels
-    without a colour (and motion boxes) draw in the default teal.
+    operator's per-label colours from the Objects settings are used (motion
+    boxes use the ``motion`` entry). Labels without a colour draw in the
+    default teal.
 
     ``max_width`` downscales the frame before the boxes are drawn, so a
     thumbnail request decodes and encodes exactly once and ships a fraction of

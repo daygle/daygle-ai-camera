@@ -550,6 +550,8 @@ textarea {
 .box-color-cell { display: inline-flex; align-items: center; gap: 8px; }
 .box-color-input { width: 44px; height: 32px; padding: 2px; border-radius: 6px; cursor: pointer; }
 .box-color-reset { padding: 4px 10px; font-size: 0.85rem; }
+/* Motion box colour (Objects page, Detection Behavior card): laid out like a form-stack label. */
+.motion-color-field { display: grid; gap: 8px; justify-items: start; color: var(--muted); font-weight: 800; }
 @media (pointer: coarse), (max-width: 600px) { .box-color-input { height: 40px; } }
 .empty { color: var(--muted); padding: 12px; }
 

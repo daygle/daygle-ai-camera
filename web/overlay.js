@@ -54,7 +54,8 @@ function loadOverlayBoxColors() {
 
 function overlayColorForDetection(detection) {
   const label = String(detection?.label || '').trim().toLowerCase();
-  if (detection?.motion_event === true || label === 'motion') return MOTION_OVERLAY_COLOR;
+  // Motion boxes use the reserved 'motion' entry (Objects page, Motion Box Colour).
+  if (detection?.motion_event === true || label === 'motion') return _overlayBoxColors.motion || MOTION_OVERLAY_COLOR;
   return _overlayBoxColors[label] || OBJECT_OVERLAY_COLOR;
 }
 

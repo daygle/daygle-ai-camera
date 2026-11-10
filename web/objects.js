@@ -86,6 +86,13 @@ let groupBoxColors = {}; // group name -> '#rrggbb' overlay box colour
 // The colour an object's box uses when it has no override - mirrors
 // OBJECT_OVERLAY_COLOR in web/overlay.js (not loaded on this page).
 const DEFAULT_BOX_COLOR = '#47d6ff';
+// Motion boxes are not an object class, so their colour is stored under the
+// reserved 'motion' key of box_colors and set by its own picker (Detection
+// Behavior card). The default mirrors MOTION_OVERLAY_COLOR in web/overlay.js.
+const MOTION_BOX_COLOR_KEY = 'motion';
+const DEFAULT_MOTION_BOX_COLOR = '#49e6a3';
+const motionBoxColorInput = document.getElementById('motionBoxColorInput');
+const motionBoxColorReset = document.getElementById('motionBoxColorReset');
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 let groups = {}; // group name -> [member labels]
 let groupModes = {}; // group name -> 'any' | 'moving' | 'still'
@@ -242,9 +249,28 @@ function render(settings) {
       if (MODE_LABELS[mode]) groupModes[group] = mode;
     }
   }
+  renderMotionBoxColor();
   renderTable();
   renderGroupModes();
 }
+
+function renderMotionBoxColor() {
+  const color = boxColors[MOTION_BOX_COLOR_KEY];
+  if (motionBoxColorInput) motionBoxColorInput.value = color || DEFAULT_MOTION_BOX_COLOR;
+  if (motionBoxColorReset) motionBoxColorReset.hidden = !color;
+}
+
+motionBoxColorInput?.addEventListener('input', () => {
+  boxColors[MOTION_BOX_COLOR_KEY] = motionBoxColorInput.value.toLowerCase();
+  if (motionBoxColorReset) motionBoxColorReset.hidden = false;
+  markUnsaved();
+});
+
+motionBoxColorReset?.addEventListener('click', () => {
+  delete boxColors[MOTION_BOX_COLOR_KEY];
+  renderMotionBoxColor();
+  markUnsaved();
+});
 
 // ─── Object Groups ────────────────────────────────────────────────────────
 
