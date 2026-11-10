@@ -7607,11 +7607,14 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
     font-size: 12px;
     font-weight: 700;
   }
-  /* Groups: name | effective, members, then picker. */
+  /* Groups: name | box colour, members, picker, then edit/remove. */
   #groupModesTableWrap .rule-table td:nth-child(1) { grid-column: 1; grid-row: 1; }
   #groupModesTableWrap .rule-table td:nth-child(4) { grid-column: 2; grid-row: 1; }
   #groupModesTableWrap .rule-table td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; font-size: 12px; }
   #groupModesTableWrap .rule-table td:nth-child(3) { grid-column: 1 / -1; grid-row: 3; }
+  #groupModesTableWrap .rule-table td:nth-child(5) { grid-column: 1 / -1; grid-row: 4; }
+  #groupModesTableWrap .group-row-actions { justify-content: stretch; }
+  #groupModesTableWrap .group-row-actions button { flex: 1 1 0; }
 }
 
 /* ─── Phones: .stack-table turns a wide table into one card per row ───────

@@ -11,7 +11,6 @@ const messageEl = document.getElementById('objectsMessage');
 const saveBtn = document.getElementById('saveObjectsBtn');
 const saveBtnHeader = document.getElementById('saveObjectsBtnHeader');
 
-const groupsList = document.getElementById('groupsList');
 const groupsMessage = document.getElementById('groupsMessage');
 const groupNameInput = document.getElementById('groupNameInput');
 const groupMembersChips = document.getElementById('groupMembersChips');
@@ -24,6 +23,14 @@ const groupCancelBtn = document.getElementById('groupCancelBtn');
 const groupModesBody = document.getElementById('groupModesBody');
 const groupModesTableWrap = document.getElementById('groupModesTableWrap');
 const groupModesEmpty = document.getElementById('groupModesEmpty');
+const saveBar = document.getElementById('objectsSaveBar');
+const objectsFilter = document.getElementById('objectsFilter');
+const objectsChangedOnly = document.getElementById('objectsChangedOnly');
+const objectsCount = document.getElementById('objectsCount');
+const objectsFilterEmpty = document.getElementById('objectsFilterEmpty');
+// Classes edited this session stay visible under "Changed only" even when set
+// back to Inherit, so a row never vanishes from under the pointer.
+const touchedLabels = new Set();
 
 // ── Multi-select state ──────────────────────────────────────────────────
 const selectedMembers = new Set();
@@ -124,12 +131,50 @@ function rerenderObjectTable() {
 function markUnsaved() {
   if (hasUnsavedChanges) return;
   hasUnsavedChanges = true;
-  if (saveBtnHeader) saveBtnHeader.style.display = '';
+  if (saveBar) saveBar.hidden = false;
 }
 
 function markSaved() {
   hasUnsavedChanges = false;
-  if (saveBtnHeader) saveBtnHeader.style.display = 'none';
+  if (saveBar) saveBar.hidden = true;
+}
+
+// A class differs from its defaults when it has its own mode, a still alert
+// or its own box colour (read from the inputs, which hold unsaved edits).
+function objectIsChanged(label) {
+  if (labels[label] || boxColors[label] || touchedLabels.has(label)) return true;
+  const input = tableBody?.querySelector(`input[data-still-alert="${CSS.escape(label)}"]`);
+  return (Number.parseInt(input?.value, 10) || 0) > 0;
+}
+
+// Search and "Changed only" HIDE rows rather than dropping them: Save reads
+// the still-alert minutes from every row's input.
+function applyObjectFilter() {
+  if (!tableBody) return;
+  const query = String(objectsFilter?.value || '').trim().toLowerCase();
+  const changedOnly = Boolean(objectsChangedOnly?.checked) && !query;
+  const rows = [...tableBody.querySelectorAll('tr[data-object-label]')];
+  let shown = 0;
+  let changed = 0;
+  for (const row of rows) {
+    const label = row.dataset.objectLabel;
+    const isChanged = objectIsChanged(label);
+    if (isChanged) changed += 1;
+    const matches = query
+      ? label.toLowerCase().includes(query) || titleCase(label).toLowerCase().includes(query)
+      : (!changedOnly || isChanged);
+    row.hidden = !matches;
+    if (matches) shown += 1;
+  }
+  if (objectsCount) {
+    objectsCount.textContent = `${changed} of ${rows.length} changed${shown !== rows.length ? ` · showing ${shown}` : ''}`;
+  }
+  if (objectsFilterEmpty) {
+    objectsFilterEmpty.hidden = shown > 0 || !rows.length;
+    objectsFilterEmpty.textContent = query
+      ? `No object matches "${query}".`
+      : 'Every object uses its defaults. Turn off "Changed only" to see and change all of them.';
+  }
 }
 
 function renderTable() {
@@ -183,6 +228,7 @@ function renderTable() {
       const value = select.value;
       if (value === 'inherit') delete labels[label];
       else labels[label] = value;
+      touchedLabels.add(label);
       rerenderObjectTable();
       markUnsaved();
     });
@@ -191,13 +237,17 @@ function renderTable() {
   tableBody.querySelectorAll('input[data-still-alert]').forEach((input) => {
     // Values are read fresh from the inputs at save time, so this listener
     // only needs to flag the form dirty.
-    input.addEventListener('change', markUnsaved);
+    input.addEventListener('change', () => {
+      touchedLabels.add(input.dataset.stillAlert);
+      markUnsaved();
+    });
   });
 
   tableBody.querySelectorAll('input[data-box-color]').forEach((input) => {
     input.addEventListener('input', () => {
       const label = input.dataset.boxColor;
       boxColors[label] = input.value.toLowerCase();
+      touchedLabels.add(label);
       const reset = tableBody.querySelector(`button[data-box-color-reset="${CSS.escape(label)}"]`);
       if (reset) reset.hidden = false;
       markUnsaved();
@@ -214,6 +264,7 @@ function renderTable() {
       markUnsaved();
     });
   });
+  applyObjectFilter();
 }
 
 function render(settings) {
@@ -279,37 +330,6 @@ function parseMembers() {
   return [...selectedMembers].sort();
 }
 
-function renderGroups() {
-  if (!groupsList) return;
-  const names = Object.keys(groups).sort();
-  if (!names.length) {
-    groupsList.innerHTML = '<p class="muted empty-message">No groups yet. Add one above - e.g. <code>vehicle</code> → <code>car, truck, bus</code>.</p>';
-    return;
-  }
-  groupsList.innerHTML = names.map((name) => {
-    const members = (groups[name] || [])
-      .map((member) => `<span class="chip">${escapeHtml(titleCase(member))}</span>`)
-      .join('');
-    return `
-      <div class="group-row" data-group-name="${escapeHtml(name)}">
-        <div class="group-row-main">
-          <span class="group-name">${escapeHtml(titleCase(name))}</span>
-          <div class="group-members">${members || '<span class="muted">no members</span>'}</div>
-        </div>
-        <div class="group-row-actions">
-          <button type="button" class="secondary" data-group-edit="${escapeHtml(name)}">Edit</button>
-          <button type="button" class="btn-danger" data-group-remove="${escapeHtml(name)}">Remove</button>
-        </div>
-      </div>`;
-  }).join('');
-  groupsList.querySelectorAll('[data-group-edit]').forEach((btn) => {
-    btn.addEventListener('click', () => startEditGroup(btn.dataset.groupEdit));
-  });
-  groupsList.querySelectorAll('[data-group-remove]').forEach((btn) => {
-    btn.addEventListener('click', () => removeGroup(btn.dataset.groupRemove));
-  });
-}
-
 function renderGroupModes() {
   if (!groupModesBody) return;
   const names = Object.keys(groups).sort();
@@ -325,12 +345,11 @@ function renderGroupModes() {
     const title = escapeHtml(titleCase(name));
     const members = (groups[name] || []).map((member) => titleCase(member)).join(', ');
     const override = groupModes[name];
-    const effective = override || defaultMode;
     const groupColor = groupBoxColors[name];
     return `
       <tr data-group-mode="${escapeHtml(name)}">
         <td class="cell-label">${title}</td>
-        <td class="muted">${escapeHtml(members)}</td>
+        <td class="muted" data-label="Members">${escapeHtml(members || 'No members')}</td>
         <td>
           <select data-group-mode-select="${escapeHtml(name)}" aria-label="Detection mode for ${title}">
             <option value="inherit" ${override ? '' : 'selected'}>Inherit (${escapeHtml(modeLabel(defaultMode))})</option>
@@ -339,15 +358,26 @@ function renderGroupModes() {
             <option value="still" ${override === 'still' ? 'selected' : ''}>Still Only</option>
           </select>
         </td>
-        <td><span class="model-status ${effective === 'any' ? 'model-status-installed' : 'model-status-active'}">${escapeHtml(modeLabel(effective))}</span></td>
         <td data-label="Box Colour">
           <span class="box-color-cell">
             <input type="color" class="box-color-input" value="${escapeHtml(groupColor || DEFAULT_BOX_COLOR)}" data-group-box-color="${escapeHtml(name)}" aria-label="Box colour for ${title}" title="Colour of the box and label for every ${title} member without its own colour">
             <button type="button" class="secondary box-color-reset" data-group-box-color-reset="${escapeHtml(name)}" ${groupColor ? '' : 'hidden'} title="Return ${title} to the default box colour">Reset</button>
           </span>
         </td>
+        <td class="group-actions-cell">
+          <span class="group-row-actions">
+            <button type="button" class="secondary" data-group-edit="${escapeHtml(name)}">Edit</button>
+            <button type="button" class="secondary" data-group-remove="${escapeHtml(name)}" aria-label="Remove ${title}">Remove</button>
+          </span>
+        </td>
       </tr>`;
   }).join('');
+  groupModesBody.querySelectorAll('[data-group-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => startEditGroup(btn.dataset.groupEdit));
+  });
+  groupModesBody.querySelectorAll('[data-group-remove]').forEach((btn) => {
+    btn.addEventListener('click', () => removeGroup(btn.dataset.groupRemove));
+  });
   groupModesBody.querySelectorAll('input[data-group-box-color]').forEach((input) => {
     input.addEventListener('input', () => {
       const name = input.dataset.groupBoxColor;
@@ -414,7 +444,6 @@ async function persistGroups(next, renames = {}) {
       body: JSON.stringify({ groups: next, renames }),
     });
     groups = (result && result.groups) || {};
-    renderGroups();
     renderGroupModes();
     rerenderObjectTable();  // membership changes shift which classes a group covers
     groupsMessage.textContent = 'Object groups saved.';
@@ -465,6 +494,8 @@ async function saveGroup() {
 }
 
 async function removeGroup(name) {
+  // Saves immediately (and zone rules naming the group stop matching), so ask.
+  if (!window.confirm(`Remove the ${titleCase(name)} group? This saves straight away.`)) return;
   const next = { ...groups };
   delete next[name];
   delete groupModes[name];
@@ -485,7 +516,6 @@ async function loadAll() {
     : [];
   groups = (groupSettings && groupSettings.groups) || {};
   render(objectSettings);
-  renderGroups();
   renderDropdownOptions();
 }
 
@@ -609,6 +639,8 @@ async function saveObjects() {
 }
 
 saveBtn.addEventListener('click', saveObjects);
+objectsFilter?.addEventListener('input', applyObjectFilter);
+objectsChangedOnly?.addEventListener('change', applyObjectFilter);
 saveBtnHeader?.addEventListener('click', saveObjects);
 
 groupAddBtn?.addEventListener('click', saveGroup);
