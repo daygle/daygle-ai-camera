@@ -7,6 +7,31 @@
   <title>Face Recognition - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    /* Settings: two titled sections on one fixed 4-column grid so fields line
+       up, with one control height so inputs and selects sit level. */
+    .fr-section { display: grid; gap: 12px; padding: 16px 0; border-top: 1px solid var(--border); }
+    .fr-section:first-of-type { border-top: 0; padding-top: 4px; }
+    .fr-section-title {
+      display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin: 0;
+      font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+    }
+    .fr-section-title small { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+    #frForm .form-grid, #addPersonForm.form-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 0; }
+    #frForm .form-grid input, #frForm .form-grid select,
+    #addPersonForm input { height: 46px; padding-top: 0; padding-bottom: 0; }
+    /* Add person: Name, Notes and the button on one row. */
+    #addPersonForm.form-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; align-items: end; }
+    #addPersonForm button { min-height: 46px; }
+    #peopleEmpty { margin-top: 12px; }
+    @media (max-width: 1100px) {
+      #frForm .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 600px) {
+      #frForm .form-grid, #addPersonForm.form-grid { grid-template-columns: minmax(0, 1fr); }
+      #addPersonForm button { width: 100%; }
+    }
+  </style>
 </head>
 <body>
   <main class="shell page-stack">
@@ -32,8 +57,8 @@
       <div class="settings-section-header">
         <div class="settings-section-icon">⚙️</div>
         <div>
-          <h2>Settings</h2>
-          <p class="settings-section-subtitle">Enabling requires an embedding model downloaded under <a href="/models/faces">Models › Face Models</a>. Face embeddings are biometric data.</p>
+          <h2>Face Recognition Settings</h2>
+          <p class="settings-section-subtitle">Recognition needs an embedding model from <a href="/models/faces">Models › Face Models</a>. Face embeddings are biometric data.</p>
         </div>
       </div>
       <p id="frRuntime" class="fr-runtime" role="status" hidden></p>
@@ -46,14 +71,9 @@
              model selected"). -->
         <input type="hidden" name="model_path" />
         <input type="hidden" name="model_id" />
+        <section class="fr-section" aria-labelledby="frRecognitionTitle">
+        <h3 class="fr-section-title" id="frRecognitionTitle">Recognition <small>Who each face belongs to</small></h3>
         <div class="form-grid">
-          <label>
-            <span>Face Detection Mode <span class="info-tip" data-tip="Whether face detections count for moving subjects, still subjects, or both. Default: Moving &amp; Still - a person standing still facing the camera is exactly what face detection is for, so faces ignore the global moving-only default unless overridden here." title="Whether face detections count for moving subjects, still subjects, or both. Default: Moving &amp; Still - a person standing still facing the camera is exactly what face detection is for, so faces ignore the global moving-only default unless overridden here." tabindex="0" aria-label="Help: Whether face detections count for moving subjects, still subjects, or both"></span></span>
-            <select name="face_mode">
-              <option value="inherit">Moving &amp; Still (Default)</option>
-              <option value="moving">Moving Only</option>
-              <option value="still">Still Only</option>
-            </select></label>
           <label>
             <span>Face Recognition <span class="info-tip" data-tip="Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model." title="Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model." tabindex="0" aria-label="Help: Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model."></span></span>
             <select name="enabled">
@@ -64,9 +84,6 @@
             <span>Match Threshold <span class="info-tip" data-tip="Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5" title="Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5" tabindex="0" aria-label="Help: Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5"></span></span>
             <input name="match_threshold" type="number" min="0" max="1" step="0.01" /></label>
           <label>
-            <span>Minimum Face Size <span class="info-tip" data-tip="Ignore faces smaller than this many pixels on the shorter side. Faces below this are treated as too small to identify - they are not matched, and not flagged as strangers. 0 disables the minimum." title="Ignore faces smaller than this many pixels on the shorter side. Faces below this are treated as too small to identify - they are not matched, and not flagged as strangers. 0 disables the minimum." tabindex="0" aria-label="Help: Ignore faces smaller than this many pixels on the shorter side. 0 disables the minimum."></span></span>
-            <input name="min_face_pixels" type="number" min="0" step="1" /></label>
-          <label>
             <span>Identity Retention <span class="info-tip" data-tip="Days to keep identity labels on events before they are cleared. 0 keeps them forever." title="Days to keep identity labels on events before they are cleared. 0 keeps them forever." tabindex="0" aria-label="Help: Days to keep identity labels on events before they are cleared. 0 keeps them forever."></span></span>
             <input name="retention_days" type="number" min="0" step="1" /></label>
           <label>
@@ -75,18 +92,34 @@
               <option value="false">Disabled</option>
               <option value="true">Enabled</option>
             </select></label>
+        </div>
+        </section>
+        <section class="fr-section" aria-labelledby="frDetectionTitle">
+        <h3 class="fr-section-title" id="frDetectionTitle">Face detection <small>Which faces are found and counted</small></h3>
+        <div class="form-grid">
+          <label>
+            <span>Face Detection Mode <span class="info-tip" data-tip="Whether face detections count for moving subjects, still subjects, or both. Default: Moving &amp; Still - a person standing still facing the camera is exactly what face detection is for, so faces ignore the global moving-only default unless overridden here." title="Whether face detections count for moving subjects, still subjects, or both. Default: Moving &amp; Still - a person standing still facing the camera is exactly what face detection is for, so faces ignore the global moving-only default unless overridden here." tabindex="0" aria-label="Help: Whether face detections count for moving subjects, still subjects, or both"></span></span>
+            <select name="face_mode">
+              <option value="inherit">Moving &amp; Still (Default)</option>
+              <option value="moving">Moving Only</option>
+              <option value="still">Still Only</option>
+            </select></label>
           <label>
             <span>Face Confidence <span class="info-tip" data-tip="Minimum detection confidence (0-1). Default: 0.45. Faces are small targets - a lower value like 0.30 often catches distant faces better." title="Minimum detection confidence (0-1). Default: 0.45. Faces are small targets - a lower value like 0.30 often catches distant faces better." tabindex="0" aria-label="Help: Minimum detection confidence (0-1). Default: 0.45."></span></span>
             <input name="face_confidence" type="number" min="0" max="1" step="0.01" value="0.45" /></label>
           <label>
-            <span>Only Accept Faces On A Person <span class="info-tip" data-tip="Count a face only where the object detector also sees a person (now or a moment ago). Stops the face model boxing gravel, fences or the timestamp as faces, which it often does on night/IR footage. Turn off only for a close-up camera where people are not detected. Default: Enabled" title="Count a face only where the object detector also sees a person (now or a moment ago). Stops the face model boxing gravel, fences or the timestamp as faces, which it often does on night/IR footage. Turn off only for a close-up camera where people are not detected. Default: Enabled" tabindex="0" aria-label="Help: Count a face only where a person is also detected. Default: Enabled"></span></span>
+            <span>Minimum Face Size <span class="info-tip" data-tip="Ignore faces smaller than this many pixels on the shorter side. Faces below this are treated as too small to identify - they are not matched, and not flagged as strangers. 0 disables the minimum." title="Ignore faces smaller than this many pixels on the shorter side. Faces below this are treated as too small to identify - they are not matched, and not flagged as strangers. 0 disables the minimum." tabindex="0" aria-label="Help: Ignore faces smaller than this many pixels on the shorter side. 0 disables the minimum."></span></span>
+            <input name="min_face_pixels" type="number" min="0" step="1" /></label>
+          <label>
+            <span>Require A Person <span class="info-tip" data-tip="Count a face only where the object detector also sees a person (now or a moment ago). Stops the face model boxing gravel, fences or the timestamp as faces, which it often does on night/IR footage. Turn off only for a close-up camera where people are not detected. Default: Enabled" title="Count a face only where the object detector also sees a person (now or a moment ago). Stops the face model boxing gravel, fences or the timestamp as faces, which it often does on night/IR footage. Turn off only for a close-up camera where people are not detected. Default: Enabled" tabindex="0" aria-label="Help: Count a face only where a person is also detected. Default: Enabled"></span></span>
             <select name="face_require_person">
               <option value="true">Enabled</option>
               <option value="false">Disabled</option>
             </select></label>
         </div>
+        </section>
         <div class="button-row">
-          <button id="frReloadBtn" class="secondary" type="button">Reload</button>
+          <button id="frReloadBtn" class="secondary" type="button" title="Reload the face-recognition (embedding) model and enrolled faces">Reload recognition model</button>
           <button id="frSaveBtn" type="submit">Save</button>
         </div>
       </form>
@@ -97,21 +130,19 @@
         <div class="settings-section-icon">👥</div>
         <div>
           <h2>People</h2>
-          <p class="settings-section-subtitle">Add someone, then enrol their face photos. Requires an embedding model and recognition enabled to enrol faces.</p>
+          <p class="settings-section-subtitle">Add someone, then enrol their face photos.</p>
         </div>
       </div>
-      <form id="addPersonForm" class="settings-form">
-        <label class="field">
+      <form id="addPersonForm" class="form-grid">
+        <label>
           <span>Name</span>
           <input type="text" name="name" maxlength="200" required />
         </label>
-        <label class="field">
+        <label>
           <span>Notes <span class="muted">(Optional)</span></span>
           <input type="text" name="notes" maxlength="2000" />
         </label>
-        <div class="button-row">
-          <button id="addPersonBtn" type="submit">Add Person</button>
-        </div>
+        <button id="addPersonBtn" type="submit">Add Person</button>
       </form>
       <div id="peopleMessage" class="muted"></div>
       <div id="peopleEmpty" class="muted" hidden>No people enrolled yet.</div>
