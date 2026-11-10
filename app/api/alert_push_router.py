@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
@@ -12,7 +14,7 @@ from app.auth_gates import require_admin
 from app.deps import get_database, get_redacted_push_notification_settings
 from app.payload_validators import validate_push_notification_settings
 from app.push_notifications import PushNotificationError, PushNotificationService
-from app.request_helpers import read_json_object, write_audit_log
+from app.request_helpers import admin_json_object, read_json_object, write_audit_log
 from app.utils import normalize_push_recipients
 
 router = APIRouter()
@@ -34,9 +36,8 @@ def get_push_notification_settings(request: Request, settings=Depends(get_redact
 
 
 @router.put('/api/settings/alert-push')
-async def update_push_notification_settings(request: Request, db=Depends(get_database)):
+def update_push_notification_settings(request: Request, db=Depends(get_database), payload: dict[str, Any] = Depends(admin_json_object)):
     require_admin(request)
-    payload = await read_json_object(request)
     settings = validate_push_notification_settings(payload)
     result = db.set_setting('alert_push', settings, utc_now())
     write_audit_log(request, db, 'update', 'settings.alert_push')

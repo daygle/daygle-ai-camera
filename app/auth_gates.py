@@ -142,15 +142,22 @@ def _request_ip(request: Request) -> str:
     if is_trusted_proxy(direct):
         forwarded = request.headers.get('x-forwarded-for')
         if forwarded:
-            # X-Forwarded-For per RFC 7239 convention (and the XFF de-facto
-            # format used by Nginx / Traefik / Caddy / HAProxy / Cloudflare)
-            # is a comma-separated list where the LEFTMOST entry is the
-            # ORIGINAL client IP and each subsequent entry is one proxy hop.
-            # Reverse proxies commonly append their own IP to the right, so
-            # ``[-1]`` (the most recent hop) is the proxy, not the client.
-            # Always pick ``[0]`` -- and tolerate accidental whitespace by
-            # stripping each candidate before extracting the first entry.
-            first_hop = forwarded.split(',')[0].strip()
-            if first_hop:
-                return first_hop
+            # Each proxy (Nginx ``$proxy_add_x_forwarded_for``, Traefik, Caddy,
+            # HAProxy, Cloudflare) APPENDS the address it received the request
+            # from, so only the entries a trusted proxy wrote are trustworthy:
+            # everything to their left is whatever the client chose to send.
+            # Taking the leftmost entry let any client pick its own IP with a
+            # ``X-Forwarded-For`` header (``spoofed, real`` after the proxy
+            # appends), defeating the per-IP login backoff and poisoning audit
+            # logs. Walk from the right instead, skip hops that are themselves
+            # trusted proxies, and return the first untrusted address: the
+            # nearest client no trusted party vouches past.
+            hops = [hop.strip() for hop in forwarded.split(',')]
+            if hops and hops[0]:
+                for hop in reversed(hops):
+                    if hop and not is_trusted_proxy(hop):
+                        return hop
+                # Every entry is a trusted proxy (internal chain): the
+                # leftmost is the furthest hop a trusted party recorded.
+                return hops[0]
     return direct or 'unknown'

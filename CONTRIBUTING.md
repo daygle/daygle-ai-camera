@@ -105,10 +105,10 @@ The repository carries two independent suites and CI (`.github/workflows/python-
 
 ## Lint policy
 
-- **Python (`app/`)**: `ruff check app/` under the Pyflakes (`F`) ruleset in
-  `ruff.toml`. Clean is required; new warnings are errors.
-- **Python (`tests/`)**: intentionally not ruff-gated yet (the "Pool-A"
-  preload pattern reads as unused imports; see the comment in `ruff.toml`).
+- **Python (`app/`, `scripts/`, `tests/`)**: `ruff check app/ scripts/ tests/`
+  under the Pyflakes (`F`) ruleset in `ruff.toml`. Clean is required; new
+  warnings are errors. Intentional "Pool-A" preload imports in `tests/` carry
+  an explicit `# noqa: F401` (see the comment in `ruff.toml`).
 - **JS (`web/` + `tests/`)**: ESLint recommended rules (`eslint.config.js`).
   `no-undef` and `no-unused-vars` are both **errors** for `web/` - there is
   no warning baseline and no `--max-warnings` pin in CI. Cross-script

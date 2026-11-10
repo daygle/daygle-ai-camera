@@ -4,7 +4,8 @@
 live in ``app/auth_gates.py``; all routers import them directly from there.
 
 These tests pin ``_request_ip`` behavior: loopback caller with
-``X-Forwarded-For`` returns the first hop; loopback caller without the header
+``X-Forwarded-For`` returns the rightmost untrusted hop (a client cannot
+choose its own IP by sending the header); loopback caller without the header
 returns the loopback direct; non-loopback caller ignores XFF (so a hostile
 client can't spoof its IP).
 
@@ -47,10 +48,10 @@ def test_request_ip_returns_xff_when_loopback_and_header_present():
 
     Behind a reverse proxy the direct connection is loopback (proxy -> app)
     but the real client IP is in XFF. ``_request_ip`` must strip and pick
-    the first hop.
+    the rightmost hop the trusted proxy appended.
     """
     import app.auth_gates as auth_gates
-    request = _FakeRequest("127.0.0.1", {"x-forwarded-for": "1.2.3.4, 10.0.0.1"})
+    request = _FakeRequest("127.0.0.1", {"x-forwarded-for": "1.2.3.4"})
     assert auth_gates._request_ip(request) == "1.2.3.4"
 
 
@@ -95,32 +96,46 @@ def test_request_ip_returns_unknown_when_client_info_missing():
     assert auth_gates._request_ip(request) == "unknown"
 
 
-def test_request_ip_picks_first_xff_hop_for_multi_hop_chain():
-    """Per RFC 7239 / XFF convention, the leftmost XFF entry is the original
-    client and subsequent entries are intermediate proxy hops.
+def test_request_ip_ignores_client_supplied_xff_prefix():
+    """A client-sent ``X-Forwarded-For`` must not choose the resolved IP.
 
-    Reverse proxies (Nginx, Traefik, Cloudflare, AWS ALB) typically APPEND
-    their IP to the right, so ``[-1]`` is the most recent proxy hop, not
-    the client. Bug pre-fix: ``_request_ip`` returned ``[-1].strip()``,
-    giving the rate-limiter / audit log the proxy IP rather than the actual
-    attacker IP -- which both poisoned the rate-limit source attribution
-    AND gave attackers a single IP (the trusted proxy) to DoS while
-    rotating their real IPs in the upstream hops.
+    Reverse proxies APPEND the address they received the request from, so a
+    client that sends ``X-Forwarded-For: 6.6.6.6`` reaches the app as
+    ``6.6.6.6, <real client>``. Returning the leftmost entry let an attacker
+    rotate a fake IP per request and slip the per-IP login backoff; the
+    rightmost entry (written by the trusted proxy) is the real client.
     """
     import app.auth_gates as auth_gates
-    # Caller is the trusted proxy; the XFF chain represents client -> proxyA
-    # -> proxyB -> trusted-proxy -> app. The original client is the
-    # leftmost entry.
-    request = _FakeRequest("127.0.0.1", {"x-forwarded-for": "203.0.113.5, 10.0.0.1, 10.0.0.2, 127.0.0.1"})
+    request = _FakeRequest("127.0.0.1", {"x-forwarded-for": "6.6.6.6, 203.0.113.5"})
     assert auth_gates._request_ip(request) == "203.0.113.5"
 
 
-def test_request_ip_tolerates_whitespace_around_first_xff_hop():
-    """Some proxies insert a space after the comma (``"1.2.3.4, 10.0.0.1"``);
-    the first hop must still be extracted correctly.
+def test_request_ip_skips_trusted_hops_in_multi_hop_chain(monkeypatch):
+    """Trusted intermediate proxies are skipped; the first untrusted hop from
+    the right is the client. An untrusted intermediate hop is returned rather
+    than anything to its left, which it could have forged."""
+    import app.auth_gates as auth_gates
+    chain = {"x-forwarded-for": "6.6.6.6, 203.0.113.5, 10.0.0.1, 10.0.0.2"}
+    request = _FakeRequest("127.0.0.1", chain)
+    # Only loopback trusted: 10.0.0.2 is the nearest untrusted hop.
+    assert auth_gates._request_ip(request) == "10.0.0.2"
+    monkeypatch.setattr(auth_gates, "_trusted_proxies", lambda: frozenset({"127.0.0.1", "10.0.0.0/24"}))
+    assert auth_gates._request_ip(request) == "203.0.113.5"
+
+
+def test_request_ip_returns_leftmost_when_every_hop_is_trusted(monkeypatch):
+    import app.auth_gates as auth_gates
+    monkeypatch.setattr(auth_gates, "_trusted_proxies", lambda: frozenset({"127.0.0.1", "10.0.0.0/24"}))
+    request = _FakeRequest("127.0.0.1", {"x-forwarded-for": "10.0.0.9, 10.0.0.1"})
+    assert auth_gates._request_ip(request) == "10.0.0.9"
+
+
+def test_request_ip_tolerates_whitespace_around_xff_hops():
+    """Some proxies insert a space after the comma (``"10.0.0.1, 1.2.3.4"``);
+    the client hop must still be extracted correctly.
     """
     import app.auth_gates as auth_gates
-    request = _FakeRequest("127.0.0.1", {"x-forwarded-for": " 1.2.3.4 , 10.0.0.1"})
+    request = _FakeRequest("127.0.0.1", {"x-forwarded-for": " 10.0.0.1 , 1.2.3.4 "})
     assert auth_gates._request_ip(request) == "1.2.3.4"
 
 

@@ -228,8 +228,8 @@ async def authentication_middleware(request: Request, call_next):
     # /api/* requests. Runs AFTER the role check (so 401/403 still fire
     # without spending a throttle slot on unauth'd callers) and BEFORE the
     # CSRF + Origin crypto work (so a wholesale flood cannot pin the CPU
-    # round-4 H4-style). The limiter key is the trusted first-hop IP from
-    # ``app.auth_gates._request_ip`` (RFC-7239-compatible).
+    # round-4 H4-style). The limiter key is the client IP resolved by
+    # ``app.auth_gates._request_ip`` (rightmost untrusted X-Forwarded-For hop).
     if (
         admin_required
         and session['user']['role'] == 'admin'

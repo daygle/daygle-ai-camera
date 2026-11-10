@@ -80,7 +80,7 @@ jobs:
         pip install ruff pytest pytest-cov pytest-xdist
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Lint with ruff
-      run: ruff check app/ scripts/
+      run: ruff check app/ scripts/ tests/
     - name: Test with pytest
       # Spread the suite over every runner core (~7 min -> ~2.5 min).
       # --dist loadfile keeps each test file on one worker: tests/support.py

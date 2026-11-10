@@ -8,6 +8,7 @@ M1: middleware._is_same_origin identifies cross-origin / null / missing-origin r
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import sqlite3
@@ -329,6 +330,41 @@ class AuthServiceAbsoluteExpiryTests(TestCase):
         finally:
             conn.close()
         self.assertEqual(before_row[1], after_row[1])
+
+    def test_session_renewal_issues_a_single_session_write(self):
+        """A renewing read stamps ``last_seen_at`` inside the renewal UPDATE;
+        ``get_session`` must not follow it with a second, redundant UPDATE
+        (it compared against the pre-renewal ``last_seen_at`` it had read)."""
+        self.auth.create_user('erin', self.PASSWORD, role='admin')
+        self.auth.apply_config({'session_timeout_hours': 1})
+        with mock.patch.object(self.auth, 'verify_password', return_value=True):
+            _public_user, token, _csrf, _expires_at = self.auth.authenticate(
+                'erin', self.PASSWORD, ip_address='127.0.0.1',
+            )
+        now = datetime.now(timezone.utc)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                'UPDATE user_sessions SET expires_at = ?, last_seen_at = ? WHERE session_token = ?',
+                ((now + timedelta(minutes=4)).isoformat(), (now - timedelta(minutes=56)).isoformat(), token),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        statements: list[str] = []
+        real_connect = self.auth.connect
+
+        @contextlib.contextmanager
+        def tracing_connect():
+            with real_connect() as db:
+                db.set_trace_callback(statements.append)
+                yield db
+
+        with mock.patch.object(self.auth, 'connect', tracing_connect):
+            session = self.auth.get_session(token)
+        self.assertIsNotNone(session)
+        session_writes = [sql for sql in statements if sql.lstrip().upper().startswith('UPDATE USER_SESSIONS')]
+        self.assertEqual(len(session_writes), 1, session_writes)
 
     def test_cleanup_expired_sessions_drops_expired_absolute(self):
         self.auth.create_user('dave', self.PASSWORD, role='admin')

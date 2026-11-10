@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
@@ -12,7 +14,7 @@ from app.auth_gates import require_admin
 from app.deps import get_database, get_redacted_email_alert_settings
 from app.email_alerts import EmailAlertError, EmailAlertService
 from app.payload_validators import validate_alert_email_settings
-from app.request_helpers import read_json_object, write_audit_log
+from app.request_helpers import admin_json_object, read_json_object, write_audit_log
 from app.utils import normalize_email_recipients
 
 router = APIRouter()
@@ -29,9 +31,8 @@ def get_alert_email_settings(settings=Depends(get_redacted_email_alert_settings)
 
 
 @router.put('/api/settings/alert-email')
-async def update_alert_email_settings(request: Request, db=Depends(get_database)):
+def update_alert_email_settings(request: Request, db=Depends(get_database), payload: dict[str, Any] = Depends(admin_json_object)):
     require_admin(request)
-    payload = await read_json_object(request)
     settings = validate_alert_email_settings(payload)
     result = db.set_setting('alert_email', settings, utc_now())
     write_audit_log(request, db, 'update', 'settings.alert_email')

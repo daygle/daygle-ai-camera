@@ -1,18 +1,16 @@
 # Ruff configuration.
 #
 # The CI lint job (.github/workflows/python-app.yml) runs
-# `ruff check app scripts`.
+# `ruff check app scripts tests`.
 # We select the Pyflakes ("F") rules: the highest-signal, low-false-positive
 # set - unused/undefined names, duplicate definitions, and f-string mistakes.
-# app/ and scripts/ are clean under these today, so the gate is meaningful
+# app/, scripts/ and tests/ are clean under these, so the gate is meaningful
 # without noise. scripts/ (first-party tooling, notably
 # scripts/evaluate_detection.py) is gated so it cannot rot outside the check.
-#
-# tests/ are intentionally not gated yet: they use a deliberate "Pool-A"
-# preload pattern (`import app.main` for its module-rebind side effects before
-# importing the module under test) that reads as F401 "imported but unused".
-# Enforcing F there would require annotating ~45 intentional imports; that is
-# deferred to keep this change focused on production code.
+# tests/ use a deliberate "Pool-A" preload pattern (`import app.main` for its
+# module-rebind side effects before importing the module under test); those
+# intentional imports carry an explicit `# noqa: F401` or are referenced, so
+# any other unused import in a test is a real leftover.
 # Keep in sync with the project's Python floor (README + CI matrix + Docker
 # base image): 3.11. Ruff uses this to apply version-aware linting (e.g. flag
 # syntax renamed/removed in newer Pythons).
