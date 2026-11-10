@@ -87,10 +87,11 @@ class _SoundsFileGuard(unittest.TestCase):
     def test_detector_dynamic_cells_remain_escaped(self) -> None:
         source = _read(self.path)
         for substring in (
-            '${escapeHtml(detectorStatusClass(camera, status))}',
             '${escapeHtml(detectorCameraLabel(camera))}',
-            '${escapeHtml(detectorEnabledRules(camera).length)}',
-            '${escapeHtml(detectorConfidenceMap(status.last_confidences))}',
+            "${escapeHtml(classes || 'Nothing yet')}",
+            '${escapeHtml(health.detail)}',
+            '${escapeHtml(detectorLastHeard(status))}',
+            '<span class="sound-health is-${escapeHtml(health.tone)}">${escapeHtml(health.label)}</span>',
         ):
             self.assertIn(substring, source)
 

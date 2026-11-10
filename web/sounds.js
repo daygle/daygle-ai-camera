@@ -4,9 +4,8 @@ let selectedCameraId = '';
 let selectedStatus = null;
 let soundDirty = false;
 
-requireElements(['soundCameraSelect', 'soundEnabled', 'soundStatusPanel']);
+requireElements(['soundEnabled', 'soundStatusPanel']);
 
-const cameraSelect = document.getElementById('soundCameraSelect');
 const soundEnabled = document.getElementById('soundEnabled');
 const soundDetectionInterval = document.getElementById('soundDetectionInterval');
 const statusPanel = document.getElementById('soundStatusPanel');
@@ -16,6 +15,7 @@ const soundCameraStatusList = document.getElementById('soundCameraStatusList');
 const soundClassSelect = document.getElementById('soundClassSelect');
 const addSoundClassBtn = document.getElementById('addSoundClassBtn');
 const soundClassEditor = document.getElementById('soundClassEditor');
+const soundEditorTitle = document.getElementById('soundEditorTitle');
 
 // Detection-scope defaults for a newly assigned class. Alert delivery fields
 // (email/push/record/schedule) start off and are configured on the Alerts page.
@@ -86,24 +86,29 @@ function detectorHasRtspConfig(camera) {
 function detectorCameraLabel(camera) {
   const name = String(camera?.name || '').trim();
   const id = String(camera?.id || '').trim();
-  if (name && id) return `${name} (${id})`;
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (name && id && slug !== id) return `${name} (${id})`;
   return name || id || 'Unknown Camera';
 }
 
-function detectorStatusReason(camera, status) {
-  if (!detectorSoundConfigured(camera)) return 'Sound Disabled';
-  if (!detectorEnabledRules(camera).length) return 'No Enabled Sound Classes';
-  if (!detectorHasRtspConfig(camera)) return 'No RTSP Stream Configured';
-  if (status.running) return 'Running';
-  return titleCase(String(status.detector_status || status.state || 'Not Running'));
+// One verdict per camera, shared by its table row and the editor banner.
+// "Running" alone only means the listener thread is alive: with the TFLite
+// runtime missing the thread runs but nothing is classified, which used to
+// show as a green "Detector Running" box. Green now needs a usable backend.
+function detectorHealth(camera, status = {}) {
+  const backend = String(status.backend || '').toLowerCase();
+  const detail = status.backend_reason || status.status_detail || '';
+  if (!detectorSoundConfigured(camera)) return { tone: 'off', label: 'Sound off', detail: '' };
+  if (!detectorEnabledRules(camera).length) return { tone: 'off', label: 'No sound classes', detail: 'Add a sound class so this camera starts listening.' };
+  if (!detectorHasRtspConfig(camera)) return { tone: 'error', label: 'No RTSP stream', detail: 'Sound detection needs the camera\'s RTSP stream.' };
+  if (backend === 'unavailable') return { tone: 'error', label: 'Unavailable', detail: detail || 'The sound model backend is unavailable.' };
+  if (backend === 'loading' || /loading/i.test(String(status.detector_status || ''))) return { tone: 'warn', label: 'Loading', detail };
+  if (status.running) return { tone: 'ok', label: 'Listening', detail };
+  return { tone: 'warn', label: titleCase(String(status.detector_status || status.state || 'Not running')), detail };
 }
 
-function detectorStatusClass(camera, status) {
-  if (status.running) return 'status-ok';
-  const reason = detectorStatusReason(camera, status).toLowerCase();
-  if (reason.includes('loading')) return 'status-warning';
-  if (reason === 'sound disabled' || reason === 'no enabled sound classes') return '';
-  return 'status-error';
+function detectorHealthPill(health) {
+  return `<span class="sound-health is-${escapeHtml(health.tone)}">${escapeHtml(health.label)}</span>`;
 }
 
 function detectorConfidenceMap(confidences = {}) {
@@ -117,29 +122,35 @@ function detectorConfidenceMap(confidences = {}) {
     .join(', ');
 }
 
+function detectorLastHeard(status) {
+  const label = status.last_class_label || (status.last_class ? titleCase(String(status.last_class).replace(/[_-]+/g, ' ')) : '');
+  const score = Number(status.last_confidence);
+  if (!label) return 'Nothing yet';
+  return Number.isFinite(score) ? `${label} · ${Math.round(score * 100)}%` : label;
+}
+
 function renderDetectorStatuses(rows) {
   if (!soundCameraStatusList) return;
   if (!rows.length) {
     soundCameraStatusList.innerHTML = '<p class="muted empty-message">No cameras configured. Add one on the <a href="/cameras">Cameras</a> page.</p>';
     return;
   }
-  const rowsHtml = rows.map(({ camera, status }) => `
-    <tr class="${escapeHtml(detectorStatusClass(camera, status))}">
-      <td class="cell-label">${escapeHtml(detectorCameraLabel(camera))}</td>
-      <td data-label="Configured">${escapeHtml(detectorSoundConfigured(camera) ? 'Yes' : 'No')}</td>
-      <td data-label="Enabled sounds">${escapeHtml(detectorEnabledRules(camera).length)}</td>
-      <td data-label="Backend">${escapeHtml(titleCase(String(status.backend || 'None').replace(/[_-]+/g, ' ')))}</td>
-      <td data-label="Running">${escapeHtml(status.running ? 'Yes' : 'No')}</td>
-      <td data-label="Status">${escapeHtml(detectorStatusReason(camera, status))}</td>
-      <td data-label="Last sound">${escapeHtml(status.last_class_label || titleCase(String(status.last_class || 'None').replace(/[_-]+/g, ' ')))}</td>
-      <td data-label="Recent scores">${escapeHtml(detectorConfidenceMap(status.last_confidences))}</td>
-      <td data-label="Detail">${escapeHtml(status.backend_reason || '')}</td>
-    </tr>
-  `).join('');
+  const rowsHtml = rows.map(({ camera, status }) => {
+    const health = detectorHealth(camera, status);
+    const selected = camera.id === selectedCameraId;
+    const classes = detectorEnabledRules(camera).map((rule) => soundClassLabel(rule)).join(', ');
+    return `
+    <tr data-camera-row="${escapeHtml(camera.id || '')}" class="${selected ? 'is-selected' : ''}" aria-selected="${selected ? 'true' : 'false'}">
+      <td class="cell-label"><button type="button" class="sound-camera-pick" data-pick-camera="${escapeHtml(camera.id || '')}">${escapeHtml(detectorCameraLabel(camera))}</button></td>
+      <td data-label="Sound">${escapeHtml(detectorSoundConfigured(camera) ? 'On' : 'Off')}</td>
+      <td data-label="Listening for">${escapeHtml(classes || 'Nothing yet')}</td>
+      <td data-label="Status" title="${escapeHtml(health.detail)}">${detectorHealthPill(health)}${health.detail && health.tone === 'error' ? `<span class="sound-health-detail">${escapeHtml(health.detail)}</span>` : ''}</td>
+      <td data-label="Last heard" title="${escapeHtml(`Recent scores: ${detectorConfidenceMap(status.last_confidences)}`)}">${escapeHtml(detectorLastHeard(status))}</td>
+    </tr>`;
+  }).join('');
   soundCameraStatusList.innerHTML = '<div class="stack-table-wrap" style="overflow-x:auto">'
     + '<table class="rule-table stack-table">'
-    + '<thead><tr><th>Camera</th><th>Configured</th><th>Enabled Sounds</th><th>Backend</th>'
-    + '<th>Running</th><th>Status</th><th>Last Sound</th><th>Recent Scores</th><th>Detail</th></tr></thead>'
+    + '<thead><tr><th>Camera</th><th>Sound</th><th>Listening for</th><th>Status</th><th>Last heard</th></tr></thead>'
     + '<tbody>' + rowsHtml + '</tbody></table></div>';
 }
 
@@ -160,19 +171,6 @@ async function refreshDetectorStatuses() {
 
 function currentCamera() {
   return cameras.find((camera) => camera.id === selectedCameraId) || cameras[0] || null;
-}
-
-function renderCameraSelect() {
-  if (!cameras.length) {
-    cameraSelect.innerHTML = '<option value="">No Cameras Configured</option>';
-    cameraSelect.disabled = true;
-    return;
-  }
-  cameraSelect.disabled = false;
-  cameraSelect.innerHTML = cameras.map((camera) => {
-    const label = camera.name || camera.id || 'Camera';
-    return `<option value="${escapeHtml(camera.id || '')}" ${camera.id === selectedCameraId ? 'selected' : ''}>${escapeHtml(label)} (${escapeHtml(camera.id || '')})</option>`;
-  }).join('');
 }
 
 function renderClassPicker(camera) {
@@ -299,23 +297,27 @@ function addSoundClass() {
 
 function renderStatus() {
   const camera = currentCamera();
-
   if (!camera || !selectedStatus) {
+    statusPanel.hidden = true;
     statusPanel.innerHTML = '';
     return;
   }
-  const detail = selectedStatus.backend_reason || selectedStatus.status_detail || '';
-  const stateClass = selectedStatus.running ? 'status-ok' : (detail ? 'status-warning' : '');
-  const stateLabel = selectedStatus.running ? 'Detector Running' : 'Detector Not Running';
-  statusPanel.innerHTML = safeHtml`<div class="status-panel${stateClass ? ` ${stateClass}` : ''}"><span>${stateLabel}${detail ? ` · ${detail}` : ''}</span></div>`;
+  const health = detectorHealth(camera, selectedStatus);
+  const titles = { ok: 'Listening', warn: 'Not listening yet', error: 'Not listening - no sound alerts from this camera', off: 'Not listening' };
+  statusPanel.className = `sound-health-banner is-${health.tone}`;
+  const heading = safeHtml`<strong>${titles[health.tone]} · ${health.label}</strong>`;
+  const detail = health.detail ? safeHtml`<p>${health.detail}</p>` : '';
+  statusPanel.innerHTML = heading + detail;
+  statusPanel.hidden = false;
 }
 
 function renderEditor() {
   const camera = currentCamera();
-  renderCameraSelect();
+  if (soundEditorTitle) {
+    soundEditorTitle.textContent = camera ? `${camera.name || camera.id} - sound settings` : 'Camera sound settings';
+  }
   soundEnabled.disabled = !camera;
   saveBtn.disabled = !camera;
-  reloadBtn.disabled = !camera;
   soundEnabled.value = String(detectorSoundConfigured(camera));
   if (soundDetectionInterval) {
     soundDetectionInterval.disabled = !camera;
@@ -342,8 +344,20 @@ async function refreshStatus() {
 }
 
 function selectCamera(cameraId) {
+  if (!cameraId || cameraId === selectedCameraId) return;
+  if (soundDirty && !window.confirm('Discard unsaved sound settings for this camera?')) return;
+  if (soundDirty) {
+    // Class edits are made in place on the camera; reload to drop them.
+    selectedCameraId = cameraId;
+    loadSounds().catch((err) => {
+      if (!window.daygleAuth?.redirecting) setMessage(err.message, true);
+    });
+    return;
+  }
   selectedCameraId = cameraId;
-  refreshStatus();
+  setMessage('');
+  refreshStatus().then(refreshDetectorStatuses);
+  document.getElementById('soundEditorCard')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 async function saveSoundDetection() {
@@ -413,7 +427,10 @@ async function loadSounds() {
   await refreshDetectorStatuses();
 }
 
-cameraSelect.addEventListener('change', () => selectCamera(cameraSelect.value));
+soundCameraStatusList?.addEventListener('click', (event) => {
+  const row = event.target instanceof Element ? event.target.closest('tr[data-camera-row]') : null;
+  if (row) selectCamera(row.getAttribute('data-camera-row') || '');
+});
 soundEnabled.addEventListener('change', () => { markSoundDirty(); renderStatus(); });
 addSoundClassBtn?.addEventListener('click', addSoundClass);
 saveBtn.addEventListener('click', saveSoundDetection);
