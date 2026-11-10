@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import subprocess
-from datetime import date, datetime, timezone
+from datetime import date, datetime, UTC
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -65,7 +66,47 @@ def _is_noise(entry: dict) -> bool:
 # logs) or "LEVEL:logger.name:" (app logger). Since the parser returns ``level``
 # as a separate field, stripping this prefix makes all log entries align
 # cleanly in the viewer. Safe no-op on messages without a level prefix.
-_LEVEL_PREFIX_PATTERN = re.compile(r'^[A-Z]+:(\S+:)?\s*')
+#
+# The optional middle part is the Python logger name (``logging``'s default
+# ``LEVEL:name:message`` format); it is captured to tag each entry with a
+# ``source``. uvicorn's own formatter writes ``LEVEL:`` + padding with no
+# logger name, so a level prefix without a name is the web server.
+_LEVEL_PREFIX_PATTERN = re.compile(r'^[A-Z]+:(?:(?P<logger>[A-Za-z_][\w.]*):)?\s*')
+
+# Application Log ``source`` for each logger. App modules log on children of
+# ``daygle.ai`` named for their area (``daygle.ai.recording`` etc.), so the
+# area is the third segment. A few older loggers keep their own names.
+# Keep the keys in step with the Source filter in web/application-log.html.
+_AREA_SOURCES = frozenset({
+    'cameras', 'recording', 'ptz',
+    'detection', 'analysis', 'models', 'faces', 'sound',
+    'alerts',
+    'auth', 'storage', 'updates', 'tunnel',
+})
+_LOGGER_SOURCES: dict[str, str] = {
+    'daygle.auth': 'auth',
+    'daygle.notifications': 'alerts',
+    'daygle.sound': 'sound',
+    'app.storage': 'storage',
+    'app.frame_capture_clock': 'cameras',
+    'app.middleware': 'web',
+}
+
+
+def _source_for(logger_name: str | None, had_level_prefix: bool) -> str:
+    """Map a journal line's logger name to its Application Log source."""
+    if not logger_name:
+        # ``LEVEL:`` with no logger name is uvicorn; no prefix at all is raw
+        # process output (ffmpeg stderr, tracebacks, prints).
+        return 'web' if had_level_prefix else 'other'
+    if logger_name in _LOGGER_SOURCES:
+        return _LOGGER_SOURCES[logger_name]
+    if logger_name.startswith('uvicorn'):
+        return 'web'
+    parts = logger_name.split('.')
+    if parts[:2] == ['daygle', 'ai'] and len(parts) > 2 and parts[2] in _AREA_SOURCES:
+        return parts[2]
+    return 'core'
 
 
 def _log_date_range(date_from: str | None, date_to: str | None) -> tuple[date | None, date | None]:
@@ -79,7 +120,7 @@ def _log_date_range(date_from: str | None, date_to: str | None) -> tuple[date | 
 def _parse_entry(raw: dict) -> dict:
     ts_us = raw.get('__REALTIME_TIMESTAMP', '')
     try:
-        ts = datetime.fromtimestamp(int(ts_us) / 1_000_000, tz=timezone.utc).isoformat()
+        ts = datetime.fromtimestamp(int(ts_us) / 1_000_000, tz=UTC).isoformat()
     except (ValueError, TypeError):
         ts = ''
     priority = str(raw.get('PRIORITY', '6'))
@@ -93,11 +134,15 @@ def _parse_entry(raw: dict) -> dict:
     # Strip redundant syslog level prefix - the ``level`` field already
     # carries the severity, so "INFO:     " or "INFO:daygle.ai:" etc. from
     # the raw message is just visual noise in the viewer.
-    message = _LEVEL_PREFIX_PATTERN.sub('', message, count=1)
+    prefix = _LEVEL_PREFIX_PATTERN.match(message)
+    source = _source_for(prefix.group('logger') if prefix else None, prefix is not None)
+    if prefix:
+        message = message[prefix.end():]
     return {
         'timestamp': ts,
         'level': _PRIORITY_LABEL.get(priority, 'INFO'),
         'message': message,
+        'source': source,
     }
 
 
@@ -154,6 +199,8 @@ def get_app_log(
             try:
                 entry = _parse_entry(json.loads(line))
             except Exception:
+                # Skip an unparseable journal line. Deliberately not logged:
+                # the warning would land in the very journal being read.
                 continue
             if _is_noise(entry):
                 continue
@@ -191,7 +238,7 @@ async def stream_app_log(request: Request):
                     break
                 try:
                     raw_line = await asyncio.wait_for(proc.stdout.readline(), timeout=30.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ': keepalive\n\n'
                     continue
                 except ValueError:
@@ -207,18 +254,17 @@ async def stream_app_log(request: Request):
                 try:
                     entry = _parse_entry(json.loads(line_str))
                 except Exception:
+                    # Skip it; logging here would feed back into this stream.
                     continue
                 if _is_noise(entry):
                     continue
                 yield f'data: {json.dumps(entry)}\n\n'
         finally:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 proc.terminate()
-            except ProcessLookupError:
-                pass
             try:
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 # Reap the killed child so it does not linger as a zombie.
                 await proc.wait()

@@ -65,7 +65,7 @@ from typing import Any
 import app.state as _state
 from app.diagnostics import log_ai_diagnostic
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.models')
 
 # Dynamic quantization can be requested by multiple detector reloads at once
 # (for example, a settings save racing with a camera worker). The temporary
@@ -753,14 +753,8 @@ def quantize_int8(model_path: Path) -> Path | None:
             )
             log_ai_diagnostic(
                 'ai_int8_quantization',
-                'INT8 QDQ quantization (MinMax calibration, {} samples: {} real camera, '
-                '{} synthetic fallback; {} configured cameras) for {} ...'.format(
-                    len(calibration_reader),
-                    calibration_reader.real_frame_count,
-                    calibration_reader.synthetic_frame_count,
-                    configured_camera_count,
-                    source,
-                ),
+                f'INT8 QDQ quantization (MinMax calibration, {len(calibration_reader)} samples: {calibration_reader.real_frame_count} real camera, '
+                f'{calibration_reader.synthetic_frame_count} synthetic fallback; {configured_camera_count} configured cameras) for {source} ...',
                 details={'source': str(source)},
             )
 

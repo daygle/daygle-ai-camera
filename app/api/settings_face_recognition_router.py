@@ -23,7 +23,7 @@ from app.face_recognition_settings import face_recognition_status, validate_face
 from app.model_management import _download_weights, _relative_model_path, _safe_within_models_dir
 from app.request_helpers import read_json_object, write_audit_log
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.faces')
 
 router = APIRouter()
 

@@ -10,7 +10,7 @@ import copy
 import logging
 import threading
 import time
-from datetime import date, datetime, timedelta, timezone, tzinfo
+from datetime import date, datetime, timedelta, tzinfo, UTC
 from math import acos, asin, atan, cos, degrees, floor, radians, sin, tan
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -25,7 +25,7 @@ from app.recording_settings import (
     normalize_camera_profiles_with_legacy,
 )
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 
 _PROFILE_POLL_SECONDS = 30.0
 _ONVIF_POLL_SECONDS = 60.0
@@ -53,7 +53,7 @@ def suggest_solar_schedule(
         # ``UTC`` is always available even on Windows images that do not ship
         # the optional IANA tzdata package. Other zones still use ZoneInfo so
         # DST-aware local sunrise/sunset calculations remain accurate.
-        zone = timezone.utc if timezone_value.upper() == 'UTC' else ZoneInfo(timezone_value)
+        zone = UTC if timezone_value.upper() == 'UTC' else ZoneInfo(timezone_value)
     except (TypeError, ValueError, ZoneInfoNotFoundError) as exc:
 
         raise ValueError('Valid latitude, longitude, and IANA timezone are required.') from exc
@@ -86,7 +86,7 @@ def suggest_solar_schedule(
         hour_angle /= 15.0
         local_mean_time = hour_angle + right_ascension - (0.06571 * approx) - 6.622
         utc_hour = (local_mean_time - lng_hour) % 24.0
-        utc_dt = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=utc_hour)
+        utc_dt = datetime.combine(target_date, datetime.min.time(), tzinfo=UTC) + timedelta(hours=utc_hour)
         local_dt = utc_dt.astimezone(zone)
         return local_dt.strftime('%H:%M')
 
@@ -109,7 +109,7 @@ def _resolve_timezone(name: Any) -> tzinfo | None:
     if not text:
         return None
     try:
-        return timezone.utc if text.upper() == 'UTC' else ZoneInfo(text)
+        return UTC if text.upper() == 'UTC' else ZoneInfo(text)
     except (TypeError, ValueError, ZoneInfoNotFoundError):
         return None
 

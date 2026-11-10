@@ -13,7 +13,7 @@ from fractions import Fraction
 from typing import Any
 
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 
 
 # A failed ``VideoCapture.read``/``retrieve`` is recoverable for RTSP streams:
@@ -341,8 +341,8 @@ class OpenCvStreamCamera:
                 self.detected_fps = cap_fps
                 if self.configured_fps is None:
                     self.fps = cap_fps
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug('Could not read stream FPS from the capture: %s', exc)
         return self._capture
 
     def _release_capture(self) -> None:

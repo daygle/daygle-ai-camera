@@ -9,9 +9,10 @@ import re
 import secrets
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
+from collections.abc import Iterator
 
 from app.utils import _normalize_iso_to_utc, _parse_iso_datetime, utc_now
 
@@ -98,10 +99,10 @@ def _equalize_password_timing(password: str) -> None:
                 390000,
             ).hex()
             hmac.compare_digest(candidate, digest)
-    except Exception:
+    except Exception as exc:
         # Defensive: dummy equalisation must never propagate; the auth
         # path's real branch decides the user-visible outcome.
-        pass
+        logging.getLogger('daygle.ai').debug('Login timing equalisation failed: %s', exc)
 
 
 def _is_locked_until_future(raw: Any, now_dt: datetime) -> bool:
@@ -603,7 +604,7 @@ class AuthService:
                 raise AuthError(
                     'Current password is required to change username or email.'
                 )
-            now_dt = datetime.now(timezone.utc)
+            now_dt = datetime.now(UTC)
             with self.connect() as db:
                 row = db.execute(
                     'SELECT * FROM users WHERE id = ?', (user_id,)
@@ -700,7 +701,7 @@ class AuthService:
         errors = self.validate_password_complexity(new_password)
         if errors:
             raise AuthError(" ".join(errors))
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now(UTC)
         with self.connect() as db:
             row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
             if row is None or not row["is_active"]:
@@ -732,10 +733,10 @@ class AuthService:
         failures = int(row["failed_attempts"] or 0) + 1
         locked_until = None
         if failures >= self.max_login_attempts:
-            locked_until = (now_dt + self.lockout).astimezone(timezone.utc).isoformat()
+            locked_until = (now_dt + self.lockout).astimezone(UTC).isoformat()
         db.execute(
             "UPDATE users SET failed_attempts = ?, locked_until = ?, updated_at = ? WHERE id = ?",
-            (failures, locked_until, now_dt.astimezone(timezone.utc).isoformat(), row["id"]),
+            (failures, locked_until, now_dt.astimezone(UTC).isoformat(), row["id"]),
         )
         db.commit()
 
@@ -766,7 +767,7 @@ class AuthService:
         username = username.strip()
         with self.connect() as db:
             row = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-            now_dt = datetime.now(timezone.utc)
+            now_dt = datetime.now(UTC)
             _now_raw = now_dt.isoformat()
             # Defence-in-depth -- cosmetically identical coverage to the
             # recordings / events / camera_diagnostics lifecycle.
@@ -827,7 +828,7 @@ class AuthService:
                     # locked, permission denied). We intentionally do NOT
                     # raised-and-propagate: that would convert a 5-minute
                     # disk hiccup into a full login outage.
-                    logging.getLogger('daygle.ai').warning(
+                    logging.getLogger('daygle.ai.auth').warning(
                         'login_attempts audit-write failed for %s/%s: %s',
                         username, ip_address, audit_write_exc,
                     )
@@ -878,7 +879,7 @@ class AuthService:
     def get_session(self, session_token: str | None) -> dict[str, Any] | None:
         if not session_token:
             return None
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now(UTC)
         now = now_dt.isoformat()
         with self.connect() as db:
             row = db.execute(
@@ -969,7 +970,7 @@ class AuthService:
                 )
                 # Purge login_attempts rows older than 90 days. Combined into
                 # the same transaction as the session sweep for atomicity.
-                cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+                cutoff_iso = (datetime.now(UTC) - timedelta(days=90)).isoformat()
                 db.execute(
                     'DELETE FROM login_attempts WHERE created_at < ?',
                     (cutoff_iso,),
@@ -979,7 +980,7 @@ class AuthService:
             # locked, schema mismatch) must never break the caller's
             # maintenance tick. Logged at warning level so retention
             # bugs are diagnosable rather than silent.
-            logging.getLogger('daygle.ai').warning(
+            logging.getLogger('daygle.ai.auth').warning(
                 'cleanup_expired_sessions: session/login_attempts purge failed: %s', exc
             )
         # Camera_diagnostics purger: separate module, separate connection.
@@ -991,7 +992,7 @@ class AuthService:
             from app.backup import purge_ai_diagnostics_by_policy
             purge_ai_diagnostics_by_policy()
         except Exception as diag_purge_exc:
-            logging.getLogger('daygle.ai').warning(
+            logging.getLogger('daygle.ai.auth').warning(
                 'cleanup_expired_sessions: camera_diagnostics purge failed: %s',
                 diag_purge_exc,
             )
@@ -1002,7 +1003,7 @@ class AuthService:
             from app.backup import purge_face_identities_by_policy
             purge_face_identities_by_policy()
         except Exception as face_purge_exc:
-            logging.getLogger('daygle.ai').warning(
+            logging.getLogger('daygle.ai.auth').warning(
                 'cleanup_expired_sessions: face_identities purge failed: %s',
                 face_purge_exc,
             )
@@ -1014,7 +1015,7 @@ class AuthService:
             from app.backup import purge_unknown_faces_by_policy
             purge_unknown_faces_by_policy()
         except Exception as unknown_purge_exc:
-            logging.getLogger('daygle.ai').warning(
+            logging.getLogger('daygle.ai.auth').warning(
                 'cleanup_expired_sessions: unknown_faces purge failed: %s',
                 unknown_purge_exc,
             )

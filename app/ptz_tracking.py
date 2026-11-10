@@ -57,12 +57,13 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from app.diagnostics import log_camera_diagnostic
 from app.utils import normalize_bool_setting
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.ptz')
 
 # Control loop timing (seconds). Pan/tilt pulses run from MIN_PULSE_SECONDS
 # (just outside the dead zone) to MAX_PULSE_SECONDS (target at the frame

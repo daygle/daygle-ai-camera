@@ -25,9 +25,10 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 # The full-frame pass runs at ``threshold * FLOOR_RATIO`` (never below
 # ``MIN_FLOOR``) so near-misses are visible to the re-check. 0.6 turns a 0.5

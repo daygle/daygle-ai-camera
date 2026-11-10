@@ -18,7 +18,7 @@ import app.state as _state
 from app.camera_backend import OpenCvStreamCamera
 from app.utils import build_stream_url
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 
 
 def read_ingest_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:

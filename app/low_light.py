@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 
 LOW_LIGHT_MODES = ('off', 'auto', 'on')
 

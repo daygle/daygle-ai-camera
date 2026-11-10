@@ -25,7 +25,8 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
+from collections.abc import Mapping
 
 
 CLOUDFLARED_TOKEN_ENV = "DAYGLE_CLOUDFLARED_TOKEN"
@@ -72,7 +73,7 @@ TUNNEL_RESTART_BACKOFF_MAX_SECONDS = 300.0
 # resets and the next failure gets a fast first retry again.
 TUNNEL_HEALTHY_UPTIME_SECONDS = 60.0
 
-logger = logging.getLogger("daygle.ai")
+logger = logging.getLogger('daygle.ai.tunnel')
 
 
 @dataclass(frozen=True)

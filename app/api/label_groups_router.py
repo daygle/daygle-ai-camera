@@ -31,7 +31,7 @@ from app.label_groups import (
 )
 from app.request_helpers import read_json_object, write_audit_log
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 router = APIRouter()
 

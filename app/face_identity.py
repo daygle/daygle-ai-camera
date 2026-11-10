@@ -32,7 +32,7 @@ from app.face_detection_rules import (
 from app.face_recognition_service import get_face_recognition_service
 from app.object_tracking import live_track_ids
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.faces')
 
 _FACE_LABEL = 'face'
 
@@ -227,15 +227,20 @@ def _maybe_capture_unknown(
         if track_id in captured:
             return
         captured.add(track_id)
-    # Enforce per-camera cap to prevent unbounded growth.
+    # Enforce the global pending-review cap to prevent unbounded growth.
     try:
         import app.state as _state
         if _state.database is not None:
             count = _state.database.count_unknown_faces(status='pending')
             if count >= _MAX_PENDING_CAPTURES:
                 return
-    except Exception:
-        pass  # non-fatal: skip capture if DB unavailable
+    except Exception as exc:
+        # The cap cannot be checked and the store would fail the same way:
+        # skip this capture, but forget the track so a later sighting retries.
+        logger.debug('Unknown-face capture skipped for %s: database unavailable (%s)', camera_id, exc)
+        with _lock:
+            _captured_unknown.get(camera_id, set()).discard(track_id)
+        return
     # Embed + thumbnail off the hot path (already computed by recognize, but
     # the embedding isn't stored by the matcher). We re-embed here only once
     # per track since the first unknown appearance is the only capture.

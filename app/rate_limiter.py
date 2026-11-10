@@ -22,6 +22,7 @@ import threading
 import time
 from collections import deque
 from typing import Any
+from datetime import UTC
 
 # Entries are evicted per-IP on that IP's next request, so an IP that fails
 # once and never returns (a scanner, a brute-force probe from a one-shot
@@ -349,5 +350,5 @@ setup_limiter = SlidingWindowRateLimiter(
 
 def _ts_to_iso(ts: float) -> str:
     """Format a Unix timestamp as an ISO-8601 string for diagnostics."""
-    from datetime import datetime, timezone
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+    from datetime import datetime
+    return datetime.fromtimestamp(ts, tz=UTC).isoformat()

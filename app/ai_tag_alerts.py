@@ -37,13 +37,13 @@ import logging
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from app.diagnostics import log_ai_diagnostic
 import app.state as _state
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.alerts')
 
 _cooldowns: dict[str, float] = {}
 _cooldown_lock = threading.Lock()
@@ -349,7 +349,7 @@ def _fire(event_id: int, event: dict[str, Any], camera: dict[str, Any], zone: di
     message = f'AI tag alert ({status}): {terms} on {camera_name} ({zone_name})'
     database = _state.database
     database.add_alert(
-        created_at=datetime.now(timezone.utc).isoformat(), rule_name=rule_name, event_id=int(event_id),
+        created_at=datetime.now(UTC).isoformat(), rule_name=rule_name, event_id=int(event_id),
         label=label, confidence=0.0, message=message,
     )
     database.mark_event_alert_triggered(int(event_id))

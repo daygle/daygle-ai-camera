@@ -10,7 +10,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 import app.state as _state
@@ -152,7 +152,7 @@ from app.zone_detection import (
     zone_record_on_detect,
 )
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 
 
 def _no_object_match_reason(
@@ -1735,7 +1735,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             })
         dwell_detections = _zone_stamp
     zone_rules = zone_object_alert_rules(settings)
-    has_object_zone_rules = any((zone.get('enabled', True) and zone.get('monitor_objects', True) and any((rule.get('enabled', True) and str(rule.get('label') or '').strip() for rule in zone.get('object_rules') or [])) for zone in (settings.get('detection') or {}).get('zones', [])))
+    has_object_zone_rules = any(zone.get('enabled', True) and zone.get('monitor_objects', True) and any(rule.get('enabled', True) and str(rule.get('label') or '').strip() for rule in zone.get('object_rules') or []) for zone in (settings.get('detection') or {}).get('zones', []))
     # Zone-scoped faces need the geometry-stamping pass too, even when no
     # zone monitors OBJECTS: without it face detections skip zone matching and
     # the AlertEngine would fire zone-face rules for faces anywhere in frame.
@@ -1961,7 +1961,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         recording_detections.append({**_dwell, 'alert_matched': True, 'alert_triggered': True})
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
     camera_recording_config = _state.camera_event_recording_config(settings)
-    frame_capture_time = datetime.fromtimestamp(frame_capture_ts, tz=timezone.utc).isoformat()
+    frame_capture_time = datetime.fromtimestamp(frame_capture_ts, tz=UTC).isoformat()
     # Presence gate (app.event_presence) - no cooldowns. An object raises one
     # event when it appears and none while it stays in view; another object of
     # the same type raises one when more of that type are in view together than
@@ -2073,7 +2073,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         return has_channel and _rule_notify_active_now(rule.get('schedule') or rule)
 
     alert_rows = [
-        {'created_at': datetime.now(timezone.utc).isoformat(), 'rule_name': alert['rule_name'], 'label': alert['label'], 'confidence': alert['confidence'], 'message': alert['message']}
+        {'created_at': datetime.now(UTC).isoformat(), 'rule_name': alert['rule_name'], 'label': alert['label'], 'confidence': alert['confidence'], 'message': alert['message']}
         for alert in triggered
         if _alert_notifies_now(alert)
     ]

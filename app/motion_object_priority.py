@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 DEFAULT_GRACE_SECONDS = 3.0
 MAX_GRACE_SECONDS = 10.0

@@ -151,7 +151,7 @@ import numpy as np
 import app.state as _state
 from app.alerts import AlertEngine
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 from app.config_facades import get_camera_config
 from app.camera_policy import camera_policy
 

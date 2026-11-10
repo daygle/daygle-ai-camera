@@ -190,12 +190,12 @@ class _StageContext:
 
     __slots__ = ('_stage', '_started', '_timer')
 
-    def __init__(self, timer: 'StageTimer', stage: str) -> None:
+    def __init__(self, timer: StageTimer, stage: str) -> None:
         self._timer = timer
         self._stage = stage
         self._started = 0.0
 
-    def __enter__(self) -> '_StageContext':
+    def __enter__(self) -> _StageContext:
         self._started = _clock()
         return self
 

@@ -8,7 +8,8 @@ a circular import between those modules.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from app.media_utils import recording_playback_sidecar_path, safe_storage_path
 

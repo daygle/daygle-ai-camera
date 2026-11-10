@@ -43,7 +43,8 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 # How much the interval may grow while a scene is stable. Bounded at 4x: the
 # point is to cut steady-state work, not to redefine what "detecting" means.
@@ -222,7 +223,7 @@ class AdaptiveCadenceTracker:
 # side effects, which keeps it importable from tests and from the settings
 # router without a running monitor.
 
-_tracker: Optional[AdaptiveCadenceTracker] = None
+_tracker: AdaptiveCadenceTracker | None = None
 _tracker_lock = threading.Lock()
 
 

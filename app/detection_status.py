@@ -70,7 +70,7 @@ Phase-29 rebind):
   (API routers + tests), no main.py body callers.
 
 **Logger acquisition:** the module uses its own child logger via
-``logging.getLogger('daygle.ai')`` (matches Phase-26/27/28 precedent).
+``logging.getLogger('daygle.ai.detection')`` (matches Phase-26/27/28 precedent).
 None of the five helpers currently emit log messages, but the logger
 is wired up for consistency with sibling modules.
 
@@ -89,13 +89,13 @@ logic - defer). Both are left intact in ``main.py``.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 import app.state as _state
 from app.config_facades import get_camera_config
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 # Canonical set of detection labels that are NOT specific-object triggers.
 # Used by detection_label_strings / detection_label_confidences to skip
@@ -167,7 +167,7 @@ def update_live_detection_status(camera_id: str, **updates: Any) -> None:
             **_state.live_detection_status.get(camera_id, {}),
             **updates,
             'camera_id': camera_id,
-            'updated_at': datetime.now(timezone.utc).isoformat(),
+            'updated_at': datetime.now(UTC).isoformat(),
         }
 
 

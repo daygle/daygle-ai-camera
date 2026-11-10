@@ -11,6 +11,7 @@ it on and points it at a model.
 """
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
 
@@ -44,6 +45,7 @@ DEFAULT_FACE_RECOGNITION_CONFIG: dict[str, Any] = {
     'auto_enrich_enabled': False,
 }
 
+logger = logging.getLogger('daygle.ai')
 _ALLOWED_KEYS = frozenset(DEFAULT_FACE_RECOGNITION_CONFIG)
 
 
@@ -123,8 +125,8 @@ def face_recognition_status(config: dict[str, Any], service: Any = None, databas
         try:
             enrolled_people = len(database.list_persons())
             enrolled_faces = database.count_person_faces(model=config.get('model_id'))
-        except Exception:  # pragma: no cover - defensive: status must never 500
-            pass
+        except Exception as exc:  # pragma: no cover - defensive: status must never 500
+            logger.warning('Could not count enrolled faces for the status card: %s', exc)
     status['enrolled_people'] = enrolled_people
     status['enrolled_faces'] = enrolled_faces
     return status

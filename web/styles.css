@@ -6637,9 +6637,7 @@ button.secondary:disabled, a.secondary:disabled {
    header (title, count, update check), a one-line status strip, the
    installed models as cards, then a compact catalog of the rest.
    ===================================================================== */
-.model-library-card { display: grid; gap: 16px; min-width: 0; border-left: 3px solid var(--accent); }
-.model-library-card-face { border-left-color: #a78bfa; }
-:root.light .model-library-card-face { border-left-color: #7c3aed; }
+.model-library-card { display: grid; gap: 16px; min-width: 0; }
 .model-library-header {
   display: flex;
   align-items: flex-start;

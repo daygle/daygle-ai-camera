@@ -12,14 +12,14 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 import app.state as _state
 from app import behaviour, behaviour_baseline
 from app.alert_dispatch import submit_alert_notification
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 # Per-crossing cooldown: last wall-clock fire time keyed by
 # ``camera|zone|direction|track`` so a subject straddling the line does not
@@ -204,7 +204,7 @@ def emit_tripwire_crossings(camera_id: str, settings: dict[str, Any], detections
 
 
 def _emit_one(camera_id: str, settings: dict[str, Any], crossing: dict[str, Any], wire: dict[str, Any]) -> None:
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     zone_name = crossing.get('zone_name') or 'zone'
     wire_name = crossing.get('tripwire_name') or 'Tripwire'
     direction = crossing['direction']
@@ -340,7 +340,7 @@ def emit_loiter_anomalies(camera_id: str, settings: dict[str, Any], detections: 
             })
 
     now = time.time()
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     with _loiter_lock:
         _ensure_loiter_loaded_locked()
         presence = _loiter_presence.setdefault(camera_id, {})
@@ -499,7 +499,7 @@ def emit_time_of_day_anomalies(camera_id: str, settings: dict[str, Any], detecti
     if not observations:
         return 0
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     with _time_lock:
         _ensure_time_loaded_locked()
         result = behaviour_baseline.time_of_day_step(
@@ -662,7 +662,7 @@ def emit_activity_spike_anomalies(camera_id: str, settings: dict[str, Any], dete
     if not observations:
         return 0
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     with _activity_lock:
         _ensure_activity_loaded_locked()
         result = behaviour_baseline.activity_step(

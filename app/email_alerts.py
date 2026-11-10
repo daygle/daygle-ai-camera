@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import smtplib
 from contextlib import contextmanager
@@ -10,7 +11,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate, make_msgid
 from html import escape
-from typing import Any, Iterator
+from typing import Any
+from collections.abc import Iterator
 
 from app.alert_formatting import build_alert_content
 
@@ -244,10 +246,9 @@ class EmailAlertService:
                     # ``smtp.quit()`` via ``_create_smtp_session``'s
                     # ``finally``) -- double-quit() on the same handle
                     # is harmless in smtplib.
-                    try:
+                    # SMTP cleanup is best-effort after delivery completes.
+                    with contextlib.suppress(Exception):
                         active_smtp.quit()
-                    except Exception:
-                        pass  # SMTP cleanup is best-effort after delivery completes.
         except EmailAlertError:
             # Session-level failure (connect / TLS / login / quit) -- propagate
             # so the outer ``deliver_email_alerts`` exception handler logs it.

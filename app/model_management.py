@@ -107,7 +107,7 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
     elif precision == 'fp16' and device.lower() in ('cuda', 'auto'):
         # Keep the operator-visible warning for the fp16-without-GPU case so
         # the silent FP32 export is not hidden.
-        logging.getLogger('daygle.ai').warning(
+        logging.getLogger('daygle.ai.models').warning(
             'precision=fp16 requested but onnxruntime-gpu is not installed; '
             'exporting FP32. Install onnxruntime-gpu + CUDA drivers and re-export.',
         )
@@ -126,7 +126,7 @@ from app.ai_settings import (
 from app.auth import utc_now
 from app.config_facades import effective_ai_config
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.models')
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 PYPI_ULTRALYTICS_URL = 'https://pypi.org/pypi/ultralytics/json'
@@ -352,7 +352,7 @@ def _fetch_ultralytics_version() -> str:
 
 def _parse_semver(v: str) -> tuple[int, ...]:
     try:
-        return tuple((int(x) for x in v.split('.')))
+        return tuple(int(x) for x in v.split('.'))
     except ValueError:
         return (0,)
 

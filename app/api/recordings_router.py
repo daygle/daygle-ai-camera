@@ -7,7 +7,7 @@ import mimetypes
 import re
 import threading
 from collections import OrderedDict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -187,17 +187,17 @@ def recordings_timeline(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail='Invalid day. Use YYYY-MM-DD.') from exc
     else:
-        target_day = datetime.now(timezone.utc).date()
+        target_day = datetime.now(UTC).date()
 
     if tz_offset_minutes is None:
-        timeline_timezone = timezone.utc
+        timeline_timezone = UTC
     else:
         timeline_timezone = timezone(timedelta(minutes=-tz_offset_minutes))
 
     day_start_local = datetime.combine(target_day, datetime.min.time(), tzinfo=timeline_timezone)
     day_end_local = day_start_local + timedelta(days=1)
-    day_start = day_start_local.astimezone(timezone.utc)
-    day_end = day_end_local.astimezone(timezone.utc)
+    day_start = day_start_local.astimezone(UTC)
+    day_end = day_end_local.astimezone(UTC)
 
     recordings_list = db.list_recordings_for_camera_day(selected_camera_id, day_start.isoformat(), day_end.isoformat())
     request_user = user

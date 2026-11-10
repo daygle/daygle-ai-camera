@@ -85,7 +85,7 @@ from app.box_geometry import extent_unstable as _extent_unstable
 from app.runtime_config import cached_snapshot
 from app.zone_schema import canonical_label
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 # Detection-behavior modes.
 MODE_ANY = 'any'      # moving and still

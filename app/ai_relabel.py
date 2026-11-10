@@ -14,14 +14,14 @@ the new one. Every other rule condition still applies.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 import app.state as _state
 from app.diagnostics import log_ai_diagnostic
 from app.zone_schema import canonical_label, detection_within_box_limits, label_matches
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.analysis')
 
 MAX_RELABEL_CANDIDATES = 12
 # Never relabel to these: no object to alert on, or an identity rule.
@@ -168,7 +168,7 @@ def relabel_alerts(
 
 def _store(alerts: list[dict[str, Any]], event: dict[str, Any], event_id: int) -> None:
     database = _state.database
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     try:
         for alert in alerts:
             database.add_alert(
