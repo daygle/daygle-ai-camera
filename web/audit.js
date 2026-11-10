@@ -137,9 +137,6 @@ document.getElementById('refreshBtn').addEventListener('click', () => loadEntrie
 document.getElementById('filterUsername').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') loadEntries(0);
 });
-document.getElementById('filterResource').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') loadEntries(0);
-});
 
 // Bootstrap: prime CSRF/user via setApiAuth first so subsequent api() calls
 // (none today, but consistent with every other page) are authenticated.
