@@ -36,16 +36,84 @@
         <input id="filterUsername" placeholder="Filter by username" aria-label="Filter by username" />
         <select id="filterAction" aria-label="Action">
           <option value="">All actions</option>
-          <option value="login">Login</option>
-          <option value="logout">Logout</option>
-          <option value="create">Create</option>
-          <option value="update">Update</option>
-          <option value="delete">Delete</option>
-          <option value="delete_all">Delete All</option>
-          <option value="backup">Backup</option>
-          <option value="restore">Restore</option>
+          <optgroup label="Access">
+            <option value="login">Login</option>
+            <option value="logout">Logout</option>
+            <option value="setup_rate_limited">Setup Rate Limited</option>
+          </optgroup>
+          <optgroup label="Changes">
+            <option value="create">Create</option>
+            <option value="update">Update</option>
+            <option value="delete">Delete</option>
+          </optgroup>
+          <optgroup label="People & Faces">
+            <option value="enroll">Enroll Face</option>
+            <option value="assign">Assign Face</option>
+            <option value="dismiss">Dismiss Face</option>
+          </optgroup>
+          <optgroup label="Models & Jobs">
+            <option value="download">Download</option>
+            <option value="start">Start Job</option>
+          </optgroup>
+          <optgroup label="Data & Maintenance">
+            <option value="delete_all">Delete All</option>
+            <option value="preview_delete_all">Preview Delete All</option>
+            <option value="backup">Backup</option>
+            <option value="restore">Restore</option>
+          </optgroup>
         </select>
-        <input id="filterResource" placeholder="Filter by resource (e.g. user, settings)" aria-label="Filter by resource" />
+        <select id="filterResource" aria-label="Resource">
+          <option value="">All resources</option>
+          <optgroup label="Access">
+            <option value="session">Sign-ins</option>
+            <option value="rate_limit">Login rate limit</option>
+            <option value="setup">First-run setup</option>
+            <option value="user">Users</option>
+            <option value="settings.auth">Login security</option>
+          </optgroup>
+          <optgroup label="Cameras">
+            <option value="settings.camera">All camera settings</option>
+            <option value="settings.cameras">Camera list</option>
+            <option value="settings.camera_model">Camera models</option>
+            <option value="settings.camera_profile_preset">Camera profile presets</option>
+          </optgroup>
+          <optgroup label="Events & Media">
+            <option value="event">Events</option>
+            <option value="recording">Recordings</option>
+            <option value="snapshot">Snapshots</option>
+            <option value="alert_history">Alert history</option>
+          </optgroup>
+          <optgroup label="People & Faces">
+            <option value="person">People</option>
+            <option value="person.face">Enrolled faces</option>
+            <option value="unknown_face">Unknown faces</option>
+            <option value="settings.face_recognition">Face recognition</option>
+            <option value="settings.face_detection_rules">Face detection rules</option>
+          </optgroup>
+          <optgroup label="AI & Detection">
+            <option value="settings.ai">All AI settings</option>
+            <option value="settings.ai.model">Object models</option>
+            <option value="settings.ai_verification">AI verification</option>
+            <option value="settings.objects">Objects</option>
+            <option value="settings.label_groups">Label groups</option>
+          </optgroup>
+          <optgroup label="Notifications">
+            <option value="settings.alert_email">Email alerts</option>
+            <option value="settings.alert_push">Push alerts</option>
+          </optgroup>
+          <optgroup label="System">
+            <option value="settings.live">Live view</option>
+            <option value="settings.recording">Recording settings</option>
+            <option value="settings.storage">Storage</option>
+            <option value="settings.network">Network</option>
+            <option value="settings.system.gpu">GPU</option>
+            <option value="settings.cloudflare_tunnel">Cloudflare Tunnel</option>
+            <option value="database">Database backups</option>
+            <option value="runtime_data">Runtime data</option>
+            <option value="camera_log">Camera log</option>
+            <option value="ai_log">AI log</option>
+          </optgroup>
+        </select>
         <button id="applyFiltersBtn" type="button">Apply</button>
         <button id="clearFiltersBtn" class="secondary" type="button">Clear</button>
       </div>
