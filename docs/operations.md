@@ -71,13 +71,15 @@ NVDEC is separate from the CUDA cores that run detection and the AI model, so it
 
 ## Camera log
 
-Use **Camera Log** (`/camera-log`) to investigate operational issues. The log includes:
+Use **Camera Log** (`/camera-log`) to investigate operational issues. The event-type filter is grouped the same way as the list below:
 
-- `camera_offline` and `camera_online` transitions.
-- `detection_backoff` and `detection_recovered` events.
-- `capture_failed` events.
-- `prebuffer_fallback`, `prebuffer_short_preroll`, `prebuffer_degenerate`, and `prebuffer_restart` recording events. A `prebuffer_short_preroll` warning means an event clip captured less pre-event footage than configured because the rolling buffer had not filled yet (common right after saving recording settings, a camera reconnect, or the camera first coming online); it recovers on its own once the buffer refills.
-- `audio_mux_disk_full` warnings mean an event clip was saved **without audio** because the audio mux hit `No space left on device`. The video is always kept. The usual cause is a genuinely full (or inode-exhausted) recordings filesystem - free up space and future clips get sound again. Check the diagnostic's `free_bytes`/`free_inodes` and `write_probe` details: if they show ample space and a live write that *succeeded*, the `-28` came from inside ffmpeg rather than the disk, and the `stderr_origin` field names the originating error. The audio is now assembled into a single track before muxing (rather than one delayed ffmpeg input per second), which removes the large filtergraph that previously provoked spurious end-of-stream `-28` errors on healthy disks. While the disk stays full the diagnostic is emitted at most once per camera per 30 minutes.
+- **Connectivity** - `camera_offline` and `camera_online` transitions, plus `ingest_restart` (the camera's ingest process exited and is reconnecting), `ingest_audio_disabled` (the stream has no audio track, so ingest switched to video-only) and `ingest_gpu_decode_fallback` (GPU decoding failed, so the camera now decodes on the CPU).
+- **Detection** - `detection_backoff` and `detection_recovered` events.
+- **Recording** - `capture_failed`, `audio_mux_disk_full`, and the `prebuffer_fallback`, `prebuffer_partial`, `prebuffer_short_preroll` and `prebuffer_restart` pre-event buffer events. A `prebuffer_short_preroll` warning means an event clip captured less pre-event footage than configured because the rolling buffer had not filled yet (common right after saving recording settings, a camera reconnect, or the camera first coming online); it recovers on its own once the buffer refills. A `prebuffer_partial` warning means the buffer rendered less playable video than its window (sparse keyframes or a corrupt stream) and the partial footage was saved.
+  - An `audio_mux_disk_full` warning means an event clip was saved **without audio** because the audio mux hit `No space left on device`. The video is always kept. The usual cause is a genuinely full (or inode-exhausted) recordings filesystem - free up space and future clips get sound again. Check the diagnostic's `free_bytes`/`free_inodes` and `write_probe` details: if they show ample space and a live write that *succeeded*, the `-28` came from inside ffmpeg rather than the disk, and the `stderr_origin` field names the originating error. The audio is now assembled into a single track before muxing (rather than one delayed ffmpeg input per second), which removes the large filtergraph that previously provoked spurious end-of-stream `-28` errors on healthy disks. While the disk stays full the diagnostic is emitted at most once per camera per 30 minutes.
+- **PTZ** - `ptz_track_acquired`, `ptz_track_switched`, `ptz_track_lost`, `ptz_move_failed` and `ptz_no_home_preset` auto-tracking events.
+
+AI activity (verification, descriptions, tag alerts, relabels, AI search, face capture, and AI model startup/install diagnostics) is recorded separately on **AI Log** (`/ai-log`), grouped as Verification, Descriptions, Tag Alerts, Relabel & Search, Faces, and Models & Startup. Everything else the service prints goes to **Application Log** (`/application-log`, the systemd journal), and user actions to **Audit Log**.
 
 Filter by camera ID, event type, or severity when investigating a specific stream. The newest diagnostic events are listed first.
 

@@ -64,21 +64,30 @@ function severityBadgeClass(severity) {
 // the single source of truth for these values). Unknown or future types
 // fall back to their raw machine code.
 const EVENT_TYPE_LABELS = {
-  prebuffer_fallback: 'Prebuffer Fallback',
-  prebuffer_short_preroll: 'Prebuffer Short Pre-roll',
-  prebuffer_degenerate: 'Prebuffer Degenerate',
-  prebuffer_restart: 'Prebuffer Restart',
-  audio_mux_disk_full: 'Audio Mux Disk Full',
-  capture_failed: 'Capture Failed',
-  detection_backoff: 'Detection Backoff',
-  detection_recovered: 'Detection Recovered',
+  // Connectivity
   camera_offline: 'Camera Offline',
   camera_online: 'Camera Online',
+  ingest_restart: 'Ingest Restart',
+  ingest_audio_disabled: 'Ingest Audio Disabled',
+  ingest_gpu_decode_fallback: 'Ingest GPU Decode Fallback',
+  // Detection
+  detection_backoff: 'Detection Backoff',
+  detection_recovered: 'Detection Recovered',
+  // Recording
+  capture_failed: 'Capture Failed',
+  audio_mux_disk_full: 'Audio Mux Disk Full',
+  prebuffer_fallback: 'Prebuffer Fallback',
+  prebuffer_partial: 'Prebuffer Partial',
+  prebuffer_short_preroll: 'Prebuffer Short Pre-roll',
+  prebuffer_restart: 'Prebuffer Restart',
+  // PTZ
   ptz_track_acquired: 'PTZ Track Acquired',
   ptz_track_switched: 'PTZ Track Switched',
   ptz_track_lost: 'PTZ Track Lost',
   ptz_move_failed: 'PTZ Move Failed',
   ptz_no_home_preset: 'PTZ No Home Preset',
+  // Retired type: no longer emitted, kept so older rows still read as words.
+  prebuffer_degenerate: 'Prebuffer Degenerate',
 };
 
 function eventTypeLabel(eventType) {

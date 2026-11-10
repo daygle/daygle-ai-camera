@@ -43,21 +43,32 @@
         <input id="filterSearch" type="search" placeholder="Search messages & details…" aria-label="Search messages and details" />
         <select id="filterEventType" aria-label="Event type">
           <option value="">All event types</option>
-          <option value="prebuffer_fallback">Prebuffer Fallback</option>
-          <option value="prebuffer_short_preroll">Prebuffer Short Pre-roll</option>
-          <option value="prebuffer_degenerate">Prebuffer Degenerate</option>
-          <option value="prebuffer_restart">Prebuffer Restart</option>
-          <option value="audio_mux_disk_full">Audio Mux Disk Full</option>
-          <option value="capture_failed">Capture Failed</option>
-          <option value="detection_backoff">Detection Backoff</option>
-          <option value="detection_recovered">Detection Recovered</option>
-          <option value="camera_offline">Camera Offline</option>
-          <option value="camera_online">Camera Online</option>
-          <option value="ptz_track_acquired">PTZ Track Acquired</option>
-          <option value="ptz_track_switched">PTZ Track Switched</option>
-          <option value="ptz_track_lost">PTZ Track Lost</option>
-          <option value="ptz_move_failed">PTZ Move Failed</option>
-          <option value="ptz_no_home_preset">PTZ No Home Preset</option>
+          <optgroup label="Connectivity">
+            <option value="camera_offline">Camera Offline</option>
+            <option value="camera_online">Camera Online</option>
+            <option value="ingest_restart">Ingest Restart</option>
+            <option value="ingest_audio_disabled">Ingest Audio Disabled</option>
+            <option value="ingest_gpu_decode_fallback">Ingest GPU Decode Fallback</option>
+          </optgroup>
+          <optgroup label="Detection">
+            <option value="detection_backoff">Detection Backoff</option>
+            <option value="detection_recovered">Detection Recovered</option>
+          </optgroup>
+          <optgroup label="Recording">
+            <option value="capture_failed">Capture Failed</option>
+            <option value="audio_mux_disk_full">Audio Mux Disk Full</option>
+            <option value="prebuffer_fallback">Prebuffer Fallback</option>
+            <option value="prebuffer_partial">Prebuffer Partial</option>
+            <option value="prebuffer_short_preroll">Prebuffer Short Pre-roll</option>
+            <option value="prebuffer_restart">Prebuffer Restart</option>
+          </optgroup>
+          <optgroup label="PTZ">
+            <option value="ptz_track_acquired">PTZ Track Acquired</option>
+            <option value="ptz_track_switched">PTZ Track Switched</option>
+            <option value="ptz_track_lost">PTZ Track Lost</option>
+            <option value="ptz_move_failed">PTZ Move Failed</option>
+            <option value="ptz_no_home_preset">PTZ No Home Preset</option>
+          </optgroup>
         </select>
         <select id="filterSeverity" aria-label="Severity">
           <option value="">All severities</option>
