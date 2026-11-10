@@ -8,10 +8,42 @@
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
   <style>
+    /* One fixed grid for every section so fields line up from section to
+       section (the shared auto-fit .form-grid sized each group's columns to
+       its own field count), and one control height so text boxes and
+       dropdowns in the same row sit level. */
+    .models-settings-form { display: grid; gap: 0; }
+    .models-settings-section { display: grid; gap: 12px; padding: 18px 0; border-top: 1px solid var(--border); }
+    .models-settings-section:first-child { border-top: 0; padding-top: 4px; }
+    .models-settings-section-title {
+      display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
+      margin: 0;
+      font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+      color: var(--muted);
+    }
+    .models-settings-section-title small { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+    .models-settings-form .form-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 0;
+    }
+    .models-settings-form .form-grid input:not([type="hidden"]),
+    .models-settings-form .form-grid select { height: 46px; padding-top: 0; padding-bottom: 0; }
+    /* The face model only matters while face detection is on. Dimmed, not
+       disabled: a disabled select would drop out of the saved form. */
+    .models-settings-form label.is-inactive { opacity: .55; }
+    .models-settings-form .settings-advanced { margin-top: 0; }
+    .models-settings-form .settings-advanced .settings-device-group { margin: 14px 14px 8px; }
+    .models-settings-form .settings-advanced .settings-device-group:first-of-type { margin-top: 4px; }
+    .models-settings-files { margin: 4px 14px 14px; display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+    .models-settings-files code { color: var(--text); overflow-wrap: anywhere; }
     @media (max-width: 900px) {
+      .models-settings-form .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .onnx-hero { gap: 16px; min-height: 0; }
       .onnx-hero-copy { flex: 0 0 auto; }
       .onnx-hero-mark { margin: 0 auto; }
+    }
+    @media (max-width: 600px) {
+      .models-settings-form .form-grid { grid-template-columns: minmax(0, 1fr); }
     }
   </style>
 </head>
@@ -21,7 +53,7 @@
       <div class="onnx-hero-copy">
         <p class="eyebrow">AI model workspace</p>
         <h1>Model Settings</h1>
-        <p class="muted">Turn detection on or off, choose the device, set the minimum confidence and the face detection pass, and tune how the models run.</p>
+        <p class="muted">Turn object and face detection on or off, choose the device and minimum confidence, and tune how the models run. Which model runs is chosen on the Object Models and Face Models tabs.</p>
       </div>
       <div class="onnx-hero-mark" aria-hidden="true">
         <span class="onnx-hero-ring onnx-hero-ring-back"></span>
@@ -34,15 +66,17 @@
       <div class="settings-section-header">
         <div class="settings-section-icon">⚙️</div>
         <div>
-          <h2>Detection Settings</h2>
-          <p class="settings-section-subtitle">Configure the AI detection engine, model path, and inference parameters.</p>
+          <h2>Detection settings</h2>
+          <p class="settings-section-subtitle">How the detection models run on every camera. Changes apply when you press Save.</p>
         </div>
       </div>
       <div id="settingsMessage" class="muted"></div>
-      <form id="aiSettingsForm">
+      <form id="aiSettingsForm" class="models-settings-form">
+        <section class="models-settings-section" aria-labelledby="objectSettingsTitle">
+        <h3 class="models-settings-section-title" id="objectSettingsTitle">Object detection</h3>
         <div class="form-grid">
         <label>
-          <span>AI Enabled <span class="info-tip" data-tip="Master toggle for AI object detection. When disabled, live AI detection is skipped and the status panel reports AI DISABLED. Default: Enabled" title="Master toggle for AI object detection. When disabled, live AI detection is skipped and the status panel reports AI DISABLED. Default: Enabled" tabindex="0" aria-label="Help: Master toggle for AI object detection. When disabled, live AI detection is skipped and the status panel reports AI DISABLED. Default: Enabled"></span></span>
+          <span>Object Detection <span class="info-tip" data-tip="Master toggle for object detection. When disabled, live object detection is skipped and the status on Object Models reports Disabled. Default: Enabled" title="Master toggle for object detection. When disabled, live object detection is skipped and the status on Object Models reports Disabled. Default: Enabled" tabindex="0" aria-label="Help: Master toggle for object detection. When disabled, live object detection is skipped and the status on Object Models reports Disabled. Default: Enabled"></span></span>
           <select name="enabled">
             <option value="true">Enabled</option>
             <option value="false">Disabled</option>
@@ -55,14 +89,16 @@
             <option value="cpu">CPU</option>
           </select></label>
         <label>
-          <span>Concurrent Cameras <span class="info-tip" data-tip="How many cameras can run ONNX inference at the same time. Default: 1 (serialised). Set to your camera count so each camera gets its own inference slot - prevents one slow camera blocking another." title="How many cameras can run ONNX inference at the same time. Default: 1 (serialised). Set to your camera count so each camera gets its own inference slot - prevents one slow camera blocking another." tabindex="0" aria-label="Help: How many cameras can run ONNX inference at the same time. Default: 1 (serialised..."></span></span>
-          <input name="max_concurrent_inferences" type="number" min="1" max="16" step="1" placeholder="1" /></label>
-        <label>
           <span>Min Confidence <span class="info-tip" data-tip="Minimum confidence score (0-1) a detection must reach to be reported. Detections below this are discarded before alert matching. Per-label thresholds on the Zones page override this global value. Default: 0.45" title="Minimum confidence score (0-1) a detection must reach to be reported. Detections below this are discarded before alert matching. Per-label thresholds on the Zones page override this global value. Default: 0.45" tabindex="0" aria-label="Help: Minimum confidence score (0-1) a detection must reach to be reported. Detections below this are discarded before alert matching. Per-label thresholds on the Zones page override this. Default: 0.45"></span></span>
           <input name="confidence" type="number" min="0" max="1" step="0.01" value="0.45" /></label>
+        <label>
+          <span>Concurrent Cameras <span class="info-tip" data-tip="How many cameras can run ONNX inference at the same time. Default: 1 (serialised). Set to your camera count so each camera gets its own inference slot - prevents one slow camera blocking another." title="How many cameras can run ONNX inference at the same time. Default: 1 (serialised). Set to your camera count so each camera gets its own inference slot - prevents one slow camera blocking another." tabindex="0" aria-label="Help: How many cameras can run ONNX inference at the same time. Default: 1 (serialised..."></span></span>
+          <input name="max_concurrent_inferences" type="number" min="1" max="16" step="1" placeholder="1" /></label>
         </div>
+        </section>
 
-        <p class="settings-device-group">Face Detection <span class="settings-device-note">Runs at the same time as object detection above</span></p>
+        <section class="models-settings-section" aria-labelledby="faceSettingsTitle">
+        <h3 class="models-settings-section-title" id="faceSettingsTitle">Face detection <small>Runs at the same time as object detection</small></h3>
         <div class="form-grid">
         <label>
           <span>Face Detection <span class="info-tip" data-tip="Run an extra face-detection model at the same time as object detection, so objects (person, car…) and faces are detected in the same frames. Requires a face model installed on the Face Models tab." title="Run an extra face-detection model at the same time as object detection, so objects (person, car…) and faces are detected in the same frames. Requires a face model installed on the Face Models tab." tabindex="0" aria-label="Help: Run an extra face-detection model at the same time as object detection"></span></span>
@@ -70,12 +106,15 @@
             <option value="false">Disabled</option>
             <option value="true">Enabled</option>
           </select></label>
-        <label>
+        <label id="faceModelField">
           <span>Face Model <span class="info-tip" data-tip="The installed face-model ONNX used for face detection. Install one on the Face Models tab; this list fills automatically. Leave empty to disable." title="The installed face-model ONNX used for face detection. Install one on the Face Models tab; this list fills automatically." tabindex="0" aria-label="Help: The installed face-model ONNX used for face detection"></span></span>
           <select name="face_model_path" id="faceModelSelect"><option value="">None Installed</option></select></label>
         </div>
+        </section>
+
+        <section class="models-settings-section" aria-label="Advanced tuning">
         <details class="settings-advanced">
-          <summary>Advanced</summary>
+          <summary>Advanced tuning</summary>
           <p class="settings-advanced-hint">Optional inference tuning that works on its defaults - most setups never need to touch these. Change one at a time so you can attribute any per-frame impact. Settings are grouped by where they apply: the CPU and GPU groups only affect their own device, so on a CPU-only host the GPU group is inert (and vice versa). The device actually running is shown as <strong>Device</strong> on the Object Models tab.</p>
 
           <p class="settings-device-group">All Devices</p>
@@ -125,19 +164,15 @@
           </select></label>
           </div>
 
-          <p class="settings-device-group">Paths <span class="settings-device-note">Managed on the Object Models and Face Models tabs</span></p>
-          <div class="form-grid">
-        <label>
-          <span>Model Path <span class="info-tip" data-tip="Path to the active ONNX model file. Managed on the Object Models tab - use the Use button there to change it. Default: models/yolo26n.onnx" title="Path to the active ONNX model file. Managed on the Object Models tab - use the Use button there to change it. Default: models/yolo26n.onnx" tabindex="0" aria-label="Help: Path to the active ONNX model file. Managed on the Object Models tab. Default: models/yolo26n.onnx"></span></span>
-          <input name="model_path" readonly /></label>
-        <label>
-          <span>Face Model Path <span class="info-tip" data-tip="Path to the installed face-model ONNX used for face detection. Managed by the Face Model selector above and the Face Models tab - empty when face detection is off." title="Path to the installed face-model ONNX used for face detection. Managed by the Face Model selector above and the Face Models tab - empty when face detection is off." tabindex="0" aria-label="Help: Path to the installed face-model ONNX used for face detection"></span></span>
-          <input name="face_model_path_display" readonly placeholder="Not configured" /></label>
-        <label>
-          <span>Labels Path <span class="info-tip" data-tip="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" title="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" tabindex="0" aria-label="Help: Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names"></span></span>
-          <input name="labels_path" readonly /></label>
-          </div>
+          <p class="settings-device-group">Files in use <span class="settings-device-note">Managed on the Object Models and Face Models tabs</span></p>
+          <!-- Display only. The values still post with the form (hidden
+               inputs) exactly as the old read-only boxes did. -->
+          <div class="models-settings-files" id="modelFilesInUse"></div>
+          <input type="hidden" name="model_path" />
+          <input type="hidden" name="face_model_path_display" />
+          <input type="hidden" name="labels_path" />
         </details>
+        </section>
       </form>
       <div class="button-row">
         <button type="submit" form="aiSettingsForm" aria-label="Save model settings">Save</button>
