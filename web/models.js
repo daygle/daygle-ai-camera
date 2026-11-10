@@ -296,6 +296,33 @@ function fillAiForm(settings) {
     const conf = settings.confidence == null ? NaN : Number(settings.confidence);
     aiForm.elements['confidence'].value = Number.isFinite(conf) ? String(conf) : '0.45';
   }
+  renderFilesInUse();
+  syncFaceModelField();
+}
+
+// Settings tab: the model/labels paths post with the form as hidden inputs
+// and are shown here as plain text - they are chosen on the model tabs.
+function renderFilesInUse() {
+  const target = document.getElementById('modelFilesInUse');
+  if (!target || !aiForm) return;
+  const rows = [
+    ['Object model', aiForm.elements['model_path']?.value],
+    ['Face model', aiForm.elements['face_model_path_display']?.value],
+    ['Labels', aiForm.elements['labels_path']?.value],
+  ];
+  target.innerHTML = rows
+    .map(([name, value]) => `<span>${escapeHtml(name)}: <code>${escapeHtml(value || 'Not configured')}</code></span>`)
+    .join('');
+}
+
+// The face model only matters while face detection is on: dim it otherwise.
+// Dimmed rather than disabled, because a disabled select drops out of the
+// FormData the Save button posts.
+function syncFaceModelField() {
+  const field = document.getElementById('faceModelField');
+  const toggle = aiForm?.elements['face_enabled'];
+  if (!field || !toggle) return;
+  field.classList.toggle('is-inactive', toggle.value !== 'true');
 }
 
 // Fill one library (object or face) when this page has it.
@@ -705,7 +732,12 @@ function populateFaceModelSelect(models, currentValue) {
   const options = ['<option value="">None Installed</option>'];
   for (const model of faceModels) {
     const selected = model.path === currentValue ? ' selected' : '';
-    options.push(`<option value="${escapeHtml(model.path)}"${selected}>${escapeHtml(model.label)} (${model.exported_imgsz || '?'})</option>`);
+    // The label already carries the size ("YOLO11n · Face · 640×640"); only
+    // add it when it is missing.
+    const label = model.exported_imgsz && !String(model.label || '').includes('×')
+      ? `${model.label} · ${model.exported_imgsz}×${model.exported_imgsz}`
+      : model.label;
+    options.push(`<option value="${escapeHtml(model.path)}"${selected}>${escapeHtml(label)}</option>`);
   }
   select.innerHTML = options.join('');
 }
@@ -857,6 +889,8 @@ aiForm?.addEventListener('submit', async (event) => {
     setMessage(error.message, true);
   }
 });
+
+aiForm?.elements['face_enabled']?.addEventListener('change', syncFaceModelField);
 
 document.getElementById('checkModelBtn')?.addEventListener('click', () => runAction('checkModelBtn', '/api/settings/ai/check-model', 'Checking model'));
 document.getElementById('reloadDetectorBtn')?.addEventListener('click', () => runAction('reloadDetectorBtn', '/api/settings/ai/reload', 'Reloading detector'));
