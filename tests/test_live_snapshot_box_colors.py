@@ -45,9 +45,22 @@ def test_label_without_custom_colour_keeps_default():
     assert _close(_left_edge_bgr(out), live_snapshot._OVERLAY_BOX_BGR)
 
 
-def test_motion_box_ignores_custom_colours():
+def test_motion_box_uses_motion_colour():
     out = live_snapshot.render_live_snapshot_jpeg_overlay(
         _black_jpeg(), [_detection('motion', motion_event=True)], box_colors={'motion': '#ff0000'})
+    assert _close(_left_edge_bgr(out), (0, 0, 255))  # red, as BGR
+
+
+def test_motion_event_box_uses_motion_colour_not_its_label_colour():
+    out = live_snapshot.render_live_snapshot_jpeg_overlay(
+        _black_jpeg(), [_detection('person', motion_event=True)],
+        box_colors={'person': '#ff0000', 'motion': '#0000ff'})
+    assert _close(_left_edge_bgr(out), (255, 0, 0))  # blue, as BGR
+
+
+def test_motion_box_without_motion_colour_keeps_default():
+    out = live_snapshot.render_live_snapshot_jpeg_overlay(
+        _black_jpeg(), [_detection('motion', motion_event=True)], box_colors={'person': '#ff0000'})
     assert _close(_left_edge_bgr(out), live_snapshot._OVERLAY_BOX_BGR)
 
 

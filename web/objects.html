@@ -43,6 +43,13 @@
             <option value="still">Still Only</option>
           </select>
         </label>
+        <div class="motion-color-field">
+          <span>Motion Box Colour <span class="info-tip" data-tip="Colour of generic motion boxes (changed pixels with no recognised object) and their label on Live, playback and snapshots. Reset returns to the default teal." title="Colour of generic motion boxes (changed pixels with no recognised object) and their label on Live, playback and snapshots. Reset returns to the default teal." tabindex="0" aria-label="Help: Motion box colour"></span></span>
+          <span class="box-color-cell">
+            <input type="color" class="box-color-input" id="motionBoxColorInput" value="#49e6a3" aria-label="Box colour for motion" title="Colour of the motion box and label on Live, playback and snapshots">
+            <button type="button" class="secondary box-color-reset" id="motionBoxColorReset" hidden title="Return motion boxes to the default teal">Reset</button>
+          </span>
+        </div>
       </form>
     </section>
 

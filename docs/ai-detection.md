@@ -131,7 +131,12 @@ and timeline playback, the Zones preview, event snapshots and alert images.
 The Group Behavior table has the same picker per object group: a group colour
 applies to every member that has no colour of its own. When an object belongs
 to several coloured groups, the smallest (most specific) group wins, the same
-rule as detection modes. Motion boxes always keep the motion colour. Gallery thumbnails are rendered once, when the event is
+rule as detection modes.
+
+Generic motion boxes (changed pixels with no recognised object) are not an
+object class, so their colour is set separately by **Motion Box Colour** in the
+Detection Behavior card; it is stored as the reserved `motion` entry of
+`box_colors`, and **Reset** returns motion boxes to the default teal. Gallery thumbnails are rendered once, when the event is
 captured, so a colour change applies to thumbnails of new events only; the
 full-size snapshot uses the current colour.
 
