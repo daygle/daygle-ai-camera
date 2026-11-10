@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from app.storage_metrics import storage_status
 from app.system_metrics import GPU_TEMP_CRITICAL_C, GPU_TEMP_WARN_C, system_resources
 
 router = APIRouter()
+logger = logging.getLogger('daygle.ai')
 
 
 @router.get('/api/stats')
@@ -117,8 +119,8 @@ def available_labels():
         p = Path(labels_path)
         if p.exists():
             object_labels = [line.strip() for line in p.read_text(encoding='utf-8').splitlines() if line.strip()]
-    except Exception:
-        pass
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning('Could not read object labels from %s: %s', labels_path, exc)
     sound_labels = [
         {'id': class_id, 'label': meta['label'], 'description': meta.get('description', '')}
         for class_id, meta in SOUND_CLASSES.items()

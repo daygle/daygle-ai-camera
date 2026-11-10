@@ -24,6 +24,7 @@ sound alerts are never verified.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
 import math
@@ -664,10 +665,8 @@ class VisionVerifier:
                 raw = response.read(_MAX_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as exc:
             detail = ''
-            try:
+            with contextlib.suppress(Exception):
                 detail = exc.read(500).decode('utf-8', 'replace')
-            except Exception:  # noqa: BLE001
-                pass
             raise VerificationError(f'HTTP {exc.code} from model server {detail[:200]}'.strip()) from exc
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
             reason = getattr(exc, 'reason', exc)

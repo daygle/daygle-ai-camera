@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import errno
 import json
 import logging
@@ -870,10 +871,8 @@ class RecordingService:
                         process.kill()
                         # Reap the killed process so it does not linger as a
                         # zombie until the next restart.
-                        try:
+                        with contextlib.suppress(subprocess.TimeoutExpired):
                             process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            pass
                 # Bug 3 fix: drain any chunk ffmpeg finalised during graceful
                 # shutdown (SIGTERM). The inner polling loop bailed out the
                 # instant ``stop_event`` fired, so the chunk that was open at
@@ -1590,10 +1589,8 @@ class RecordingService:
                 # removed/upgraded mid-run). Mirror the dead-link path: close
                 # the log, count the failure, throttle the warning, back off.
                 stderr_file.close()
-                try:
+                with contextlib.suppress(OSError):
                     stderr_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
                 consecutive_failures += 1
                 now = time.monotonic()
                 if (
@@ -1680,10 +1677,8 @@ class RecordingService:
                         process.wait(timeout=5 if continuous else 2)
                     except subprocess.TimeoutExpired:
                         process.kill()
-                        try:
+                        with contextlib.suppress(subprocess.TimeoutExpired):
                             process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            pass
                     return_code = process.poll()
                 # Surface the chunk ffmpeg finalised while exiting, as the
                 # dedicated recorder does, so it is not orphaned on disk.
@@ -1743,13 +1738,11 @@ class RecordingService:
                         severity='info',
                         details={'reason': 'no_audio_stream'},
                     )
-                try:
+                # The ffmpeg process or another worker may still hold the log
+                # file briefly on Windows. Missing or locked logs are not
+                # fatal; they will be re-created or cleaned up later.
+                with contextlib.suppress(OSError):
                     stderr_path.unlink(missing_ok=True)
-                except OSError:
-                    # The ffmpeg process or another worker may still hold the log
-                    # file briefly on Windows. Missing or locked logs are not
-                    # fatal; they will be re-created or cleaned up later.
-                    pass
                 keep_seconds = int(worker_state.get('buffer_seconds') or 15)
                 self._prune_prebuffer_segments(camera_dir, keep_seconds)
                 self._prune_audio_segments(audio_camera_dir, keep_seconds)
@@ -2498,10 +2491,8 @@ class RecordingService:
         except OSError as exc:
             return {'ok': False, 'bytes_written': written, 'errno': exc.errno}
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 probe_path.unlink(missing_ok=True)
-            except OSError:
-                pass
 
     def _first_error_line(self, stderr: str) -> str:
         """Return the first ffmpeg stderr line that names an actual error.

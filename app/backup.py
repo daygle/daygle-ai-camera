@@ -20,6 +20,7 @@ Pool-C reach (resolved lazily via lazy imports inside function bodies):
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -558,10 +559,8 @@ def restore_full_backup(path: Path) -> dict[str, Any]:
 
 def _validate_restore_schema(source: sqlite3.Connection) -> None:
     """Reject executable schema before inspecting or rewriting uploaded rows."""
-    try:
+    with contextlib.suppress(AttributeError, sqlite3.NotSupportedError):
         source.enable_load_extension(False)
-    except (AttributeError, sqlite3.NotSupportedError):
-        pass
     rows = source.execute(
         "SELECT type, name, sql FROM sqlite_master "
         "WHERE (type IN ('view', 'trigger') "

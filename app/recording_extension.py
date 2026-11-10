@@ -99,6 +99,7 @@ that Phase-29 has shipped.
 """
 
 from __future__ import annotations
+import contextlib
 import os
 
 import json
@@ -516,10 +517,8 @@ def write_recording_detection_track(
         # Best-effort cleanup of the orphan tmp file so a future
         # successful write is not blocked by the junk sitting next to
         # the sidecar.
-        try:
+        with contextlib.suppress(OSError):
             tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise
 
 
@@ -702,10 +701,8 @@ def clear_runtime_media_directory(path_value: str | None) -> int:
     # expand into an rm-rf of a privileged tree. ``_safe_rmtree_no_follow``
     # handles this case AND any descendant symlinks.
     if path.is_symlink():
-        try:
+        with contextlib.suppress(OSError):
             path.unlink(missing_ok=True)
-        except OSError:
-            pass
         return 1
     deleted = 0
     for child in path.iterdir():

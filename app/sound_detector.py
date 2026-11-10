@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import csv
 import hashlib
 import json
@@ -196,8 +197,8 @@ class _YamnetBackend:
         try:
             from ai_edge_litert.interpreter import Interpreter  # type: ignore[import]
             return Interpreter
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug('ai_edge_litert interpreter unavailable (%s); trying the fallback runtime.', exc)
         try:
             from tflite_runtime.interpreter import Interpreter  # type: ignore[import]
             return Interpreter
@@ -242,8 +243,8 @@ class _YamnetBackend:
         if p.exists():
             try:
                 return json.loads(p.read_text(encoding='utf-8'))
-            except Exception:
-                pass
+            except (OSError, ValueError) as exc:
+                logger.warning('Ignoring unreadable YAMNet metadata %s: %s', p, exc)
         return {}
 
     @staticmethod
@@ -980,10 +981,8 @@ class SoundDetector:
                 self._set_status(f'error: {exc}')
             finally:
                 if proc is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         proc.kill()
-                    except Exception:
-                        pass
 
             if not self._stop_event.is_set():
                 self._stop_event.wait(5.0)

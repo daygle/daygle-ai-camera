@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import subprocess
@@ -151,6 +152,8 @@ def get_app_log(
             try:
                 entry = _parse_entry(json.loads(line))
             except Exception:
+                # Skip an unparseable journal line. Deliberately not logged:
+                # the warning would land in the very journal being read.
                 continue
             if _is_noise(entry):
                 continue
@@ -196,15 +199,14 @@ async def stream_app_log(request: Request):
                 try:
                     entry = _parse_entry(json.loads(line_str))
                 except Exception:
+                    # Skip it; logging here would feed back into this stream.
                     continue
                 if _is_noise(entry):
                     continue
                 yield f'data: {json.dumps(entry)}\n\n'
         finally:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 proc.terminate()
-            except ProcessLookupError:
-                pass
             try:
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
             except TimeoutError:

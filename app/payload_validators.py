@@ -98,6 +98,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import os
 import re
@@ -432,18 +433,16 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
             _v = payload[_flat_key]
             if _v is None:
                 continue  # cleared - omit from updated
-            try:
+            # Ignore malformed explicit motion overrides.
+            with contextlib.suppress(TypeError, ValueError):
                 updated[_flat_key] = _coerce_camera_motion_override(_flat_key, _v)
-            except (TypeError, ValueError):
-                pass  # Ignore malformed explicit motion overrides.
         elif not _flat_in_payload:
             # Payload has no motion keys at all - preserve stored override
             _cur_v = current.get(_flat_key)
             if _cur_v is not None:
-                try:
+                # Preserve the stored value when it is malformed.
+                with contextlib.suppress(TypeError, ValueError):
                     updated[_flat_key] = _coerce_camera_motion_override(_flat_key, _cur_v)
-                except (TypeError, ValueError):
-                    pass  # Preserve the stored value when it is malformed.
 
     # Per-camera background-engine overrides (motion_algorithm / motion_denoise /
     # motion_shadow_suppression).

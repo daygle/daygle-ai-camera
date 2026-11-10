@@ -19,6 +19,7 @@ Exported symbols:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import queue
@@ -198,10 +199,9 @@ def _convert_for_playback(file_path: Path, playback_path: Path, failed_marker: P
         transcode_recording_to_mp4(file_path, playback_path, **({'low_priority': True} if low_priority else {}))
     except Exception as exc:
         logger.warning('Recording playback conversion failed for %s: %s', file_path, exc)
-        try:
+        # A marker is only an optimization; keep the playable fallback.
+        with contextlib.suppress(OSError):
             failed_marker.write_bytes(b'')
-        except OSError:
-            pass  # A marker is only an optimization; keep the playable fallback.
         return file_path
     failed_marker.unlink(missing_ok=True)
     return playback_path if playback_path.exists() else file_path
@@ -371,10 +371,8 @@ def _playback_encode_attempts() -> list[tuple[str, list[str], list[str]]]:
 
 
 def _lower_priority() -> None:  # pragma: no cover - runs in the ffmpeg child
-    try:
+    with contextlib.suppress(OSError):
         os.nice(10)
-    except OSError:
-        pass
 
 
 def transcode_recording_to_mp4(source_path: Path, output_path: Path, *, low_priority: bool = False) -> None:

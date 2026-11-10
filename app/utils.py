@@ -26,12 +26,15 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import re
 import subprocess
 from datetime import date, datetime, timedelta, timezone, UTC
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
+
+logger = logging.getLogger('daygle.ai')
 
 BASE_DIR: Path = Path(__file__).resolve().parent.parent
 
@@ -60,8 +63,8 @@ def _current_version() -> str:
         if tag:
             _cached_version = tag.lstrip('v')
             return _cached_version
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug('git describe unavailable for the version lookup: %s', exc)
     # Fallback: legacy VERSION file (for tarball installs without .git)
     version_file = BASE_DIR / 'VERSION'
     if version_file.exists():

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from datetime import datetime, timedelta, UTC
@@ -562,10 +563,8 @@ class RecordingsMixin:
                     # A browser-playback transcode (HEVC/incompatible-audio
                     # cameras) is a second full copy of the clip; leaving it out
                     # let real disk use reach ~2x the configured cap.
-                    try:
+                    with contextlib.suppress(OSError):
                         size += recording_playback_sidecar_path(path).stat().st_size
-                    except OSError:
-                        pass
                     retained_bytes += size
                     if retained_bytes > max_storage_bytes:
                         purge_ids.add(recording_id)

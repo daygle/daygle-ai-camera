@@ -99,10 +99,10 @@ def _equalize_password_timing(password: str) -> None:
                 390000,
             ).hex()
             hmac.compare_digest(candidate, digest)
-    except Exception:
+    except Exception as exc:
         # Defensive: dummy equalisation must never propagate; the auth
         # path's real branch decides the user-visible outcome.
-        pass
+        logging.getLogger('daygle.ai').debug('Login timing equalisation failed: %s', exc)
 
 
 def _is_locked_until_future(raw: Any, now_dt: datetime) -> bool:
