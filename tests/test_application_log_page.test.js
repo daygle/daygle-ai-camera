@@ -4,7 +4,7 @@
 // stream: unlike the Camera Log and AI Log pages (paged APIs, server-side
 // `q`), the Application Log is a journalctl SSE tail, so its search box is
 // applied client-side - while typing (the `input` listener) and to every
-// entry that streams in afterwards (`isRowVisible` at `appendEntry` time).
+// entry that streams in afterwards (`isRowVisible` at `prependEntry` time).
 // These guards keep all three log pages' search behaviour pinned.
 //
 // Run with:
@@ -45,4 +45,15 @@ test('apply, enter and reset all honour the search box', () => {
   assert.match(js, /filterSearch'\)\.addEventListener\('keydown'[\s\S]*?applyClientFilters\(\)/);
   assert.match(js, /clearFiltersBtn[\s\S]*?filterSearch'\)\.value = ''/);
   assert.match(js, /clearFiltersBtn[\s\S]*?activeSearch = ''/);
+});
+
+test('entries are listed newest first, like the other log pages', () => {
+  // Initial batch arrives oldest-to-newest and is reversed on render.
+  assert.match(js, /\[\.\.\.\(data\.entries \|\| \[\]\)\]\.reverse\(\)/);
+  // Live entries go on top, the oldest rows are trimmed from the bottom,
+  // and auto-scroll keeps the top (newest) row in view.
+  assert.match(js, /insertBefore\(tr, applicationLogBody\.firstChild\)/);
+  assert.match(js, /removeChild\(applicationLogBody\.lastChild\)/);
+  assert.match(js, /applicationLogOutputWrap\.scrollTop = 0;/);
+  assert.doesNotMatch(js, /scrollTop = applicationLogOutputWrap\.scrollHeight/);
 });

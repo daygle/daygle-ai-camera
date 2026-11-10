@@ -1,6 +1,11 @@
 // Streams journalctl output for daygle-ai-camera.
 // REST:  GET /api/application-log?lines=200&level=...   (initial batch, server-side filtered)
 // SSE:   GET /api/application-log/stream                (live follow, client-side filtered)
+//
+// Newest entries are listed first, matching the Camera, AI and Audit logs:
+// the initial batch (returned oldest-to-newest) is inserted in reverse and
+// each live entry is inserted at the top, so the latest activity is visible
+// without scrolling.
 
 const MAX_ROWS = 500;
 
@@ -120,22 +125,34 @@ function applyClientFilters() {
   updateCount();
 }
 
+// The oldest rows sit at the bottom, so trim from there.
 function trimOldRows() {
   while (applicationLogBody.children.length > MAX_ROWS) {
-    applicationLogBody.removeChild(applicationLogBody.firstChild);
+    applicationLogBody.removeChild(applicationLogBody.lastChild);
   }
 }
 
-function appendEntry(entry) {
+function scrollToNewest() {
+  applicationLogOutputWrap.scrollTop = 0;
+}
+
+function prependEntry(entry) {
   const tr = makeRow(entry);
   tr.hidden = !isRowVisible(tr);
-  applicationLogBody.appendChild(tr);
+  // With auto-scroll off, keep whatever row the operator is reading in
+  // place: a row inserted above it would otherwise push it down.
+  const keepPosition = !autoScrollCheck.checked && applicationLogOutputWrap.scrollTop > 0;
+  const heightBefore = applicationLogOutputWrap.scrollHeight;
+  applicationLogBody.insertBefore(tr, applicationLogBody.firstChild);
   trimOldRows();
   applicationLogTable.hidden = false;
   if (!tr.hidden) applicationLogEmpty.hidden = true;
   updateCount();
-  if (!tr.hidden && autoScrollCheck.checked) {
-    applicationLogOutputWrap.scrollTop = applicationLogOutputWrap.scrollHeight;
+  if (tr.hidden) return;
+  if (autoScrollCheck.checked) {
+    scrollToNewest();
+  } else if (keepPosition) {
+    applicationLogOutputWrap.scrollTop += applicationLogOutputWrap.scrollHeight - heightBefore;
   }
 }
 
@@ -163,7 +180,8 @@ async function loadEntries() {
       updateCount();
       return;
     }
-    for (const entry of data.entries || []) {
+    // The API returns oldest-to-newest; list newest first.
+    for (const entry of [...(data.entries || [])].reverse()) {
       const tr = makeRow(entry);
       tr.hidden = !isRowVisible(tr);
       applicationLogBody.appendChild(tr);
@@ -172,9 +190,7 @@ async function loadEntries() {
     applicationLogTable.hidden = applicationLogBody.children.length === 0;
     applicationLogEmpty.hidden = applicationLogBody.children.length > 0;
     updateCount();
-    if (autoScrollCheck.checked) {
-      applicationLogOutputWrap.scrollTop = applicationLogOutputWrap.scrollHeight;
-    }
+    if (autoScrollCheck.checked) scrollToNewest();
   } catch (err) {
     if (window.daygleAuth?.redirecting) return;
     window.showToast?.(err.message, true);
@@ -231,7 +247,7 @@ function connectStream() {
         liveStatus.textContent = `Unavailable: ${entry.error}`;
         return;
       }
-      appendEntry(entry);
+      prependEntry(entry);
     } catch {
       // ignore malformed SSE frames
     }

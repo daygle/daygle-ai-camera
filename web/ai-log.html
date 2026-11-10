@@ -40,31 +40,43 @@
           <input id="filterDateTo" type="date" aria-label="To date" />
         </label>
         <input id="filterCamera" placeholder="Filter by camera id" aria-label="Filter by camera id" />
-        <input id="filterSearch" type="search" placeholder="Search messages & details…” aria-label="Search messages and details" />
+        <input id="filterSearch" type="search" placeholder="Search messages & details…" aria-label="Search messages and details" />
         <select id="filterEventType" aria-label="Event type">
           <option value="">All event types</option>
-          <option value="ai_verification_filtered">AI Verify Filtered</option>
-          <option value="ai_verification_recheck">AI Verify Re-check</option>
-          <option value="ai_verification_unavailable">AI Verify Unavailable</option>
-          <option value="ai_verification_queue_full">AI Verify Queue Full</option>
-          <option value="ai_verification_store_failed">AI Verify Store Failed</option>
-          <option value="ai_description_unavailable">AI Description Unavailable</option>
-          <option value="ai_description_store_failed">AI Description Store Failed</option>
-          <option value="ai_tag_check_unavailable">AI Tag Check Unavailable</option>
-          <option value="ai_tag_alert_suppressed">AI Tag Suppressed</option>
-          <option value="ai_tag_alert_fired">AI Tag Alert</option>
-          <option value="ai_relabel">AI Relabel</option>
-          <option value="ai_relabel_store_failed">AI Relabel Store Failed</option>
-          <option value="ai_search_fallback">AI Search Fallback</option>
-          <option value="face_capture_skipped">Face Capture Skipped</option>
-          <option value="face_capture_failed">Face Capture Failed</option>
-          <option value="ai_detector_startup">Detector Startup</option>
-          <option value="ai_detector_backend">Detector Backend</option>
-          <option value="ai_int8_quantization">INT8 Quantization</option>
-          <option value="ai_model_install">Model Install</option>
-          <option value="ai_face_embedder">Face Embedder</option>
-          <option value="ai_face_service">Face Recognition</option>
-          <option value="ai_yamnet_model">YAMNet TFLite</option>
+          <optgroup label="Verification">
+            <option value="ai_verification_filtered">AI Verify Filtered</option>
+            <option value="ai_verification_recheck">AI Verify Re-check</option>
+            <option value="ai_verification_unavailable">AI Verify Unavailable</option>
+            <option value="ai_verification_queue_full">AI Verify Queue Full</option>
+            <option value="ai_verification_store_failed">AI Verify Store Failed</option>
+          </optgroup>
+          <optgroup label="Descriptions">
+            <option value="ai_description_unavailable">AI Description Unavailable</option>
+            <option value="ai_description_store_failed">AI Description Store Failed</option>
+          </optgroup>
+          <optgroup label="Tag Alerts">
+            <option value="ai_tag_alert_fired">AI Tag Alert</option>
+            <option value="ai_tag_alert_suppressed">AI Tag Suppressed</option>
+            <option value="ai_tag_check_unavailable">AI Tag Check Unavailable</option>
+          </optgroup>
+          <optgroup label="Relabel & Search">
+            <option value="ai_relabel">AI Relabel</option>
+            <option value="ai_relabel_store_failed">AI Relabel Store Failed</option>
+            <option value="ai_search_fallback">AI Search Fallback</option>
+          </optgroup>
+          <optgroup label="Faces">
+            <option value="face_capture_skipped">Face Capture Skipped</option>
+            <option value="face_capture_failed">Face Capture Failed</option>
+            <option value="ai_face_embedder">Face Embedder</option>
+            <option value="ai_face_service">Face Recognition</option>
+          </optgroup>
+          <optgroup label="Models & Startup">
+            <option value="ai_detector_startup">Detector Startup</option>
+            <option value="ai_detector_backend">Detector Backend</option>
+            <option value="ai_int8_quantization">INT8 Quantization</option>
+            <option value="ai_model_install">Model Install</option>
+            <option value="ai_yamnet_model">YAMNet TFLite</option>
+          </optgroup>
         </select>
         <select id="filterSeverity" aria-label="Severity">
           <option value="">All severities</option>

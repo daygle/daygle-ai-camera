@@ -64,27 +64,33 @@ function severityBadgeClass(severity) {
 // the single source of truth for these values). Unknown or future types
 // fall back to their raw machine code.
 const EVENT_TYPE_LABELS = {
+  // Verification
   ai_verification_filtered: 'AI Verify Filtered',
   ai_verification_recheck: 'AI Verify Re-check',
   ai_verification_unavailable: 'AI Verify Unavailable',
   ai_verification_queue_full: 'AI Verify Queue Full',
   ai_verification_store_failed: 'AI Verify Store Failed',
+  // Descriptions
   ai_description_unavailable: 'AI Description Unavailable',
   ai_description_store_failed: 'AI Description Store Failed',
-  ai_tag_check_unavailable: 'AI Tag Check Unavailable',
-  ai_tag_alert_suppressed: 'AI Tag Suppressed',
+  // Tag Alerts
   ai_tag_alert_fired: 'AI Tag Alert',
+  ai_tag_alert_suppressed: 'AI Tag Suppressed',
+  ai_tag_check_unavailable: 'AI Tag Check Unavailable',
+  // Relabel & Search
   ai_relabel: 'AI Relabel',
   ai_relabel_store_failed: 'AI Relabel Store Failed',
   ai_search_fallback: 'AI Search Fallback',
+  // Faces
   face_capture_skipped: 'Face Capture Skipped',
   face_capture_failed: 'Face Capture Failed',
+  ai_face_embedder: 'Face Embedder',
+  ai_face_service: 'Face Recognition',
+  // Models & Startup
   ai_detector_startup: 'Detector Startup',
   ai_detector_backend: 'Detector Backend',
   ai_int8_quantization: 'INT8 Quantization',
   ai_model_install: 'Model Install',
-  ai_face_embedder: 'Face Embedder',
-  ai_face_service: 'Face Recognition',
   ai_yamnet_model: 'YAMNet TFLite',
 };
 
