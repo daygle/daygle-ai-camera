@@ -181,7 +181,7 @@ function renderModels(models) {
   if (available.length) {
     sections.push(`
       <div class="model-library-section">
-        <h3 class="model-library-section-title">${installed.length ? 'More models' : 'Available models'} <span class="model-library-section-count">${available.length}</span></h3>
+        <h3 class="model-library-section-title">${installed.length ? 'More Models' : 'Available Models'} <span class="model-library-section-count">${available.length}</span></h3>
         <div class="model-catalog-list">${available.map(arcfaceCatalogRowHtml).join('')}</div>
       </div>`);
   }

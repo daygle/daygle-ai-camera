@@ -350,7 +350,7 @@ function renderLibrary(card, list, empty, count, familyModels) {
   if (catalogGroups.length) {
     sections.push(`
       <div class="model-library-section">
-        <h3 class="model-library-section-title">${installedGroups.length ? 'More models' : 'Available models'} <span class="model-library-section-count">${catalogGroups.length}</span></h3>
+        <h3 class="model-library-section-title">${installedGroups.length ? 'More Models' : 'Available Models'} <span class="model-library-section-count">${catalogGroups.length}</span></h3>
         ${renderCatalog(catalogGroups)}
       </div>`);
   }

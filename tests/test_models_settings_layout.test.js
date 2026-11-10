@@ -1,6 +1,6 @@
 // Regression tests for the Models > Settings tab layout (/models/settings).
 //
-// The form is split into Object detection / Face detection / Advanced tuning
+// The form is split into Object Detection / Face Detection / Advanced Tuning
 // sections on one fixed grid. What it SAVES must not change: the model and
 // labels paths left the page as visible inputs but still post as hidden ones.
 
@@ -15,9 +15,9 @@ const html = readFileSync(path.resolve(here, '../web/models-settings.html'), 'ut
 const source = readFileSync(path.resolve(here, '../web/models.js'), 'utf8');
 
 test('the form is split into titled sections', () => {
-  assert.match(html, /id="objectSettingsTitle">Object detection</);
-  assert.match(html, /id="faceSettingsTitle">Face detection/);
-  assert.match(html, /<summary>Advanced tuning<\/summary>/);
+  assert.match(html, /id="objectSettingsTitle">Object Detection</);
+  assert.match(html, /id="faceSettingsTitle">Face Detection/);
+  assert.match(html, /<summary>Advanced Tuning<\/summary>/);
   assert.equal((html.match(/class="models-settings-section"/g) || []).length, 3);
 });
 
