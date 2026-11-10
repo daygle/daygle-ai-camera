@@ -42,8 +42,6 @@ if str(REPO_ROOT) not in sys.path:
 import app.main as app_main  # noqa: E402  -- must precede the imports below
 assert app_main is sys.modules["app.main"]
 import app.alert_dispatch as _ad  # noqa: E402
-import app.event_debounce as _ed  # noqa: E402
-import app.state as _state  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

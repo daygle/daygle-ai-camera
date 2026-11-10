@@ -30,6 +30,9 @@ _PRIORITY_LABEL: dict[str, str] = {
 
 # Maps UI level names to journalctl -p values (inclusive of more-severe levels).
 _SERVICE = 'daygle-ai-camera'
+# Per-line read limit for the live ``journalctl -f`` pipe (asyncio's default
+# StreamReader limit is 64 KiB). Longer entries are skipped, not fatal.
+_STREAM_LINE_LIMIT_BYTES = 1024 * 1024
 
 # Benign uvicorn protocol noise: a browser's HTTPS-first attempt (or a proxy
 # health check) sends a TLS handshake to the plain-HTTP port, which uvicorn
@@ -175,6 +178,9 @@ async def stream_app_log(request: Request):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
+                # One JSON journal entry per line; a long MESSAGE (traceback,
+                # ffmpeg stderr) easily exceeds asyncio's 64 KiB default.
+                limit=_STREAM_LINE_LIMIT_BYTES,
             )
         except FileNotFoundError:
             yield 'data: {"error":"journalctl not available"}\n\n'
@@ -187,6 +193,11 @@ async def stream_app_log(request: Request):
                     raw_line = await asyncio.wait_for(proc.stdout.readline(), timeout=30.0)
                 except asyncio.TimeoutError:
                     yield ': keepalive\n\n'
+                    continue
+                except ValueError:
+                    # A line beyond the limit: StreamReader has already
+                    # discarded it, so skip that entry instead of ending the
+                    # admin's live stream with an unhandled exception.
                     continue
                 if not raw_line:
                     break
@@ -209,6 +220,8 @@ async def stream_app_log(request: Request):
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
             except asyncio.TimeoutError:
                 proc.kill()
+                # Reap the killed child so it does not linger as a zombie.
+                await proc.wait()
 
     return StreamingResponse(
         generate(),

@@ -283,7 +283,7 @@ class _YamnetBackend:
         tmp_path = _YAMNET_TFLITE_PATH.with_suffix('.tflite.check')
         try:
             tmp_path.unlink(missing_ok=True)
-            urlretrieve(_YAMNET_TFLITE_URL, tmp_path)  # noqa: S310
+            urlretrieve(_YAMNET_TFLITE_URL, tmp_path)
             new_sha = self._sha256_file(tmp_path)
             new_size = tmp_path.stat().st_size
         except Exception as exc:

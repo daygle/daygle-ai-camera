@@ -1,12 +1,11 @@
 # Pre-commit hooks for Daygle AI Camera.
 #
 # The ruff hook mirrors the CI lint gate (.github/workflows/python-app.yml),
-# which runs `ruff check app/ scripts/` under the Pyflakes ("F") rules selected
-# in ruff.toml. scripts/ is in scope because it carries first-party tooling
-# (evaluate_detection.py) that must not rot outside the gate; it is clean under
-# the same rules today. It is NOT extended to tests/, which deliberately use a
-# "Pool-A" preload pattern that reads as unused imports and is intentionally not
-# lint-gated yet (see ruff.toml).
+# which runs `ruff check app/ scripts/ tests/` under the Pyflakes ("F") rules
+# selected in ruff.toml. scripts/ carries first-party tooling
+# (evaluate_detection.py) and tests/ the suite itself; neither may rot outside
+# the gate. Intentional "Pool-A" preload imports in tests/ are annotated (see
+# ruff.toml).
 #
 # Install:  pip install pre-commit && pre-commit install
 # Run once: pre-commit run --all-files
@@ -19,7 +18,7 @@ repos:
         # Auto-fix what ruff can (unused imports, unused variables, ...);
         # anything left unfixed fails the commit so CI never sees it first.
         args: [--fix]
-        files: ^(app|scripts)/
+        files: ^(app|scripts|tests)/
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

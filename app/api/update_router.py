@@ -122,8 +122,12 @@ def apply_update(request: Request, logger=Depends(get_logger)):
         try:
             check = subprocess.run(['systemctl', 'is-active', 'daygle-ai-camera'], capture_output=True, text=True, timeout=5, check=False)
             service_active = check.returncode == 0
-        except FileNotFoundError:
-            logger.info('Update applied; systemctl not available - skipping automatic restart.')
+        except OSError as exc:
+            # FileNotFoundError (no systemctl) and e.g. PermissionError under a
+            # hardened unit: either way the update itself succeeded, so skip
+            # the restart rather than 500 with the in-progress flag still set
+            # (which would 409 every later update until a process restart).
+            logger.info('Update applied; systemctl unavailable (%s) - skipping automatic restart.', type(exc).__name__)
             service_active = False
         except subprocess.TimeoutExpired:
             logger.warning('systemctl is-active timed out - skipping automatic restart.')

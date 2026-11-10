@@ -932,11 +932,13 @@ class AuthService:
                 if absolute_dt is None or absolute_dt <= now_dt:
                     db.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
                     return None
+            changes_before = db.total_changes
             expires_at = self._renew_session_if_stale(db, row["session_token"], row["expires_at"], now_dt, absolute_expires_at_raw)
+            renewed = db.total_changes != changes_before  # renewal also stamped last_seen_at
             # Bound activity writes to the same five-minute cadence. Camera
             # polling must not turn every read into a contended SQLite write.
             last_seen = _parse_iso_datetime(row['last_seen_at'])
-            if last_seen is None or now_dt - last_seen >= self._SESSION_RENEWAL_INTERVAL:
+            if not renewed and (last_seen is None or now_dt - last_seen >= self._SESSION_RENEWAL_INTERVAL):
                 db.execute("UPDATE user_sessions SET last_seen_at = ? WHERE session_token = ?", (now, session_token))
             return {"session_token": row["session_token"], "csrf_token": row["csrf_token"], "expires_at": expires_at, "user": self.public_user(row)}
 
