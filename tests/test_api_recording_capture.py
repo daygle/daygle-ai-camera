@@ -4,6 +4,7 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
+from contextlib import closing
 import json
 import shutil
 import sqlite3
@@ -253,7 +254,7 @@ def test_recording_table_creation(tmp_path):
 
     database_path = tmp_path / 'recordings.sqlite3'
     EventDatabase(str(database_path))
-    with sqlite3.connect(database_path) as db:
+    with closing(sqlite3.connect(database_path)) as db, db:
         columns = {row[1] for row in db.execute('PRAGMA table_info(recordings)').fetchall()}
     assert {
         'id',

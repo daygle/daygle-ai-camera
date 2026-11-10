@@ -5,6 +5,7 @@ validation, persistence) and the ``/objects`` page route.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import sqlite3
 
@@ -58,7 +59,7 @@ def test_objects_settings_save_round_trip(tmp_path, monkeypatch):
         assert updated["labels"] == {"car": "still", "person": "moving"}
 
         # Persisted to the database (still_alerts always present, empty by default).
-        with sqlite3.connect(database_path) as db:
+        with closing(sqlite3.connect(database_path)) as db, db:
             row = db.execute("SELECT value FROM app_settings WHERE key = 'objects'").fetchone()
         assert row is not None
         stored = json.loads(row[0])

@@ -8,6 +8,7 @@ import sqlite3
 import threading
 import zipfile
 from collections import deque
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -157,7 +158,7 @@ def test_audit_log_accepts_auth_disabled_anonymous_user(monkeypatch):
 def test_restore_schema_rejected_before_row_queries(tmp_path):
     backup = importlib.import_module('app.backup')
     source = tmp_path / 'source.sqlite3'
-    with sqlite3.connect(source) as conn:
+    with closing(sqlite3.connect(source)) as conn, conn:
         conn.executescript('''
             CREATE TABLE events(id INTEGER PRIMARY KEY);
             CREATE TABLE detections(id INTEGER PRIMARY KEY);
@@ -172,7 +173,7 @@ def test_full_restore_rejects_trigger_before_remapping_or_copying(tmp_path, monk
     backup = importlib.import_module('app.backup')
     state = importlib.import_module('app.state')
     source = tmp_path / 'source.sqlite3'
-    with sqlite3.connect(source) as conn:
+    with closing(sqlite3.connect(source)) as conn, conn:
         conn.executescript('''
             CREATE TABLE users(id INTEGER PRIMARY KEY, role TEXT, is_active INTEGER);
             INSERT INTO users VALUES(1, 'admin', 1);

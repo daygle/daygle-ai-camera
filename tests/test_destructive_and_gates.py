@@ -21,6 +21,7 @@ for every integration suite.
 
 from __future__ import annotations
 
+from contextlib import closing
 import inspect
 import json
 import sqlite3
@@ -134,7 +135,7 @@ class TestM2RuntimeDataTwoStepDelete:
             _setup_admin(client)
             csrf = _login(client)
             self._preview(client, csrf)
-            with sqlite3.connect(str(_db)) as conn:
+            with closing(sqlite3.connect(str(_db))) as conn, conn:
                 row = conn.execute(
                     "SELECT action, resource, details FROM audit_log "
                     "WHERE action = 'preview_delete_all' ORDER BY id DESC LIMIT 1"
@@ -213,7 +214,7 @@ class TestM2RuntimeDataTwoStepDelete:
             csrf = _login(client)
 
             # Seed a couple of rows so the wipe actually has work to do.
-            with sqlite3.connect(str(_db)) as conn:
+            with closing(sqlite3.connect(str(_db))) as conn, conn:
                 conn.execute(
                     "INSERT INTO events (created_at, source, snapshot_path, "
                     "alert_triggered, dismissed, metadata) VALUES "
@@ -249,7 +250,7 @@ class TestM2RuntimeDataTwoStepDelete:
             assert status == 200
             assert post_body['counts']['events'] == 0
             # users MUST survive (preserved).
-            with sqlite3.connect(str(_db)) as conn:
+            with closing(sqlite3.connect(str(_db))) as conn, conn:
                 admin_rows = conn.execute(
                     "SELECT COUNT(*) FROM users WHERE role='admin' AND is_active=1"
                 ).fetchone()[0]

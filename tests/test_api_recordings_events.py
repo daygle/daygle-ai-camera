@@ -629,7 +629,7 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         assert admin.request(f"/api/recordings/{recording_id}")[0] == 404
         assert not media_path.exists()
         assert not metadata_path.exists()
-        with sqlite3.connect(database_path) as db:
+        with contextlib.closing(sqlite3.connect(database_path)) as db, db:
             count = db.execute('SELECT COUNT(*) FROM recordings').fetchone()[0]
         assert count == 0
     finally:
@@ -675,7 +675,7 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
         expected_media_files_deleted = int(file_path.exists())
 
         old_started = '2000-01-01T00:00:00+00:00'
-        with sqlite3.connect(database_path) as db:
+        with contextlib.closing(sqlite3.connect(database_path)) as db, db:
             db.execute("UPDATE recordings SET started_at = ?, ended_at = ? WHERE id = ?", (old_started, old_started, recording_id))
             db.commit()
 

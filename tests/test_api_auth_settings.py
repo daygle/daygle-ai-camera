@@ -4,6 +4,7 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
+from contextlib import closing
 import json
 import os
 import sqlite3
@@ -115,7 +116,7 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
         assert client.request("/api/config")[2]["auth"]["enabled"] is True
         assert client.request("/static/live.js")[0] == 200
 
-        with sqlite3.connect(database_path) as db:
+        with closing(sqlite3.connect(database_path)) as db, db:
             tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert {"users", "user_sessions", "login_attempts", "app_settings"}.issubset(tables)
     finally:
@@ -297,7 +298,7 @@ def test_admin_ai_settings_viewer_denied_and_db_override(tmp_path, monkeypatch):
         config_payload = admin.request("/api/config")[2]
         assert config_payload["ai"]["confidence"] == 0.72
         assert admin.request("/api/status/ai")[2]["active_config_source"] == "database"
-        with sqlite3.connect(database_path) as db:
+        with closing(sqlite3.connect(database_path)) as db, db:
             value = db.execute("SELECT value FROM app_settings WHERE key = 'ai'").fetchone()[0]
         assert json.loads(value)["confidence"] == 0.72
 
@@ -949,7 +950,7 @@ def test_admin_can_backup_and_restore_database_from_api(tmp_path, monkeypatch):
         assert status == 200
         assert isinstance(backup_bytes, bytes)
         assert 'daygle-database-' in (LocalClient.header(headers, 'content-disposition') or '')
-        with sqlite3.connect(database_path) as db:
+        with closing(sqlite3.connect(database_path)) as db, db:
             assert db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0] == 1
 
         # The server-side snapshot is deleted once the download completes

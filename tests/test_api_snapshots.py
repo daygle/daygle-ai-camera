@@ -12,6 +12,7 @@ lives in tests/support.py.
 
 from __future__ import annotations
 
+from contextlib import closing
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -289,7 +290,7 @@ def test_list_snapshots_applies_recording_scoping(tmp_path, monkeypatch):
         # Stamp the recording as owned by the admin (user id 1, the first
         # account created by _setup_admin); the viewer must then be scoped
         # out of the event entirely.
-        with sqlite3.connect(database_path) as db:
+        with closing(sqlite3.connect(database_path)) as db, db:
             db.execute('UPDATE recordings SET owner_user_id = 1 WHERE id = ?', (recording_id,))
 
         viewer_client = LocalClient(base_url)

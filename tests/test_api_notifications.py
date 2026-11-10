@@ -4,6 +4,7 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
+from contextlib import closing
 import json
 import sys
 
@@ -828,7 +829,7 @@ def test_alert_email_settings_get_and_update(tmp_path, monkeypatch):
         assert updated["host"] == "smtp.example.com"
         assert updated["from_address"] == "alerts@example.com"
         import sqlite3
-        with sqlite3.connect(database_path) as db:
+        with closing(sqlite3.connect(database_path)) as db, db:
             row = db.execute("SELECT value FROM app_settings WHERE key = 'alert_email'").fetchone()
         assert row is not None
         saved = json.loads(row[0])
@@ -862,7 +863,7 @@ def test_push_notification_settings_get_and_update(tmp_path, monkeypatch):
         assert updated["server_url"] == "https://ntfy.sh"
         assert updated["topic"] == "daygle-test"
         import sqlite3
-        with sqlite3.connect(database_path) as db:
+        with closing(sqlite3.connect(database_path)) as db, db:
             row = db.execute("SELECT value FROM app_settings WHERE key = 'alert_push'").fetchone()
         assert row is not None
         saved = json.loads(row[0])

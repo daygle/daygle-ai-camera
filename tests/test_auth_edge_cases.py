@@ -18,6 +18,8 @@ harness (``_load_app`` + ``_server`` + ``LocalClient``).
 
 from __future__ import annotations
 
+from contextlib import closing
+
 import pytest
 
 from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
@@ -194,7 +196,7 @@ class TestStaleCsrfLogoutResilience:
             # Manually expire the session in the database to simulate
             # timeout while the user still has the old cookie.
             import sqlite3
-            with sqlite3.connect(database_path) as db:
+            with closing(sqlite3.connect(database_path)) as db, db:
                 db.execute("UPDATE user_sessions SET expires_at = '2000-01-01T00:00:00+00:00'")
                 db.commit()
 

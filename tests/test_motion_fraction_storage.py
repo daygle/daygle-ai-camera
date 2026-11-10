@@ -5,6 +5,7 @@ which is capped at 100% for most movement.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import sqlite3
 
 from app.database import EventDatabase
@@ -41,7 +42,7 @@ def test_event_detections_keep_the_motion_fraction(tmp_path):
 def test_old_detections_table_gains_the_column(tmp_path):
     path = tmp_path / 'old.sqlite3'
     EventDatabase(str(path))
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         columns = {row[1] for row in conn.execute('PRAGMA table_info(detections)')}
     assert 'motion_fraction' in columns
     # Opening an already-migrated database again is a no-op.
