@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 import subprocess
-from datetime import date, datetime, timezone
+from datetime import date, datetime, UTC
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -76,7 +76,7 @@ def _log_date_range(date_from: str | None, date_to: str | None) -> tuple[date | 
 def _parse_entry(raw: dict) -> dict:
     ts_us = raw.get('__REALTIME_TIMESTAMP', '')
     try:
-        ts = datetime.fromtimestamp(int(ts_us) / 1_000_000, tz=timezone.utc).isoformat()
+        ts = datetime.fromtimestamp(int(ts_us) / 1_000_000, tz=UTC).isoformat()
     except (ValueError, TypeError):
         ts = ''
     priority = str(raw.get('PRIORITY', '6'))
@@ -185,7 +185,7 @@ async def stream_app_log(request: Request):
                     break
                 try:
                     raw_line = await asyncio.wait_for(proc.stdout.readline(), timeout=30.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ': keepalive\n\n'
                     continue
                 if not raw_line:
@@ -207,7 +207,7 @@ async def stream_app_log(request: Request):
                 pass
             try:
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
 
     return StreamingResponse(

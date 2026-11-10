@@ -25,7 +25,8 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
+from collections.abc import Mapping
 
 
 CLOUDFLARED_TOKEN_ENV = "DAYGLE_CLOUDFLARED_TOKEN"

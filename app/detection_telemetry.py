@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 logger = logging.getLogger('daygle.ai')
@@ -114,7 +114,7 @@ def record_detection_cycle(
             if int(value) > 0
         }
         cycle = {
-            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'timestamp': datetime.now(UTC).isoformat(),
             'inference_mode': str(inference_mode),
             'frame_motion': bool(frame_motion),
             'camera_motion': bool(camera_motion),

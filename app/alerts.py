@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -70,9 +70,9 @@ def _now_hm_in_admin_tz() -> str:
     """
     tz_name, _, _ = _alert_datetime_prefs()
     try:
-        now_local = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
+        now_local = datetime.now(UTC).astimezone(ZoneInfo(tz_name))
     except (ZoneInfoNotFoundError, KeyError):
-        now_local = datetime.now(timezone.utc)
+        now_local = datetime.now(UTC)
     return now_local.strftime('%H:%M')
 
 

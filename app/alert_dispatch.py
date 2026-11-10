@@ -25,7 +25,7 @@ import logging
 import math
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -210,9 +210,9 @@ def _now_hm_in_admin_tz() -> str:
     """
     tz_name, _, _ = _alert_datetime_prefs()  # bare name in this module
     try:
-        now_local = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
+        now_local = datetime.now(UTC).astimezone(ZoneInfo(tz_name))
     except (ZoneInfoNotFoundError, KeyError):
-        now_local = datetime.now(timezone.utc)
+        now_local = datetime.now(UTC)
     return now_local.strftime('%H:%M')
 
 
@@ -242,12 +242,12 @@ def _format_alert_datetime(iso_str: str) -> str:
     except ValueError:
         return iso_str
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     try:
         dt = dt.astimezone(ZoneInfo(tz_name))
         tz_label = dt.strftime('%Z')
     except (ZoneInfoNotFoundError, KeyError):
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.astimezone(UTC)
         tz_label = 'UTC'
     date_str = dt.strftime({'us': '%m/%d/%Y', 'au': '%d/%m/%Y'}.get(date_fmt, '%Y-%m-%d'))
     if time_fmt == '12h':

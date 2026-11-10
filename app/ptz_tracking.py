@@ -57,7 +57,8 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from app.diagnostics import log_camera_diagnostic
 from app.utils import normalize_bool_setting

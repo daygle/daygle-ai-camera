@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import secrets
 import math
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from html import escape
 
 from fastapi.responses import HTMLResponse, Response
@@ -144,7 +144,7 @@ def set_session_cookie(
         expires=expires_dt if expires_dt is not None else None,
         # Max-Age takes precedence over Expires in browsers; it must
         # match the actual (possibly absolute-capped) server deadline.
-        max_age=max(0, math.ceil((expires_dt - datetime.now(timezone.utc)).total_seconds()))
+        max_age=max(0, math.ceil((expires_dt - datetime.now(UTC)).total_seconds()))
         if expires_dt is not None else int(session_hours * 3600),
         # M1 (round-7): bound the cookie to an explicit host if the
         # operator has set ``auth.cookie_domain``. Same domain as the

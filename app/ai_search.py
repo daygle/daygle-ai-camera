@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, time as dtime, timedelta, timezone
+from datetime import datetime, time as dtime, timedelta, timezone, UTC
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -67,9 +67,9 @@ def admin_timezone() -> ZoneInfo | timezone:
         name = _alert_datetime_prefs()[0]
         return ZoneInfo(str(name))
     except (ZoneInfoNotFoundError, ValueError):
-        return timezone.utc
+        return UTC
     except Exception:  # noqa: BLE001 - a missing preference must not break search
-        return timezone.utc
+        return UTC
 
 
 def _cameras() -> list[dict[str, str]]:
@@ -178,8 +178,8 @@ def plan_with_model(query: str, settings: dict[str, Any], now_utc: datetime) -> 
         raise VerificationError('model produced an empty query')
     return {
         'groups': groups, 'camera': camera,
-        'since': start.astimezone(timezone.utc).isoformat() if start else None,
-        'until': end.astimezone(timezone.utc).isoformat() if end else None,
+        'since': start.astimezone(UTC).isoformat() if start else None,
+        'until': end.astimezone(UTC).isoformat() if end else None,
         'interpreted_by': 'model',
     }
 
@@ -227,8 +227,8 @@ def plan_with_keywords(query: str, now_utc: datetime) -> dict[str, Any]:
     groups = [[word] for word in dict.fromkeys(words)][:MAX_GROUPS]
     return {
         'groups': groups, 'camera': camera,
-        'since': start.astimezone(timezone.utc).isoformat() if start else None,
-        'until': end.astimezone(timezone.utc).isoformat() if end else None,
+        'since': start.astimezone(UTC).isoformat() if start else None,
+        'until': end.astimezone(UTC).isoformat() if end else None,
         'interpreted_by': 'keywords',
     }
 
@@ -246,7 +246,7 @@ def search_events(
 ) -> dict[str, Any]:
     """Interpret ``query`` and return matching events plus the interpretation."""
     query = ' '.join(str(query or '').split())[:MAX_QUERY_CHARS]
-    now_utc = now_utc or datetime.now(timezone.utc)
+    now_utc = now_utc or datetime.now(UTC)
     if not query:
         return {'items': [], 'interpretation': None}
     settings = effective_ai_verification_settings()

@@ -10,7 +10,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate, make_msgid
 from html import escape
-from typing import Any, Iterator
+from typing import Any
+from collections.abc import Iterator
 
 from app.alert_formatting import build_alert_content
 

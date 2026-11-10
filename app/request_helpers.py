@@ -45,7 +45,7 @@ _REDACT_AUDIT_KEY_REGEX = re.compile(
 _REDACTED_PLACEHOLDER = '***'
 
 
-def parse_log_date(raw: str | None, field_name: str) -> "date | None":
+def parse_log_date(raw: str | None, field_name: str) -> date | None:
     """Parse a date-only filter (shared by the camera-log and app-log routes).
 
     Accepts only strict ``YYYY-MM-DD`` strings; anything else raises

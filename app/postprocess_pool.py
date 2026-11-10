@@ -14,7 +14,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 logger = logging.getLogger('daygle.ai')
 
@@ -47,7 +48,7 @@ class _Job:
         self.label = label
         self.submitted_at = time.monotonic()
 
-    def __lt__(self, other: '_Job') -> bool:
+    def __lt__(self, other: _Job) -> bool:
         return (self.priority, self.sequence) < (other.priority, other.sequence)
 
 
@@ -131,7 +132,7 @@ class PostProcessPool:
         priority: int = PRIORITY_BACKGROUND,
         label: str = '',
         block: bool = True,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         **kwargs: Any,
     ) -> bool:
         """Queue a job, returning False if shut down or a nonblocking queue is full."""
@@ -161,7 +162,7 @@ class PostProcessPool:
             self._condition.notify()
         return True
 
-    def _take(self) -> Optional[_Job]:
+    def _take(self) -> _Job | None:
         """Pop the highest-priority job, or None when shutting down."""
         with self._condition:
             while True:
@@ -227,10 +228,10 @@ class PostProcessPool:
 
 # Separate pools keep expensive clip work, identity bookkeeping, and alert
 # deliveries from starving one another during bursts.
-_clip_pool: Optional[PostProcessPool] = None
-_enrichment_pool: Optional[PostProcessPool] = None
-_notification_pool: Optional[PostProcessPool] = None
-_verification_pool: Optional[PostProcessPool] = None
+_clip_pool: PostProcessPool | None = None
+_enrichment_pool: PostProcessPool | None = None
+_notification_pool: PostProcessPool | None = None
+_verification_pool: PostProcessPool | None = None
 _pool_lock = threading.Lock()
 
 CLIP_POOL_WORKERS = 2

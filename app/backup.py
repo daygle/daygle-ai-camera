@@ -30,7 +30,7 @@ import tempfile
 import threading
 import time
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -102,7 +102,7 @@ def backup_directory() -> Path:
 
 
 def safe_backup_timestamp() -> str:
-    return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    return datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')
 
 
 def _online_backup_snapshot(source_path: str | Path, destination_path: str | Path, *, failure_detail: str) -> None:
@@ -295,7 +295,7 @@ def create_full_backup(prefix: str = 'daygle-full') -> Path:
             manifest = {
                 'format': FULL_BACKUP_FORMAT,
                 'version': FULL_BACKUP_VERSION,
-                'created_at': datetime.now(timezone.utc).isoformat(),
+                'created_at': datetime.now(UTC).isoformat(),
                 'database_filename': db_filename,
                 'storage': {
                     'data_dir': str(storage_config.get('data_dir') or ''),
@@ -475,7 +475,7 @@ def _remap_restored_database(database_path: Path, manifest: dict[str, Any], targ
                     storage_override['database'] = str(Path(str(_state.database.database_path)).resolve(strict=False))
                     conn.execute(
                         "UPDATE app_settings SET value = ?, updated_at = ? WHERE key = 'storage'",
-                        (json.dumps(storage_override), datetime.now(timezone.utc).isoformat()),
+                        (json.dumps(storage_override), datetime.now(UTC).isoformat()),
                     )
         conn.commit()
     finally:
@@ -771,7 +771,7 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
     # against).
     from app.utils import _normalize_iso_to_utc
     older_than = _normalize_iso_to_utc(
-        (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
     )
     max_storage_bytes = max_storage_gb * 1024 * 1024 * 1024
     # Capture linked events while the recording rows still exist. Events with
@@ -820,7 +820,7 @@ def purge_camera_diagnostics_by_policy() -> int:
     """
     try:
         retention_days = max(1, int(effective_recording_config().get('retention_days', 14)))
-        older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_camera_diagnostics_older_than(older_than)
     except Exception as exc:
         logger.debug('Camera diagnostics purge failed: %s', exc)
@@ -836,7 +836,7 @@ def purge_ai_diagnostics_by_policy() -> int:
     """
     try:
         retention_days = max(1, int(effective_recording_config().get('retention_days', 14)))
-        older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_ai_diagnostics_older_than(older_than)
     except Exception as exc:
         logger.debug('AI diagnostics purge failed: %s', exc)
@@ -855,7 +855,7 @@ def purge_face_identities_by_policy() -> int:
         retention_days = int(effective_face_recognition_config().get('retention_days', 0) or 0)
         if retention_days <= 0:
             return 0
-        older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_face_identities(older_than=older_than)
     except Exception as exc:
         logger.debug('Face identity purge failed: %s', exc)
@@ -876,7 +876,7 @@ def purge_unknown_faces_by_policy() -> int:
         retention_days = int(effective_face_recognition_config().get('retention_days', 0) or 0)
         if retention_days <= 0:
             return 0
-        older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_old_unknown_faces(older_than)
     except Exception as exc:
         logger.debug('Unknown-face capture purge failed: %s', exc)

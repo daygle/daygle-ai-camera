@@ -28,7 +28,7 @@ import ipaddress
 import json
 import re
 import subprocess
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, UTC
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -75,7 +75,7 @@ def _current_version() -> str:
 
 def utc_now() -> str:
     """Return the current UTC time in the application's canonical ISO form."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def local_day_bounds_to_utc(
@@ -94,15 +94,15 @@ def local_day_bounds_to_utc(
     boundary. This mirrors the ``/api/recordings/timeline`` endpoint so every
     day-window filter in the app agrees on where a day starts and ends.
     """
-    tz = timezone.utc if tz_offset_minutes is None else timezone(timedelta(minutes=-tz_offset_minutes))
+    tz = UTC if tz_offset_minutes is None else timezone(timedelta(minutes=-tz_offset_minutes))
     start: datetime | None = None
     end: datetime | None = None
     if day_from:
         d = date.fromisoformat(day_from)
-        start = datetime(d.year, d.month, d.day, tzinfo=tz).astimezone(timezone.utc)
+        start = datetime(d.year, d.month, d.day, tzinfo=tz).astimezone(UTC)
     if day_to:
         d = date.fromisoformat(day_to) + timedelta(days=1)
-        end = datetime(d.year, d.month, d.day, tzinfo=tz).astimezone(timezone.utc)
+        end = datetime(d.year, d.month, d.day, tzinfo=tz).astimezone(UTC)
     return start, end
 
 
@@ -303,8 +303,8 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _normalize_iso_to_utc(value: Any, *, raise_on_invalid: bool = False) -> str | None:
@@ -353,5 +353,5 @@ def _normalize_iso_to_utc(value: Any, *, raise_on_invalid: bool = False) -> str 
             raise ValueError(f"Invalid ISO timestamp {value!r}: {exc}") from exc
         return str(value)
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).isoformat()
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()

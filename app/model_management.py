@@ -352,7 +352,7 @@ def _fetch_ultralytics_version() -> str:
 
 def _parse_semver(v: str) -> tuple[int, ...]:
     try:
-        return tuple((int(x) for x in v.split('.')))
+        return tuple(int(x) for x in v.split('.'))
     except ValueError:
         return (0,)
 

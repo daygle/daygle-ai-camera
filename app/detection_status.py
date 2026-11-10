@@ -89,7 +89,7 @@ logic - defer). Both are left intact in ``main.py``.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 import app.state as _state
@@ -167,7 +167,7 @@ def update_live_detection_status(camera_id: str, **updates: Any) -> None:
             **_state.live_detection_status.get(camera_id, {}),
             **updates,
             'camera_id': camera_id,
-            'updated_at': datetime.now(timezone.utc).isoformat(),
+            'updated_at': datetime.now(UTC).isoformat(),
         }
 
 

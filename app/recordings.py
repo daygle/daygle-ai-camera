@@ -11,9 +11,10 @@ import tempfile
 import threading
 import time
 import wave
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 import app.state as _state
 from app.camera_id import camera_storage_key
@@ -322,9 +323,9 @@ class RecordingService:
         try:
             created = datetime.fromisoformat(event_time)
         except ValueError:
-            created = datetime.now(timezone.utc)
+            created = datetime.now(UTC)
         if created.tzinfo is None:
-            created = created.replace(tzinfo=timezone.utc)
+            created = created.replace(tzinfo=UTC)
         # Normalize to UTC so the derived ``started_at`` / ``ended_at``
         # strings compare cleanly against the SQL cutoff / day-window
         # timestamps in ``DB.purge_recordings`` / ``list_recordings_for_camera_day``
@@ -332,7 +333,7 @@ class RecordingService:
         # this, a source event with a negative tz offset (e.g.
         # ``-05:00``) sorts lexicographically BEFORE the cutoff and the
         # recording gets purged up to TZ-offset hours early.
-        created = created.astimezone(timezone.utc)
+        created = created.astimezone(UTC)
 
         pre_seconds = max(0, int(active_config.get('pre_event_seconds', 5)))
         post_seconds = max(0, int(active_config.get('post_event_seconds', 10)))
@@ -1170,9 +1171,9 @@ class RecordingService:
                     'returncode': return_code,
                     'segment_count': len(segments),
                     'requested_seconds': round(content_seconds, 1),
-                    'window_start': datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat(),
-                    'window_end': datetime.fromtimestamp(end_ts, tz=timezone.utc).isoformat(),
-                    'content_start': datetime.fromtimestamp(content_start_ts, tz=timezone.utc).isoformat(),                            'stderr_tail': stderr_tail,
+                    'window_start': datetime.fromtimestamp(start_ts, tz=UTC).isoformat(),
+                    'window_end': datetime.fromtimestamp(end_ts, tz=UTC).isoformat(),
+                    'content_start': datetime.fromtimestamp(content_start_ts, tz=UTC).isoformat(),                            'stderr_tail': stderr_tail,
                 },
             )
             return self._live_capture(stream_url, file_path, max_duration_seconds)

@@ -154,7 +154,7 @@ async def authentication_middleware(request: Request, call_next):
         return await call_next(request)
     path = request.url.path
     if path in PUBLIC_PATHS or any(
-        (path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
+        path.startswith(prefix) for prefix in PUBLIC_PREFIXES
     ):
         return await call_next(request)
     # Resolve the session first. A valid session proves the users table is

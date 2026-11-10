@@ -12,7 +12,8 @@ import time
 
 from app.alerts import _now_hm_in_admin_tz
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 from urllib.request import urlretrieve
 
 import numpy as np

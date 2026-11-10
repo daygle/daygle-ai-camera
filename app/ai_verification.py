@@ -33,7 +33,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from fastapi import HTTPException
@@ -990,7 +990,7 @@ def _description_record(text: str, tags: list[str], detections: list[dict[str, A
         # detector labels. They are hidden from redundant display chips only.
         '_model_tags': tags,
         'model': settings.get('model'),
-        'created_at': datetime.now(timezone.utc).isoformat(),
+        'created_at': datetime.now(UTC).isoformat(),
         'latency_ms': int((time.monotonic() - started) * 1000),
     }
 
@@ -1035,7 +1035,7 @@ def verify_and_describe_event(
     """
     record: dict[str, Any] = {
         'model': settings.get('model'),
-        'checked_at': datetime.now(timezone.utc).isoformat(),
+        'checked_at': datetime.now(UTC).isoformat(),
         'labels': {},
     }
     started = time.monotonic()
@@ -1541,7 +1541,7 @@ def catch_up_once() -> bool:
     forever).
     """
     settings = effective_ai_verification_settings()
-    since = datetime.now(timezone.utc) - timedelta(hours=CATCH_UP_WINDOW_HOURS)
+    since = datetime.now(UTC) - timedelta(hours=CATCH_UP_WINDOW_HOURS)
     for event in _undescribed_events(since.isoformat()):
         event_id = int(event['id'])
         metadata = event.get('metadata') or {}
@@ -1556,7 +1556,7 @@ def catch_up_once() -> bool:
         from app.utils import _parse_iso_datetime
 
         created = _parse_iso_datetime(event.get('created_at'))
-        age = (datetime.now(timezone.utc) - created).total_seconds() if created else float('inf')
+        age = (datetime.now(UTC) - created).total_seconds() if created else float('inf')
         _describe_and_store(event, event_id, settings, str(metadata.get('camera_name') or ''),
                             evaluate_rules=0 <= age <= CATCH_UP_ALERT_MAX_AGE_SECONDS, background=True)
         return True
@@ -1696,7 +1696,7 @@ def start_description_backfill(hours: int, *, limit: int = MAX_BACKFILL_EVENTS) 
     settings = effective_ai_verification_settings()
     if describe_mode(settings) == 'off':
         raise VerificationError('turn on event descriptions first')
-    since = (datetime.now(timezone.utc) - timedelta(hours=max(1, int(hours)))).isoformat()
+    since = (datetime.now(UTC) - timedelta(hours=max(1, int(hours)))).isoformat()
     with _backfill_lock:
         if _backfill_state['running']:
             return dict(_backfill_state)
@@ -1709,7 +1709,7 @@ def start_description_backfill(hours: int, *, limit: int = MAX_BACKFILL_EVENTS) 
             if len(events) >= wanted:
                 break
         _backfill_state.update(running=bool(events), total=len(events), done=0, failed=0,
-                               started_at=datetime.now(timezone.utc).isoformat(), finished_at=None)
+                               started_at=datetime.now(UTC).isoformat(), finished_at=None)
         if not events:
             _backfill_state['finished_at'] = _backfill_state['started_at']
             return dict(_backfill_state)
@@ -1717,7 +1717,7 @@ def start_description_backfill(hours: int, *, limit: int = MAX_BACKFILL_EVENTS) 
         threading.Thread(target=_run_backfill, args=(events,), name='ai-description-backfill', daemon=True).start()
     except Exception as exc:
         with _backfill_lock:
-            _backfill_state.update(running=False, finished_at=datetime.now(timezone.utc).isoformat())
+            _backfill_state.update(running=False, finished_at=datetime.now(UTC).isoformat())
         raise VerificationError('could not start description backfill') from exc
     return description_backfill_status()
 
@@ -1750,4 +1750,4 @@ def _run_backfill(events: list[dict[str, Any]]) -> None:
                 _backfill_state['done' if text is not None else 'failed'] += 1
     finally:
         with _backfill_lock:
-            _backfill_state.update(running=False, finished_at=datetime.now(timezone.utc).isoformat())
+            _backfill_state.update(running=False, finished_at=datetime.now(UTC).isoformat())

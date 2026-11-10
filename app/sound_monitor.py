@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 import app.state as _state
@@ -64,7 +64,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
     """Callback invoked by a per-camera SoundDetector when a sound class is detected."""
     from app.recording_extension import attach_event_recording
     class_label = SOUND_CLASSES.get(class_id, {}).get('label', class_id)
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     with _state._sound_statuses_lock:
         status = _state._sound_statuses.setdefault(camera_id, {})
         status['state'] = 'detected'

@@ -5,7 +5,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Iterator
+from collections.abc import Callable, Iterator
 
 from app.db.alerts import AlertsMixin
 from app.db.audit import AuditLogMixin

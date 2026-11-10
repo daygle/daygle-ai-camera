@@ -9,9 +9,10 @@ import re
 import secrets
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
+from collections.abc import Iterator
 
 from app.utils import _normalize_iso_to_utc, _parse_iso_datetime, utc_now
 
@@ -603,7 +604,7 @@ class AuthService:
                 raise AuthError(
                     'Current password is required to change username or email.'
                 )
-            now_dt = datetime.now(timezone.utc)
+            now_dt = datetime.now(UTC)
             with self.connect() as db:
                 row = db.execute(
                     'SELECT * FROM users WHERE id = ?', (user_id,)
@@ -700,7 +701,7 @@ class AuthService:
         errors = self.validate_password_complexity(new_password)
         if errors:
             raise AuthError(" ".join(errors))
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now(UTC)
         with self.connect() as db:
             row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
             if row is None or not row["is_active"]:
@@ -732,10 +733,10 @@ class AuthService:
         failures = int(row["failed_attempts"] or 0) + 1
         locked_until = None
         if failures >= self.max_login_attempts:
-            locked_until = (now_dt + self.lockout).astimezone(timezone.utc).isoformat()
+            locked_until = (now_dt + self.lockout).astimezone(UTC).isoformat()
         db.execute(
             "UPDATE users SET failed_attempts = ?, locked_until = ?, updated_at = ? WHERE id = ?",
-            (failures, locked_until, now_dt.astimezone(timezone.utc).isoformat(), row["id"]),
+            (failures, locked_until, now_dt.astimezone(UTC).isoformat(), row["id"]),
         )
         db.commit()
 
@@ -766,7 +767,7 @@ class AuthService:
         username = username.strip()
         with self.connect() as db:
             row = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-            now_dt = datetime.now(timezone.utc)
+            now_dt = datetime.now(UTC)
             _now_raw = now_dt.isoformat()
             # Defence-in-depth -- cosmetically identical coverage to the
             # recordings / events / camera_diagnostics lifecycle.
@@ -878,7 +879,7 @@ class AuthService:
     def get_session(self, session_token: str | None) -> dict[str, Any] | None:
         if not session_token:
             return None
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now(UTC)
         now = now_dt.isoformat()
         with self.connect() as db:
             row = db.execute(
@@ -967,7 +968,7 @@ class AuthService:
                 )
                 # Purge login_attempts rows older than 90 days. Combined into
                 # the same transaction as the session sweep for atomicity.
-                cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+                cutoff_iso = (datetime.now(UTC) - timedelta(days=90)).isoformat()
                 db.execute(
                     'DELETE FROM login_attempts WHERE created_at < ?',
                     (cutoff_iso,),
