@@ -1,15 +1,15 @@
 """Regression guard for the dashboard's Motion Detections stat card.
 
-The dashboard used to compute this number in the browser by filtering the
-fully drained event list (``events.filter(isMotionOnlyEvent).length``), which
-meant the page had to fetch the entire history before one stat card could be
-correct. The count now comes from ``db.stats()`` alongside the object and sound
-cards, so the feed can paint from its first page.
+This number used to be computed in the browser by filtering the fully drained
+event list, which meant the page had to fetch the entire history before one
+stat card could be correct. The count now comes from ``db.stats()`` alongside
+the object and sound cards.
 
-The SQL must agree with the frontend's ``isMotionOnlyEvent()``: a motion-only
-event is a non-sound event with at least one detection where EVERY detection
-label sits inside GENERIC_TRIGGER_LABELS. Events with no detections, or whose
-labels are all blank, are under-recorded samples and must not count.
+The SQL applies the same motion-only boundary as the frontend's
+``GENERIC_TRIGGER_LABELS`` (web/utils.js): a motion-only event is a non-sound
+event with at least one detection where EVERY detection label sits inside
+that set. Events with no detections, or whose labels are all blank, are
+under-recorded samples and must not count.
 """
 
 from app.database import EventDatabase

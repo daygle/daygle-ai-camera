@@ -1156,68 +1156,6 @@ function recordingHasMotion(recording) {
     || (recording?.track || []).some((sample) => (sample?.detections || []).some((d) => String(d?.label || '').trim().toLowerCase() === 'motion'));
 }
 
-// ---------------------------------------------------------------------------
-// Motion-vs-object boundary helpers - shared by every page that renders a
-// motion / object / sound split (recordings, recordings modal, timeline,
-// dashboard activity feed, stat cards). Each helper takes the exact payload
-// shape the corresponding API or item builder produces, so the tests can
-// pin behaviour at every layer without re-implementing the logic.
-//
-// "Motion-only" means:
-//   * it isn't a sound recording / event (sound source or sound class
-//     label), AND
-//   * every detection / label sits inside GENERIC_TRIGGER_LABELS (motion,
-//     alert, human, object, none, off, continuous) - i.e. no concrete
-//     object or sound class labels.
-//
-// Edge cases: events / recordings with zero detections / labels are NOT
-// classified as motion-only - they're just under-recorded samples and
-// shouldn't pull the counts.
-// ---------------------------------------------------------------------------
-function _hasOnlyGenericLabels(labels) {
-  const normalized = (Array.isArray(labels) ? labels : []).map((entry) => {
-    if (typeof entry === 'string') return String(entry || '').trim().toLowerCase();
-    return String(entry?.label || '').trim().toLowerCase();
-  }).filter(Boolean);
-  if (!normalized.length) return false;
-  return normalized.every(isGenericTriggerLabel);
-}
-
-function isMotionOnlyEvent(event) {
-  if (!event) return false;
-  if (event.source === 'sound') return false;
-  return _hasOnlyGenericLabels(event.detections);
-}
-
-function isMotionOnlyEventItem(item) {
-  if (!item || item.isSound) return false;
-  return _hasOnlyGenericLabels(item.detections);
-}
-
-// A single continuous clip can produce both a typed (object/sound) event and a
-// bare motion-only event on the same recording. The dashboard keeps them as
-// separate rows so each stays filterable under its Type tab, but the typed row
-// already represents the clip (and carries a motion badge), so in the combined
-// "All" view the motion-only row reads as a duplicate. Flag every motion-only
-// item whose recordingId also has a typed row; the dashboard hides flagged rows
-// in the All view while the Motion-detections tab still shows them. Mutates and
-// returns the same array (callers rely on the same item references).
-function markSupersededMotionRows(items) {
-  if (!Array.isArray(items)) return items;
-  const recordingsWithTypedRow = new Set();
-  for (const item of items) {
-    if (item && item.recordingId && !item.isMotionOnly) {
-      recordingsWithTypedRow.add(item.recordingId);
-    }
-  }
-  for (const item of items) {
-    if (item && item.isMotionOnly && item.recordingId && recordingsWithTypedRow.has(item.recordingId)) {
-      item.supersededByTypedRow = true;
-    }
-  }
-  return items;
-}
-
 // ─── Shared recording helpers (recordings list + timeline) ────────────────
 // The /api/recordings and /api/recordings/timeline endpoints return the same
 // recording shape, so the recordings list and the timeline page share these
@@ -1362,54 +1300,6 @@ function soundDetectionSummary(recording) {
   return Array.from(agg.entries())
     .map(([label, value]) => ({ label, confidence: value.confidence, count: value.count }))
     .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
-}
-
-// Render one type pill for a single event inside a recording (object /
-// motion / sound), mirroring the Events page's boundary: a sound source or
-// sound-class detection renders the speaker pill, an event whose detections
-// are all generic markers (motion) renders the Motion pill, and anything
-// else renders the strongest concrete object label. The Recordings list uses
-// this per-event to show what a multi-event clip actually contains -- one
-// pill per linked event -- instead of collapsing them into a bare "N events"
-// count. The payload shape is the event dict that /api/recordings attaches to
-// ``recording.events`` (each with its own ``detections`` + ``metadata``).
-function recordingEventPills(event) {
-  if (!event) return '';
-  const detections = Array.isArray(event.detections) ? event.detections : [];
-  if (String(event.source || '').toLowerCase() === 'sound'
-      || event.metadata?.source === 'sound-detection'
-      || detections.some((d) => isSoundLabel(d && d.label))) {
-    const soundDetections = detections.filter((d) => isSoundLabel(d && d.label));
-    if (soundDetections.length) {
-      return soundDetections
-        .map((d) => detectionPill(d.label, d.confidence, true))
-        .join('');
-    }
-    const meta = event.metadata || {};
-    const label = meta.class_label || meta.label || event.trigger_label;
-    const confidence = typeof meta.confidence === 'number' ? meta.confidence : null;
-    return label ? detectionPill(label, confidence, true) : '';
-  }
-  // Motion-only event: every detection is a generic marker (motion), so the
-  // single Motion pill with the strongest intensity stands in for the event.
-  const concrete = detections.filter((d) => {
-    const label = String(d && d.label || '').trim().toLowerCase();
-    return label && !GENERIC_TRIGGER_LABELS.has(label);
-  });
-  if (!concrete.length) {
-    const strongest = detections
-      .filter((d) => String(d && d.label || '').trim().toLowerCase() === 'motion')
-      .reduce((best, d) => (d && Number(d.confidence) > (best ? Number(best.confidence) : -1) ? d : best), null);
-    return strongest ? motionPill(strongest.confidence, motionFractionOf(detections)) : '';
-  }
-  // Object event: the strongest concrete detection of THIS event (plus its
-  // still-alert badge when the event fired a dwell alert). The clip-level
-  // Motion pill in the row already covers frame motion, so no duplicate here.
-  const strongestObject = concrete
-    .slice()
-    .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))[0];
-  return detectionPill(strongestObject.label, strongestObject.confidence)
-    + (strongestObject.still_alert ? stillAlertBadge(strongestObject.still_alert_minutes) : '');
 }
 
 // ─── Shared log table formatting ──────────────────────────────────────────
@@ -2348,9 +2238,8 @@ window.daygleUi = {
   DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
   isMotionOnlyRecording, isContinuousOnlyRecording, motionConfidenceFor, motionFractionFor, recordingHasMotion,
-  isMotionOnlyEvent, isMotionOnlyEventItem, markSupersededMotionRows,
   // Shared recording readers (recordings list + timeline).
-  isSoundRecording, recordingTriggerType, recordingTriggerLabel, recordingZoneNames, recordingDetectionSummary, recordingEventPills, cameraLabel,
+  isSoundRecording, recordingTriggerType, recordingTriggerLabel, recordingZoneNames, recordingDetectionSummary, cameraLabel,
   renderTimeSelect, timeSelectValue, setTimeSelectValue,
   // Logs (audit + camera-log share these)
   formatLogTime, LOG_PAGE_SIZE,
