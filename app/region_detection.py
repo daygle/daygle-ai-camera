@@ -23,7 +23,7 @@ from typing import Any
 from app.detector import CONTAINMENT_THRESHOLD, is_stacked_split
 
 
-logger = logging.getLogger("daygle.ai")
+logger = logging.getLogger('daygle.ai.detection')
 
 
 def _motion_region_boxes(

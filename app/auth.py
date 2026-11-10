@@ -827,7 +827,7 @@ class AuthService:
                     # locked, permission denied). We intentionally do NOT
                     # raised-and-propagate: that would convert a 5-minute
                     # disk hiccup into a full login outage.
-                    logging.getLogger('daygle.ai').warning(
+                    logging.getLogger('daygle.ai.auth').warning(
                         'login_attempts audit-write failed for %s/%s: %s',
                         username, ip_address, audit_write_exc,
                     )
@@ -977,7 +977,7 @@ class AuthService:
             # locked, schema mismatch) must never break the caller's
             # maintenance tick. Logged at warning level so retention
             # bugs are diagnosable rather than silent.
-            logging.getLogger('daygle.ai').warning(
+            logging.getLogger('daygle.ai.auth').warning(
                 'cleanup_expired_sessions: session/login_attempts purge failed: %s', exc
             )
         # Camera_diagnostics purger: separate module, separate connection.
@@ -989,7 +989,7 @@ class AuthService:
             from app.backup import purge_ai_diagnostics_by_policy
             purge_ai_diagnostics_by_policy()
         except Exception as diag_purge_exc:
-            logging.getLogger('daygle.ai').warning(
+            logging.getLogger('daygle.ai.auth').warning(
                 'cleanup_expired_sessions: camera_diagnostics purge failed: %s',
                 diag_purge_exc,
             )
@@ -1000,7 +1000,7 @@ class AuthService:
             from app.backup import purge_face_identities_by_policy
             purge_face_identities_by_policy()
         except Exception as face_purge_exc:
-            logging.getLogger('daygle.ai').warning(
+            logging.getLogger('daygle.ai.auth').warning(
                 'cleanup_expired_sessions: face_identities purge failed: %s',
                 face_purge_exc,
             )
@@ -1012,7 +1012,7 @@ class AuthService:
             from app.backup import purge_unknown_faces_by_policy
             purge_unknown_faces_by_policy()
         except Exception as unknown_purge_exc:
-            logging.getLogger('daygle.ai').warning(
+            logging.getLogger('daygle.ai.auth').warning(
                 'cleanup_expired_sessions: unknown_faces purge failed: %s',
                 unknown_purge_exc,
             )

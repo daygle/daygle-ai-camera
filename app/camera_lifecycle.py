@@ -35,7 +35,7 @@ from app.recordings import RecordingService
 from app.sound_monitor import apply_sound_settings
 from app.storage import Storage
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 
 
 class _SentinelRecordingService:

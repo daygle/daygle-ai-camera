@@ -26,6 +26,7 @@ let eventSource = null;
 // lines nobody is looking at.
 let liveWanted = false;
 let activeLevel = '';
+let activeSource = '';
 let activeSearch = '';
 let activeDateFrom = '';
 let activeDateTo = '';
@@ -40,6 +41,33 @@ const LEVEL_SETS = {
   info:    ['EMERG', 'ALERT', 'CRIT', 'ERROR', 'WARNING', 'NOTICE', 'INFO'],
   debug:   LEVEL_ORDER,
 };
+
+// Friendly names for each entry's ``source`` (set by app_log_router from the
+// logger name). The Source filter's options are the single source of truth
+// for the values; unknown or future sources fall back to their raw key.
+const SOURCE_LABELS = {
+  cameras: 'Cameras',
+  recording: 'Recording',
+  ptz: 'PTZ',
+  detection: 'Detection',
+  analysis: 'AI analysis',
+  models: 'Models',
+  faces: 'Faces',
+  sound: 'Sound',
+  alerts: 'Alerts & notifications',
+  auth: 'Sign-in & security',
+  storage: 'Database & storage',
+  updates: 'Updates',
+  tunnel: 'Cloudflare Tunnel',
+  web: 'Web server',
+  core: 'App core',
+  other: 'Raw output',
+};
+
+function sourceLabel(source) {
+  const key = String(source || '').trim();
+  return SOURCE_LABELS[key] || key || '-';
+}
 
 function levelBadgeClass(level) {
   const l = (level || 'INFO').toUpperCase();
@@ -70,6 +98,7 @@ function formatEntryTime(iso) {
 function isRowVisible(tr) {
   const lvl = tr.dataset.level || 'INFO';
   if (activeLevel && !(LEVEL_SETS[activeLevel] || LEVEL_ORDER).includes(lvl)) return false;
+  if (activeSource && tr.dataset.source !== activeSource) return false;
   if (activeSearch && !(tr.dataset.msg || '').includes(activeSearch)) return false;
   const dateKey = (tr.dataset.timestamp || '').slice(0, 10);
   if (activeDateFrom && (!dateKey || dateKey < activeDateFrom)) return false;
@@ -82,6 +111,7 @@ function makeRow(entry) {
   tr.dataset.level = (entry.level || 'INFO').toUpperCase();
   tr.dataset.msg = (entry.message || '').toLowerCase();
   tr.dataset.timestamp = entry.timestamp || '';
+  tr.dataset.source = entry.source || '';
 
   const tdTime = document.createElement('td');
   tdTime.dataset.label = 'Time';
@@ -95,12 +125,19 @@ function makeRow(entry) {
   badge.textContent = entry.level || 'INFO';
   tdLevel.appendChild(badge);
 
+  const tdSource = document.createElement('td');
+  tdSource.dataset.label = 'Source';
+  tdSource.style.whiteSpace = 'nowrap';
+  tdSource.textContent = sourceLabel(entry.source);
+  if (entry.source) tdSource.title = entry.source;
+
   const tdMsg = document.createElement('td');
   tdMsg.dataset.label = 'Message';
   tdMsg.textContent = entry.message || '';
 
   tr.appendChild(tdTime);
   tr.appendChild(tdLevel);
+  tr.appendChild(tdSource);
   tr.appendChild(tdMsg);
   return tr;
 }
@@ -313,6 +350,7 @@ liveBtn.addEventListener('click', () => {
 
 document.getElementById('applyFiltersBtn').addEventListener('click', async () => {
   activeLevel = document.getElementById('filterLevel').value;
+  activeSource = document.getElementById('filterSource').value;
   activeSearch = document.getElementById('filterSearch').value.trim().toLowerCase();
   activeDateFrom = document.getElementById('filterDateFrom').value;
   activeDateTo = document.getElementById('filterDateTo').value;
@@ -328,13 +366,21 @@ document.getElementById('clearFiltersBtn').addEventListener('click', async () =>
   document.getElementById('filterDateFrom').value = '';
   document.getElementById('filterDateTo').value = '';
   document.getElementById('filterLevel').value = '';
+  document.getElementById('filterSource').value = '';
   document.getElementById('filterSearch').value = '';
   activeLevel = '';
+  activeSource = '';
   activeSearch = '';
   activeDateFrom = '';
   activeDateTo = '';
   await loadEntries();
   if (!eventSource) connectStream();
+});
+
+// Source is applied client-side to the buffered rows, so it filters at once.
+document.getElementById('filterSource').addEventListener('change', () => {
+  activeSource = document.getElementById('filterSource').value;
+  applyClientFilters();
 });
 
 document.getElementById('filterSearch').addEventListener('input', () => {
@@ -361,6 +407,7 @@ document.getElementById('clearDisplayBtn').addEventListener('click', () => {
 async function init() {
   await window.daygleAuthReady;
   activeLevel = document.getElementById('filterLevel').value;
+  activeSource = document.getElementById('filterSource').value;
   activeSearch = document.getElementById('filterSearch').value.trim().toLowerCase();
   activeDateFrom = document.getElementById('filterDateFrom').value;
   activeDateTo = document.getElementById('filterDateTo').value;

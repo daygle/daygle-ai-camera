@@ -16,7 +16,7 @@ from typing import Any
 import app.state as _state
 from app.utils import user_recipient_id
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.alerts')
 
 
 def _users_by_id(

@@ -32,7 +32,7 @@ from app.face_detection_rules import (
 from app.face_recognition_service import get_face_recognition_service
 from app.object_tracking import live_track_ids
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.faces')
 
 _FACE_LABEL = 'face'
 

@@ -34,7 +34,7 @@ from app.face_recognition import (
 from app.diagnostics import log_ai_diagnostic
 from app.utils import normalize_bool_setting as _coerce_bool
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.faces')
 
 # app_settings key: {model_id: input scaling} the stored embeddings were made with.
 INPUT_SCALING_SETTING = 'face_embedding_input_scaling'

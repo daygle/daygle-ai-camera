@@ -16,7 +16,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 # Priority tiers. Lower runs first. A clip the user asked for beats background
 # enrichment within a shared pool; dedicated pools can isolate unrelated work.

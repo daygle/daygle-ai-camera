@@ -70,7 +70,7 @@ Phase-29 rebind):
   (API routers + tests), no main.py body callers.
 
 **Logger acquisition:** the module uses its own child logger via
-``logging.getLogger('daygle.ai')`` (matches Phase-26/27/28 precedent).
+``logging.getLogger('daygle.ai.detection')`` (matches Phase-26/27/28 precedent).
 None of the five helpers currently emit log messages, but the logger
 is wired up for consistency with sibling modules.
 
@@ -95,7 +95,7 @@ from typing import Any
 import app.state as _state
 from app.config_facades import get_camera_config
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 # Canonical set of detection labels that are NOT specific-object triggers.
 # Used by detection_label_strings / detection_label_confidences to skip

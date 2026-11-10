@@ -111,7 +111,7 @@ from app.email_alerts import EmailAlertService, _encode_subject, _stamp_originat
 from app.push_notifications import PushNotificationService
 from app.utils import normalize_email_recipients, normalize_push_recipients
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 
 
 def effective_camera_offline_alert_settings() -> dict[str, Any]:

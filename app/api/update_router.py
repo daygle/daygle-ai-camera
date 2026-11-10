@@ -27,7 +27,7 @@ GITHUB_REPO = 'daygle/daygle-ai-camera'
 UPDATE_TIMEOUT_SECONDS = 1800
 
 router = APIRouter()
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.updates')
 
 
 @router.post('/api/update/check')

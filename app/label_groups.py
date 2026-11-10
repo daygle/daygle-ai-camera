@@ -24,7 +24,7 @@ from typing import Any
 
 import app.state as _state
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.detection')
 
 # The two original hard-coded groups, kept as the first-run defaults so a
 # fresh install behaves exactly like the previous release.

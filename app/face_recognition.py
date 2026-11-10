@@ -27,7 +27,7 @@ import numpy as np
 
 from app.diagnostics import log_ai_diagnostic
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.faces')
 
 
 # ArcFace / InsightFace recognition models take a 112x112 aligned RGB crop and

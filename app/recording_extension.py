@@ -85,7 +85,7 @@ shares one definition. Adding/removing a generic marker is a
 single-line edit to ``app/detection_status.py``.
 
 **Logger acquisition:** owns its own child logger via
-``logging.getLogger('daygle.ai')`` (matches Phase-25/26/27/28/29
+``logging.getLogger('daygle.ai.recording')`` (matches Phase-25/26/27/28/29
 precedent; same logging tree).
 
 **Default-arg safety:** no function-default expression evaluates
@@ -120,7 +120,7 @@ from app.detection_status import (
 )
 from app.media_utils import probe_video_duration, safe_storage_path, schedule_playback_conversion
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.recording')
 
 # How long a detection thread may park waiting for room in the post-process
 # pool (Item 12). Short by design: this is called from the detection path, so

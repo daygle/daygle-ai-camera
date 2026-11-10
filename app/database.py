@@ -18,7 +18,7 @@ from app.db.recordings import RecordingsMixin
 from app.db.settings_repo import SettingsRepoMixin
 from app.db.unknown_faces import UnknownFacesMixin
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.storage')
 
 
 # How long a connection waits for a contended write lock before giving up with

@@ -150,7 +150,7 @@ YOLO_MODELS: dict[str, dict[str, Any]] = {
     'yolo11l-face': {'pt': 'yolov11l-face.pt', 'onnx': 'yolov11l-face.onnx', 'label': 'YOLO11l · Face', 'approx_mb': 51, 'input_size': 640, 'labels': 'models/face.names', 'keypoint_count': 5, 'weights_url': 'https://github.com/YapaLab/yolo-face/releases/download/1.0.0/yolov11l-face.pt', 'weights_sha256': 'ba0000a5945ef6c4b5841b06478ff9a55649073d01cf98f382dd4991100c9514', 'description': 'High-accuracy face detection. Requires a capable CPU or GPU.'},
 }
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.models')
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODELS_DIR = BASE_DIR / 'models'

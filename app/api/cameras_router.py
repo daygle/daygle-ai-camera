@@ -26,7 +26,7 @@ from app.utils import build_stream_url
 from app.state import _camera_health_lock, _camera_health_state
 import app.state as _state
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 from app.deps import (
     get_apply_cameras_settings,
     get_database,

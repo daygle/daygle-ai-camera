@@ -88,8 +88,10 @@ class SettingsAiRouterLoggerTests(unittest.TestCase):
     """``app/api/settings_ai_router`` modules-level logger is wired."""
 
     def test_module_logger_is_daygle_ai(self) -> None:
+        # A child of ``daygle.ai`` so the Application Log can group it under
+        # Models while records still propagate to the ``daygle.ai`` tree.
         from app.api.settings_ai_router import logger  # noqa: WPS433
-        self.assertEqual(logger.name, 'daygle.ai')
+        self.assertEqual(logger.name, 'daygle.ai.models')
 
     def test_module_imports_logging_and_json(self) -> None:
         from app.api import settings_ai_router  # noqa: WPS433

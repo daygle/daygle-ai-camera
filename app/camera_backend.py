@@ -13,7 +13,7 @@ from fractions import Fraction
 from typing import Any
 
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.cameras')
 
 
 # A failed ``VideoCapture.read``/``retrieve`` is recoverable for RTSP streams:

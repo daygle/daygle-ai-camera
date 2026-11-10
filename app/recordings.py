@@ -33,7 +33,7 @@ from app.video_decode import (
 )
 
 
-logger = logging.getLogger('daygle.ai')
+logger = logging.getLogger('daygle.ai.recording')
 
 
 class RecordingService:
