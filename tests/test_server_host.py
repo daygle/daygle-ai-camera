@@ -8,6 +8,7 @@ loopback (the tunnel is the only ingress), including a UI-saved toggle.
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import Any
 
 from app.server import forwarded_allow_ips, server_host
@@ -86,7 +87,7 @@ def test_persisted_tunnel_loopback_only_overrides_yaml(tmp_path) -> None:
 
     db_path = tmp_path / "data" / "daygle_ai_camera.sqlite3"
     db_path.parent.mkdir()
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection, connection:
         connection.execute(
             "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
         )
@@ -105,7 +106,7 @@ def test_persisted_tunnel_loopback_only_overrides_yaml(tmp_path) -> None:
     assert server_host(cfg) == "0.0.0.0"
 
     # The reverse: UI locked to loopback overrides a YAML opt-out.
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection, connection:
         connection.execute(
             "UPDATE app_settings SET value = ? WHERE key = 'cloudflare_tunnel'",
             (json.dumps({"tunnel_loopback_only": True}),),
@@ -162,7 +163,7 @@ def test_forwarded_allow_ips_uses_ui_saved_trusted_proxies(tmp_path) -> None:
 
     db_path = tmp_path / "data" / "daygle_ai_camera.sqlite3"
     db_path.parent.mkdir()
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection, connection:
         connection.execute(
             "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
         )

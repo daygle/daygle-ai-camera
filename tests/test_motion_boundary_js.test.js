@@ -48,8 +48,6 @@ assert.ok(ui && ui.isMotionOnlyRecording, 'utils.js should expose isMotionOnlyRe
 const {
   isMotionOnlyRecording,
   isContinuousOnlyRecording,
-  isMotionOnlyEvent,
-  isMotionOnlyEventItem,
   motionConfidenceFor,
   motionFractionFor,
   motionFractionOf,
@@ -59,7 +57,6 @@ const {
   isSoundRecording,
   recordingDetectionSummary,
   recordingZoneNames,
-  recordingEventPills,
   continuousPill,
 } = ui;
 
@@ -338,134 +335,6 @@ test('motionConfidenceFor: no motion confidence → null', () => {
 test('motionConfidenceFor: motion present but NaN/invalid conf → null', () => {
   assert.equal(motionConfidenceFor({ detections: [{ label: 'motion', confidence: NaN }] }), null);
   assert.equal(motionConfidenceFor({ detections: [{ label: 'motion' }] }), null);
-});
-
-// ─── isMotionOnlyEventItem (merged dashboard activity item, type=event) ───
-
-test('isMotionOnlyEventItem: motion-only merged event item → true', () => {
-  assert.equal(isMotionOnlyEventItem({
-    type: 'event',
-    isSound: false,
-    detections: [{ label: 'motion', confidence: 0.5 }],
-  }), true);
-});
-
-test('isMotionOnlyEventItem: object detection item → false', () => {
-  assert.equal(isMotionOnlyEventItem({
-    type: 'event',
-    isSound: false,
-    detections: [{ label: 'person', confidence: 0.9 }],
-  }), false);
-});
-
-test('isMotionOnlyEventItem: sound item → false', () => {
-  assert.equal(isMotionOnlyEventItem({
-    type: 'event',
-    isSound: true,
-    detections: [{ label: 'doorbell', confidence: 0.7 }],
-  }), false);
-});
-
-test('isMotionOnlyEventItem: empty detections → false (under-recorded sample)', () => {
-  assert.equal(isMotionOnlyEventItem({ type: 'event', isSound: false, detections: [] }), false);
-});
-
-test('isMotionOnlyEventItem: null/undefined → false', () => {
-  assert.equal(isMotionOnlyEventItem(null), false);
-  assert.equal(isMotionOnlyEventItem(undefined), false);
-});
-
-// ─── isMotionOnlyEvent (raw /api/events payload, used by stat cards) ─────
-
-test('isMotionOnlyEvent: rtsp event with motion-only detections → true', () => {
-  assert.equal(isMotionOnlyEvent({
-    id: 1,
-    source: 'rtsp',
-    detections: [{ label: 'motion', confidence: 0.4 }],
-  }), true);
-});
-
-test('isMotionOnlyEvent: sound event → false', () => {
-  assert.equal(isMotionOnlyEvent({
-    source: 'sound',
-    detections: [{ label: 'doorbell', confidence: 0.8 }],
-  }), false);
-});
-
-test('isMotionOnlyEvent: object event → false', () => {
-  assert.equal(isMotionOnlyEvent({
-    source: 'rtsp',
-    detections: [{ label: 'person', confidence: 0.92 }],
-  }), false);
-});
-
-test('isMotionOnlyEvent: event with no detections → false', () => {
-  assert.equal(isMotionOnlyEvent({ id: 2, source: 'rtsp', detections: [] }), false);
-});
-
-test('isMotionOnlyEvent: null → false', () => {
-  assert.equal(isMotionOnlyEvent(null), false);
-  assert.equal(isMotionOnlyEvent(undefined), false);
-});
-
-// ─── recordingEventPills (per-event type pills on the Recordings list) ────
-
-test('recordingEventPills: object event renders the strongest concrete label', () => {
-  const html = recordingEventPills({
-    source: 'rtsp',
-    detections: [
-      { label: 'person', confidence: 0.71 },
-      { label: 'person', confidence: 0.93 },
-      { label: 'motion', confidence: 0.4 },
-    ],
-  });
-  assert.ok(html.includes('Person'), 'object pill names the label');
-  assert.ok(html.includes('93%'), 'object pill carries the strongest confidence');
-  assert.ok(!html.includes('Motion'), 'clip-level Motion pill is not duplicated per event');
-});
-
-test('recordingEventPills: motion-only event renders the Motion pill', () => {
-  const html = recordingEventPills({
-    source: 'rtsp',
-    detections: [{ label: 'motion', confidence: 0.6 }, { label: 'motion', confidence: 0.4 }],
-  });
-  assert.ok(html.includes('Motion'), 'motion pill rendered');
-  assert.ok(html.includes('60%'), 'strongest motion intensity used');
-});
-
-test('recordingEventPills: sound event renders the speaker pill with its class', () => {
-  const html = recordingEventPills({
-    source: 'sound',
-    metadata: { source: 'sound-detection', class_label: 'Dog Bark', confidence: 0.82 },
-    detections: [{ label: 'dog_bark', confidence: 0.82 }],
-  });
-  assert.ok(html.includes('Dog Bark'), 'sound class named');
-  assert.ok(html.includes('82%'), 'sound confidence shown');
-});
-
-test('recordingEventPills: sound event falls back to metadata when detections are empty', () => {
-  const html = recordingEventPills({
-    source: 'sound',
-    metadata: { source: 'sound-detection', class_label: 'Car Alarm', confidence: 0.9 },
-    detections: [],
-  });
-  assert.ok(html.includes('Car Alarm'));
-  assert.ok(html.includes('90%'));
-});
-
-test('recordingEventPills: still-alert object event keeps its dwell badge', () => {
-  const html = recordingEventPills({
-    source: 'rtsp',
-    detections: [{ label: 'package', confidence: 0.88, still_alert: true, still_alert_minutes: 12 }],
-  });
-  assert.ok(html.includes('Package'));
-  assert.ok(html.includes('Still 12 Min'));
-});
-
-test('recordingEventPills: empty/unusable events render nothing', () => {
-  assert.equal(recordingEventPills(null), '');
-  assert.equal(recordingEventPills(undefined), '');
-  assert.equal(recordingEventPills({ source: 'rtsp', detections: [] }), '');
 });
 
 // ─── isContinuousOnlyRecording (always-on capture segments) ───────────────

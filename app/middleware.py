@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import logging
 import re
 import urllib.parse
 from pathlib import Path
@@ -51,12 +50,6 @@ MUTATING_METHODS = _state.MUTATING_METHODS
 PUBLIC_PATHS = _state.PUBLIC_PATHS
 PUBLIC_PREFIXES = _state.PUBLIC_PREFIXES
 
-# Module-level logger so the origin-check warning path doesn't need to
-# re-instantiate on every request. Same logging tree as ``daygle.ai``
-# elsewhere; logged at WARNING because Origin/Referer anomalies on
-# pre-auth paths are interesting but not necessarily hostile.
-logger = logging.getLogger(__name__)
-
 
 def _is_same_origin(request: Request) -> tuple[bool, str]:
     try:
@@ -73,8 +66,8 @@ def _check_same_origin(request: Request) -> tuple[bool, str]:
     Reads ``Origin`` first, then falls back to ``Referer`` (some privacy
     extensions strip only one). Returns ``(True, '')`` on a match; on
     mismatch returns ``(False, '<reason>')``. ``Origin: null`` is treated
-    as a mismatch for non-pre-auth paths so sandboxed iframes / ``data:``
-    URI exploits don't bypass the guard.
+    as a mismatch so sandboxed iframes / ``data:`` URI exploits don't bypass
+    the guard.
 
     Mismatch criteria on state-changing ``/api/`` requests:
       * missing BOTH Origin and Referer headers
@@ -250,20 +243,12 @@ async def authentication_middleware(request: Request, call_next):
         # M1: same-origin guard runs BEFORE the cookie+header CSRF check as
         # defence-in-depth. If the session cookie ever leaks cross-origin,
         # the Origin/Referer mismatch rejects the request FIRST so an
-        # attacker can't ride the cookie on a /api/ POST. Pre-auth paths
-        # (/api/auth/login + /api/setup) log a warning instead of a hard
-        # reject: those POSTs are exposed to a real client that might
-        # legitimately send ``Origin: null`` (privacy-mode browsers,
-        # sandboxed iframes, ``data:``-URI navigations, etc.) -- the
-        # trade-off is documented and prefer-warning over lockout.
+        # attacker can't ride the cookie on a /api/ POST. The pre-auth forms
+        # (POST /login, POST /setup) are not under /api/ and never reach this
+        # block: they return early via PUBLIC_PATHS and are guarded by their
+        # own double-submit CSRF cookie in app/api/auth_router.py.
         is_same_origin, origin_reason = _is_same_origin(request)
-        if path in PUBLIC_PATHS or path == '/api/setup':
-            if not is_same_origin:
-                logger.warning(
-                    'Same-origin check failed on pre-auth path %s: %s',
-                    path, origin_reason,
-                )
-        elif not is_same_origin:
+        if not is_same_origin:
             return JSONResponse(
                 {'detail': f'Origin check failed: {origin_reason}'},
                 status_code=403,

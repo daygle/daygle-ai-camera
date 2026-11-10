@@ -4,6 +4,7 @@ Split out of the former monolithic tests/test_api.py; the shared harness
 (LocalClient, _load_app, _server, _login, _setup_admin, …) lives in
 tests/support.py.
 """
+from contextlib import closing
 import json
 import sqlite3
 import subprocess
@@ -170,7 +171,7 @@ def test_ai_settings_save_missing_model_path_is_rejected_and_preserves_previous(
         assert 'not found' in body.get('detail', '').lower()
 
         # Neither rejected save may have persisted the bad path.
-        with sqlite3.connect(database_path) as db:
+        with closing(sqlite3.connect(database_path)) as db, db:
             row = db.execute("SELECT value FROM app_settings WHERE key = 'ai'").fetchone()
         if row is not None:
             saved_model_path = json.loads(row[0]).get('model_path')

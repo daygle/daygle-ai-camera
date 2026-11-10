@@ -303,7 +303,10 @@ def poll_camera_profiles() -> None:
             schedule_target=scheduled_profile(profiles, timezone_name=camera.get('timezone')),
             ir_state=ir_state,
             error=error,
-            checked_at=datetime.now().isoformat(timespec='seconds'),
+            # Aware UTC like every other API timestamp: a naive host-local
+            # string is read by browsers in the VIEWER's zone, so it shifted
+            # by the offset whenever the server ran in another timezone.
+            checked_at=utc_now(),
         )
 
     if not changed or _state.database is None:

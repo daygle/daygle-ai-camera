@@ -5,6 +5,7 @@ import ipaddress
 import json
 import re
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,12 @@ _DEFAULT_DATABASE_PATH = "data/daygle_ai_camera.sqlite3"
 def _persisted_setting(database_path: str | Path, key: str) -> dict[str, Any]:
     """Read one JSON ``app_settings`` row before FastAPI has initialised its DB."""
     try:
-        with sqlite3.connect(database_path) as connection:
+        # ``sqlite3.Connection``'s own context manager only commits/rolls back;
+        # it never closes, so ``closing`` releases the handle. Read-only URI
+        # mode keeps this pre-startup probe side-effect free: a plain connect
+        # would create an empty database file at a not-yet-existing path.
+        uri = f"{Path(database_path).resolve().as_uri()}?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
             row = connection.execute(
                 "SELECT value FROM app_settings WHERE key = ?", (key,)
             ).fetchone()

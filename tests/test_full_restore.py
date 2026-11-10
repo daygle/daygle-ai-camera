@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import sqlite3
 import zipfile
@@ -116,7 +117,7 @@ def test_full_restore_remaps_database_paths_and_restores_media(tmp_path, monkeyp
 
         assert (target_root / "clip.mp4").read_bytes() == b"video"
         assert (target_snapshots / "event.jpg").read_bytes() == b"snapshot"
-        with sqlite3.connect(str(target_db)) as conn:
+        with closing(sqlite3.connect(str(target_db))) as conn, conn:
             recording_path = conn.execute("SELECT file_path FROM recordings WHERE id = 1").fetchone()[0]
             event_path = conn.execute("SELECT snapshot_path FROM events WHERE id = 1").fetchone()[0]
             storage = json.loads(conn.execute("SELECT value FROM app_settings WHERE key = 'storage'").fetchone()[0])
