@@ -328,8 +328,46 @@ def _zone_pixel_bounds(diff_mask: Any, zone: dict[str, Any]) -> tuple[int, int, 
         return None
 
 
+def _largest_motion_blob(region: Any) -> tuple[int, int, int, int] | None:
+    """Inclusive ``(x0, y0, x1, y1)`` pixel bounds of the largest connected
+    group of changed pixels in ``region`` (a boolean zone crop).
+
+    Boxing the min/max of *every* changed pixel let unrelated movement
+    anywhere in the zone -- a swaying bush, a flickering shadow, sensor noise
+    on a fence edge -- stretch one moving car's box across the whole zone.
+    The mask is dilated first so one subject broken into fragments (windows,
+    wheels, limbs) still merges into a single blob, then only the biggest blob
+    is boxed, using the original (undilated) changed pixels inside it.
+    """
+    try:
+        import cv2
+    except ImportError:  # pragma: no cover - cv2 ships with the app
+        cv2 = None
+    if cv2 is None:
+        ys, xs = np.where(region)
+        if not xs.size:
+            return None
+        return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+    mask_u8 = region.astype(np.uint8)
+    # Bridge gaps of a few pixels (the motion mask is ~320x240) so a single
+    # subject isn't split into several blobs.
+    dilated = cv2.dilate(mask_u8, np.ones((3, 3), np.uint8), iterations=2)
+    count, labels, _stats, _centroids = cv2.connectedComponentsWithStats(dilated, connectivity=8)
+    if count <= 1:
+        return None
+    # Rank blobs by how many genuinely changed pixels they hold, not by their
+    # dilated footprint, so a scatter of noise specks can't outrank a subject.
+    real_counts = np.bincount(labels[region], minlength=count)
+    real_counts[0] = 0
+    best = int(real_counts.argmax())
+    if real_counts[best] <= 0:
+        return None
+    ys, xs = np.where(region & (labels == best))
+    return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+
+
 def _zone_motion_pixel_box(diff_mask: Any, zone: dict[str, Any]) -> dict[str, float] | None:
-    """Return the tight normalised bounding box of the changed pixels inside
+    """Return the tight normalised bounding box of the main moving blob inside
     a zone, or ``None`` when the mask/geometry can't produce one.
 
     Motion pseudo-detections used to carry the zone's FULL rectangle as their
@@ -344,13 +382,14 @@ def _zone_motion_pixel_box(diff_mask: Any, zone: dict[str, Any]) -> dict[str, fl
         if bounds is None:
             return None
         px1, py1, px2, py2 = bounds
-        changed = np.where(diff_mask[py1:py2, px1:px2])
-        if not changed[0].size:
+        region = np.asarray(diff_mask[py1:py2, px1:px2], dtype=bool)
+        if not region.any():
             return None
-        x0 = int(changed[1].min()) + px1
-        y0 = int(changed[0].min()) + py1
-        x1 = int(changed[1].max()) + px1
-        y1 = int(changed[0].max()) + py1
+        blob = _largest_motion_blob(region)
+        if blob is None:
+            return None
+        bx0, by0, bx1, by1 = blob
+        x0, y0, x1, y1 = bx0 + px1, by0 + py1, bx1 + px1, by1 + py1
         frame_h, frame_w = diff_mask.shape
         return {
             'x': round(max(0.0, min(1.0, x0 / frame_w)), 4),

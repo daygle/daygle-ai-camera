@@ -838,7 +838,7 @@ You can combine both on the same zone - the object rule is authoritative when YO
 
 Motion confidence is computed independently for each zone by slicing the pixel-diff mask to that zone's bounding rectangle. Movement in Zone A does not inflate Zone B's confidence score.
 
-When a zone fires, the green overlay box on snapshots / playback is the bounding box of the changed pixels *inside* that zone (not the whole zone), so the overlay points at where the movement happened. Without a diff mask (first frame, fail-open, forced scan) the box falls back to the zone's full rectangle.
+When a zone fires, the green overlay box on snapshots / playback is the bounding box of the largest connected group of changed pixels *inside* that zone (not the whole zone, and not every scattered change in it), so the overlay points at the main thing that moved. Unrelated movement elsewhere in the same zone -- a bush in the wind, a shadow, noise specks -- still counts towards the zone's trigger but no longer stretches the box. Without a diff mask (first frame, fail-open, forced scan) the box falls back to the zone's full rectangle.
 
 This per-zone path requires the internal diff mask - a 240×320 boolean array produced by the background comparison. In rare error conditions (first frame after startup, numpy exception), the diff mask is unavailable and the system falls back to the frame-wide confidence score for all zones. The fallback is temporary and resolves on the next frame.
 
