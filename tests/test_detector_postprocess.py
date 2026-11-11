@@ -1014,3 +1014,63 @@ def test_nms_free_auto_collapses_top_bottom_split_person():
     res = det._postprocess_nms_free(out, SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
     assert len(res) == 1
     assert res[0]["confidence"] == pytest.approx(0.92)
+
+
+# -- column-part (narrow part poking out of a wider box) --------------------
+
+def test_nms_drops_legs_box_hanging_below_wide_person_box():
+    """The reported night-IR frame (800x448): a wide head-to-knee box that
+    takes in a backpack (95%) and a narrow knee-to-feet "legs" box (78%)
+    whose feet hang below it. IoU ~0.20, containment ~0.75 and a width ratio
+    of ~0.45 slip past the IoU, containment and stacked rules; the legs box
+    lies wholly inside the wide box's column, so the column-part rule drops
+    it."""
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [250, 45, 380, 310],    # head-to-knee, wide (backpack)
+        [320, 180, 378, 352],   # knee-to-feet, narrow
+    ], dtype=np.float32)
+    scores = np.array([0.95, 0.78], dtype=np.float32)
+    classes = np.array([0, 0])
+    assert non_max_suppression(boxes, scores, classes, 0.45) == [0]
+    assert sorted(non_max_suppression(
+        boxes, scores, classes, 0.45, suppress_column_parts=False,
+    )) == [0, 1]
+
+
+def test_nms_column_part_rule_keeps_person_partly_behind_another():
+    """A second person in the same column whose box is mostly outside the
+    nearer person's box (containment well under 0.6) is kept."""
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [100, 200, 260, 500],   # near person
+        [150, 80, 220, 300],    # far person: 100 of 220px inside
+    ], dtype=np.float32)
+    scores = np.array([0.9, 0.8], dtype=np.float32)
+    classes = np.array([0, 0])
+    assert sorted(non_max_suppression(boxes, scores, classes, 0.45)) == [0, 1]
+
+
+def test_nms_column_part_rule_is_class_aware():
+    from app.detector import non_max_suppression
+
+    boxes = np.array([
+        [250, 45, 380, 310],
+        [320, 180, 378, 352],
+    ], dtype=np.float32)
+    scores = np.array([0.95, 0.78], dtype=np.float32)
+    classes = np.array([0, 24])
+    assert sorted(non_max_suppression(boxes, scores, classes, 0.45)) == [0, 1]
+
+
+def test_region_dedup_drops_legs_box_hanging_below_wide_person_box():
+    """The region-boost crop merge uses the same column-part rule."""
+    from app.region_detection import _dedup_by_iou
+
+    wide = {"label": "person", "confidence": 0.95,
+            "box": {"x": 250 / 800, "y": 45 / 448, "width": 130 / 800, "height": 265 / 448}}
+    legs = {"label": "person", "confidence": 0.78,
+            "box": {"x": 320 / 800, "y": 180 / 448, "width": 58 / 800, "height": 172 / 448}}
+    assert _dedup_by_iou([legs, wide], 0.5) == [wide]
