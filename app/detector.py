@@ -99,6 +99,39 @@ def is_stacked_split(
     )
 
 
+# Column-part duplicates: a narrow part-of-body box (legs, torso) that sits
+# entirely within a wider box's left-right span but pokes out above or below
+# it. The reported night-IR frame: a wide head-to-knee box (it takes in a
+# backpack) plus a narrow knee-to-feet "legs" box whose feet hang below it.
+# Containment is only ~0.75 because the feet stick out, so the 0.8 rule
+# misses it, and the widths differ too much (~0.45) for the stacked rule.
+# When the smaller box's whole width is inside the other box, a lower
+# containment bar is safe: two people side by side, or a child beside an
+# adult, only partly share a column; a person further back in the same
+# column shows mostly above the nearer one, so little of their box is inside.
+COLUMN_PART_COLUMN_THRESHOLD = 0.85       # x-overlap / smaller box's width
+COLUMN_PART_CONTAINMENT_THRESHOLD = 0.6   # intersection / smaller box's area
+
+
+def is_column_part(
+    inter_w: Any, intersection: Any, w_a: Any, area_a: Any, w_b: Any, area_b: Any,
+) -> Any:
+    """True where the smaller of two same-class boxes is a part of the other
+    that lies within its column (see ``COLUMN_PART_*``).
+
+    Works on scalars or numpy arrays (elementwise).
+    """
+    a_smaller = area_a <= area_b
+    small_w = np.where(a_smaller, w_a, w_b)
+    small_area = np.minimum(area_a, area_b)
+    return (
+        (small_w > 0)
+        & (small_area > 0)
+        & (inter_w >= COLUMN_PART_COLUMN_THRESHOLD * small_w)
+        & (intersection >= COLUMN_PART_CONTAINMENT_THRESHOLD * small_area)
+    )
+
+
 def non_max_suppression(
     boxes: np.ndarray,
     scores: np.ndarray,
@@ -106,6 +139,7 @@ def non_max_suppression(
     iou_threshold: float,
     containment_threshold: float = CONTAINMENT_THRESHOLD,
     suppress_stacked: bool = True,
+    suppress_column_parts: bool = True,
 ) -> list[int]:
     """Class-aware greedy NMS with nested- and stacked-box suppression.
 
@@ -113,9 +147,11 @@ def non_max_suppression(
     that class that either overlaps it by more than ``iou_threshold`` (IoU),
     lies mostly inside it / mostly contains it -- intersection over the
     smaller of the two areas >= ``containment_threshold`` -- or is the other
-    half of a top/bottom split of the same object (see ``is_stacked_split``).
-    Pass a ``containment_threshold`` above 1 to disable the containment rule
-    and ``suppress_stacked=False`` to disable the stacked rule.
+    half of a top/bottom split of the same object (see ``is_stacked_split``),
+    or is a narrow part of it poking out of its top or bottom (see
+    ``is_column_part``). Pass a ``containment_threshold`` above 1 to disable
+    the containment rule, ``suppress_stacked=False`` to disable the stacked
+    rule and ``suppress_column_parts=False`` to disable the column-part rule.
     """
     if boxes.size == 0:
         return []
@@ -157,6 +193,11 @@ def non_max_suppression(
                 survivors &= ~is_stacked_split(
                     inter_w, inter_h,
                     widths[current], heights[current], widths[rest], heights[rest],
+                )
+            if suppress_column_parts:
+                survivors &= ~is_column_part(
+                    inter_w, intersection,
+                    widths[current], current_area, widths[rest], rest_areas,
                 )
             ordered = rest[survivors]
             class_areas = rest_areas[survivors]
