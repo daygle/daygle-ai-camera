@@ -1286,3 +1286,44 @@ def test_camera_watches_label_follows_rules_and_label_lists():
     assert zd.camera_watches_label(with_labels, 'car')
     # A camera with nothing configured accepts every label.
     assert zd.camera_watches_label({'id': 'bare', 'detection': {'zones': []}}, 'bench')
+
+
+def test_zone_motion_box_ignores_unrelated_motion_elsewhere_in_zone(zd):
+    """A moving subject plus scattered unrelated changes (wind in a bush,
+    shadow flicker, noise specks) elsewhere in the same zone must box the
+    subject only -- not stretch one box across the whole zone."""
+    np = pytest.importorskip('numpy')
+    pytest.importorskip('cv2')
+    settings = {
+        'id': 'cam-1',
+        'name': 'Cam 1',
+        'detection': {
+            'zones': [
+                {
+                    'id': 'z',
+                    'enabled': True,
+                    'monitor_motion': True,
+                    'x': 0,
+                    'y': 0,
+                    'width': 1,
+                    'height': 1,
+                    'object_rules': [{'label': 'motion', 'min_confidence': 0.0}],
+                },
+            ],
+        },
+    }
+    mask = np.zeros((240, 320), dtype=bool)
+    # The car: a solid blob on the left, split by a small gap (windows).
+    mask[100:160, 0:40] = True
+    mask[100:160, 43:80] = True
+    # A swaying bush on the right and noise specks at the zone edges.
+    mask[90:110, 250:262] = True
+    mask[5, 300] = True
+    mask[230, 150] = True
+    result = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)
+    assert len(result) == 1
+    box = result[0]['box']
+    assert box['x'] == 0.0
+    assert box['width'] == pytest.approx(80 / 320, abs=0.01)
+    assert box['y'] == pytest.approx(100 / 240, abs=0.01)
+    assert box['height'] == pytest.approx(60 / 240, abs=0.01)
