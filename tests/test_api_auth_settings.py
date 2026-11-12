@@ -843,7 +843,12 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
 
         def __init__(self, stream_url):
             FakeCapture.instances.append(self)
-            self._stream_url = stream_url
+            # Key on the path, not the full URL: live capture now opens a
+            # loopback broker URL (app.rtsp_broker) whose port changes per
+            # capture, while the path still identifies the camera.
+            from urllib.parse import urlsplit
+
+            self._stream_url = urlsplit(stream_url).path or stream_url
             self._reads = 0
             if threading.get_ident() == main_tid:
                 constructs.append(len(FakeCapture.instances))

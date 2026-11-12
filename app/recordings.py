@@ -21,6 +21,7 @@ import app.state as _state
 from app.camera_id import camera_storage_key
 from app.detection_status import GENERIC_TRIGGER_LABELS, json_safe_detections
 from app.media_utils import _recording_input_options, hevc_mp4_tag_args, newest_video_file
+from app.rtsp_broker import RtspBrokerError, camera_input_url, start_camera_broker
 from app.utils import camera_stream_input_options
 from app.frame_capture_clock import (
     FrameCaptureClock,
@@ -377,46 +378,47 @@ class RecordingService:
         # stream_url may contain credentials (rtsp://user:pass@host/...). ffmpeg
         # requires them inline in the -i URL; there is no other mechanism for RTSP
         # auth. The command array is intentionally never logged for this reason.
-        command = [
-            ffmpeg,
-            '-y',
-            '-threads', '1',
-            '-filter_threads', '1',
-            # Keep glitchy-but-present video on a flaky stream rather than
-            # discarding corrupt packets (which can empty the clip of video);
-            # -err_detect ignore_err keeps the capture alive without dropping it.
-            '-err_detect',
-            'ignore_err',
-            *camera_stream_input_options(stream_url),
-            '-i',
-            stream_url,
-            '-t',
-            f'{float(duration_seconds):.3f}',
-            '-map',
-            '0:v:0',
-            '-map',
-            '0:a:0?',
-            '-c:v',
-            'libx264',
-            '-c:a',
-            'aac',
-            '-b:a',
-            '128k',
-            '-preset',
-            'veryfast',
-            # Preserve the source frame timestamps when the prebuffer is
-            # unavailable and we must capture directly. No scale or output-rate
-            # filter is applied, so the clip keeps the stream's own
-            # resolution/FPS.
-            '-fps_mode',
-            'passthrough',
-            '-pix_fmt',
-            'yuv420p',
-            '-movflags',
-            '+faststart',
-            str(tmp_path),
-        ]
-        result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
+        with camera_input_url(stream_url) as input_url:
+            command = [
+                ffmpeg,
+                '-y',
+                '-threads', '1',
+                '-filter_threads', '1',
+                # Keep glitchy-but-present video on a flaky stream rather than
+                # discarding corrupt packets (which can empty the clip of video);
+                # -err_detect ignore_err keeps the capture alive without dropping it.
+                '-err_detect',
+                'ignore_err',
+                *camera_stream_input_options(input_url),
+                '-i',
+                input_url,
+                '-t',
+                f'{float(duration_seconds):.3f}',
+                '-map',
+                '0:v:0',
+                '-map',
+                '0:a:0?',
+                '-c:v',
+                'libx264',
+                '-c:a',
+                'aac',
+                '-b:a',
+                '128k',
+                '-preset',
+                'veryfast',
+                # Preserve the source frame timestamps when the prebuffer is
+                # unavailable and we must capture directly. No scale or output-rate
+                # filter is applied, so the clip keeps the stream's own
+                # resolution/FPS.
+                '-fps_mode',
+                'passthrough',
+                '-pix_fmt',
+                'yuv420p',
+                '-movflags',
+                '+faststart',
+                str(tmp_path),
+            ]
+            result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
         if result.returncode != 0:
             # Stream may have dropped mid-clip; keep partial footage if ffmpeg
             # wrote a decodable file before dying rather than discarding it.
@@ -793,6 +795,16 @@ class RecordingService:
         video_tag_args = hevc_mp4_tag_args(newest_video_file(chunks_dir))
 
         consecutive_failures = 0
+        # Route every ffmpeg process through the loopback RTSP broker so a
+        # camera cannot redirect capture to a different host/port. The
+        # broker lives for the worker (it accepts each reconnect) and is
+        # never bypassed: if it cannot start, the worker fails closed.
+        try:
+            broker = start_camera_broker(stream_url)
+        except RtspBrokerError as exc:
+            logger.warning('Continuous recorder for %s cannot start RTSP redirect broker (%s); refusing direct capture.', camera_key, exc)
+            return
+        input_url = broker.url if broker is not None else stream_url
         while not stop_event.is_set():
             list_file.unlink(missing_ok=True)
             command = [
@@ -804,8 +816,8 @@ class RecordingService:
                 '-loglevel', 'error',
                 '-fflags', '+discardcorrupt',
                 '-err_detect', 'ignore_err',
-                *camera_stream_input_options(stream_url),
-                '-i', stream_url,
+                *camera_stream_input_options(input_url),
+                '-i', input_url,
                 '-map', '0:v:0',
                 '-map', '0:a:0?',
                 '-c:v', 'copy',
@@ -896,6 +908,9 @@ class RecordingService:
                     camera_key, backoff, consecutive_failures,
                 )
                 stop_event.wait(backoff)
+
+        if broker is not None:
+            broker.close()
 
     @staticmethod
     def _newest_chunk_signature(chunks_dir: Path, camera_key: str) -> tuple[int, float] | None:
@@ -1422,6 +1437,17 @@ class RecordingService:
         # the CPU for the rest of the worker's life (see app.video_decode).
         gpu_decode_failed = False
 
+        # Route every ffmpeg process through the loopback RTSP broker so a
+        # camera cannot redirect capture to a different host/port. The
+        # broker lives for the worker (it accepts each reconnect) and is
+        # never bypassed: if it cannot start, the worker fails closed.
+        try:
+            broker = start_camera_broker(stream_url)
+        except RtspBrokerError as exc:
+            logger.warning('Prebuffer ingest for %s cannot start RTSP redirect broker (%s); refusing direct capture.', camera_key, exc)
+            return
+        input_url = broker.url if broker is not None else stream_url
+
         while not stop_event.is_set():
             from app.config_facades import effective_live_config as _elc
             from app.recording_settings import effective_camera_live_settings
@@ -1456,9 +1482,9 @@ class RecordingService:
                 # bad stream without throwing the video away.
                 '-err_detect',
                 'ignore_err',
-                *camera_stream_input_options(stream_url),
+                *camera_stream_input_options(input_url),
                 '-i',
-                stream_url,
+                input_url,
                 # Output 1: rolling fragmented-MP4 video segments for event clips.
                 '-map',
                 '0:v:0',
@@ -1822,6 +1848,9 @@ class RecordingService:
                         )
                         # Wake promptly if the worker is asked to stop mid-backoff.
                         stop_event.wait(backoff)
+
+        if broker is not None:
+            broker.close()
 
     def _collect_prebuffer_segments_from_dir(self, camera_dir: Path, start_ts: float, end_ts: float) -> tuple[list[Path], float | None]:
         """Shared segment collector for any prebuffer directory.

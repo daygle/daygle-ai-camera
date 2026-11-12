@@ -100,6 +100,10 @@ def test_continuous_chunk_command_preserves_source_video(monkeypatch, tmp_path):
     )
 
     command = captured[0]
-    assert command[command.index('-i') + 1] == 'rtsp://camera/mainstream'
+    # The worker's ffmpeg must open the loopback broker URL, not the
+    # configured camera URL directly (see app.rtsp_broker).
+    input_url = command[command.index('-i') + 1]
+    assert input_url.startswith('rtsp://127.0.0.1:')
+    assert input_url.endswith('/mainstream')
     assert command[command.index('-c:v') + 1] == 'copy'
     assert command[command.index('-segment_time') + 1] == '60'

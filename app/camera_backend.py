@@ -12,6 +12,7 @@ import time
 from fractions import Fraction
 from typing import Any
 
+from app.rtsp_broker import RtspBrokerError, camera_input_url, start_camera_broker
 from app.utils import CAMERA_STREAM_FORMATS, CAMERA_STREAM_PROTOCOLS, camera_stream_input_options
 
 
@@ -173,6 +174,7 @@ class OpenCvStreamCamera:
         self.started_at = time.time()
         self.last_error: str | None = None
         self._capture: Any | None = None
+        self._broker: Any | None = None
         # Set by ``close()`` so an in-flight blocking ``cv2.VideoCapture()``
         # open can detect the close (after OpenCV eventually returns) and
         # release the capture instead of leaving it dangling. Instances are
@@ -219,18 +221,22 @@ class OpenCvStreamCamera:
         ffprobe = shutil.which('ffprobe')
         if not ffprobe or not self.stream_url:
             return
-        command = [
-            ffprobe,
-            '-v', 'error',
-            *camera_stream_input_options(self.stream_url),
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=avg_frame_rate,r_frame_rate',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            '-i', self.stream_url,
-        ]
+        # The probe must not be a redirect side-channel: run ffprobe through
+        # the same loopback broker as live capture. A broker failure just
+        # skips this optional metadata probe.
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=3, check=False)
-        except (OSError, subprocess.SubprocessError):
+            with camera_input_url(self.stream_url) as input_url:
+                command = [
+                    ffprobe,
+                    '-v', 'error',
+                    *camera_stream_input_options(input_url),
+                    '-select_streams', 'v:0',
+                    '-show_entries', 'stream=avg_frame_rate,r_frame_rate',
+                    '-of', 'default=noprint_wrappers=1:nokey=1',
+                    '-i', input_url,
+                ]
+                result = subprocess.run(command, capture_output=True, text=True, timeout=3, check=False)
+        except (OSError, subprocess.SubprocessError, RtspBrokerError):
             return
         if result.returncode != 0:
             return
@@ -320,13 +326,22 @@ class OpenCvStreamCamera:
         _configure_opencv_threads()
 
         if self._capture is None:
+            # OpenCV/FFmpeg must not connect to the camera directly: route it
+            # through the loopback RTSP broker so a redirect cannot pivot the
+            # capture to another host/port. The broker is stored on the
+            # instance and closed by ``_release_capture`` with the capture.
+            # A broker failure raises (fail closed) rather than opening the
+            # configured URL directly.
+            broker = start_camera_broker(self.stream_url)
+            input_url = broker.url if broker is not None else self.stream_url
+            self._broker = broker
             # ``cv2.VideoCapture()`` against a dead RTSP URL blocks inside
             # OpenCV for ~30s and neither stimeout nor
             # CAP_PROP_OPEN_TIMEOUT_MSEC bounds it in current builds. We hold
             # the instance lock across this call (see ``_acquire_raw_frame``),
             # so ``close()`` only waits a short grace window and this in-flight
             # open must detect the close once OpenCV returns.
-            self._capture = cv2.VideoCapture(self.stream_url, cv2.CAP_FFMPEG)
+            self._capture = cv2.VideoCapture(input_url, cv2.CAP_FFMPEG)
             if self._closed:
                 # close() won the race while the blocking open was in flight;
                 # discard the late capture and bail so the caller cleans up.
@@ -363,6 +378,9 @@ class OpenCvStreamCamera:
         if self._capture is not None:
             self._capture.release()
             self._capture = None
+        broker, self._broker = self._broker, None
+        if broker is not None:
+            broker.close()
 
     @staticmethod
     def _frame_contains_data(image: Any) -> bool:

@@ -12,6 +12,7 @@ import threading
 import time
 
 from app.alerts import _now_hm_in_admin_tz
+from app.rtsp_broker import RtspBrokerError, start_camera_broker
 from app.utils import camera_stream_input_options
 from pathlib import Path
 from typing import Any
@@ -943,23 +944,35 @@ class SoundDetector:
         hop_samples = self._hop_samples(chunk_samples)
         bytes_per_sample = 2  # s16le
 
-        cmd = [
-            ffmpeg, '-loglevel', 'error',
-            *camera_stream_input_options(self.rtsp_url),
-            '-i', self.rtsp_url,
-            '-vn',
-            '-acodec', 'pcm_s16le',
-            '-ar', str(SAMPLE_RATE),
-            '-ac', '1',
-            '-f', 's16le',
-            'pipe:1',
-        ]
 
         enabled_classes = [r['class'] for r in self.rules]
         logger.info('Sound monitor started (RTSP, classes=%s)', enabled_classes)
         self._set_status('listening')
 
+        # Route every ffmpeg process through the loopback RTSP broker so a
+        # camera cannot redirect capture to a different host/port. The broker
+        # lives for the monitor (it accepts each reconnect) and is never
+        # bypassed: if it cannot start, capture fails closed.
+        try:
+            broker = start_camera_broker(self.rtsp_url)
+        except RtspBrokerError as exc:
+            logger.error('Sound monitor cannot start RTSP redirect broker (%s); refusing direct capture.', exc)
+            self._set_status(f'error: RTSP redirect broker unavailable: {exc}')
+            return
+        input_url = broker.url if broker is not None else self.rtsp_url
+
         while not self._stop_event.is_set():
+            cmd = [
+                ffmpeg, '-loglevel', 'error',
+                *camera_stream_input_options(input_url),
+                '-i', input_url,
+                '-vn',
+                '-acodec', 'pcm_s16le',
+                '-ar', str(SAMPLE_RATE),
+                '-ac', '1',
+                '-f', 's16le',
+                'pipe:1',
+            ]
             proc: subprocess.Popen | None = None
             watchdog_done = threading.Event()
             watchdog: threading.Thread | None = None
@@ -1008,6 +1021,9 @@ class SoundDetector:
 
             if not self._stop_event.is_set():
                 self._stop_event.wait(5.0)
+
+        if broker is not None:
+            broker.close()
 
     def _run_ingest(self) -> None:
         """Consume PCM-WAV audio segments produced by the shared per-camera
