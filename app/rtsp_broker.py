@@ -239,6 +239,7 @@ class RtspBroker:
                 raw.connect(sockaddr)
                 if self._scheme == 'rtsps':
                     context = ssl.create_default_context()
+                    context.minimum_version = ssl.TLSVersion.TLSv1_2
                     raw = context.wrap_socket(raw, server_hostname=self._hostname)
                 raw.settimeout(None)
                 return raw
