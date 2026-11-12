@@ -201,3 +201,32 @@ def test_broker_fails_closed_when_upstream_unresolvable():
 def test_broker_rejects_non_rtsp_url():
     with pytest.raises(RtspBrokerError):
         RtspBroker('file:///etc/passwd')
+
+
+def test_broker_reresolves_per_connection_and_falls_back_on_dns_failure(monkeypatch):
+    """A DHCP address change is picked up on reconnect, but a transient DNS
+    failure must not break a reconnect that last-known-good addresses can
+    still serve."""
+    import socket as socket_module
+
+    broker = RtspBroker('rtsp://camera.invalid:554/stream')
+    try:
+        calls = []
+
+        def fake_getaddrinfo(host, port, *_args, **_kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                return [(socket_module.AF_INET, socket_module.SOCK_STREAM, 0, '', ('192.0.2.10', port))]
+            if len(calls) == 2:
+                return [(socket_module.AF_INET, socket_module.SOCK_STREAM, 0, '', ('192.0.2.20', port))]
+            raise OSError('temporary DNS failure')
+
+        monkeypatch.setattr(socket_module, 'getaddrinfo', fake_getaddrinfo)
+        first = broker._ensure_resolved()
+        second = broker._ensure_resolved()
+        fallback = broker._ensure_resolved()
+        assert first[0][1][0] == '192.0.2.10'
+        assert second[0][1][0] == '192.0.2.20'
+        assert fallback == second
+    finally:
+        broker.close()

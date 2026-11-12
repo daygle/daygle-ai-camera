@@ -12,8 +12,10 @@ to an arbitrary internal RTSP endpoint.
 Instead, live capture never sees the camera URL. It sees a loopback URL
 served by :class:`RtspBroker`, which:
 
-- resolves the camera hostname once and only ever connects to those
-  pinned addresses (the hostname is never re-resolved per connection),
+- re-resolves the camera hostname on each new connection (falling back
+  to the last-known-good addresses on transient DNS failure, so a
+  DHCP-driven address change is picked up on reconnect) and only ever
+  connects to those resolved addresses,
 - proxies the RTSP control connection (TCP interleaving, the transport
   the app forces for every capture path),
 - inspects upstream RTSP responses and refuses to forward a 3xx redirect
@@ -115,7 +117,8 @@ class RtspBroker:
 
     One broker serves every sequential connection of a capture (the
     initial handshake plus any same-authority redirect reconnects),
-    keeping the pinned upstream addresses for its whole lifetime.
+    re-resolving the upstream addresses on each new connection for its
+    whole lifetime.
     """
 
     def __init__(self, stream_url: str) -> None:
@@ -198,12 +201,21 @@ class RtspBroker:
             self._sockets.discard(sock)
 
     def _ensure_resolved(self) -> list[tuple[int, tuple]]:
+        """Resolve the camera host for this connection.
+
+        Re-resolved on every new client connection so a DHCP-driven
+        address change is picked up when capture reconnects. A transient
+        DNS failure falls back to the last-known-good addresses instead
+        of breaking an otherwise healthy reconnect. This does not weaken
+        redirect enforcement, which compares the redirect ``Location``
+        against the configured hostname, not against these addresses.
+        """
         with self._resolve_lock:
-            if self._resolved:
-                return self._resolved
             try:
                 infos = socket.getaddrinfo(self._hostname, self._port, socket.AF_UNSPEC, socket.SOCK_STREAM)
             except OSError as exc:
+                if self._resolved:
+                    return self._resolved
                 raise RtspBrokerError(f'Cannot resolve camera host {self._hostname!r}: {exc}') from exc
             seen: set[tuple] = set()
             resolved: list[tuple[int, tuple]] = []
@@ -211,10 +223,11 @@ class RtspBroker:
                 if sockaddr not in seen:
                     seen.add(sockaddr)
                     resolved.append((family, sockaddr))
-            if not resolved:
+            if resolved:
+                self._resolved = resolved
+            elif not self._resolved:
                 raise RtspBrokerError(f'Cannot resolve camera host {self._hostname!r}.')
-            self._resolved = resolved
-            return resolved
+            return self._resolved
 
     def _connect_upstream(self) -> socket.socket:
         last_error: OSError | None = None
