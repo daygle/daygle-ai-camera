@@ -8,6 +8,9 @@ then lock the real owner out. They now share the sign-in lockout counter.
 """
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from app.auth import AuthError, AuthService
@@ -52,6 +55,33 @@ def test_successful_password_change_resets_the_counter(tmp_path):
         auth.change_password(user_id, 'Wr0ng-Guess!', 'N3w-Str0ng-Pass!')
     auth.change_password(user_id, PASSWORD, 'N3w-Str0ng-Pass!')
     assert auth.get_user(user_id)['failed_attempts'] == 0
+
+
+@pytest.mark.parametrize('operation', ['login', 'password', 'profile'])
+def test_concurrent_wrong_passwords_are_all_counted(tmp_path, monkeypatch, operation):
+    auth, user_id = _auth(tmp_path)
+    barrier = threading.Barrier(3)
+
+    def reject_together(*_args):
+        barrier.wait(timeout=10)
+        return False
+
+    monkeypatch.setattr(auth, 'verify_password', reject_together)
+
+    def attempt(_index):
+        with pytest.raises(AuthError):
+            if operation == 'login':
+                auth.authenticate('alex', 'wrong', '10.0.0.1')
+            elif operation == 'password':
+                auth.change_password(user_id, 'wrong', 'N3w-Str0ng-Pass!')
+            else:
+                auth.update_profile(user_id, email='new@example.com', current_password='wrong')
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        list(pool.map(attempt, range(3)))
+    user = auth.get_user(user_id)
+    assert user['failed_attempts'] == 3
+    assert user['locked_until'] is not None
 
 
 def test_locked_sign_in_pays_the_same_hashing_cost(tmp_path, monkeypatch):

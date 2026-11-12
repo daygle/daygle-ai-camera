@@ -257,33 +257,29 @@ def redact_camera_secrets(cam: dict[str, Any]) -> dict[str, Any]:
     admin's own UI needs the stored fields back. This stricter variant is for
     responses that reach **viewer-role** accounts (``/api/config``, the
     viewer branch of ``GET /api/cameras``): on top of the password strip it
-    masks any credentials EMBEDDED in ``stream_url`` (e.g.
-    ``rtsp://user:secret@cam/stream``), which the stream-source validator
-    accepts and which would otherwise echo the camera password verbatim to
-    every signed-in user. The masked URL keeps scheme/host/port/path so
-    non-admin consumers still see which camera the record describes; the
-    stored configuration is never modified.
+    removes URL userinfo, query and fragment from ``stream_url`` because
+    any of them may contain credentials. The masked URL keeps scheme, host,
+    port and path; the stored configuration is never modified.
     """
     out = _redact_camera(cam)
+    if out.get('path'):
+        out['path'] = str(out['path']).split('?', 1)[0].split('#', 1)[0]
     stream_url = str(out.get('stream_url') or '')
     if stream_url:
         try:
             parsed = urlsplit(stream_url)
+            hostname, port = parsed.hostname, parsed.port
+            if not parsed.scheme or not hostname:
+                raise ValueError('Invalid stream URL')
+            netloc = f'[{hostname}]' if ':' in hostname else hostname
+            if port is not None:
+                netloc = f'{netloc}:{port}'
+            out['has_stream_url_credentials'] = parsed.username is not None
+            out['stream_url'] = urlunsplit((parsed.scheme, netloc, parsed.path, '', ''))
         except ValueError:
-            parsed = None
-        if parsed is not None and parsed.username is not None:
-            out['has_stream_url_credentials'] = True
-            netloc = parsed.hostname or ''
-            # A bare IPv6 literal must stay bracketed in the rebuilt authority
-            # (mirrors ``build_stream_url``) or colons read as port separators.
-            if ':' in netloc and not netloc.startswith('['):
-                netloc = f'[{netloc}]'
-            if parsed.port is not None:
-                netloc = f'{netloc}:{parsed.port}'
-            out['stream_url'] = urlunsplit((
-                parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment,
-            ))
-        else:
+            # Old or restored configuration may predate URL validation.
+            # Never return an unparseable URL that could contain secrets.
+            out['stream_url'] = ''
             out['has_stream_url_credentials'] = False
     else:
         out['has_stream_url_credentials'] = False

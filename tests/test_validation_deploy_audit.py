@@ -82,6 +82,8 @@ def test_malformed_face_rules_body_does_not_wipe_rules(tmp_path, monkeypatch):
 @pytest.mark.parametrize('stream_url', [
     'file:///etc/shadow', 'concat:/etc/passwd|/etc/group', 'subfile,,start,0,end,0,,:/etc/passwd',
     '/etc/passwd', 'rtsp:', 'data:video/mp4;base64,AAAA',
+    'rtsp://[broken/stream', 'rtsp://camera:bad/stream', 'rtsp://camera:65536/stream',
+    'rtsp://user:pass@/stream', 'rtsp://camera/live\nmalicious',
 ])
 def test_camera_stream_url_must_be_a_network_stream(stream_url):
     validators = importlib.import_module('app.payload_validators')

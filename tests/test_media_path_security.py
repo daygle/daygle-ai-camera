@@ -46,6 +46,54 @@ def test_safe_storage_path_rejects_symlinked_media_when_supported(monkeypatch, t
     assert media_utils.safe_storage_path(link, roots=("recordings_dir",)) is None
 
 
+def test_recording_sidecars_do_not_follow_symlinks(monkeypatch, tmp_path):
+    from app import recording_extension
+
+    clip = tmp_path / 'clip.mp4'
+    clip.write_bytes(b'video')
+    secret = tmp_path / 'secret.json'
+    secret.write_text('[{"detections":[{"label":"private"}]}]')
+    (tmp_path / 'clip.track.json').symlink_to(secret)
+    assert recording_extension.load_recording_detection_track(clip) is None
+
+    outside = tmp_path / 'outside.mp4'
+    outside.write_bytes(b'video')
+    sidecar = tmp_path / 'clip.h264-audio.mp4'
+    sidecar.symlink_to(outside)
+    monkeypatch.setattr(media_utils, 'mp4_is_browser_playable', lambda _path: True)
+    assert media_utils.recording_stream_path(clip) == clip
+
+
+def test_recording_track_write_does_not_follow_old_temp_symlink(tmp_path):
+    from app import recording_extension
+
+    clip = tmp_path / 'clip.mp4'
+    protected = tmp_path / 'protected'
+    protected.write_bytes(b'private')
+    (tmp_path / 'clip.track.json.tmp').symlink_to(protected)
+    track = [{'detections': [{'label': 'person'}]}]
+    recording_extension.write_recording_detection_track(clip, track)
+    assert protected.read_bytes() == b'private'
+    assert recording_extension.load_recording_detection_track(clip) == track
+
+
+def test_failed_playback_marker_does_not_overwrite_hardlinked_file(monkeypatch, tmp_path):
+    clip = tmp_path / 'clip.mp4'
+    clip.write_bytes(b'video')
+    protected = tmp_path / 'protected'
+    protected.write_bytes(b'private')
+    marker = tmp_path / 'clip.playback.failed'
+    marker.hardlink_to(protected)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError('conversion failed')
+
+    monkeypatch.setattr(media_utils, 'transcode_recording_to_mp4', fail)
+    assert media_utils._convert_for_playback(clip, tmp_path / 'clip.h264-audio.mp4', marker) == clip
+    assert protected.read_bytes() == b'private'
+    assert marker.read_bytes() == b''
+
+
 def test_delete_recording_files_skips_out_of_tree_paths(monkeypatch, tmp_path):
     from app import recording_extension
 

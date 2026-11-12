@@ -20,7 +20,8 @@ from collections.abc import Callable
 import app.state as _state
 from app.camera_id import camera_storage_key
 from app.detection_status import GENERIC_TRIGGER_LABELS, json_safe_detections
-from app.media_utils import hevc_mp4_tag_args, newest_video_file
+from app.media_utils import _recording_input_options, hevc_mp4_tag_args, newest_video_file
+from app.utils import camera_stream_input_options
 from app.frame_capture_clock import (
     FrameCaptureClock,
     detection_frame_output_args,
@@ -386,8 +387,7 @@ class RecordingService:
             # -err_detect ignore_err keeps the capture alive without dropping it.
             '-err_detect',
             'ignore_err',
-            '-rtsp_transport',
-            'tcp',
+            *camera_stream_input_options(stream_url),
             '-i',
             stream_url,
             '-t',
@@ -802,9 +802,9 @@ class RecordingService:
                 '-threads', '1',
                 '-filter_threads', '1',
                 '-loglevel', 'error',
-                '-rtsp_transport', 'tcp',
                 '-fflags', '+discardcorrupt',
                 '-err_detect', 'ignore_err',
+                *camera_stream_input_options(stream_url),
                 '-i', stream_url,
                 '-map', '0:v:0',
                 '-map', '0:a:0?',
@@ -1447,8 +1447,6 @@ class RecordingService:
                 '-hide_banner',
                 '-loglevel',
                 'error',
-                '-rtsp_transport',
-                'tcp',
                 # Do NOT use +discardcorrupt here. On a flaky camera link it drops
                 # every corrupt VIDEO packet as it is captured, leaving near
                 # audio-only segments, so the event render later finds no video
@@ -1458,6 +1456,7 @@ class RecordingService:
                 # bad stream without throwing the video away.
                 '-err_detect',
                 'ignore_err',
+                *camera_stream_input_options(stream_url),
                 '-i',
                 stream_url,
                 # Output 1: rolling fragmented-MP4 video segments for event clips.
@@ -2129,7 +2128,8 @@ class RecordingService:
             return None
         try:
             result = subprocess.run(
-                [ffprobe, '-v', 'error', '-show_entries', 'format=duration',
+                [ffprobe, '-v', 'error', *_recording_input_options(segment),
+                 '-show_entries', 'format=duration',
                  '-of', 'default=noprint_wrappers=1:nokey=1', key],
                 capture_output=True, text=True, timeout=5, check=False,
             )
@@ -2242,6 +2242,7 @@ class RecordingService:
             if ffprobe:
                 command = [
                     ffprobe, '-v', 'error',
+                    '-protocol_whitelist', 'file', '-f', 'wav',
                     '-select_streams', 'a:0',
                     '-show_entries', 'stream=codec_name',
                     '-of', 'csv=p=0',
@@ -2997,6 +2998,7 @@ class RecordingService:
         command = [
             ffprobe,
             '-v', 'error',
+            *_recording_input_options(file_path),
             '-select_streams', 'v:0',
             '-count_packets',
             '-show_entries',

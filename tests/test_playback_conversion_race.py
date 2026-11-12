@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -12,6 +13,41 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import app.media_utils as mu  # noqa: E402
+
+
+def test_recording_probe_and_conversion_restrict_nested_resources(tmp_path, monkeypatch):
+    source = tmp_path / 'source.mp4'
+    source.write_bytes(b'video')
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        if command[0] == 'ffmpeg':
+            Path(command[-1]).write_bytes(b'output')
+        return subprocess.CompletedProcess(command, 0, stdout='h264', stderr='')
+
+    monkeypatch.setattr(mu, '_FFPROBE', 'ffprobe')
+    monkeypatch.setattr(mu, '_FFMPEG', 'ffmpeg')
+    monkeypatch.setattr(mu.subprocess, 'run', run)
+    mu.probe_video_codec(source)
+    mu.probe_video_duration(source)
+    mu.mp4_has_video_stream(source)
+    mu._transcode_attempt('ffmpeg', source, tmp_path / 'output.mp4', [], ['-c:v', 'libx264'], 30, False)
+    assert len(calls) == 5  # conversion validates its generated output too
+    for command in calls:
+        assert command[command.index('-protocol_whitelist') + 1] == 'file'
+        assert command[command.index('-format_whitelist') + 1] == 'mov,matroska,avi'
+        assert command[command.index('-f') + 1] == 'mov'
+        assert command[command.index('-enable_drefs') + 1] == '0'
+        assert command[command.index('-use_absolute_path') + 1] == '0'
+
+
+def test_recording_input_formats_do_not_apply_mov_options_to_other_containers():
+    for filename, demuxer in [('clip.mkv', 'matroska'), ('clip.webm', 'matroska'), ('clip.avi', 'avi')]:
+        options = mu._recording_input_options(Path(filename))
+        assert options[options.index('-f') + 1] == demuxer
+        assert '-enable_drefs' not in options
+
 
 
 def _hevc_clip(tmp_path, monkeypatch, convert):

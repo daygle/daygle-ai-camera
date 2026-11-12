@@ -10,7 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 import app.backup as backup_module
 import app.state as state
@@ -130,6 +131,46 @@ def test_full_restore_remaps_database_paths_and_restores_media(tmp_path, monkeyp
         archive.unlink(missing_ok=True)
 
 
+def test_restore_copy_does_not_overwrite_hardlinked_file(tmp_path):
+    source = tmp_path / 'source'
+    target = tmp_path / 'target'
+    source.mkdir()
+    target.mkdir()
+    protected = tmp_path / 'protected'
+    protected.write_bytes(b'private')
+    (source / 'clip.mp4').write_bytes(b'restored')
+    (target / 'clip.mp4').hardlink_to(protected)
+
+    assert backup_module._copy_restored_tree(source, target) == 1
+    assert protected.read_bytes() == b'private'
+    assert (target / 'clip.mp4').read_bytes() == b'restored'
+
+
+def test_restore_copy_rejects_dangling_symlink(tmp_path):
+    source = tmp_path / 'source'
+    target = tmp_path / 'target'
+    source.mkdir()
+    target.mkdir()
+    (source / 'clip.mp4').write_bytes(b'restored')
+    (target / 'clip.mp4').symlink_to(tmp_path / 'missing')
+
+    with pytest.raises(HTTPException, match='symbolic link'):
+        backup_module._copy_restored_tree(source, target)
+    assert not (tmp_path / 'missing').exists()
+
+
+@pytest.mark.parametrize('section', ['recordings', 'snapshots', 'events'])
+@pytest.mark.parametrize('directory', ['.prebuffer', '.frames', '.audio', 'backups'])
+def test_full_restore_rejects_runtime_directories(tmp_path, section, directory):
+    archive = tmp_path / 'backup.zip'
+    with zipfile.ZipFile(archive, 'w') as zf:
+        zf.writestr('manifest.json', json.dumps({'format': backup_module.FULL_BACKUP_FORMAT, 'version': 2}))
+        zf.writestr('database/source.sqlite3', b'database')
+        zf.writestr(f'{section}/{directory}/camera/segment.mp4', b'untrusted')
+    with pytest.raises(HTTPException, match='reserved runtime directory'):
+        backup_module.validate_full_backup(archive)
+
+
 def test_full_restore_rejects_archive_traversal(tmp_path):
     archive = tmp_path / "malicious.zip"
     manifest = {"format": backup_module.FULL_BACKUP_FORMAT, "version": 2}
@@ -140,3 +181,40 @@ def test_full_restore_rejects_archive_traversal(tmp_path):
     with pytest.raises(HTTPException, match="unsafe archive path"):
         backup_module.validate_full_backup(archive)
     assert not (tmp_path / "outside.txt").exists()
+
+
+@pytest.mark.parametrize('declared_length', [None, '1', '10000'])
+def test_restore_upload_limit_applies_before_multipart_spooling(tmp_path, monkeypatch, declared_length):
+    from app.api import settings_system_router as router
+
+    monkeypatch.setattr(router, 'MAX_BACKUP_UPLOAD_BYTES', 256)
+    monkeypatch.setattr(router, 'require_admin', lambda request: None)
+    app = FastAPI()
+    app.include_router(router.router)
+    app.dependency_overrides[router.get_database] = lambda: SimpleNamespace(database_path=tmp_path / 'db.sqlite3')
+    headers = {'Content-Type': 'multipart/form-data; boundary=boundary'}
+    if declared_length is not None:
+        headers['Content-Length'] = declared_length
+    body = (
+        b'--boundary\r\nContent-Disposition: form-data; name="file"; filename="backup.zip"\r\n\r\n'
+        + b'x' * 512 + b'\r\n--boundary--\r\n'
+    )
+    with TestClient(app) as client:
+        response = client.post('/api/settings/system/database/restore', content=iter([body[:128], body[128:]]), headers=headers)
+    assert response.status_code == 413
+    assert not list(tmp_path.glob('.restore-*'))
+    assert not router.DATABASE_RESTORE_LOCK.locked()
+
+
+def test_restore_upload_validates_multipart_file(tmp_path, monkeypatch):
+    from app.api import settings_system_router as router
+
+    monkeypatch.setattr(router, 'require_admin', lambda request: None)
+    app = FastAPI()
+    app.include_router(router.router)
+    app.dependency_overrides[router.get_database] = lambda: SimpleNamespace(database_path=tmp_path / 'db.sqlite3')
+    with TestClient(app) as client:
+        response = client.post('/api/settings/system/database/restore', files={'file': ('empty.sqlite3', b'')})
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'Uploaded backup is empty.'
+    assert not list(tmp_path.glob('.restore-*'))

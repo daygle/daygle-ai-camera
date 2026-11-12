@@ -62,7 +62,7 @@ def _playable_stream_path(file_path: Path) -> Path | None:
     if cached is not None:
         stream_path, mtime_ns, size = cached
         try:
-            stream_stat = stream_path.stat()
+            stream_stat = None if stream_path.is_symlink() else stream_path.stat()
         except OSError:
             stream_stat = None
         if stream_stat is not None and (stream_stat.st_mtime_ns, stream_stat.st_size) == (mtime_ns, size):
@@ -70,7 +70,7 @@ def _playable_stream_path(file_path: Path) -> Path | None:
                 _PLAYABLE_STREAM_CACHE.move_to_end(key)
             return stream_path
     stream_path = recording_stream_path(file_path)
-    if not stream_path.exists() or not mp4_has_video_stream(stream_path):
+    if stream_path.is_symlink() or not stream_path.exists() or not mp4_has_video_stream(stream_path):
         return None
     try:
         stream_stat = stream_path.stat()

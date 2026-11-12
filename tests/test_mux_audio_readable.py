@@ -76,6 +76,8 @@ def test_readable_filter_drops_unprobeable_and_keeps_good(tmp_path, monkeypatch)
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffprobe')
 
     def fake_run(command, *args, **kwargs):
+        assert command[command.index('-protocol_whitelist') + 1] == 'file'
+        assert command[command.index('-f') + 1] == 'wav'
         target = command[-1]
         ok = target != str(bad)
         return types.SimpleNamespace(
