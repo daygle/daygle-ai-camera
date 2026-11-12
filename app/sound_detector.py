@@ -25,6 +25,8 @@ from app.diagnostics import log_ai_diagnostic
 logger = logging.getLogger('daygle.sound')
 
 SAMPLE_RATE = 16000
+# Bound a stalled RTSP audio process, including FFmpeg redirect loops.
+RTSP_AUDIO_STALL_SECONDS = 30.0
 
 # Raised by app.recordings.audio_segments_after() when the per-camera ingest
 # has learned the RTSP stream carries no audio track. Mirrored here instead
@@ -959,16 +961,29 @@ class SoundDetector:
 
         while not self._stop_event.is_set():
             proc: subprocess.Popen | None = None
+            watchdog_done = threading.Event()
+            watchdog: threading.Thread | None = None
             try:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
                 raw_buf = bytearray()
                 need_bytes = chunk_samples * bytes_per_sample
                 advance_bytes = hop_samples * bytes_per_sample
+                last_audio_at = [time.monotonic()]
 
+                def watch_audio() -> None:
+                    while not watchdog_done.wait(0.5):
+                        if self._stop_event.is_set() or time.monotonic() - last_audio_at[0] >= RTSP_AUDIO_STALL_SECONDS:
+                            with contextlib.suppress(ProcessLookupError):
+                                proc.kill()
+                            return
+
+                watchdog = threading.Thread(target=watch_audio, daemon=True, name='sound-rtsp-watchdog')
+                watchdog.start()
                 while not self._stop_event.is_set() and proc.poll() is None:
                     chunk = proc.stdout.read(need_bytes - len(raw_buf))
                     if not chunk:
                         break
+                    last_audio_at[0] = time.monotonic()
                     raw_buf.extend(chunk)
                     if len(raw_buf) >= need_bytes:
                         audio = (
@@ -981,9 +996,15 @@ class SoundDetector:
                 logger.error('Sound monitor RTSP error: %s', exc)
                 self._set_status(f'error: {exc}')
             finally:
+                watchdog_done.set()
+                if watchdog is not None:
+                    watchdog.join()
                 if proc is not None:
-                    with contextlib.suppress(Exception):
+                    with contextlib.suppress(ProcessLookupError):
                         proc.kill()
+                    proc.wait()
+                    if proc.stdout is not None:
+                        proc.stdout.close()
 
             if not self._stop_event.is_set():
                 self._stop_event.wait(5.0)
