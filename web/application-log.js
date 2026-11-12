@@ -49,6 +49,7 @@ const SOURCE_LABELS = {
   cameras: 'Cameras',
   recording: 'Recording',
   ptz: 'PTZ',
+  rtsp_broker: 'RTSP broker',
   detection: 'Detection',
   analysis: 'AI analysis',
   models: 'Models',

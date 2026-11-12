@@ -78,7 +78,7 @@ _LEVEL_PREFIX_PATTERN = re.compile(r'^[A-Z]+:(?:(?P<logger>[A-Za-z_][\w.]*):)?\s
 # area is the third segment. A few older loggers keep their own names.
 # Keep the keys in step with the Source filter in web/application-log.html.
 _AREA_SOURCES = frozenset({
-    'cameras', 'recording', 'ptz',
+    'cameras', 'recording', 'ptz', 'rtsp_broker',
     'detection', 'analysis', 'models', 'faces', 'sound',
     'alerts',
     'auth', 'storage', 'updates', 'tunnel',
