@@ -24,6 +24,7 @@ from app.camera_config import (
 )
 from app.config_facades import effective_cameras_config, get_camera_config
 from app.media_utils import ffmpeg_decoder_available, is_hevc_codec, video_codec_label
+from app.rtsp_broker import RtspBrokerError, camera_input_url
 from app.utils import build_stream_url, camera_stream_input_options
 from app.state import _camera_health_lock, _camera_health_state
 import app.state as _state
@@ -324,12 +325,16 @@ async def test_camera_connection(request: Request, recording_service=Depends(get
     ffprobe = shutil.which('ffprobe')
     if not ffprobe:
         raise HTTPException(status_code=503, detail='ffprobe is not installed - cannot test connection.')
-    command = [ffprobe, '-v', 'quiet', *camera_stream_input_options(stream_url), '-i', stream_url,
-               '-show_entries', 'stream=codec_type,codec_name', '-of', 'json']
+    # The test must go through the same loopback RTSP broker as live
+    # capture, or it would itself be a redirect side-channel (and would
+    # report a redirected internal service as "reachable").
     try:
-        result = await run_in_threadpool(
-            subprocess.run, command, capture_output=True, timeout=8, check=False
-        )
+        with camera_input_url(stream_url) as input_url:
+            command = [ffprobe, '-v', 'quiet', *camera_stream_input_options(input_url), '-i', input_url,
+                       '-show_entries', 'stream=codec_type,codec_name', '-of', 'json']
+            result = await run_in_threadpool(
+                subprocess.run, command, capture_output=True, timeout=8, check=False
+            )
         if result.returncode == 0:
             video_codec = None
             try:
@@ -362,6 +367,8 @@ async def test_camera_connection(request: Request, recording_service=Depends(get
             }
         stderr = recording_service.redact_stream_credentials(result.stderr.decode('utf-8', errors='replace').strip())
         return {'online': False, 'message': f'Stream unreachable: {stderr[:300]}' if stderr else 'Stream unreachable.'}
+    except RtspBrokerError:
+        return {'online': False, 'message': 'Stream unreachable: RTSP redirect broker unavailable.'}
     except subprocess.TimeoutExpired:
         return {'online': False, 'message': 'Connection timed out (8 s). Check host, port, and credentials.'}
 

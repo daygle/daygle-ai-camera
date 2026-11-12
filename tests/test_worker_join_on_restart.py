@@ -75,8 +75,11 @@ def _patch_event_recording(monkeypatch, recordings_module, target_cls):
     original_start = recordings_module.threading.Thread.start
 
     def tracking_start(self) -> None:
-        with events_lock:
-            events.append((time.monotonic(), "thread_start"))
+        # The loopback RTSP broker (app.rtsp_broker) also starts threads;
+        # only worker-thread starts matter for the join-ordering assertions.
+        if not self.name.startswith("rtsp-broker"):
+            with events_lock:
+                events.append((time.monotonic(), "thread_start"))
         original_start(self)
 
     monkeypatch.setattr(recordings_module.threading.Thread, "start", tracking_start)

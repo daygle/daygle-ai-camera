@@ -8,17 +8,29 @@ include deployment context when reporting.
 ## RTSP camera network isolation
 
 Only connect to trusted camera servers. An RTSP server can redirect FFmpeg or
-OpenCV to a different host or port; the stream protocol allowlist does not
-prevent this. Apply outbound network restrictions to the service and its child
-processes so they can reach only the camera endpoints and other services the
-application needs. Account for DNS and required application traffic when
-configuring those rules; private LAN addresses are not inherently unsafe.
-Keep both the system FFmpeg/ffprobe and OpenCV's bundled FFmpeg updated. The
-FFmpeg fixes for CVE-2026-107698 reject non-RTSP redirect schemes, but do not
-prevent redirects to another RTSP server. FFmpeg through 9.0.2 is also affected
-by the redirect-loop issue CVE-2026-107696; existing worker timeouts limit some
-loops, but are not a network security boundary. OpenCV and direct sound capture
-are separate paths and may use different FFmpeg builds.
+OpenCV to a different host or port; FFmpeg offers no option to disable RTSP
+redirects (`-max_redirects` is an HTTP-only option), and the stream protocol
+allowlist does not prevent a redirect to another RTSP server. To close that
+SSRF pivot in code, every live RTSP connection in this application — the
+shared ingest/prebuffer, continuous and event-clip recording, RTSP sound
+capture, the OpenCV capture, and the camera connection test — is routed
+through the loopback broker in `app/rtsp_broker.py`. The broker re-resolves
+the configured camera host on each new connection (falling back to the
+last-known-good addresses on transient DNS failure, so DHCP address changes
+are picked up on reconnect), only ever connects to those resolved addresses,
+and drops any 3xx redirect whose `Location` changes the scheme, host, or
+port; same-authority redirects are rewritten back to the broker. Capture
+fails closed if the broker cannot start. As defence in depth, also apply
+outbound network restrictions to the service and its child processes so they
+can reach only the camera endpoints and other services the application
+needs. Account for DNS and required application traffic when configuring
+those rules; private LAN addresses are not inherently unsafe. Keep both the
+system FFmpeg/ffprobe and OpenCV's bundled FFmpeg updated. The FFmpeg fixes
+for CVE-2026-107698 reject non-RTSP redirect schemes, but do not prevent
+redirects to another RTSP server. FFmpeg through 9.0.2 is also affected by
+the redirect-loop issue CVE-2026-107696; existing worker timeouts limit some
+loops, but are not a network security boundary. OpenCV and direct sound
+capture are separate paths and may use different FFmpeg builds.
 
 ## Supported versions
 

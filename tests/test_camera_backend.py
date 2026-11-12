@@ -9,7 +9,12 @@ import sys
 import pytest
 
 from app.camera_backend import OpenCvStreamCamera
-from app.utils import CAMERA_STREAM_FORMATS, CAMERA_STREAM_PROTOCOLS, camera_stream_input_options
+from app.utils import (
+    CAMERA_STREAM_FORMATS,
+    CAMERA_STREAM_PROTOCOLS,
+    RTSP_STREAM_PROTOCOLS,
+    camera_stream_input_options,
+)
 
 
 @pytest.mark.parametrize('url', ['http://camera/stream', 'https://camera/stream'])
@@ -23,9 +28,19 @@ def test_live_http_input_rejects_redirects_and_playlists(url) -> None:
 
 
 def test_live_rtsp_input_keeps_tcp_without_http_options() -> None:
+    # ``-max_redirects`` is an HTTP-protocol option with no effect on the
+    # RTSP demuxer, so RTSP inputs must not carry it (older tools reject
+    # unknown options and would break capture); redirect enforcement for
+    # RTSP lives in app.rtsp_broker, which proxies every live connection.
+    # The RTSP whitelist also excludes HTTP/RTMP so a redirect cannot
+    # pivot the capture to a non-RTSP service.
     options = camera_stream_input_options('rtsp://camera/stream')
-    assert options[-2:] == ('-rtsp_transport', 'tcp')
+    assert options == ('-protocol_whitelist', RTSP_STREAM_PROTOCOLS,
+                       '-format_whitelist', CAMERA_STREAM_FORMATS,
+                       '-rtsp_transport', 'tcp')
     assert '-max_redirects' not in options
+    assert 'http' not in RTSP_STREAM_PROTOCOLS.split(',')
+    assert 'rtmp' not in RTSP_STREAM_PROTOCOLS.split(',')
 
 
 def test_opencv_enforces_capture_options_over_inherited_values(monkeypatch) -> None:
@@ -112,7 +127,10 @@ def test_get_frame_probes_declared_rtsp_rate_once_and_parses_fraction(monkeypatc
     assert first['effective_fps'] == 25.0
     assert second['fps'] == 25.0
     assert len(calls) == 1
-    assert calls[0][-2:] == ['-i', 'rtsp://user:secret@example/stream']
+    # The probe runs through the loopback RTSP broker, never the camera URL.
+    assert calls[0][-2] == '-i'
+    assert calls[0][-1].startswith('rtsp://user:secret@127.0.0.1:')
+    assert calls[0][-1].endswith('/stream')
 
 
 def test_get_frame_schedules_probe_in_background(monkeypatch) -> None:
