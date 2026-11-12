@@ -280,8 +280,15 @@ def validate_camera_stream_source(settings: dict[str, Any]) -> None:
     """Reject a camera ``stream_url`` / ``host`` ffmpeg must not be given."""
     stream_url = str(settings.get('stream_url') or '').strip()
     if stream_url:
-        parsed = urlsplit(stream_url)
-        if parsed.scheme.lower() not in ALLOWED_STREAM_URL_SCHEMES or not parsed.netloc:
+        try:
+            parsed = urlsplit(stream_url)
+            hostname, port = parsed.hostname, parsed.port
+        except ValueError:
+            hostname, port = None, None
+            parsed = None
+        if (parsed is None or parsed.scheme.lower() not in ALLOWED_STREAM_URL_SCHEMES
+                or not hostname or (port is not None and port == 0)
+                or any(ord(character) < 32 or ord(character) == 127 for character in stream_url)):
             raise HTTPException(
                 status_code=400,
                 detail=(

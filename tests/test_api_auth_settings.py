@@ -775,9 +775,11 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
 
     class FakeCv2:
         CAP_PROP_BUFFERSIZE = 38
+        CAP_FFMPEG = 1900
 
         @staticmethod
-        def VideoCapture(stream_url):
+        def VideoCapture(stream_url, backend):
+            assert backend == FakeCv2.CAP_FFMPEG
             return FakeCapture(stream_url)
 
         @staticmethod
@@ -874,9 +876,11 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
 
     class FakeCv2:
         CAP_PROP_BUFFERSIZE = 38
+        CAP_FFMPEG = 1900
 
         @staticmethod
-        def VideoCapture(stream_url):
+        def VideoCapture(stream_url, backend):
+            assert backend == FakeCv2.CAP_FFMPEG
             return FakeCapture(stream_url)
 
         @staticmethod

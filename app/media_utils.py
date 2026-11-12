@@ -25,6 +25,7 @@ import os
 import queue
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -135,6 +136,26 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
 _FFPROBE: str | None = shutil.which('ffprobe')
 _FFMPEG: str | None = shutil.which('ffmpeg')
 
+# Restored recordings are untrusted. Do not let a playlist or external MP4
+# track open another local file or initiate a network connection. The app
+# records MP4; Matroska and AVI cover existing legacy playback conversions.
+_RECORDING_INPUT_OPTIONS = (
+    '-protocol_whitelist', 'file',
+    '-format_whitelist', 'mov,matroska,avi',
+)
+
+
+def _recording_input_options(file_path: Path) -> tuple[str, ...]:
+    # MOV-only AVOptions must not be passed to Matroska or AVI. Force the
+    # demuxer for known suffixes so renamed input cannot bypass these options.
+    suffix = file_path.suffix.lower()
+    if suffix in {'.mkv', '.webm'}:
+        return (*_RECORDING_INPUT_OPTIONS, '-f', 'matroska')
+    if suffix == '.avi':
+        return (*_RECORDING_INPUT_OPTIONS, '-f', 'avi')
+    # Treat unknown suffixes as MP4, never as auto-detected playlists.
+    return (*_RECORDING_INPUT_OPTIONS, '-f', 'mov', '-enable_drefs', '0', '-use_absolute_path', '0')
+
 
 def recording_playback_sidecar_path(file_path: Path) -> Path:
     return file_path.with_name(f'{file_path.stem}.h264-audio.mp4')
@@ -170,7 +191,8 @@ def _conversion_lock(file_path: Path) -> threading.Lock:
 
 
 def _fresh_sidecar(file_path: Path, playback_path: Path) -> bool:
-    return playback_path.exists() and file_path.exists() and playback_path.stat().st_mtime >= file_path.stat().st_mtime
+    return (not playback_path.is_symlink() and playback_path.exists() and file_path.exists()
+            and playback_path.stat().st_mtime >= file_path.stat().st_mtime)
 
 
 def recording_stream_path(file_path: Path, *, low_priority: bool = False) -> Path:
@@ -186,7 +208,7 @@ def recording_stream_path(file_path: Path, *, low_priority: bool = False) -> Pat
         if _fresh_sidecar(file_path, playback_path):
             return playback_path
         if (
-            failed_marker.exists() and file_path.exists()
+            not failed_marker.is_symlink() and failed_marker.exists() and file_path.exists()
             and failed_marker.stat().st_mtime >= file_path.stat().st_mtime
             and time.time() - failed_marker.stat().st_mtime < PLAYBACK_FAILURE_RETRY_SECONDS
         ):
@@ -201,7 +223,13 @@ def _convert_for_playback(file_path: Path, playback_path: Path, failed_marker: P
         logger.warning('Recording playback conversion failed for %s: %s', file_path, exc)
         # A marker is only an optimization; keep the playable fallback.
         with contextlib.suppress(OSError):
-            failed_marker.write_bytes(b'')
+            # Never truncate a symlink or a hard-linked file as a marker.
+            fd, name = tempfile.mkstemp(prefix='.playback-failed-', dir=failed_marker.parent)
+            os.close(fd)
+            try:
+                os.replace(name, failed_marker)
+            finally:
+                Path(name).unlink(missing_ok=True)
         return file_path
     failed_marker.unlink(missing_ok=True)
     return playback_path if playback_path.exists() else file_path
@@ -295,7 +323,7 @@ def probe_stream_codec(file_path: Path, stream_selector: str) -> str | None:
     ffprobe = _FFPROBE or shutil.which('ffprobe')
     if not ffprobe:
         return None
-    command = [ffprobe, '-v', 'error', '-select_streams', stream_selector,
+    command = [ffprobe, '-v', 'error', *_recording_input_options(file_path), '-select_streams', stream_selector,
                '-show_entries', 'stream=codec_name',
                '-of', 'default=noprint_wrappers=1:nokey=1', str(file_path)]
     try:
@@ -320,7 +348,7 @@ def probe_video_duration(file_path: Path) -> float | None:
     ffprobe = _FFPROBE or shutil.which('ffprobe')
     if not ffprobe or not file_path.exists():
         return None
-    command = [ffprobe, '-v', 'error', '-show_entries', 'format=duration',
+    command = [ffprobe, '-v', 'error', *_recording_input_options(file_path), '-show_entries', 'format=duration',
                '-of', 'default=noprint_wrappers=1:nokey=1', str(file_path)]
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
@@ -414,6 +442,7 @@ def _transcode_attempt(
     command = [
         ffmpeg, '-y',
         '-fflags', '+discardcorrupt', '-err_detect', 'ignore_err',
+        *_recording_input_options(source_path),
         *input_args,
         '-i', str(source_path),
         '-map', '0:v:0', '-map', '0:a:0?',
@@ -543,7 +572,7 @@ def _preconvert_worker() -> None:
 def mp4_has_video_stream(file_path: Path) -> bool:
     if not _FFPROBE:
         return file_path.exists() and file_path.stat().st_size > 0
-    command = [_FFPROBE, '-v', 'error', '-select_streams', 'v:0',
+    command = [_FFPROBE, '-v', 'error', *_recording_input_options(file_path), '-select_streams', 'v:0',
                '-show_entries', 'stream=codec_name',
                '-of', 'default=noprint_wrappers=1:nokey=1', str(file_path)]
     try:

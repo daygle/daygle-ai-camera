@@ -12,6 +12,7 @@ import threading
 import time
 
 from app.alerts import _now_hm_in_admin_tz
+from app.utils import camera_stream_input_options
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
@@ -942,7 +943,7 @@ class SoundDetector:
 
         cmd = [
             ffmpeg, '-loglevel', 'error',
-            '-rtsp_transport', 'tcp',
+            *camera_stream_input_options(self.rtsp_url),
             '-i', self.rtsp_url,
             '-vn',
             '-acodec', 'pcm_s16le',

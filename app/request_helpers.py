@@ -137,7 +137,7 @@ async def read_json_body(request: Request) -> Any:
     body = await _read_bounded_body(request, MAX_JSON_BYTES, 'JSON body')
     try:
         return json.loads(body, parse_constant=_reject_non_finite, parse_float=_parse_finite_float)
-    except (ValueError, UnicodeDecodeError) as exc:
+    except (ValueError, UnicodeDecodeError, RecursionError) as exc:
         raise HTTPException(status_code=400, detail='Request body must be valid JSON.') from exc
 
 

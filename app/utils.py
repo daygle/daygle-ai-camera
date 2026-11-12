@@ -113,6 +113,23 @@ def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
     return str(settings.get(key) or '').strip()
 
 
+# Restrict camera demuxers and protocols to exclude playlists and local files.
+# HTTP redirect control is supported by newer FFmpeg builds; older command-line
+# tools reject the unknown option rather than opening the HTTP stream.
+CAMERA_STREAM_PROTOCOLS = 'rtsp,rtsps,rtmp,rtmps,http,https,tls,tcp,udp,rtp,srt,srtp,crypto,httpproxy'
+CAMERA_STREAM_FORMATS = 'rtsp,rtp,mjpeg,mjpeg_2000,mpjpeg,mpegts,mov,matroska,flv,h264,hevc'
+
+
+def camera_stream_input_options(url: str) -> tuple[str, ...]:
+    options = ('-protocol_whitelist', CAMERA_STREAM_PROTOCOLS, '-format_whitelist', CAMERA_STREAM_FORMATS)
+    scheme = urlsplit(url).scheme.lower()
+    if scheme in {'http', 'https'}:
+        return (*options, '-max_redirects', '0')
+    if scheme in {'rtsp', 'rtsps'}:
+        return (*options, '-rtsp_transport', 'tcp')
+    return options
+
+
 def _inject_credentials(url: str, settings: dict[str, Any]) -> str:
     """Inject username/password credentials into an RTSP URL if present."""
     username = _non_empty_setting(settings, 'username')

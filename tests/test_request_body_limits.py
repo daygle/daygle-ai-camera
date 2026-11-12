@@ -60,6 +60,13 @@ def test_malformed_json_stays_a_client_error():
     assert exc.value.status_code == 400
 
 
+def test_deeply_nested_json_is_a_client_error():
+    request = _request(b'[' * 10000 + b'0' + b']' * 10000)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(read_json_body(request))
+    assert exc.value.status_code == 400
+
+
 def test_onvif_reply_within_cap_is_decoded():
     reply = io.BytesIO(b'<soap>ok</soap>')
     assert ptz._read_onvif_response(reply) == '<soap>ok</soap>'

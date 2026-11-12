@@ -358,6 +358,13 @@ def _validate_full_backup_archive(path: Path) -> tuple[dict[str, Any], str]:
                 root = name.split('/', 1)[0]
                 if root not in allowed_roots:
                     raise HTTPException(status_code=400, detail='Full backup contains an unexpected archive section.')
+                # Full backups never contain live ingest state. Reject it in
+                # every media section: configured storage roots can overlap.
+                if root in {'recordings', 'snapshots', 'events'} and any(
+                    part.casefold() in {'.prebuffer', '.frames', '.audio', 'backups'}
+                    for part in PurePosixPath(name).parts[1:]
+                ):
+                    raise HTTPException(status_code=400, detail='Full backup contains a reserved runtime directory.')
                 if root == 'database' and not info.is_dir():
                     database_members.append(name)
             total_size += max(0, int(info.file_size))
@@ -492,7 +499,7 @@ def _remap_restored_database(database_path: Path, manifest: dict[str, Any], targ
 def _copy_restored_tree(source: Path, target: Path) -> int:
     if not source.exists():
         return 0
-    if target.exists() and target.is_symlink():
+    if target.is_symlink():
         raise HTTPException(status_code=400, detail='Configured restore directory is a symbolic link.')
     target.mkdir(parents=True, exist_ok=True)
     copied = 0
@@ -507,16 +514,25 @@ def _copy_restored_tree(source: Path, target: Path) -> int:
             current_target = target
             for part in relative.parts[:-1]:
                 current_target = current_target / part
-                if current_target.exists() and current_target.is_symlink():
+                if current_target.is_symlink():
                     raise HTTPException(status_code=400, detail='Configured restore directory contains a symbolic link.')
             raw_target_file = target / relative
-            if raw_target_file.exists() and raw_target_file.is_symlink():
+            if raw_target_file.is_symlink():
                 raise HTTPException(status_code=400, detail='Configured restore directory contains a symbolic link.')
             target_file = raw_target_file.resolve(strict=False)
             if not target_file.is_relative_to(target.resolve(strict=False)):
                 raise HTTPException(status_code=400, detail='Full backup media path is unsafe.')
             target_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_file, target_file)
+            # Replace the directory entry rather than truncating an existing
+            # inode, which may be hard-linked to a file outside the restore root.
+            fd, temp_name = tempfile.mkstemp(prefix='.restore-', dir=target_file.parent)
+            os.close(fd)
+            temp_file = Path(temp_name)
+            try:
+                shutil.copy2(source_file, temp_file)
+                os.replace(temp_file, target_file)
+            finally:
+                temp_file.unlink(missing_ok=True)
             copied += 1
     return copied
 

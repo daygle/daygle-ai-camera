@@ -599,6 +599,7 @@ class AuthService:
         email_changed = (
             email is not None and email.strip() != str(existing.get('email') or '')
         )
+        verified_password_hash = None
         if username_changed or email_changed:
             if not current_password:
                 raise AuthError(
@@ -618,6 +619,7 @@ class AuthService:
                 if not self.verify_password(current_password, row['password_hash']):
                     self._record_failed_password(db, row, now_dt)
                     raise AuthError('Current password is incorrect.')
+                verified_password_hash = row['password_hash']
         updates: list[str] = []
         params: list[Any] = []
         if username is not None:
@@ -668,6 +670,17 @@ class AuthService:
         params.extend([utc_now(), user_id])
         try:
             with self.connect() as db:
+                db.execute('BEGIN IMMEDIATE')
+                current = db.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
+                if current is None or not current['is_active']:
+                    raise AuthError('User not found or inactive.')
+                username_changed = username is not None and username != str(current['username'] or '')
+                email_changed = email is not None and email.strip() != str(current['email'] or '')
+                if username_changed or email_changed:
+                    if verified_password_hash is None or current['password_hash'] != verified_password_hash:
+                        raise AuthError('Current password is required to change username or email.')
+                    if _is_locked_until_future(current['locked_until'], datetime.now(UTC)):
+                        raise AuthError('Account is temporarily locked. Try again later.')
                 cursor = db.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
                 if cursor.rowcount == 0:
                     raise AuthError("User not found.")
@@ -711,9 +724,16 @@ class AuthService:
             if not self.verify_password(current_password, row["password_hash"]):
                 self._record_failed_password(db, row, now_dt)
                 raise AuthError("Current password is incorrect.")
+            new_hash = self.hash_password(new_password)
+            db.execute('BEGIN IMMEDIATE')
+            current = db.execute('SELECT password_hash, is_active, locked_until FROM users WHERE id = ?', (user_id,)).fetchone()
+            if current is None or not current['is_active'] or current['password_hash'] != row['password_hash']:
+                raise AuthError('Current password is incorrect.')
+            if _is_locked_until_future(current['locked_until'], datetime.now(UTC)):
+                raise AuthError('Account is temporarily locked. Try again later.')
             db.execute(
                 "UPDATE users SET password_hash = ?, failed_attempts = 0, locked_until = NULL, updated_at = ? WHERE id = ?",
-                (self.hash_password(new_password), utc_now(), user_id),
+                (new_hash, utc_now(), user_id),
             )
             db.execute(
                 "DELETE FROM user_sessions WHERE user_id = ? AND session_token IS NOT ?",
@@ -730,13 +750,18 @@ class AuthService:
         afterwards, which makes ``connect()`` roll back -- so the counter is
         committed here first, or the failure would never be recorded.
         """
-        failures = int(row["failed_attempts"] or 0) + 1
-        locked_until = None
-        if failures >= self.max_login_attempts:
-            locked_until = (now_dt + self.lockout).astimezone(UTC).isoformat()
+        # Calculate from the current database value, not the row read before
+        # password verification: concurrent guesses may have updated it since.
         db.execute(
-            "UPDATE users SET failed_attempts = ?, locked_until = ?, updated_at = ? WHERE id = ?",
-            (failures, locked_until, now_dt.astimezone(UTC).isoformat(), row["id"]),
+            "UPDATE users SET failed_attempts = COALESCE(failed_attempts, 0) + 1, "
+            "locked_until = CASE WHEN COALESCE(failed_attempts, 0) + 1 >= ? "
+            "THEN ? ELSE locked_until END, updated_at = ? WHERE id = ?",
+            (
+                self.max_login_attempts,
+                (now_dt + self.lockout).astimezone(UTC).isoformat(),
+                now_dt.astimezone(UTC).isoformat(),
+                row["id"],
+            ),
         )
         db.commit()
 
@@ -801,6 +826,18 @@ class AuthService:
                 if not self.verify_password(password, row["password_hash"]):
                     self._record_failed_password(db, row, now_dt)
                     raise AuthError("Invalid username or password.")
+                # Revalidate after hashing under the write lock so a concurrent
+                # password reset, rename, deactivation or lockout cannot issue a
+                # session based on credentials that are no longer valid.
+                db.execute('BEGIN IMMEDIATE')
+                current = db.execute('SELECT * FROM users WHERE id = ?', (row['id'],)).fetchone()
+                if (current is None or not current['is_active']
+                        or current['username'] != username
+                        or current['password_hash'] != row['password_hash']):
+                    raise AuthError('Invalid username or password.')
+                if _is_locked_until_future(current['locked_until'], datetime.now(UTC)):
+                    raise AuthError('Account is temporarily locked. Try again later.')
+                row = current
                 token = secrets.token_urlsafe(48)
                 csrf_token = secrets.token_urlsafe(32)
                 absolute_expires_at = now_dt + self.absolute_session_lifetime

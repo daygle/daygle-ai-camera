@@ -289,6 +289,31 @@ def test_redact_camera_secrets_masks_stream_url_credentials():
     assert out['name'] == 'Front'
 
 
+@pytest.mark.parametrize('url', [
+    'rtsp://cam.lan/stream?token=secret',
+    'rtsp://user:password@cam.lan/stream?key=secret#fragment-secret',
+    'rtsp://cam.lan/stream#fragment-secret',
+])
+def test_redact_camera_secrets_strips_query_and_fragment(url):
+    camera_config = importlib.import_module('app.camera_config')
+    result = camera_config.redact_camera_secrets({'stream_url': url})
+    assert result['stream_url'] == 'rtsp://cam.lan/stream'
+
+
+@pytest.mark.parametrize('url', ['rtsp://user:password@cam:bad/stream', 'rtsp://[broken/stream'])
+def test_redact_camera_secrets_fails_closed_for_malformed_url(url):
+    camera_config = importlib.import_module('app.camera_config')
+    assert camera_config.redact_camera_secrets({'stream_url': url})['stream_url'] == ''
+
+
+def test_redact_camera_secrets_strips_host_based_path_query_and_fragment():
+    camera_config = importlib.import_module('app.camera_config')
+    camera = {'host': 'cam.lan', 'path': 'stream1?token=secret#fragment-secret'}
+    out = camera_config.redact_camera_secrets(camera)
+    assert out['path'] == 'stream1'
+    assert camera['path'] == 'stream1?token=secret#fragment-secret'
+
+
 def test_redact_camera_secrets_leaves_clean_stream_url_unchanged():
     camera_config = importlib.import_module('app.camera_config')
     plain = 'rtsp://cam.lan/stream1'

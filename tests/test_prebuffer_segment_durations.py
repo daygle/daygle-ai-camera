@@ -74,6 +74,30 @@ def _refined(service, camera_dir, start_ts, end_ts):
     return service._probe_window_segment_starts(camera_dir, timed, start_ts, end_ts)
 
 
+def test_recording_and_prebuffer_probes_restrict_input_resources(tmp_path, monkeypatch):
+    service = _service(tmp_path)
+    video = tmp_path / 'clip.mp4'
+    video.write_bytes(b'video')
+    calls = []
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffprobe')
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        if '-count_packets' in command:
+            return subprocess.CompletedProcess(command, 0, stdout='{"streams": []}', stderr='')
+        return subprocess.CompletedProcess(command, 0, stdout='1.0', stderr='')
+
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    service._segment_duration_seconds(video, video.stat())
+    service._probe_clip(video)
+    assert len(calls) == 2
+    for command in calls:
+        assert command[command.index('-protocol_whitelist') + 1] == 'file'
+        assert command[command.index('-format_whitelist') + 1] == 'mov,matroska,avi'
+        assert command[command.index('-enable_drefs') + 1] == '0'
+        assert command[command.index('-use_absolute_path') + 1] == '0'
+
+
 def test_window_segments_use_probed_duration_when_spacing_exceeds_estimate_threshold(tmp_path, monkeypatch):
     """6s segments spaced fractionally above 6.0s: the estimate falls back to
     ``end - 4`` for each, the probe gives the real 6s."""

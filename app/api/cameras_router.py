@@ -24,7 +24,7 @@ from app.camera_config import (
 )
 from app.config_facades import effective_cameras_config, get_camera_config
 from app.media_utils import ffmpeg_decoder_available, is_hevc_codec, video_codec_label
-from app.utils import build_stream_url
+from app.utils import build_stream_url, camera_stream_input_options
 from app.state import _camera_health_lock, _camera_health_state
 import app.state as _state
 
@@ -324,7 +324,7 @@ async def test_camera_connection(request: Request, recording_service=Depends(get
     ffprobe = shutil.which('ffprobe')
     if not ffprobe:
         raise HTTPException(status_code=503, detail='ffprobe is not installed - cannot test connection.')
-    command = [ffprobe, '-v', 'quiet', '-rtsp_transport', 'tcp', '-i', stream_url,
+    command = [ffprobe, '-v', 'quiet', *camera_stream_input_options(stream_url), '-i', stream_url,
                '-show_entries', 'stream=codec_type,codec_name', '-of', 'json']
     try:
         result = await run_in_threadpool(

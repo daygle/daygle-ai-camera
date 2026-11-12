@@ -10,10 +10,12 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException, MultiPartParser
 
 from app.auth import utc_now
 from app.cloudflare_tunnel import MAX_TUNNEL_TOKEN_LENGTH, CloudflareTunnelSecretStore
@@ -43,6 +45,7 @@ from app.payload_validators import (
 from app.request_helpers import admin_json_object, write_audit_log
 from app.backup import (
     DATABASE_RESTORE_LOCK,
+    FULL_BACKUP_MAX_UNCOMPRESSED_BYTES,
     create_database_backup,
     create_full_backup,
     overwrite_database_from_file,
@@ -58,6 +61,28 @@ from app.profile_presets import list_presets
 import app.state as _state
 
 router = APIRouter()
+
+# Allow room for multipart framing around a maximum-size full backup.
+MAX_BACKUP_UPLOAD_BYTES = FULL_BACKUP_MAX_UNCOMPRESSED_BYTES + 1024 * 1024
+
+
+async def _bounded_backup_stream(request: Request):
+    declared = request.headers.get('content-length')
+    if declared is not None:
+        try:
+            length = int(declared)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail='Invalid Content-Length.') from exc
+        if length < 0:
+            raise HTTPException(status_code=400, detail='Invalid Content-Length.')
+        if length > MAX_BACKUP_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail='Backup upload is too large.')
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_BACKUP_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail='Backup upload is too large.')
+        yield chunk
 
 
 @router.get('/api/settings/system')
@@ -118,15 +143,23 @@ def backup_database_full(request: Request, db=Depends(get_database)):
 
 
 @router.post('/api/settings/system/database/restore')
-async def restore_database(request: Request, file: UploadFile=File(...), db=Depends(get_database)):
+async def restore_database(request: Request, db=Depends(get_database)):
     require_admin(request)
-    filename = Path(file.filename or '').name
-    if not filename:
-        raise HTTPException(status_code=400, detail='Choose a SQLite database or full ZIP backup file to restore.')
     if not DATABASE_RESTORE_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail='Another database restore is already in progress.')
     restore_temp = db.database_path.parent / f'.restore-{secrets.token_hex(8)}.sqlite3'
+    form = None
     try:
+        if not request.headers.get('content-type', '').lower().startswith('multipart/form-data'):
+            raise HTTPException(status_code=400, detail='Expected a multipart backup upload.')
+        try:
+            form = await MultiPartParser(request.headers, _bounded_backup_stream(request), max_files=1, max_fields=0).parse()
+        except MultiPartException as exc:
+            raise HTTPException(status_code=400, detail='Invalid multipart backup upload.') from exc
+        file = form.get('file')
+        if not isinstance(file, UploadFile) or not Path(file.filename or '').name:
+            raise HTTPException(status_code=400, detail='Choose a SQLite database or full ZIP backup file to restore.')
+        filename = Path(file.filename).name
         # The upload can be a full backup (database + media + models), so every
         # blocking file call is pushed to the threadpool: writing chunks inline
         # would stall the event loop -- and every concurrent live stream -- for
@@ -169,7 +202,8 @@ async def restore_database(request: Request, file: UploadFile=File(...), db=Depe
         restore_temp.unlink(missing_ok=True)
         for sidecar_suffix in ('-wal', '-shm'):
             Path(f'{restore_temp}{sidecar_suffix}').unlink(missing_ok=True)
-        await file.close()
+        if form is not None:
+            await form.close()
 
 
 def _tunnel_status(db=None):

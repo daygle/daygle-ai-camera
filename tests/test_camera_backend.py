@@ -2,11 +2,57 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 
 import pytest
 
 from app.camera_backend import OpenCvStreamCamera
+from app.utils import CAMERA_STREAM_FORMATS, CAMERA_STREAM_PROTOCOLS, camera_stream_input_options
+
+
+@pytest.mark.parametrize('url', ['http://camera/stream', 'https://camera/stream'])
+def test_live_http_input_rejects_redirects_and_playlists(url) -> None:
+    options = camera_stream_input_options(url)
+    assert options == ('-protocol_whitelist', CAMERA_STREAM_PROTOCOLS,
+                       '-format_whitelist', CAMERA_STREAM_FORMATS, '-max_redirects', '0')
+    assert 'hls' not in CAMERA_STREAM_FORMATS.split(',')
+    assert 'file' not in CAMERA_STREAM_PROTOCOLS.split(',')
+    assert '-rtsp_transport' not in options
+
+
+def test_live_rtsp_input_keeps_tcp_without_http_options() -> None:
+    options = camera_stream_input_options('rtsp://camera/stream')
+    assert options[-2:] == ('-rtsp_transport', 'tcp')
+    assert '-max_redirects' not in options
+
+
+def test_opencv_enforces_capture_options_over_inherited_values(monkeypatch) -> None:
+    class Capture:
+        def isOpened(self):
+            return True
+
+    class FakeCv2:
+        CAP_FFMPEG = 1900
+
+        @staticmethod
+        def VideoCapture(_url, backend):
+            assert backend == FakeCv2.CAP_FFMPEG
+            options = dict(option.split(';', 1) for option in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'].split('|'))
+            assert options['protocol_whitelist'] == CAMERA_STREAM_PROTOCOLS
+            assert options['format_whitelist'] == CAMERA_STREAM_FORMATS
+            assert options['max_redirects'] == '0'
+            assert options['custom'] == 'value'
+            return Capture()
+
+    monkeypatch.setenv('OPENCV_FFMPEG_CAPTURE_OPTIONS',
+                       'protocol_whitelist;ALL|format_whitelist;ALL|max_redirects;9|custom;value')
+    monkeypatch.setitem(sys.modules, 'cv2', FakeCv2)
+    monkeypatch.setattr('app.camera_backend._configure_opencv_threads', lambda: None)
+    monkeypatch.setattr('app.camera_backend._configure_ffmpeg_log_level', lambda: None)
+    camera = OpenCvStreamCamera('http://camera/stream')
+    camera._open_capture()
 
 
 def test_effective_fps_prefers_configured_override() -> None:

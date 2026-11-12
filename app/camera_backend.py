@@ -12,6 +12,8 @@ import time
 from fractions import Fraction
 from typing import Any
 
+from app.utils import CAMERA_STREAM_FORMATS, CAMERA_STREAM_PROTOCOLS, camera_stream_input_options
+
 
 logger = logging.getLogger('daygle.ai.cameras')
 
@@ -30,6 +32,7 @@ _avutil_libs: list[Any] = []
 _avutil_libs_searched = False
 _avutil_lock = threading.Lock()
 _opencv_threads_lock = threading.Lock()
+_opencv_capture_options_lock = threading.Lock()
 _opencv_threads_configured = False
 
 
@@ -219,7 +222,7 @@ class OpenCvStreamCamera:
         command = [
             ffprobe,
             '-v', 'error',
-            '-rtsp_transport', 'tcp',
+            *camera_stream_input_options(self.stream_url),
             '-select_streams', 'v:0',
             '-show_entries', 'stream=avg_frame_rate,r_frame_rate',
             '-of', 'default=noprint_wrappers=1:nokey=1',
@@ -300,7 +303,18 @@ class OpenCvStreamCamera:
 
         # Prefer TCP for RTSP cameras. UDP packet loss and frequent reconnects
         # can make inexpensive ONVIF cameras fail during session setup.
-        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|max_delay;500000|stimeout;5000000|fflags;discardcorrupt")
+        # OpenCV reads this process-wide setting for every FFmpeg open. Preserve
+        # unrelated operator options but always enforce the security options.
+        with _opencv_capture_options_lock:
+            existing = os.environ.get('OPENCV_FFMPEG_CAPTURE_OPTIONS', '')
+            options = [part for part in existing.split('|') if part and part.split(';', 1)[0].lower() not in {
+                'protocol_whitelist', 'format_whitelist', 'max_redirects',
+            }]
+            if not existing:
+                options = ['rtsp_transport;tcp', 'max_delay;500000', 'stimeout;5000000', 'fflags;discardcorrupt']
+            options.extend((f'protocol_whitelist;{CAMERA_STREAM_PROTOCOLS}',
+                            f'format_whitelist;{CAMERA_STREAM_FORMATS}', 'max_redirects;0'))
+            os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = '|'.join(options)
 
         import cv2
         _configure_opencv_threads()
@@ -312,7 +326,7 @@ class OpenCvStreamCamera:
             # the instance lock across this call (see ``_acquire_raw_frame``),
             # so ``close()`` only waits a short grace window and this in-flight
             # open must detect the close once OpenCV returns.
-            self._capture = cv2.VideoCapture(self.stream_url)
+            self._capture = cv2.VideoCapture(self.stream_url, cv2.CAP_FFMPEG)
             if self._closed:
                 # close() won the race while the blocking open was in flight;
                 # discard the late capture and bail so the caller cleans up.

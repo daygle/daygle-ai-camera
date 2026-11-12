@@ -101,6 +101,7 @@ that Phase-29 has shipped.
 from __future__ import annotations
 import contextlib
 import os
+import tempfile
 
 import json
 import logging
@@ -509,9 +510,11 @@ def write_recording_detection_track(
     # (the caller already logs ``warning(... could not write
     # detection track)``).
     sidecar_path = recording_track_sidecar_path(file_path)
-    tmp_path = sidecar_path.with_suffix(sidecar_path.suffix + '.tmp')
+    fd, tmp_name = tempfile.mkstemp(prefix=f'.{sidecar_path.name}.', suffix='.tmp', dir=sidecar_path.parent)
+    tmp_path = Path(tmp_name)
     try:
-        tmp_path.write_text(json.dumps(track), encoding='utf-8')
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            json.dump(track, handle)
         os.replace(tmp_path, sidecar_path)
     except OSError:
         # Best-effort cleanup of the orphan tmp file so a future
@@ -526,7 +529,7 @@ def load_recording_detection_track(
     file_path: Path,
 ) -> list[dict[str, Any]] | None:
     sidecar = recording_track_sidecar_path(file_path)
-    if not sidecar.exists():
+    if sidecar.is_symlink() or not sidecar.exists():
         return None
     try:
         data = json.loads(sidecar.read_text(encoding='utf-8'))
