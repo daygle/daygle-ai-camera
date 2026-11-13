@@ -66,6 +66,22 @@ def _probe_ir_state(
     return ir_state, error
 
 
+def forget_onvif_probe(camera_id: Any) -> None:
+    """Drop a camera's cached ONVIF verdict after its settings change.
+
+    The cache exists to spare the cameras repeated HTTP probes, not to keep an
+    operator waiting: without this, a corrected host or password would not take
+    effect until the 60 s entry expired, so the form would still report the old
+    failure right after saving.
+    """
+    key_id = str(camera_id or '')
+    if not key_id:
+        return
+    with _onvif_probe_lock:
+        for key in [key for key in _onvif_probe_cache if key[0] == key_id]:
+            _onvif_probe_cache.pop(key, None)
+
+
 def suggest_solar_schedule(
     latitude: float,
     longitude: float,

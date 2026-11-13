@@ -246,6 +246,54 @@ def test_onvif_probe_failure_is_cached_too(monkeypatch):
     assert len(calls) == 1
 
 
+def test_forget_onvif_probe_drops_only_that_camera():
+    pa._onvif_probe_cache[('cam-a', '10.0.0.1', 80)] = (1.0, 'day', None)
+    pa._onvif_probe_cache[('cam-b', '10.0.0.2', 80)] = (1.0, 'night', None)
+    pa.forget_onvif_probe('cam-a')
+    assert ('cam-a', '10.0.0.1', 80) not in pa._onvif_probe_cache
+    assert ('cam-b', '10.0.0.2', 80) in pa._onvif_probe_cache
+
+
+def test_saving_a_camera_drops_its_cached_probe(monkeypatch):
+    """A corrected host or password must take effect on the next poll."""
+    import threading
+    from types import SimpleNamespace
+
+    # Import the modules the router actually holds: tests/support._load_app
+    # rebuilds the app.* namespace mid-suite, so the module-level ``pa``
+    # imported above can be a stale copy with its own cache.
+    import app.api.cameras_router as cameras_router
+    import app.profile_automation as profile_automation
+
+    cameras = [{'id': 'cam-a', 'name': 'A'}]
+    saved = {}
+
+    class _Database:
+        def get_setting(self, _key):
+            return None
+
+        def set_setting(self, key, value, _updated):
+            saved[key] = value
+
+    monkeypatch.setattr(cameras_router, 'effective_cameras_config', lambda: list(cameras))
+    monkeypatch.setattr(cameras_router, 'validate_camera_settings', lambda payload, **_kw: dict(payload))
+    monkeypatch.setattr(cameras_router, 'link_camera_profiles', lambda settings, _presets: (settings, []))
+    monkeypatch.setattr(cameras_router, 'write_audit_log', lambda *_a, **_kw: None)
+    monkeypatch.setattr(cameras_router, 'profile_status', lambda _camera_id: {})
+    monkeypatch.setattr(
+        cameras_router, '_state',
+        SimpleNamespace(_cameras_config_write_lock=threading.Lock()),
+    )
+    profile_automation._onvif_probe_cache[('cam-a', '10.0.0.1', 80)] = (1.0, 'night', None)
+
+    cameras_router._upsert_camera(
+        'cam-a', {'name': 'A2'}, object(), _Database(), lambda _settings: None,
+    )
+
+    assert ('cam-a', '10.0.0.1', 80) not in profile_automation._onvif_probe_cache
+    assert saved['cameras'][0]['name'] == 'A2'
+
+
 def test_onvif_imaging_probe_reads_ircut_filter(monkeypatch):
     monkeypatch.setattr(ptz, '_get_video_source_token', lambda *args: 'video-token')
 
