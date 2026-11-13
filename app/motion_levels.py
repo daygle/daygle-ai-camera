@@ -31,13 +31,15 @@ _lock = threading.Lock()
 _peaks: dict[str, dict[str, dict[int, float]]] = {}
 
 
-def _note_peak(camera_id: str, zone_id: str, fraction: float, now: float) -> float:
-    """Record ``fraction`` and return the zone's peak over the window."""
+def _note_peak(
+    camera_id: str, zone_id: str, fraction: float, now: float, *, record: bool = True,
+) -> float:
+    """Record ``fraction`` (when ``record``) and return the zone's peak over the window."""
     bucket = int(now // _PEAK_BUCKET_SECONDS) * _PEAK_BUCKET_SECONDS
     oldest = now - PEAK_WINDOW_SECONDS
     with _lock:
         buckets = _peaks.setdefault(camera_id, {}).setdefault(zone_id, {})
-        if fraction > buckets.get(bucket, -1.0):
+        if record and fraction > buckets.get(bucket, -1.0):
             buckets[bucket] = fraction
         for start in [start for start in buckets if start + _PEAK_BUCKET_SECONDS <= oldest]:
             del buckets[start]
@@ -57,6 +59,7 @@ def motion_zone_levels(
     streaks: dict[str, int] | None = None,
     confirm_cycles: dict[str, int] | None = None,
     now: float | None = None,
+    record_peaks: bool = True,
 ) -> list[dict[str, Any]]:
     """Turn ``zone_motion_detections`` levels into the published per-zone list.
 
@@ -64,6 +67,11 @@ def motion_zone_levels(
     (and so can raise an event); ``streaks`` are the confirmation counters, so
     a zone above its trigger but still waiting for its next check reads as
     moving with ``checks_seen`` < ``checks_needed``.
+
+    ``record_peaks=False`` publishes each peak WITHOUT folding this cycle in.
+    Used while the camera itself is moving: a pan sweeps every zone's changed
+    share toward 100%, which says nothing about the scene and would pin the
+    ten-minute peak (the number an operator reads to pick a trigger) at ~100%.
     """
     now = time.time() if now is None else now
     known = set()
@@ -77,11 +85,11 @@ def motion_zone_levels(
         trigger = float(level.get('trigger') or 0.0)
         needed = int((confirm_cycles or {}).get(zone_id, 2))
         if fraction is None:
-            peak = _note_peak(camera_id, zone_id, 0.0, now)
+            peak = _note_peak(camera_id, zone_id, 0.0, now, record=record_peaks)
             state = 'triggered' if zone_id in triggered_zone_ids else 'quiet'
         else:
             fraction = float(fraction)
-            peak = _note_peak(camera_id, zone_id, fraction, now)
+            peak = _note_peak(camera_id, zone_id, fraction, now, record=record_peaks)
             if zone_id in triggered_zone_ids:
                 state = 'triggered'
             elif fraction >= QUIET_FRACTION:

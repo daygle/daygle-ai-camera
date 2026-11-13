@@ -161,3 +161,46 @@ def test_meter_states_and_ten_minute_peak():
     assert motion_zone_levels(camera, [], triggered_zone_ids=set(), now=2000.0) == []
     assert publish(0.0, 2001.0)['peak_fraction'] == 0.0
     forget_camera(camera)
+
+
+def test_camera_motion_frames_do_not_raise_the_ten_minute_peak():
+    # While the camera itself pans, every zone reads ~100% changed -- that is
+    # ego-motion, not scene motion. It must not become the peak an operator
+    # reads when choosing "trigger when X% of this zone moves".
+    camera = 'cam-peak-camera-motion'
+    forget_camera(camera)
+    level = {'zone_id': 'drive', 'zone_name': 'Drive', 'trigger': 0.02}
+
+    def publish(fraction, now, record_peaks=True):
+        [entry] = motion_zone_levels(
+            camera, [{**level, 'fraction': fraction}], triggered_zone_ids=set(),
+            confirm_cycles={'drive': 2}, now=now, record_peaks=record_peaks,
+        )
+        return entry
+
+    assert publish(0.02, 1000.0)['peak_fraction'] == 0.02
+    panned = publish(0.99, 1010.0, record_peaks=False)
+    # The meter still shows the pan's own reading...
+    assert panned['fraction'] == 0.99
+    # ...but it does not poison the peak.
+    assert panned['peak_fraction'] == 0.02
+    # A settled frame records normally again.
+    assert publish(0.03, 1020.0)['peak_fraction'] == 0.03
+    forget_camera(camera)
+
+
+def test_per_camera_motion_overrides_are_clamped_to_the_validated_band():
+    # A per-camera override is read straight from the camera settings dict, so
+    # a hand-edited config.yaml can put it outside the range the settings
+    # validator allows. That must be clamped, not fed to the engine: an alpha
+    # above 1.0 makes the background update diverge, and an oversized pixel
+    # threshold silently disables motion detection.
+    from app.live_monitor import _parse_motion_override
+
+    assert _parse_motion_override(5.0, 0.05, 'motion_background_alpha') == 0.5
+    assert _parse_motion_override('0.02', 0.05, 'motion_background_alpha') == 0.02
+    assert _parse_motion_override('junk', 0.05, 'motion_background_alpha') == 0.05
+    assert _parse_motion_override(5000, 30, 'motion_pixel_threshold') == 255
+    assert _parse_motion_override(0, 30, 'motion_pixel_threshold') == 1
+    assert _parse_motion_override(0.9, 0.005, 'motion_gate_fraction') == 0.5
+    assert _parse_motion_override(0.0, 0.03, 'motion_scale_fraction') == 0.001

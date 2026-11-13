@@ -318,18 +318,30 @@ def _new_unknown_face_alerts(
     return alerts
 
 
-def _parse_motion_override(raw_value: Any, fallback: Any, cast=float) -> Any:
-    """Cast a per-camera motion override, keeping ``fallback`` if the cast fails.
+def _parse_motion_override(raw_value: Any, fallback: Any, flat_key: str) -> Any:
+    """Coerce + clamp a per-camera motion override, keeping ``fallback`` on junk.
 
-    One malformed override (e.g. a bad ``motion_pixel_threshold`` merged from a
-    hand-edited config.yaml) must never break the detection cycle, so a cast
-    failure silently keeps the validated global value. Used for every numeric
-    override on the ~4 Hz hot path so each stays a single inline branch instead
-    of a hand-rolled try/except per field.
+    Casting alone was not enough. A per-camera override is read straight from
+    the camera settings dict, which may come from a hand-edited config.yaml and
+    never passes through ``validate_live_settings``. Out-of-band values are not
+    merely ignored by the engine:
+
+    - ``motion_background_alpha`` above 1.0 turns the background update
+      ``(1-alpha)*bg + alpha*frame`` into an unstable extrapolation instead of a
+      convex blend, so the mask swings wildly;
+    - a ``motion_pixel_threshold`` of 5000 makes MOG2 flag nothing, silently
+      disabling motion detection for that camera.
+
+    The settings validator already defines the bands these values must sit in,
+    so reuse its coercion rather than duplicating them here: the engine can then
+    only run in a state the UI could also have produced. A malformed value keeps
+    the validated global default, exactly as the cast did before.
     """
     try:
-        return cast(raw_value)
-    except (TypeError, ValueError):
+        from app.payload_validators import _coerce_camera_motion_override
+
+        return _coerce_camera_motion_override(flat_key, raw_value)
+    except (TypeError, ValueError, KeyError):
         return fallback
 
 
@@ -1050,20 +1062,21 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # invalidated one another.  detect_frame_motion passes the size into the
     # per-camera model signature and the zone scorer derives geometry from the
     # returned mask shape.
-    # Per-camera flat overrides; a value that fails its cast keeps the
+    # Per-camera flat overrides, clamped to the same bands the settings
+    # validator enforces; a value that is malformed (or out of range) keeps the
     # validated global default via _parse_motion_override.
     _cam_pt = settings.get('motion_pixel_threshold')
     if _cam_pt is not None:
-        _pixel_threshold = _parse_motion_override(_cam_pt, _pixel_threshold)
+        _pixel_threshold = _parse_motion_override(_cam_pt, _pixel_threshold, 'motion_pixel_threshold')
     _cam_gf = settings.get('motion_gate_fraction')
     if _cam_gf is not None:
-        _gate_fraction = _parse_motion_override(_cam_gf, _gate_fraction)
+        _gate_fraction = _parse_motion_override(_cam_gf, _gate_fraction, 'motion_gate_fraction')
     _cam_sf = settings.get('motion_scale_fraction')
     if _cam_sf is not None:
-        _scale_fraction = _parse_motion_override(_cam_sf, _scale_fraction)
+        _scale_fraction = _parse_motion_override(_cam_sf, _scale_fraction, 'motion_scale_fraction')
     _cam_ba = settings.get('motion_background_alpha')
     if _cam_ba is not None:
-        _background_alpha = _parse_motion_override(_cam_ba, _background_alpha)
+        _background_alpha = _parse_motion_override(_cam_ba, _background_alpha, 'motion_background_alpha')
     # Per-camera engine / post-processing overrides.
     _cam_algo = settings.get('motion_algorithm')
     if _cam_algo is not None:
@@ -1224,6 +1237,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             camera_id, _motion_levels,
             triggered_zone_ids={str(item.get('zone_id') or '') for item in motion_detections},
             streaks=_streaks, confirm_cycles=_confirm_cycles,
+            # A moving camera sweeps every zone's share toward 100%, and that is
+            # not scene motion: the detector already excludes those frames from
+            # events. Keep them out of the ten-minute peak too, which is the
+            # number an operator reads when choosing a trigger -- a PTZ pan (or
+            # auto-tracking) would otherwise pin every peak at ~100% for ten
+            # minutes.
+            record_peaks=not camera_motion['active'],
         ))
     except Exception as exc:  # noqa: BLE001 - a status meter must never break a cycle
         logger.debug('Motion zone levels failed for %s: %s', camera_id, exc)
