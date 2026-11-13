@@ -50,3 +50,13 @@ test('the outbox rows have styles', () => {
   assert.ok(styles.includes('.alert-outbox-list'), 'the list needs a style rule');
   assert.ok(styles.includes('.alert-outbox-row'), 'the row needs a style rule');
 });
+
+test('the Notifications tab carries a queued-count badge', () => {
+  const tab = settingsHtml.slice(
+    settingsHtml.indexOf('id="tab-notifications"'),
+    settingsHtml.indexOf('</button>', settingsHtml.indexOf('id="tab-notifications"')),
+  );
+  assert.ok(tab.includes('id="notificationsOutboxBadge"'), 'the badge must live in the Notifications tab button');
+  assert.ok(settingsJs.includes("getElementById('notificationsOutboxBadge')"), 'settings.js must drive the badge');
+  assert.ok(styles.includes('.settings-tab-badge'), 'the badge needs a style rule');
+});

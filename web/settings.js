@@ -455,6 +455,16 @@ function formatOutboxTime(epochSeconds) {
   return value > 0 ? new Date(value * 1000).toLocaleString() : 'now';
 }
 
+// The tab badge surfaces a stuck relay/ntfy server from any settings panel,
+// not just once the operator opens the Notifications panel.
+function renderOutboxBadge(total) {
+  const badge = document.getElementById('notificationsOutboxBadge');
+  if (!badge) return;
+  const count = Number(total || 0);
+  badge.hidden = count <= 0;
+  badge.textContent = count > 99 ? '99+' : String(count);
+}
+
 function renderAlertOutbox(payload) {
   const section = document.getElementById('alertOutboxSection');
   const list = document.getElementById('alertOutboxList');
@@ -464,11 +474,13 @@ function renderAlertOutbox(payload) {
   // card instead of showing a permission error on a panel they can use.
   if (payload === null) {
     section.hidden = true;
+    renderOutboxBadge(0);
     return;
   }
   section.hidden = false;
   const entries = Array.isArray(payload?.entries) ? payload.entries : [];
   const total = Number(payload?.total ?? entries.length);
+  renderOutboxBadge(total);
   if (summary) {
     summary.textContent = total
       ? `${total} queued delivery(ies). The server keeps retrying each one; use Retry to try now.`
