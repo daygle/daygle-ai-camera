@@ -352,7 +352,7 @@ Each camera runs a **Day** profile and a **Night** profile: named sets of detect
 
 The built-in Day profiles set **Ignore Shadows** to *Auto*, and the Night profiles set it to *Off* because IR frames carry no colour. **Cat / Small Animal**, **Maximum Recall** and **Night / IR** turn **Second Look** on. Their Night versions also set **Low-Light Enhancement** to *Auto*. **Low CPU** turns both off. **Balanced** and **Fast Motion** leave both on the global default. **Adaptive Cadence** is off for **Fast Motion**, **Maximum Recall** and **Cat / Small Animal (Night)**, because short visits must not wait out a stretched interval.
 
-Profile selection can be manual, schedule-based (Day Starts / Night Starts in the camera's timezone), driven by the camera's ONVIF IR state, or solar - sunrise/sunset recalculated daily from the camera's coordinates and timezone.
+Profile selection can be manual, schedule-based (Day Starts / Night Starts in the camera's timezone), driven by the camera's ONVIF IR state, or solar - sunrise/sunset recalculated daily from the camera's coordinates and timezone. A camera that has both coordinates and a timezone is switched to solar automatically (and returns to manual if the location is cleared), so the manual, schedule and ONVIF modes are for cameras without a complete location.
 
 ### Motion Engine
 

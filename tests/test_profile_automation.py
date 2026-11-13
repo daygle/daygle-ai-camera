@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 import app.profile_automation as pa
 import app.ptz as ptz
 import app.state as state
@@ -9,6 +11,14 @@ from app.recording_settings import (
     effective_camera_live_settings,
     normalize_camera_detection_profiles,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_onvif_probe_cache():
+    """The probe throttle is process state; tests must not inherit it."""
+    pa._onvif_probe_cache.clear()
+    yield
+    pa._onvif_probe_cache.clear()
 
 
 def test_detection_profiles_normalize_performance_fields_and_legacy_fallback():
@@ -199,6 +209,41 @@ def test_scheduled_profile_evaluates_dst_correctly_in_camera_timezone():
     profiles = {'day_start': '07:00', 'night_start': '19:00'}
     dst_instant = datetime(2026, 1, 15, 20, 0, tzinfo=timezone.utc)
     assert pa.scheduled_profile(profiles, now=dst_instant, timezone_name='Australia/Sydney') == 'day'
+
+
+def test_onvif_imaging_probe_is_throttled_to_the_configured_interval(monkeypatch):
+    """The 30s poll must not re-probe a camera that was probed a moment ago."""
+    calls = []
+    monkeypatch.setattr(pa, 'probe_onvif_day_night', lambda *args: calls.append(args) or 'day')
+    pa._onvif_probe_cache.clear()
+    camera = {
+        'id': 'throttle-cam', 'host': '10.0.0.77', 'backend': 'onvif',
+        'timezone': 'UTC', 'ptz': {},
+    }
+    profiles = {'active': 'day', 'source': 'onvif', 'day_start': '07:00', 'night_start': '19:00'}
+    assert pa._select_target(camera, profiles)[1] == 'onvif_ir'
+    assert pa._select_target(camera, profiles)[1] == 'onvif_ir'
+    assert len(calls) == 1
+
+
+def test_onvif_probe_failure_is_cached_too(monkeypatch):
+    calls = []
+
+    def failing(*args):
+        calls.append(args)
+        raise OSError('unreachable')
+
+    monkeypatch.setattr(pa, 'probe_onvif_day_night', failing)
+    pa._onvif_probe_cache.clear()
+    camera = {
+        'id': 'failing-cam', 'host': '10.0.0.78', 'backend': 'onvif',
+        'timezone': 'UTC', 'ptz': {},
+    }
+    profiles = {'active': 'day', 'source': 'onvif', 'day_start': '07:00', 'night_start': '19:00'}
+    first = pa._select_target(camera, profiles)
+    second = pa._select_target(camera, profiles)
+    assert first[1] == 'schedule_fallback' and second[3] == 'OSError'
+    assert len(calls) == 1
 
 
 def test_onvif_imaging_probe_reads_ircut_filter(monkeypatch):

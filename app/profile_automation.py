@@ -29,6 +29,41 @@ logger = logging.getLogger('daygle.ai.cameras')
 
 _PROFILE_POLL_SECONDS = 30.0
 _ONVIF_POLL_SECONDS = 60.0
+# Last ONVIF imaging verdict per (camera id, host, port): (checked_at, ir_state,
+# error). The poll runs every 30 s but an IR state changes over minutes, so
+# re-probing each poll doubled the HTTP traffic per camera and made one slow
+# camera delay the profile switch of every other one (probes are sequential).
+_onvif_probe_cache: dict[tuple[str, str, int], tuple[float, str | None, str | None]] = {}
+_onvif_probe_lock = threading.Lock()
+
+
+def _probe_ir_state(
+    camera: dict[str, Any], host: str, http_port: int,
+) -> tuple[str | None, str | None]:
+    """ONVIF IrCutFilter for a camera, cached for ``_ONVIF_POLL_SECONDS``.
+
+    A failure is cached too (the schedule fallback is evaluated live), so an
+    unreachable camera is not re-probed on every poll either.
+    """
+    key = (str(camera.get('id') or ''), str(host), int(http_port))
+    now = time.monotonic()
+    with _onvif_probe_lock:
+        cached = _onvif_probe_cache.get(key)
+        if cached is not None and now - cached[0] < _ONVIF_POLL_SECONDS:
+            return cached[1], cached[2]
+    ir_state: str | None = None
+    error: str | None = None
+    try:
+        ir_state = probe_onvif_day_night(
+            host, http_port,
+            str(camera.get('username') or ''),
+            str(camera.get('password') or ''),
+        )
+    except Exception as exc:  # noqa: BLE001 - camera-specific ONVIF support is optional
+        error = type(exc).__name__
+    with _onvif_probe_lock:
+        _onvif_probe_cache[key] = (now, ir_state, error)
+    return ir_state, error
 
 
 def suggest_solar_schedule(
@@ -205,19 +240,16 @@ def _select_target(camera: dict[str, Any], profiles: dict[str, Any]) -> tuple[st
     if not host:
         return scheduled, 'schedule_fallback', None, 'Camera host is unavailable for ONVIF imaging status.'
     ptz = camera.get('ptz') if isinstance(camera.get('ptz'), dict) else {}
-    http_port = int(ptz.get('http_port') or camera.get('http_port') or 80)
     try:
-        ir_state = probe_onvif_day_night(
-            host,
-            http_port,
-            str(camera.get('username') or ''),
-            str(camera.get('password') or ''),
-        )
-    except Exception as exc:  # camera-specific ONVIF support is optional
-        return scheduled, 'schedule_fallback', None, type(exc).__name__
+        http_port = int(ptz.get('http_port') or camera.get('http_port') or 80)
+    except (TypeError, ValueError):
+        # A junk port must not abort the whole poll (and with it every other
+        # camera's profile switch); fall back to the default HTTP port.
+        http_port = 80
+    ir_state, probe_error = _probe_ir_state(camera, host, http_port)
     if ir_state in {'day', 'night'}:
         return ir_state, 'onvif_ir', ir_state, None
-    return scheduled, 'schedule_fallback', None, 'ONVIF camera did not report a usable IrCutFilter.'
+    return scheduled, 'schedule_fallback', None, probe_error or 'ONVIF camera did not report a usable IrCutFilter.'
 
 
 def poll_camera_profiles() -> None:

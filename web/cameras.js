@@ -481,7 +481,7 @@ function buildEditFormHtml(camera, index) {
             '<button type="button" class="secondary profile-suggest-btn">Suggest Sunrise/Sunset</button>' +
             '<span class="form-help muted profile-action-result" aria-live="polite"></span>' +
           '</div>' +
-          '<p class="form-help muted">Choose which profile is active right now. Solar mode refreshes sunrise/sunset times daily using this camera’s coordinates and timezone. The Day and Night profiles below decide what runs in each.</p>' +
+          '<p class="form-help muted">Choose which profile is active right now. Solar mode refreshes sunrise/sunset times daily using this camera’s coordinates and timezone; a complete location (both coordinates and a timezone) selects Solar automatically, and clearing it returns the camera to Manual. The Day and Night profiles below decide what runs in each.</p>' +
           '<p class="form-help muted">Runtime: <strong>' + escapeHtml(runtimeActive.charAt(0).toUpperCase() + runtimeActive.slice(1)) + '</strong> (' + escapeHtml(runtimeSourceLabel) + '). ' + escapeHtml(runtimeNote) + '</p>' +
         '</div>' +
         profileLinkSectionHtml(camera) +
