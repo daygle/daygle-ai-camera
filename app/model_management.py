@@ -914,6 +914,14 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
     invalidate_ai_status_cache()
     ai_settings = effective_ai_config()
     rel_path = _relative_model_path(destination)
+    # A re-export rewrites the file behind the SAME path, and per-camera
+    # detectors are cached per path (app/camera_models.py). Without evicting
+    # here, a camera assigned to this model keeps running the previous weights
+    # in memory until a global reload or a restart -- the update would silently
+    # not take effect. Dropping the cached reference is safe: a cycle already
+    # running holds its own reference and finishes on the session it started.
+    from app.camera_models import evict_camera_model_cache
+    evict_camera_model_cache(rel_path)
     # Face-family downloads never take over the PRIMARY object-detector slot:
     # they are wired into the secondary face pass instead (face_model_path),
     # leaving the active COCO/object model untouched. They must also NOT flip

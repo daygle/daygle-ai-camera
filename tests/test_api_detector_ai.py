@@ -662,6 +662,65 @@ def test_ai_models_endpoint(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_reinstalling_a_non_active_model_evicts_its_camera_detector(tmp_path, monkeypatch):
+    """A re-export rewrites the file behind an unchanged path. Per-camera
+    detectors are cached per path (app/camera_models.py), so installing a model
+    that is NOT the active one must evict that cache entry -- otherwise a camera
+    assigned to it keeps running the previous weights in memory until a global
+    reload or a restart, and the update silently never takes effect."""
+    _load_app(tmp_path, monkeypatch)
+    import app.api.settings_ai_router as ai_router
+    import app.camera_models as cm
+    import app.model_management as mm
+
+    models_dir = tmp_path / 'models'
+    monkeypatch.setattr(mm, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(mm, 'MODELS_DIR', models_dir)
+    monkeypatch.setattr(ai_router, 'BASE_DIR', tmp_path)
+
+    active_settings = {
+        'backend': 'onnx',
+        'model_path': 'models/yolo11n-640.onnx',
+        'labels_path': 'models/coco.names',
+        'input_size': 640,
+    }
+    monkeypatch.setattr(mm, 'effective_ai_config', lambda: dict(active_settings))
+    monkeypatch.setattr(mm, 'validate_ai_settings', lambda payload: dict(payload))
+    monkeypatch.setattr(mm, 'detector_status', lambda settings: dict(settings))
+    monkeypatch.setattr(mm, '_installed_package_version', lambda _package: 'test-version')
+    reload_calls = []
+
+    def fake_reload(settings):
+        reload_calls.append(dict(settings))
+        return True, None
+
+    monkeypatch.setattr(mm._state, 'reload_detector', fake_reload)
+    monkeypatch.setattr(mm._state.database, 'set_setting', lambda *_args: None)
+
+    def fake_export(model_name, destination, imgsz, **_kwargs):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(f'{model_name}-{imgsz}'.encode())
+        return destination.stat().st_size
+
+    monkeypatch.setattr(mm, 'export_yolo_onnx', fake_export)
+
+    key = ('models/yolo11n-1024.onnx', 'models/coco.names')
+    # Stand-in for the detector a live cycle for a camera assigned to the 1024
+    # variant has already built and cached.
+    with cm._cache_lock:
+        cm._detector_cache[key] = object()
+    try:
+        result = mm._do_download_model('yolo11n', False, 1024)
+        assert result['reload_succeeded'] is False
+        assert reload_calls == []  # the active model is untouched
+        assert key not in cm._detector_cache, (
+            'the per-camera detector cached for the re-exported model must be evicted'
+        )
+        assert (models_dir / 'yolo11n-1024.onnx').read_bytes() == b'yolo11n-1024'
+    finally:
+        cm.clear_camera_model_cache()
+
+
 def test_do_download_model_binds_face_labels_and_keypoints(tmp_path, monkeypatch):
     """Downloading a catalog entry that declares ``labels`` / ``keypoint_count``
     (a face detector) binds them onto the active AI settings, so the model is
