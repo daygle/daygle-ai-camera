@@ -199,6 +199,12 @@ async def authentication_middleware(request: Request, call_next):
                 {'detail': 'Admin access required'}, status_code=403,
             )
         # Page routes: return a proper 403 HTML page instead of raw JSON.
+        # Reuse the sign-in page's layout classes (auth-shell / auth-card):
+        # this used to carry `error-page` / `error-page-body`, which no stylesheet
+        # ever defined, so the page rendered as unstyled text with an underlined
+        # accent-on-accent link. `button-link` is the anchor-button style the
+        # templates use; `.primary` only sets padding/background and would leave
+        # the link underlined.
         return HTMLResponse(
             content='''<!DOCTYPE html>
 <html lang="en">
@@ -207,13 +213,11 @@ async def authentication_middleware(request: Request, call_next):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body class="error-page-body">
-<div class="error-page">
+<body><main class="auth-shell"><section class="card auth-card">
 <h1>403</h1>
 <p>You need administrator access to view this page.</p>
-<a href="/" class="button primary">Return to Live</a>
-</div>
-</body>
+<a href="/" class="button-link">Return to Live</a>
+</section></main></body>
 </html>''',
             status_code=403,
         )
