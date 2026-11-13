@@ -469,6 +469,22 @@
       </div>
     </section>
 
+    <section class="card" id="alertOutboxSection">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">📬</div>
+        <div>
+          <h2>Undelivered Alerts</h2>
+          <p class="settings-section-subtitle">Alerts the mail server or ntfy could not accept. They are retried automatically; retry one now to try again immediately.</p>
+        </div>
+      </div>
+      <p id="alertOutboxSummary" class="settings-section-subtitle"></p>
+      <div id="alertOutboxList" class="alert-outbox-list"></div>
+      <div class="button-row">
+        <button id="alertOutboxRefreshBtn" class="btn-info" type="button">Refresh</button>
+        <button id="alertOutboxRetryAllBtn" class="btn-info" type="button">Retry All Now</button>
+      </div>
+    </section>
+
     </div><!-- /panel-notifications -->
 
     <div class="settings-panel" id="panel-network" role="tabpanel" aria-labelledby="tab-network" data-panel="network" hidden>

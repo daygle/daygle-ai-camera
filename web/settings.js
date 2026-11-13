@@ -447,12 +447,59 @@ function syncGpuHealthVisibility(resources) {
 }
 
 
+// Deliveries the mail relay or ntfy server never accepted (app.alert_outbox).
+// The server retries them on its own schedule; the buttons only force the
+// timing, so nothing here is destructive.
+function formatOutboxTime(epochSeconds) {
+  const value = Number(epochSeconds || 0);
+  return value > 0 ? new Date(value * 1000).toLocaleString() : 'now';
+}
+
+function renderAlertOutbox(payload) {
+  const section = document.getElementById('alertOutboxSection');
+  const list = document.getElementById('alertOutboxList');
+  const summary = document.getElementById('alertOutboxSummary');
+  if (!section || !list) return;
+  // Viewers may not read the queue (it lists recipient addresses): hide the
+  // card instead of showing a permission error on a panel they can use.
+  if (payload === null) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+  const total = Number(payload?.total ?? entries.length);
+  if (summary) {
+    summary.textContent = total
+      ? `${total} queued delivery(ies). The server keeps retrying each one; use Retry to try now.`
+      : 'Nothing is queued: every alert was delivered.';
+  }
+  list.innerHTML = entries.map((entry) => {
+    const target = entry.channel === 'push'
+      ? (entry.topics || []).join(', ') || 'shared topic'
+      : (entry.recipients || []).join(', ');
+    const error = entry.last_error ? ` - last error: ${entry.last_error}` : '';
+    return '<div class="alert-outbox-row">'
+      + `<div><strong>${escapeHtml(entry.rule_name || 'Alert')}</strong>`
+      + ` &middot; ${escapeHtml(String(entry.channel || ''))} &middot; event #${Number(entry.event_id)}</div>`
+      + `<div class="settings-section-subtitle">To: ${escapeHtml(target)} &middot; attempts ${Number(entry.attempts)}`
+      + ` &middot; next try ${escapeHtml(formatOutboxTime(entry.next_attempt_at))}${escapeHtml(error)}</div>`
+      + `<button type="button" class="btn-info" data-outbox-retry="${Number(entry.id)}">Retry</button>`
+      + '</div>';
+  }).join('');
+}
+
+async function refreshAlertOutbox() {
+  renderAlertOutbox(await api('/api/alerts/outbox'));
+}
+
+
 async function loadSettings() {
   // nav.js's daygleAuthReady IIFE has already fetched /api/auth/me once at
   // script-load time and populated window.daygleAuth.{user, csrfToken}; the
   // shared api() below picks up the CSRF token automatically.
   await window.daygleAuthReady;
-  const [settings, emailSettings, pushSettings, cameraOfflineSettings, users] = await Promise.all([
+  const [settings, emailSettings, pushSettings, cameraOfflineSettings, users, alertOutbox] = await Promise.all([
     api('/api/settings/system'),
     api('/api/settings/alert-email'),
     api('/api/settings/alert-push'),
@@ -460,6 +507,8 @@ async function loadSettings() {
     // Only the offline recipient picker needs users; without them it still
     // lists the stored recipients.
     api('/api/users').catch(() => []),
+    // Admin-only; a viewer gets 403 and the card stays hidden.
+    api('/api/alerts/outbox').catch(() => null),
   ]);
   recipientUsers = Array.isArray(users) ? users : (users?.users || []);
   const versionEl = document.getElementById('currentVersion');
@@ -480,6 +529,7 @@ async function loadSettings() {
   renderEmail(emailSettings);
   renderPush(pushSettings);
   renderCameraOffline(cameraOfflineSettings);
+  renderAlertOutbox(alertOutbox);
   renderCloudflareTunnel(settings.cloudflare_tunnel);
   enhanceFormFieldLabels();
   messageEl.textContent = '';
@@ -759,6 +809,32 @@ document.getElementById('clearAiLogBtn').addEventListener('click', guard(async (
   if (!window.confirm('Clear all AI log events? This cannot be undone.')) return;
   const result = await api('/api/ai-log', { method: 'DELETE' });
   setMessage(`Cleared ${result.deleted} AI log event(s).`);
+}));
+
+// Undelivered alerts (app.alert_outbox): the server retries on its own; these
+// buttons only let an admin force the timing.
+document.getElementById('alertOutboxRefreshBtn')?.addEventListener('click', guard(async () => {
+  await refreshAlertOutbox();
+}));
+
+document.getElementById('alertOutboxRetryAllBtn')?.addEventListener('click', guard(async () => {
+  const result = await api('/api/alerts/outbox/retry', { method: 'POST' });
+  setMessage(`${Number(result?.queued || 0)} queued delivery(ies) will be retried within the next half minute.`);
+  await refreshAlertOutbox();
+}));
+
+document.getElementById('alertOutboxList')?.addEventListener('click', guard(async (event) => {
+  const button = event.target.closest('[data-outbox-retry]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const result = await api(`/api/alerts/outbox/${Number(button.dataset.outboxRetry)}/retry`, { method: 'POST' });
+    setMessage(result?.status === 'delivered'
+      ? 'Queued alert delivered.'
+      : `Still undelivered (${result?.status || 'error'}): ${result?.error || 'no detail'}`);
+  } finally {
+    await refreshAlertOutbox();
+  }
 }));
 
 

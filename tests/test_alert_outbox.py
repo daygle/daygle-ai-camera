@@ -114,6 +114,54 @@ def test_prune_drops_rows_past_the_retention_window(db):
     assert outbox.prune(now=time.time() + outbox.OUTBOX_RETENTION_SECONDS + 60) == 1
 
 
+def test_public_entries_describe_the_queue_without_the_raw_payload(db):
+    outbox = _outbox()
+    outbox.enqueue('email', 21, _alert(), recipients=['ops@example.com'], error='relay down')
+    entries = outbox.public_entries()
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry['channel'] == 'email'
+    assert entry['rule_name'] == 'Cat alert'
+    assert entry['label'] == 'cat'
+    assert entry['recipients'] == ['ops@example.com']
+    assert entry['attempts'] == 0
+    assert 'payload' not in entry
+    assert outbox.pending_count() == 1
+
+
+def test_retry_now_reports_the_outcome_and_404s_a_missing_row(db, monkeypatch):
+    outbox = _outbox()
+    outbox.enqueue('push', 22, _alert(), topics=['daygle-ops'])
+    row_id = db.due_alert_deliveries(time.time() + 1)[0]['id']
+
+    monkeypatch.setattr(outbox, '_deliver_row', lambda row: None)
+    assert outbox.retry_now(row_id) == {'status': 'delivered'}
+    assert outbox.retry_now(row_id) is None
+
+    outbox.enqueue('push', 23, _alert(), topics=['daygle-ops'])
+    row_id = db.due_alert_deliveries(time.time() + 1)[0]['id']
+
+    def still_down(_row):
+        raise OSError('still down')
+
+    monkeypatch.setattr(outbox, '_deliver_row', still_down)
+    result = outbox.retry_now(row_id)
+    assert result['status'] == 'rescheduled'
+    assert 'still down' in result['error']
+    assert outbox.pending_count() == 1
+
+
+def test_retry_all_now_makes_every_row_due(db):
+    outbox = _outbox()
+    outbox.enqueue('email', 24, _alert(), recipients=['ops@example.com'])
+    outbox.enqueue('push', 25, _alert(), topics=['daygle-ops'])
+    db.request_all_alert_delivery_retries(time.time() + 3600)
+    assert db.due_alert_deliveries(time.time()) == []
+
+    assert outbox.retry_all_now() == 2
+    assert len(db.due_alert_deliveries(time.time() + 1)) == 2
+
+
 def test_worker_starts_idempotently_and_stops(db):
     outbox = _outbox()
     outbox.start_worker()

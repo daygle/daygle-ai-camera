@@ -1033,3 +1033,58 @@ def test_redact_password_for_viewer_on_alert_settings(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_alert_outbox_endpoints_list_retry_and_gate(tmp_path, monkeypatch):
+    """The undelivered-alerts card's API: admin-only list, 404 for a gone row,
+    retry-now delivery, and the retry-all scheduling call."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.alert_outbox as outbox
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        # Signed out: the queue lists recipient addresses, so it must not answer.
+        status, _headers, _body = client.request('/api/alerts/outbox')
+        assert status in (401, 403)
+
+        _setup_admin(client)
+        csrf = _login(client)
+        assert outbox.enqueue(
+            'email', 42,
+            {'label': 'cat', 'rule_name': 'Cat alert', 'confidence': 0.9, 'message': 'Cat matched'},
+            recipients=['ops@example.com'],
+        )
+
+        status, _headers, payload = client.request('/api/alerts/outbox')
+        assert status == 200
+        assert payload['total'] == 1
+        entry = payload['entries'][0]
+        assert entry['rule_name'] == 'Cat alert'
+        assert entry['recipients'] == ['ops@example.com']
+        assert 'payload' not in entry
+
+        status, _headers, _body = client.request(
+            '/api/alerts/outbox/9999/retry', method='POST',
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 404
+
+        delivered: list = []
+        monkeypatch.setattr(outbox, '_deliver_row', lambda row: delivered.append(row))
+        status, _headers, result = client.request(
+            f"/api/alerts/outbox/{entry['id']}/retry", method='POST',
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert result['status'] == 'delivered'
+        assert len(delivered) == 1
+        status, _headers, payload = client.request('/api/alerts/outbox')
+        assert payload['total'] == 0
+
+        status, _headers, result = client.request(
+            '/api/alerts/outbox/retry', method='POST', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200 and result['queued'] == 0
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

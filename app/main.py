@@ -308,6 +308,8 @@ from app.api.alert_email_router import router as alert_email_router
 app.include_router(alert_email_router)
 from app.api.alert_push_router import router as alert_push_router
 app.include_router(alert_push_router)
+from app.api.alert_outbox_router import router as alert_outbox_router
+app.include_router(alert_outbox_router)
 from app.api.ai_verification_router import router as ai_verification_router
 app.include_router(ai_verification_router)
 from app.api.camera_offline_router import router as camera_offline_router

@@ -145,7 +145,8 @@ def _deliver_row(row: dict[str, Any]) -> None:
     )
 
 
-def _retry_row(row: dict[str, Any], now: float | None = None) -> None:
+def _retry_row(row: dict[str, Any], now: float | None = None) -> dict[str, Any]:
+    """Attempt one queued delivery; returns its new status for the UI."""
     db = _state.database
     row_id = int(row.get('id') or 0)
     channel = str(row.get('channel') or '')
@@ -160,6 +161,7 @@ def _retry_row(row: dict[str, Any], now: float | None = None) -> None:
         logger.info(
             'Dropping the queued %s alert for event %s: %s', channel, event_id, exc,
         )
+        return {'status': 'dropped', 'error': str(exc)}
     except Exception as exc:
         if attempts >= OUTBOX_MAX_ATTEMPTS:
             db.delete_alert_delivery(row_id)
@@ -167,7 +169,7 @@ def _retry_row(row: dict[str, Any], now: float | None = None) -> None:
                 'Giving up on the queued %s alert for event %s after %d attempt(s): %s',
                 channel, event_id, attempts, exc,
             )
-            return
+            return {'status': 'gave_up', 'error': str(exc)}
         delay = OUTBOX_RETRY_BASE_SECONDS * (2 ** (attempts - 1))
         next_at = (time.time() if now is None else now) + delay
         db.reschedule_alert_delivery(row_id, attempts, next_at, str(exc)[:500])
@@ -176,12 +178,13 @@ def _retry_row(row: dict[str, Any], now: float | None = None) -> None:
             'next try in %.0f min',
             channel, event_id, attempts, OUTBOX_MAX_ATTEMPTS, exc, delay / 60,
         )
-    else:
-        db.delete_alert_delivery(row_id)
-        logger.info(
-            'Queued %s alert for event %s delivered on retry %d',
-            channel, event_id, attempts,
-        )
+        return {'status': 'rescheduled', 'error': str(exc)}
+    db.delete_alert_delivery(row_id)
+    logger.info(
+        'Queued %s alert for event %s delivered on retry %d',
+        channel, event_id, attempts,
+    )
+    return {'status': 'delivered'}
 
 
 def retry_due(now: float | None = None, limit: int = OUTBOX_BATCH_SIZE) -> int:
@@ -197,6 +200,71 @@ def retry_due(now: float | None = None, limit: int = OUTBOX_BATCH_SIZE) -> int:
             # A failed bookkeeping write must not abort the rest of the batch.
             logger.exception('Alert outbox retry failed for row %s', row.get('id'))
     return len(rows)
+
+
+def public_entries(limit: int = 100) -> list[dict[str, Any]]:
+    """Queued deliveries shaped for the admin settings view.
+
+    Deliberately excludes the raw payload (the alert dict and any snapshot
+    reference): the UI needs the rule, channel and reason, not the internals.
+    """
+    db = getattr(_state, 'database', None)
+    if db is None:
+        return []
+    entries: list[dict[str, Any]] = []
+    for row in db.alert_deliveries(limit):
+        try:
+            payload = json.loads(row.get('payload') or '{}')
+        except ValueError:
+            payload = {}
+        alert = payload.get('alert') if isinstance(payload.get('alert'), dict) else {}
+        entries.append({
+            'id': int(row.get('id') or 0),
+            'created_at': row.get('created_at'),
+            'event_id': row.get('event_id'),
+            'channel': row.get('channel'),
+            'rule_name': str(alert.get('rule_name') or ''),
+            'label': str(alert.get('label') or ''),
+            'recipients': list(payload.get('recipients') or []),
+            'topics': list(payload.get('topics') or []),
+            'attempts': int(row.get('attempts') or 0),
+            'last_error': row.get('last_error'),
+            'next_attempt_at': float(row.get('next_attempt_at') or 0),
+        })
+    return entries
+
+
+def pending_count() -> int:
+    db = getattr(_state, 'database', None)
+    return db.count_alert_deliveries() if db is not None else 0
+
+
+def retry_now(row_id: int) -> dict[str, Any] | None:
+    """Retry one queued delivery immediately; None when the row is gone."""
+    db = getattr(_state, 'database', None)
+    if db is None:
+        return None
+    row = db.alert_delivery(int(row_id))
+    if row is None:
+        return None
+    try:
+        return _retry_row(row)
+    except Exception as exc:
+        # A failed bookkeeping write must not surface as a 500 to the UI.
+        logger.exception('Manual alert outbox retry failed for row %s', row_id)
+        return {'status': 'error', 'error': str(exc)}
+
+
+def retry_all_now(now: float | None = None) -> int:
+    """Make every queued delivery due so the worker drains them.
+
+    Deliberately not attempted inline: while the server is still down each row
+    costs its transports' retry budget, which would hang the request.
+    """
+    db = getattr(_state, 'database', None)
+    if db is None:
+        return 0
+    return db.request_all_alert_delivery_retries(time.time() if now is None else now)
 
 
 def prune(now: float | None = None) -> int:

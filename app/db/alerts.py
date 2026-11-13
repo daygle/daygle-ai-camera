@@ -114,6 +114,40 @@ class AlertsMixin:
         with self.write_slot(), self.connect() as db:
             db.execute("DELETE FROM alert_delivery_outbox WHERE id = ?", (int(row_id),))
 
+    def alert_deliveries(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Queued deliveries, newest first, for the admin outbox view."""
+        with self.connect() as db:
+            rows = db.execute(
+                """
+                SELECT * FROM alert_delivery_outbox
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def alert_delivery(self, row_id: int) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM alert_delivery_outbox WHERE id = ?", (int(row_id),),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def count_alert_deliveries(self) -> int:
+        with self.connect() as db:
+            row = db.execute("SELECT COUNT(*) AS count FROM alert_delivery_outbox").fetchone()
+            return int(row["count"]) if row else 0
+
+    def request_all_alert_delivery_retries(self, now: float) -> int:
+        """Make every queued delivery due now; returns how many rows."""
+        with self.write_slot(), self.connect() as db:
+            cursor = db.execute(
+                "UPDATE alert_delivery_outbox SET next_attempt_at = ?",
+                (float(now),),
+            )
+            return int(cursor.rowcount or 0)
+
     def prune_alert_deliveries(self, older_than: str) -> int:
         """Drop rows created before the ISO-8601 ``older_than`` bound."""
         with self.write_slot(), self.connect() as db:
