@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -209,3 +211,52 @@ def test_failed_stop_after_a_move_is_retried(monkeypatch):
     conn = ptz.ptz_connection({'host': 'cam', 'ptz': {'enabled': True}})
     ptz.ptz_move(conn, 0.5, 0.0, 0.4)
     assert len(stops) == 2
+
+
+def test_a_tracking_pulse_cannot_cancel_a_concurrent_manual_command(monkeypatch):
+    """A pulse owns the camera from its move to its Stop.
+
+    The pulse's dwell used to run outside the per-camera command lock, so an
+    operator's press could be sent between the move and the trailing Stop and
+    then be cancelled by it. On Pelco-D, which moves until told to stop, that
+    ended a held press the instant the pulse finished.
+    """
+    events: list[str] = []
+    pulse_sleeping = threading.Event()
+    release_pulse = threading.Event()
+    manual_sent = threading.Event()
+
+    class _Clock:
+        monotonic = staticmethod(time.monotonic)
+
+        @staticmethod
+        def sleep(_seconds):
+            pulse_sleeping.set()
+            release_pulse.wait(5.0)
+
+    monkeypatch.setattr(ptz, 'time', _Clock)
+    monkeypatch.setattr(ptz, 'send_ptz_velocity_onvif', lambda *a, **k: events.append('move'))
+    monkeypatch.setattr(ptz, 'stop_ptz_onvif', lambda *a, **k: events.append('stop'))
+
+    def _manual(*_args, **_kwargs):
+        events.append('manual')
+        manual_sent.set()
+
+    monkeypatch.setattr(ptz, 'send_ptz_command_onvif', _manual)
+    conn = ptz.ptz_connection({'host': 'cam', 'ptz': {'enabled': True}})
+    pulse = threading.Thread(target=lambda: ptz.ptz_move(conn, 1.0, 0.0, 0.4))
+    pulse.start()
+    try:
+        assert pulse_sleeping.wait(5.0)
+        manual = threading.Thread(
+            target=lambda: ptz.send_ptz_command('cam', 'left', 5, 'onvif', http_port=80),
+        )
+        manual.start()
+        # The press must queue behind the pulse, not be stopped by it.
+        assert not manual_sent.wait(0.3)
+    finally:
+        release_pulse.set()
+        pulse.join(5.0)
+    manual.join(5.0)
+    assert not pulse.is_alive() and not manual.is_alive()
+    assert events == ['move', 'stop', 'manual']

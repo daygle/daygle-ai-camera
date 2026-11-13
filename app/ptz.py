@@ -712,6 +712,12 @@ def ptz_move(conn: PtzConnection, pan: float, tilt: float, duration: float, zoom
     from a worker thread, never the detection loop.
     """
     duration = max(0.05, min(5.0, float(duration)))
+    # The move and its Stop are ONE operation, so the camera's command lock is
+    # held for the whole pulse. Releasing it during the dwell let a manual press
+    # interleave, and this pulse's trailing Stop then cancelled the operator's
+    # command -- on Pelco-D (which moves until stopped) a held press ended the
+    # moment the pulse finished. Queueing a press behind a pulse of at most a
+    # couple of seconds is what "the operator wins" has to mean at the camera.
     with conn.lock:
         if conn.protocol == 'tcp_pelcod':
             _pelcod_send(conn.host, conn.tcp_port, _pelcod_move_packet(conn.address, pan, tilt, zoom))
@@ -720,21 +726,26 @@ def ptz_move(conn: PtzConnection, pan: float, tilt: float, duration: float, zoom
                 conn.host, conn.http_port, pan, tilt, zoom,
                 conn.username, conn.password, timeout_seconds=duration,
             )
-    time.sleep(duration)
-    try:
-        ptz_stop(conn)
-    except OSError as exc:
-        # A dropped Stop is what leaves a camera spinning, so try once more.
-        logger.warning('PTZ stop after a move failed on %s, retrying: %s', conn.host, exc)
-        ptz_stop(conn)
+        time.sleep(duration)
+        try:
+            _send_stop_locked(conn)
+        except OSError as exc:
+            # A dropped Stop is what leaves a camera spinning, so try once more.
+            logger.warning('PTZ stop after a move failed on %s, retrying: %s', conn.host, exc)
+            _send_stop_locked(conn)
+
+
+def _send_stop_locked(conn: PtzConnection) -> None:
+    """Send the Stop for ``conn``; the caller must hold ``conn.lock``."""
+    if conn.protocol == 'tcp_pelcod':
+        send_ptz_command_tcp(conn.host, conn.tcp_port, conn.address, 'stop', 0)
+    else:
+        stop_ptz_onvif(conn.host, conn.http_port, conn.username, conn.password)
 
 
 def ptz_stop(conn: PtzConnection) -> None:
     with conn.lock:
-        if conn.protocol == 'tcp_pelcod':
-            send_ptz_command_tcp(conn.host, conn.tcp_port, conn.address, 'stop', 0)
-        else:
-            stop_ptz_onvif(conn.host, conn.http_port, conn.username, conn.password)
+        _send_stop_locked(conn)
 
 
 def ptz_goto_home(conn: PtzConnection, preset: str = '') -> bool:
