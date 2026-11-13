@@ -244,6 +244,41 @@ def test_shared_ingest_worker_command_fans_out_three_outputs(tmp_path, monkeypat
     assert 'image2' in cmd and cmd.count('segment') >= 2  # ts segment + wav segment muxers
 
 
+def test_stale_log_sweep_preserves_a_live_ingest_log(tmp_path):
+    """A running ingest's stderr log must survive another worker's sweep.
+
+    A healthy ffmpeg writes nothing to stderr, so its log's mtime stops at
+    creation. The startup sweep (run by a worker starting for any camera)
+    classified such a file as an orphan and deleted it, after which the live
+    worker's own exit path read nothing back from ``stderr_path`` - losing the
+    stderr that decides whether to disable the audio output, fall back to CPU
+    decoding, and why ffmpeg exited.
+    """
+    import app.recordings as recordings_module
+    RecordingService = recordings_module.RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    old = time.time() - 3600.0
+    orphan = service.prebuffer_dir / 'orphan.log'
+    live = service.prebuffer_dir / 'live.log'
+    for path in (orphan, live):
+        path.write_text('stderr', encoding='utf-8')
+        os.utime(path, (old, old))
+
+    stop = threading.Event()
+    thread = threading.Thread(target=stop.wait, daemon=True)
+    thread.start()
+    try:
+        service._prebuffer_workers['cam'] = {'thread': thread, 'ingest_log': str(live)}
+        service._prune_stale_ingest_logs()
+    finally:
+        stop.set()
+        thread.join(timeout=5)
+
+    assert not orphan.exists(), 'a log no live worker owns is still swept'
+    assert live.exists(), 'a live worker keeps the log its exit path reads'
+
+
 def test_prebuffer_window_change_updates_worker_without_restart(tmp_path, monkeypatch):
     import app.recordings as recordings_module
     RecordingService = recordings_module.RecordingService

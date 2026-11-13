@@ -1644,6 +1644,9 @@ class RecordingService:
 
             stderr_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
             stderr_path = Path(stderr_file.name)
+            # Publish this iteration's log so the stale-log sweep cannot unlink
+            # it while this worker is alive (see _prune_stale_ingest_logs).
+            worker_state['ingest_log'] = str(stderr_path)
             try:
                 process = subprocess.Popen(
                     command, stdout=subprocess.DEVNULL, stderr=stderr_file,
@@ -1659,6 +1662,7 @@ class RecordingService:
                 stderr_file.close()
                 with contextlib.suppress(OSError):
                     stderr_path.unlink(missing_ok=True)
+                worker_state.pop('ingest_log', None)
                 consecutive_failures += 1
                 now = time.monotonic()
                 if (
@@ -1811,6 +1815,7 @@ class RecordingService:
                 # fatal; they will be re-created or cleaned up later.
                 with contextlib.suppress(OSError):
                     stderr_path.unlink(missing_ok=True)
+                worker_state.pop('ingest_log', None)
                 keep_seconds = int(worker_state.get('buffer_seconds') or 15)
                 self._prune_prebuffer_segments(camera_dir, keep_seconds)
                 self._prune_audio_segments(audio_camera_dir, keep_seconds)
@@ -1929,7 +1934,27 @@ class RecordingService:
 
     def _prune_stale_ingest_logs(self, max_age_seconds: float = 300.0) -> None:
         cutoff = time.time() - max_age_seconds
+        # A log a LIVE worker is still writing must never be swept. A healthy
+        # ffmpeg writes nothing to stderr, so the file's mtime stops at
+        # creation: this sweep (a NEW worker's startup) would see an hours-old
+        # file and delete a running ingest's log. On POSIX the ffmpeg keeps
+        # writing to the unlinked inode, so that worker's own exit path reads
+        # nothing back from ``stderr_path`` - and the no-audio switch-over, the
+        # GPU-decode fallback and the restart diagnostic all decide from that
+        # stderr. Read the worker map without ``_prebuffer_lock`` on purpose:
+        # this runs on an ingest thread, and ``_ensure_prebuffer_worker`` holds
+        # that lock while joining the previous worker, so waiting for it here
+        # would stall that join for its whole timeout.
+        live_logs = {
+            str(worker.get('ingest_log'))
+            for worker in list(self._prebuffer_workers.values())
+            if worker.get('ingest_log')
+            and isinstance(worker.get('thread'), threading.Thread)
+            and worker['thread'].is_alive()
+        }
         for log_path in self.prebuffer_dir.glob('*.log'):
+            if str(log_path) in live_logs:
+                continue
             try:
                 if log_path.stat().st_mtime < cutoff:
                     log_path.unlink(missing_ok=True)
