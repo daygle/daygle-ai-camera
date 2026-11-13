@@ -18,7 +18,12 @@ router = APIRouter()
 
 
 @router.get('/api/settings/camera-offline')
-def get_camera_offline_alert_settings():
+def get_camera_offline_alert_settings(request: Request):
+    # Admin-only like every other settings GET. The middleware admin list only
+    # covers mutating methods for this path, and the payload carries the alert
+    # recipients' email addresses and ``user:<id>`` references, which viewers
+    # must not be able to enumerate (same rule as the admin-only /api/users).
+    require_admin(request)
     return effective_camera_offline_alert_settings()
 
 

@@ -100,6 +100,21 @@ def test_camera_offline_settings_keep_user_recipients(tmp_path, monkeypatch):
         status, _headers, payload = client.request('/api/settings/camera-offline')
         assert status == 200
         assert payload['recipients'] == ['user:4', 'ops@example.com']
+
+        # The settings are admin-only: a viewer signed in to the live pages must
+        # not be able to read the alert recipients' addresses or user ids.
+        status, _headers, _created = client.request(
+            '/api/users',
+            method='POST',
+            json_body={'username': 'viewer1', 'password': 'Viewer123!', 'role': 'viewer'},
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        viewer = LocalClient(base_url)
+        _login(viewer, 'viewer1', 'Viewer123!')
+        status, _headers, denied = viewer.request('/api/settings/camera-offline')
+        assert status == 403
+        assert denied['detail'] == 'Admin access required'
     finally:
         server.should_exit = True
         thread.join(timeout=5)

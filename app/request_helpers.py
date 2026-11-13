@@ -161,7 +161,7 @@ async def read_json_body(request: Request) -> Any:
     ``<``/``>`` range checks (every comparison with NaN is False) and crash
     ``int()`` with OverflowError, so they are rejected here, once, for every
     settings payload. The body is size-capped at ``MAX_JSON_BYTES`` (413)
-    and its nesting depth at ``_MAX_JSON_DEPTH`` (400).
+    and its nesting depth at ``_MAX_JSON_DEPTH`` (100).
     """
     body = await _read_bounded_body(request, MAX_JSON_BYTES, 'JSON body')
     try:
