@@ -51,6 +51,28 @@ test('the outbox rows have styles', () => {
   assert.ok(styles.includes('.alert-outbox-row'), 'the row needs a style rule');
 });
 
+test('the badge polls on a timer so a stuck server shows on an open page', () => {
+  assert.match(settingsJs, /const ALERT_OUTBOX_REFRESH_MS = \d+;/, 'the poll period must be a named constant');
+  assert.match(
+    settingsJs,
+    /startPageInterval\(pollAlertOutbox, ALERT_OUTBOX_REFRESH_MS\)/,
+    'the poll must go through startPageInterval so hidden tabs stay quiet',
+  );
+  // The poller is started from the successful render only (a viewer's first
+  // read 403s and must not leave a timer re-failing every tick).
+  const renderBody = settingsJs.slice(
+    settingsJs.indexOf('function renderAlertOutbox('),
+    settingsJs.indexOf('const ALERT_OUTBOX_REFRESH_MS'),
+  );
+  assert.ok(renderBody.includes('startPageInterval(pollAlertOutbox'), 'the poller must start after a successful read');
+  const deniedBranch = renderBody.slice(
+    renderBody.indexOf('if (payload === null) {'),
+    renderBody.indexOf('section.hidden = false;'),
+  );
+  assert.ok(!deniedBranch.includes('startPageInterval'), 'the 403 path must not start polling');
+  assert.match(settingsJs, /Admin access required/, 'a demoted admin must stop the poller');
+});
+
 test('the Notifications tab carries a queued-count badge', () => {
   const tab = settingsHtml.slice(
     settingsHtml.indexOf('id="tab-notifications"'),

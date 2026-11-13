@@ -499,6 +499,33 @@ function renderAlertOutbox(payload) {
       + `<button type="button" class="btn-info" data-outbox-retry="${Number(entry.id)}">Retry</button>`
       + '</div>';
   }).join('');
+  // The server queues a row only after its own transient retries fail, then
+  // drains the queue on a 30s pass, so polling at the same pace surfaces a
+  // stuck relay on a page left open. startPageInterval (web/utils.js) skips
+  // hidden tabs and runs one tick on refocus, so a returning operator sees the
+  // current count without a reload.
+  if (alertOutboxPoller === null) {
+    alertOutboxPoller = startPageInterval(pollAlertOutbox, ALERT_OUTBOX_REFRESH_MS) || null;
+  }
+}
+
+const ALERT_OUTBOX_REFRESH_MS = 30000;
+// Only starts after a successful list read: a viewer's first request 403s and
+// there is nothing to poll for.
+let alertOutboxPoller = null;
+
+async function pollAlertOutbox() {
+  try {
+    await refreshAlertOutbox();
+  } catch (error) {
+    // A demoted account keeps its session but loses admin: stop asking rather
+    // than failing every tick. Transient errors leave the poller running.
+    if (String(error?.message || '').includes('Admin access required')) {
+      window.clearInterval(alertOutboxPoller);
+      alertOutboxPoller = null;
+      renderAlertOutbox(null);
+    }
+  }
 }
 
 async function refreshAlertOutbox() {
