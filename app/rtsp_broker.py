@@ -60,6 +60,17 @@ class RtspBrokerError(RuntimeError):
     """The broker could not be started; capture must fail closed."""
 
 
+class _ClientDisconnected(Exception):
+    """The local FFmpeg/OpenCV client closed its side of the broker."""
+
+
+def _send_to_client(client: socket.socket, data: bytes) -> None:
+    try:
+        client.sendall(data)
+    except OSError as exc:
+        raise _ClientDisconnected() from exc
+
+
 def _effective_port(scheme: str, port: int | None) -> int | None:
     if port is not None:
         return port
@@ -151,6 +162,9 @@ class RtspBroker:
         authority = f'{self._userinfo}@{self._authority}' if self._userinfo else self._authority
         self.url = urlunsplit(('rtsp', authority, parsed.path or '/', parsed.query, ''))
         self._accept_thread: threading.Thread | None = None
+        # Most recent upstream failure, so a caller (the connection test)
+        # can report the real reason instead of FFmpeg's generic error.
+        self.last_error: str | None = None
 
     def start(self) -> RtspBroker:
         self._accept_thread = threading.Thread(
@@ -280,7 +294,13 @@ class RtspBroker:
             )
             forward_thread.start()
             self._forward_upstream_to_client(upstream, client)
+        except _ClientDisconnected:
+            # FFmpeg closed its side (normal exit, segment rollover, probe
+            # finished, restart) while the camera was still sending. That
+            # is an orderly end of this capture, not a camera failure.
+            logger.debug('RTSP broker client for %s:%s disconnected', self._hostname, self._port)
         except (OSError, RtspBrokerError) as exc:
+            self.last_error = str(exc)
             logger.warning('RTSP broker connection to %s:%s failed: %s', self._hostname, self._port, exc)
         finally:
             for sock in (client, upstream):
@@ -336,7 +356,7 @@ class RtspBroker:
                     total = 4 + int.from_bytes(buffer[2:4], 'big')
                     if len(buffer) < total:
                         break
-                    client.sendall(bytes(buffer[:total]))
+                    _send_to_client(client, bytes(buffer[:total]))
                     del buffer[:total]
                     continue
                 if buffer[:5].upper() == b'RTSP/':
@@ -354,12 +374,12 @@ class RtspBroker:
                     message = self._apply_redirect_policy(message)
                     if message is None:
                         return
-                    client.sendall(message)
+                    _send_to_client(client, message)
                     continue
                 # Unexpected framing: forward as-is rather than stall the
                 # stream. Redirect enforcement covers every parseable RTSP
                 # response above; non-RTSP bytes cannot drive a redirect.
-                client.sendall(bytes(buffer))
+                _send_to_client(client, bytes(buffer))
                 buffer.clear()
                 break
 

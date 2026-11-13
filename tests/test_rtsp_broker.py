@@ -244,3 +244,54 @@ def test_broker_reresolves_per_connection_and_falls_back_on_dns_failure(monkeypa
         assert fallback == second
     finally:
         broker.close()
+
+
+def test_client_disconnect_mid_stream_is_not_logged_as_failure(caplog):
+    """FFmpeg closing its side while the camera still streams is normal."""
+    import logging
+    import time
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(('127.0.0.1', 0))
+    listener.listen(1)
+    port = int(listener.getsockname()[1])
+    stop = threading.Event()
+
+    def stream_forever() -> None:
+        conn, _ = listener.accept()
+        with conn:
+            frame = b'$\x00' + (1000).to_bytes(2, 'big') + b'\x00' * 1000
+            while not stop.is_set():
+                try:
+                    conn.sendall(frame)
+                except OSError:
+                    return
+
+    threading.Thread(target=stream_forever, daemon=True).start()
+    broker = RtspBroker(f'rtsp://127.0.0.1:{port}/stream').start()
+    try:
+        with caplog.at_level(logging.WARNING, logger='daygle.ai.rtsp_broker'):
+            from urllib.parse import urlsplit
+            client = socket.create_connection(('127.0.0.1', urlsplit(broker.url).port), timeout=5)
+            client.recv(4096)
+            client.close()
+            time.sleep(0.5)
+        assert not [r for r in caplog.records if 'failed' in r.getMessage()]
+        assert broker.last_error is None
+    finally:
+        stop.set()
+        broker.close()
+        listener.close()
+
+
+def test_upstream_connect_failure_is_recorded():
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(('127.0.0.1', 0))
+    port = int(listener.getsockname()[1])
+    listener.close()  # nothing listens on this port now
+    broker = RtspBroker(f'rtsp://127.0.0.1:{port}/stream').start()
+    try:
+        _exchange(broker.url)
+        assert broker.last_error and 'Cannot connect to camera' in broker.last_error
+    finally:
+        broker.close()

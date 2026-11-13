@@ -24,7 +24,7 @@ from app.camera_config import (
 )
 from app.config_facades import effective_cameras_config, get_camera_config
 from app.media_utils import ffmpeg_decoder_available, is_hevc_codec, video_codec_label
-from app.rtsp_broker import RtspBrokerError, camera_input_url
+from app.rtsp_broker import RtspBrokerError, start_camera_broker
 from app.utils import build_stream_url, camera_stream_input_options
 from app.state import _camera_health_lock, _camera_health_state
 import app.state as _state
@@ -347,13 +347,20 @@ async def test_camera_connection(request: Request, recording_service=Depends(get
     # The test must go through the same loopback RTSP broker as live
     # capture, or it would itself be a redirect side-channel (and would
     # report a redirected internal service as "reachable").
+    broker = None
     try:
-        with camera_input_url(stream_url) as input_url:
-            command = [ffprobe, '-v', 'quiet', *camera_stream_input_options(input_url), '-i', input_url,
+        broker = start_camera_broker(stream_url)
+        input_url = broker.url if broker is not None else stream_url
+        try:
+            command = [ffprobe, '-v', 'error', *camera_stream_input_options(input_url), '-i', input_url,
                        '-show_entries', 'stream=codec_type,codec_name', '-of', 'json']
             result = await run_in_threadpool(
                 subprocess.run, command, capture_output=True, timeout=8, check=False
             )
+        finally:
+            if broker is not None:
+                broker.close()
+        broker_error = broker.last_error if broker is not None else None
         if result.returncode == 0:
             video_codec = None
             try:
@@ -384,11 +391,19 @@ async def test_camera_connection(request: Request, recording_service=Depends(get
                 'video_codec_label': codec_label,
                 'hevc_decode_supported': decoder_available if is_hevc_codec(video_codec) else None,
             }
-        stderr = recording_service.redact_stream_credentials(result.stderr.decode('utf-8', errors='replace').strip())
+        # Show the camera address, not the broker's loopback one, in the reason.
+        stderr = result.stderr.decode('utf-8', errors='replace').replace(input_url, stream_url).strip()
+        if broker_error:
+            # The broker could not reach the camera; that is the real reason.
+            stderr = broker_error
+        stderr = recording_service.redact_stream_credentials(stderr)
         return {'online': False, 'message': f'Stream unreachable: {stderr[:300]}' if stderr else 'Stream unreachable.'}
     except RtspBrokerError:
         return {'online': False, 'message': 'Stream unreachable: RTSP redirect broker unavailable.'}
     except subprocess.TimeoutExpired:
+        if broker is not None and broker.last_error:
+            reason = recording_service.redact_stream_credentials(broker.last_error)
+            return {'online': False, 'message': f'Stream unreachable: {reason[:300]}'}
         return {'online': False, 'message': 'Connection timed out (8 s). Check host, port, and credentials.'}
 
 
