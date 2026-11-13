@@ -176,3 +176,64 @@ def test_cleanup_camera_runtime_state_keeps_other_cameras(state):
     assert 'cam-keep' in detection_state._motion_log_last_at
     assert 'cam-old' not in state.live_detection_history
     assert 'cam-old' not in detection_state._motion_log_last_at
+
+
+# ---------------------------------------------------------------------------
+# Settings-apply exception safety
+# ---------------------------------------------------------------------------
+
+def test_apply_storage_settings_failure_keeps_old_service_published(cl, state, monkeypatch):
+    """A failing RecordingService construction must not orphan the sentinel.
+
+    Publishing ``_SentinelRecordingService`` before constructing the new
+    service meant an unwritable recordings dir (or full disk) left the
+    sentinel published forever: every ingest prime / should_record became a
+    silent no-op and recording stopped until restart."""
+    class _OldService:
+        def stop_prebuffer_workers(self):
+            recorders.append('stop_prebuffer')
+
+        def stop_all_continuous_recordings(self):
+            recorders.append('stop_continuous')
+
+    recorders = []
+    old_service = _OldService()
+    monkeypatch.setattr(state, 'recording_service', old_service)
+
+    def _boom(_config):
+        raise OSError('recordings directory is not writable')
+
+    monkeypatch.setattr(cl, 'RecordingService', _boom)
+    monkeypatch.setattr(cl, 'log_camera_diagnostic', lambda *a, **k: None)
+
+    with pytest.raises(OSError):
+        cl.apply_storage_and_recording_settings()
+
+    assert state.recording_service is old_service, (
+        'old service must stay published when the new one cannot be built'
+    )
+    assert not isinstance(state.recording_service, cl._SentinelRecordingService)
+    assert recorders == [], 'old workers must not be torn down for a failed swap'
+
+
+def test_reload_detector_construction_failure_publishes_error_not_sentinel(cl, state, monkeypatch):
+    """A raising create_detector must leave a failing detector, not the
+    generic "reloading" sentinel that never resolves."""
+    monkeypatch.setattr(state, 'detector', None)
+    monkeypatch.setattr(state, 'face_detector', None)
+
+    def _boom(_settings):
+        raise RuntimeError('model file is corrupt')
+
+    monkeypatch.setattr(cl, 'create_detector', _boom)
+    monkeypatch.setattr(cl, 'log_detector_initialization', lambda *_a, **_k: None)
+
+    ok, error = cl.reload_detector({'backend': 'onnx'})
+
+    assert ok is False
+    assert 'model file is corrupt' in (error or '')
+    detector = state.detector
+    assert not isinstance(detector, cl._SentinelDetector) or 'failed to load' in (
+        detector.unavailable_reason or ''
+    ), 'sentinel left in place would report "reloading" forever'
+    assert getattr(detector, 'available', True) is False

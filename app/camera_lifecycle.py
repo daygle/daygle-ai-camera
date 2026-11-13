@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import threading
 from typing import Any
 
 import app.state as _state
@@ -36,6 +37,14 @@ from app.sound_monitor import apply_sound_settings
 from app.storage import Storage
 
 logger = logging.getLogger('daygle.ai.cameras')
+
+# Serializes concurrent ``reload_detector`` calls (AI settings save racing a
+# model-download completion). A second reload must not publish its own
+# sentinel and null the first reload's ``previous_detector`` while the first
+# is still creating/publishing its candidate -- the mid-swap window would
+# otherwise leak an ONNX session and publish the older candidate last.
+# Reentrant: ``reload_detector`` calls ``_rebuild_face_detector`` internally.
+_reload_detector_lock = threading.RLock()
 
 
 class _SentinelRecordingService:
@@ -354,6 +363,21 @@ def apply_storage_and_recording_settings() -> None:
     # ``RecordingService`` is published into a quiescent monitor-landscape.
     with _state._apply_settings_lock:
         old_service = _state.recording_service
+        # Construct NEW before publishing the sentinel or stopping OLD. The
+        # constructors create directories and can raise (unwritable
+        # recordings_dir, full disk); doing so first means a construction
+        # failure leaves the OLD service published and fully working
+        # instead of orphaning the sentinel -- which would silently kill
+        # all recording and ingest until the next successful settings
+        # apply or restart. Construction itself starts no workers, so
+        # holding off the teardown until it has succeeded is race-free.
+        new_storage = Storage({**_state.config, 'storage': effective_storage_config()})
+        new_service = RecordingService({
+            **_state.config,
+            'storage': effective_storage_config(),
+            'recording': effective_recording_config(),
+        })
+        new_service.diagnostic_callback = log_camera_diagnostic
         # Publish sentinel BEFORE stopping OLD workers, so any monitor poll
         # that arrives mid-teardown absorbs as a no-op rather than spawning
         # a fresh ffmpeg against the OLD service.
@@ -370,13 +394,8 @@ def apply_storage_and_recording_settings() -> None:
         # Publish NEW AFTER OLD has fully exited its workers. By the time
         # ``_state.recording_service`` is reassigned below, no OLD ffmpeg is
         # alive that could race a NEW ffmpeg on the same per-camera directory.
-        _state.storage = Storage({**_state.config, 'storage': effective_storage_config()})
-        _state.recording_service = RecordingService({
-            **_state.config,
-            'storage': effective_storage_config(),
-            'recording': effective_recording_config(),
-        })
-        _state.recording_service.diagnostic_callback = log_camera_diagnostic
+        _state.storage = new_storage
+        _state.recording_service = new_service
 
 
 def _rebuild_face_detector(ai_settings: dict[str, Any]) -> None:
@@ -413,6 +432,11 @@ def _rebuild_face_detector(ai_settings: dict[str, Any]) -> None:
 
 
 def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
+    with _reload_detector_lock:
+        return _reload_detector_locked(ai_settings)
+
+
+def _reload_detector_locked(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     import app.alert_dispatch as _alert_dispatch
     from app.ai_settings import invalidate_ai_status_cache
     invalidate_ai_status_cache()
@@ -422,6 +446,14 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     # from, so the cached per-camera sessions must be rebuilt on next use.
     from app.camera_models import clear_camera_model_cache
     clear_camera_model_cache()
+    # Keep the per-camera motion baselines (``_frame_motion_prev`` /
+    # ``_frame_motion_last_gray``): inference takes time, so the detector can
+    # be mid-reload while a camera is analysing a frame. Dropping the baseline
+    # would make the FIRST frame after the swap compare against nothing and
+    # surface as a full-frame change -- exactly the phantom "motion" the model
+    # reload is otherwise careful to avoid (see app.detection_state's handling
+    # of a background-shape mismatch). Clearing the MOG2 models as the camera
+    # cache does is fine; the diff baseline is what must survive.
     # Bug 8 audit fix: alias the OLD reference BEFORE publishing the
     # sentinel so concurrent pollers -- ``live_alert_monitor_loop``'s
     # per-poll ``detect_frame`` / ``ai_status_payload``,
@@ -439,7 +471,23 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
         previous_detector.session = None
         del old_session
         gc.collect()
-    candidate = create_detector(ai_settings)
+    try:
+        candidate = create_detector(ai_settings)
+    except Exception as exc:  # pragma: no cover - defensive: publish the error, not a stale sentinel
+        # ``create_detector`` returned-construction is the norm, but the
+        # constructor itself can raise (bad settings that slipped past
+        # validation, OSError while staging a model). The OLD session is
+        # already detached, so there is no rollback; the only sane publish
+        # is a sentinel carrying the real error (the broken-candidate path
+        # below does the same), and the caller gets the clean
+        # ``(False, reason)`` contract instead of a 500 leaving the
+        # generic "reloading" sentinel in place forever.
+        logger.warning('AI detector construction failed during reload: %s', exc)
+        _state.detector = _SentinelDetector(f'AI detector failed to load: {exc}')
+        _state.last_detector_error = str(exc)
+        _rebuild_face_detector(ai_settings)
+        log_detector_initialization('reload_failed')
+        return (False, _state.last_detector_error)
     candidate_error = getattr(candidate, 'unavailable_reason', None)
     if ai_settings['backend'] == 'onnx' and (not getattr(candidate, 'available', False)):
         # Bug 8 rollback safety: publish the BROKEN candidate, NOT the

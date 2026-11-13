@@ -602,7 +602,7 @@ class OnnxYoloDetector:
                 )
                 if self._use_io_binding:
                     self._run_inference_io_bound(np.ascontiguousarray(warm))
-                else:
+                elif self.session is not None:
                     self.session.run(self.output_names, {self.input_name: warm})
             except Exception as warm_exc:
                 if int8_runtime_model:
@@ -757,6 +757,13 @@ class OnnxYoloDetector:
         (the whole of ``app/detector.py`` itself, the benchmark script) pay one
         dict construction and three ``perf_counter`` reads per cycle.
         """
+        # Pin the session before any awaitable work: a concurrent
+        # ``reload_detector`` nulls ``self.session`` as part of its swap, and
+        # this call must either run to completion on the session it started
+        # with or fail the documented way -- never ``NoneType.run``.
+        session = self.session
+        if session is None:
+            raise DetectorUnavailableError(self.unavailable_reason or "ONNX detector is not available")
         started = time.perf_counter()
         effective_confidence = confidence if confidence is not None else self.confidence
         # Never run inference below the noise floor: a near-zero threshold
@@ -776,9 +783,9 @@ class OnnxYoloDetector:
             # so ``_run_inference_io_bound`` doesn't need to handle a
             # CPU-bound fallback at call time.
             if self._use_io_binding:
-                outputs = self._run_inference_io_bound(input_tensor)
+                outputs = self._run_inference_io_bound(input_tensor, session)
             else:
-                outputs = self.session.run(self.output_names, {self.input_name: input_tensor})  # type: ignore[union-attr,index]
+                outputs = session.run(self.output_names, {self.input_name: input_tensor})
         # The session call above also waited on the inference semaphore, so this
         # number includes the wait a contended camera actually experienced --
         # which is the cost a cycle budget should be charged for.
@@ -794,7 +801,7 @@ class OnnxYoloDetector:
         }
         return detections
 
-    def _run_inference_io_bound(self, input_tensor: np.ndarray) -> list[np.ndarray]:
+    def _run_inference_io_bound(self, input_tensor: np.ndarray, session: Any = None) -> list[np.ndarray]:
         """Run inference via ORT's ``io_binding`` API (CUDA-only path).
 
         Avoids the host-side input copy + output round-trip that the
@@ -806,9 +813,15 @@ class OnnxYoloDetector:
         ``OrtValue`` objects.
         """
         from onnxruntime import OrtValue  # type: ignore[import-untyped]
+        # ``session`` is passed in by the caller so a concurrent detector
+        # reload cannot null this reference mid-inference; the default keeps
+        # the historical internal call sites (the warm-up) working.
+        session = session if session is not None else self.session
+        if session is None:
+            raise DetectorUnavailableError(self.unavailable_reason or "ONNX detector is not available")
         # ``io_binding()`` allocates a fresh binding; bound tensors are
         # released when ``io`` is garbage-collected (no explicit close).
-        io = self.session.io_binding()  # type: ignore[union-attr]
+        io = session.io_binding()
         # Input: numpy on host -> OrtValue on CUDA, device_id 0.
         io.bind_ortvalue_input(
             self.input_name,  # type: ignore[arg-type]
@@ -820,7 +833,7 @@ class OnnxYoloDetector:
         # different method that takes a pre-allocated OrtValue, not a device.
         for name in self.output_names:
             io.bind_output(name, 'cuda', 0)
-        self.session.run_with_iobinding(io)  # type: ignore[union-attr]
+        session.run_with_iobinding(io)
         # ``io.get_outputs()`` returns a list in the order outputs were
         # bound; we convert each OrtValue back to host numpy for the
         # existing post-process pipeline (which only knows numpy).
