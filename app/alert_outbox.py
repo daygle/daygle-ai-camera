@@ -192,7 +192,10 @@ def retry_due(now: float | None = None, limit: int = OUTBOX_BATCH_SIZE) -> int:
     db = getattr(_state, 'database', None)
     if db is None:
         return 0
-    rows = db.due_alert_deliveries(time.time() if now is None else now, limit)
+    # Claim (not just list) the rows: the admin retry endpoint and the
+    # background worker can run concurrently, and a second drainer must not
+    # re-deliver a batch this one is already sending.
+    rows = db.claim_due_alert_deliveries(time.time() if now is None else now, limit)
     for row in rows:
         try:
             _retry_row(row, now)

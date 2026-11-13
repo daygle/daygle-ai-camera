@@ -97,6 +97,38 @@ class AlertsMixin:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def claim_due_alert_deliveries(
+        self, now: float, limit: int = 20, *, lease_seconds: float = 120.0,
+    ) -> list[dict[str, Any]]:
+        """Atomically take the due deliveries this drainer will attempt.
+
+        ``due_alert_deliveries`` is a plain SELECT, so two drainers (a second
+        process, or an admin retry racing the background worker) could both pick
+        the same row and deliver the alert twice. This statement moves
+        ``next_attempt_at`` forward as it selects, so a row belongs to exactly
+        one drainer; if that attempt dies, the lease expires and the row is
+        retried later (at-least-once delivery, which alerting already was).
+        """
+        with self.write_slot(), self.connect() as db:
+            rows = db.execute(
+                """
+                UPDATE alert_delivery_outbox
+                SET next_attempt_at = ?
+                WHERE id IN (
+                    SELECT id FROM alert_delivery_outbox
+                    WHERE next_attempt_at <= ?
+                    ORDER BY next_attempt_at, id
+                    LIMIT ?
+                )
+                RETURNING *
+                """,
+                (
+                    float(now) + max(0.0, float(lease_seconds)),
+                    float(now), int(limit),
+                ),
+            ).fetchall()
+            return sorted((dict(row) for row in rows), key=lambda row: int(row['id']))
+
     def reschedule_alert_delivery(
         self, row_id: int, attempts: int, next_attempt_at: float, last_error: str,
     ) -> None:

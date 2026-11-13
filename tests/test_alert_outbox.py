@@ -52,6 +52,18 @@ def test_outbox_enqueue_dedupes_the_same_delivery(db):
     assert len(db.due_alert_deliveries(time.time() + 1)) == 3
 
 
+def test_a_due_row_is_claimed_by_only_one_drainer(db):
+    """The admin retry and the background worker must not both send a row."""
+    outbox = _outbox()
+    outbox.enqueue('push', 11, _alert(), topics=['daygle-ops'])
+    now = time.time() + 1
+    first = db.claim_due_alert_deliveries(now)
+    second = db.claim_due_alert_deliveries(now)
+    assert len(first) == 1 and second == []
+    # A drainer that dies mid-attempt leaves the row for the next lease.
+    assert len(db.claim_due_alert_deliveries(now + 3600)) == 1
+
+
 def test_outbox_enqueue_needs_a_recipient_or_topic(db):
     outbox = _outbox()
     assert outbox.enqueue('email', 7, _alert(), recipients=[]) is False
