@@ -642,8 +642,12 @@ def _prune_frame_motion_state() -> None:
         logger.debug('Pruned stale motion state for cameras: %s', stale)
 
 def live_alert_monitor_loop() -> None:
+    # Capture this loop's stop event once. A restart publishes a NEW event (see
+    # start_live_alert_monitor) instead of clearing this one, so re-reading the
+    # published event here would let a restart keep this loop running forever.
+    stop = _state.live_alert_monitor_stop
     _last_prune = 0.0
-    while not _state.live_alert_monitor_stop.is_set():
+    while not stop.is_set():
         try:
             live_settings = effective_live_config()
             run_live_alert_monitor_once(live_settings)
@@ -669,12 +673,20 @@ def live_alert_monitor_loop() -> None:
             # retry on a short delay instead.
             logger.warning('Live alert monitor cycle failed; retrying: %s', exc)
             interval = 1.0
-        _state.live_alert_monitor_stop.wait(interval)
+        stop.wait(interval)
 
 def start_live_alert_monitor() -> None:
-    if _state.live_alert_monitor_thread and _state.live_alert_monitor_thread.is_alive():
+    previous = _state.live_alert_monitor_thread
+    if previous is not None and previous.is_alive() and not _state.live_alert_monitor_stop.is_set():
         return
-    _state.live_alert_monitor_stop.clear()
+    # Publish a FRESH stop event for this loop rather than clearing the
+    # previous one. ``stop_live_alert_monitor`` gives a slow cycle (a camera
+    # health sweep) five seconds and then drops the thread reference; clearing
+    # the shared event afterwards would silently revive that still-running
+    # loop, and two monitors would submit detection for every camera until the
+    # process restarted. With an event per loop the old thread keeps seeing its
+    # own (set) event and exits, while this one gets a clean signal.
+    _state.live_alert_monitor_stop = threading.Event()
     _state.live_alert_monitor_thread = threading.Thread(target=live_alert_monitor_loop, name='live-alert-monitor', daemon=True)
     _state.live_alert_monitor_thread.start()
 

@@ -204,27 +204,38 @@ def camera_detector(camera_settings: dict[str, Any], ai_config: dict[str, Any] |
     if _same_model_path(global_model, model_path) and _same_model_path(global_labels, labels_path):
         return _state.detector
     key = (model_path, labels_path)
+    # The cache-hit fast path stays lock-free: this runs on every cycle of every
+    # camera with an assigned model, and a plain dict read is atomic.
     cached = _detector_cache.get(key)
     if cached is not None:
         return cached
     from app.detector import create_detector
-    detector = create_detector({
-        **ai_config,
-        'backend': 'onnx',
-        'model_path': model_path,
-        'labels_path': labels_path,
-        # Re-derived per model: NMS-free auto-detects from the filename, the
-        # input size comes from the catalog when known, and keypoint heads
-        # belong to face models (excluded from assignment).
-        'categories': [],
-        'nms_free': None,
-        'keypoint_count': 0,
-        'input_size': _model_input_size(model_path),
-    })
     with _cache_lock:
-        # Insert-if-absent: a concurrent cycle may have built the same model
-        # first; keep whichever landed so cameras always share one session.
-        return _detector_cache.setdefault(key, detector)
+        # Build under the lock, re-checking first. Two cameras assigned the same
+        # model can have their first cycle at the same time (the scheduler
+        # admits several workers), and building outside the lock loaded the
+        # model twice: two ONNX sessions for one model -- a second full copy of
+        # its weights and arena until GC -- with one instance silently
+        # discarded by ``setdefault``. A cold model load is a one-off cost, so
+        # serialising it here costs nothing on the hot path above.
+        cached = _detector_cache.get(key)
+        if cached is not None:
+            return cached
+        detector = create_detector({
+            **ai_config,
+            'backend': 'onnx',
+            'model_path': model_path,
+            'labels_path': labels_path,
+            # Re-derived per model: NMS-free auto-detects from the filename, the
+            # input size comes from the catalog when known, and keypoint heads
+            # belong to face models (excluded from assignment).
+            'categories': [],
+            'nms_free': None,
+            'keypoint_count': 0,
+            'input_size': _model_input_size(model_path),
+        })
+        _detector_cache[key] = detector
+        return detector
 
 
 def clear_camera_model_cache() -> None:
