@@ -194,6 +194,11 @@ def confirm_borderline_detections(
             relevant = is_relevant(borderline)
         except Exception:  # noqa: BLE001 - relevance filtering is best-effort
             logger.debug('Second-look relevance filter failed', exc_info=True)
+            # Report them like any other drop: the function's contract is that
+            # every discarded sub-threshold detection carries a reason, and a
+            # failed filter is a reason an operator needs to see.
+            for det in borderline:
+                _reject(det, 'Second Look relevance filter failed')
             return kept
         # Not a watched label in a watched zone: never worth a re-check, and not
         # worth logging either (it is noise this camera does not care about).
@@ -210,6 +215,10 @@ def confirm_borderline_detections(
         candidate_box = _box(det.get('box'))
         label = str(det.get('label') or '').strip().lower()
         if candidate_box is None or not label:
+            # A near-miss with no usable box or label cannot be re-checked, but
+            # it is still dropped: report it so the detection log explains the
+            # miss instead of leaving an unexplained gap.
+            _reject(det, 'no usable box or label to re-check')
             continue
         region = _crop_region(candidate_box)
         rx, ry, rw, rh = region

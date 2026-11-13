@@ -195,3 +195,32 @@ def test_rejections_skip_unwatched_noise():
         is_relevant=lambda _c: [], rejected=rejected,
     )
     assert rejected == []
+
+
+def test_unusable_near_miss_is_reported_not_silently_dropped():
+    """Contract: every dropped sub-threshold detection carries a reason."""
+    rejected = []
+    candidate = _candidate(0.45)
+    candidate.pop('box')
+    assert sl.confirm_borderline_detections(
+        _CropDetector([], []), _frame(), [candidate], threshold=0.5, rejected=rejected,
+    ) == []
+    assert [item['reason'] for item in rejected] == [
+        'Below threshold (0.45 < 0.50); no usable box or label to re-check'
+    ]
+
+
+def test_relevance_filter_failure_reports_rejections():
+    """A filter exception drops the candidates, so it must say why."""
+    rejected = []
+
+    def boom(_candidates):
+        raise RuntimeError('zone rules unavailable')
+
+    assert sl.confirm_borderline_detections(
+        _CropDetector([], []), _frame(), [_candidate(0.45)], threshold=0.5,
+        is_relevant=boom, rejected=rejected,
+    ) == []
+    assert [item['reason'] for item in rejected] == [
+        'Below threshold (0.45 < 0.50); Second Look relevance filter failed'
+    ]

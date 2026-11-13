@@ -215,11 +215,21 @@ class OnnxYoloDetector:
     backend = "onnx"
 
     # Per-call preprocess / session / postprocess milliseconds, refreshed by
-    # every ``_run_inference``. Declared at class level so the attribute exists
-    # before the first inference and so duck-typed detectors elsewhere can be
-    # sampled with a plain ``getattr(detector, 'last_timing', None)`` without a
-    # hasattr dance at every call site.
-    last_timing: dict[str, float] = {}
+    # every ``_run_inference``. The sample is kept PER THREAD: this one detector
+    # instance is shared by the live inference scheduler's workers (when
+    # ``max_concurrent_inferences`` > 1), and a caller samples ``last_timing``
+    # right after its own ``detect_frame`` returns to fold the breakdown into
+    # that cycle's pipeline timing. With a plain attribute, an inference that
+    # completed on another camera's thread in that window overwrote the value,
+    # so the cycle reported another camera's preprocess/session/postprocess
+    # split. A reader outside an inference thread (benchmark, tests) still gets
+    # the most recent sample from any thread. Duck-typed detectors elsewhere are
+    # still sampled with a plain ``getattr(detector, 'last_timing', None)``.
+    @property
+    def last_timing(self) -> dict[str, float]:
+        sample = getattr(self._timing_local, 'last', None)
+        return sample if sample is not None else self._last_timing
+
     _head_mismatch_logged = False
 
     def __init__(
@@ -335,6 +345,10 @@ class OnnxYoloDetector:
         self._num_threads = num_threads if (num_threads and num_threads > 0) else max(1, min(4, cpu_count))
         self._max_concurrency = max_concurrency if (max_concurrency and max_concurrency > 0) else 1
         self._inference_semaphore = threading.Semaphore(self._max_concurrency)
+        # Backing store for the ``last_timing`` property: one slot per inference
+        # thread plus the last sample completed anywhere (see the property).
+        self._timing_local = threading.local()
+        self._last_timing: dict[str, float] = {}
 
         if not self.model_path.exists():
             self.unavailable_reason = f"ONNX model not found: {self.model_path}"
@@ -794,12 +808,21 @@ class OnnxYoloDetector:
             outputs[0], scale, pad_x, pad_y, original_width, original_height,
             effective_confidence,
         )
-        self.last_timing = {
+        self._publish_timing({
             'preprocess_ms': round(preprocess_seconds * 1000.0, 3),
             'inference_ms': round(inference_seconds * 1000.0, 3),
             'postprocess_ms': round((time.perf_counter() - started - preprocess_seconds - inference_seconds) * 1000.0, 3),
-        }
+        })
         return detections
+
+    def _publish_timing(self, timing: dict[str, float]) -> None:
+        """Publish one inference's breakdown to its thread and to the fallback.
+
+        The single place the per-thread ``last_timing`` contract is maintained,
+        so a second inference path cannot forget one half of it.
+        """
+        self._timing_local.last = timing
+        self._last_timing = timing
 
     def _run_inference_io_bound(self, input_tensor: np.ndarray, session: Any = None) -> list[np.ndarray]:
         """Run inference via ORT's ``io_binding`` API (CUDA-only path).
