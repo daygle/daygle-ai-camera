@@ -272,7 +272,7 @@ class RtspBroker:
         while not self._closed:
             try:
                 client, _addr = self._listener.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 return

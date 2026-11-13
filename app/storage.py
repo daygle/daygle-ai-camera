@@ -1,22 +1,22 @@
 from __future__ import annotations
 
-import logging
 from datetime import datetime, UTC
 import os
 import secrets
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 
 class Storage:
     def __init__(self, config: dict[str, Any]) -> None:
         storage_config = config.get('storage', {})
         self.data_dir = Path(storage_config.get('data_dir', 'data'))
-        self.snapshots_dir = Path(storage_config.get('snapshots_dir', 'data/snapshots'))
-        self.events_dir = Path(storage_config.get('events_dir', 'data/events'))
-        self.recordings_dir = Path(storage_config.get('recordings_dir', self.data_dir / 'recordings'))
+        # Unset subdirectories live under data_dir, so a custom data_dir keeps
+        # snapshots and events with the rest of the data instead of a
+        # working-directory-relative ``data/`` tree.
+        self.snapshots_dir = Path(storage_config.get('snapshots_dir') or self.data_dir / 'snapshots')
+        self.events_dir = Path(storage_config.get('events_dir') or self.data_dir / 'events')
+        self.recordings_dir = Path(storage_config.get('recordings_dir') or self.data_dir / 'recordings')
         self.ensure_directories()
 
     def ensure_directories(self) -> None:

@@ -857,13 +857,17 @@ class SoundDetector:
 
     @staticmethod
     def _rule_active_now(rule: dict[str, Any]) -> bool:
-        start = rule.get('active_start')
-        end = rule.get('active_end')
-        if not start or not end:
+        """Return True when the rule's active window covers now.
+
+        An empty, partial or equal (``start == end``) window means "any time",
+        the same reading as ``AlertEngine._is_active_now`` and the notify
+        window gate; an equal window must not collapse to a single minute.
+        """
+        start_text = str(rule.get('active_start') or '')
+        end_text = str(rule.get('active_end') or '')
+        if not start_text or not end_text or start_text == end_text:
             return True
         now = _now_hm_in_admin_tz()
-        start_text = str(start)
-        end_text = str(end)
         if start_text <= end_text:
             return start_text <= now <= end_text
         return now >= start_text or now <= end_text
