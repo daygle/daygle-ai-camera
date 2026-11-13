@@ -254,8 +254,33 @@ def test_forget_onvif_probe_drops_only_that_camera():
     assert ('cam-b', '10.0.0.2', 80) in pa._onvif_probe_cache
 
 
-def test_saving_a_camera_drops_its_cached_probe(monkeypatch):
-    """A corrected host or password must take effect on the next poll."""
+@pytest.mark.parametrize('change, kept', [
+    ({'name': 'A2'}, True),
+    ({'host': '10.0.0.9'}, False),
+    ({'username': 'other'}, False),
+    ({'password': 'new'}, False),
+    ({'ptz': {'http_port': 8000}}, False),
+])
+def test_only_probe_input_changes_drop_the_cache(change, kept):
+    pa._onvif_probe_cache.clear()
+    old = {'id': 'cam-a', 'host': '10.0.0.1', 'username': 'u', 'password': 'p'}
+    pa._onvif_probe_cache[('cam-a', '10.0.0.1', 80)] = (1.0, 'day', None)
+    pa.forget_onvif_probe_if_changed(old, {**old, **change})
+    assert (('cam-a', '10.0.0.1', 80) in pa._onvif_probe_cache) is kept
+
+
+def test_renaming_a_camera_drops_both_ids():
+    pa._onvif_probe_cache.clear()
+    pa._onvif_probe_cache[('cam-a', '10.0.0.1', 80)] = (1.0, 'day', None)
+    pa._onvif_probe_cache[('cam-b', '10.0.0.1', 80)] = (1.0, 'day', None)
+    pa.forget_onvif_probe_if_changed(
+        {'id': 'cam-a', 'host': '10.0.0.1'}, {'id': 'cam-b', 'host': '10.0.0.1'},
+    )
+    assert pa._onvif_probe_cache == {}
+
+
+def _save_camera(monkeypatch, cameras, payload):
+    """Run the router's single-camera save against stubs."""
     import threading
     from types import SimpleNamespace
 
@@ -265,7 +290,6 @@ def test_saving_a_camera_drops_its_cached_probe(monkeypatch):
     import app.api.cameras_router as cameras_router
     import app.profile_automation as profile_automation
 
-    cameras = [{'id': 'cam-a', 'name': 'A'}]
     saved = {}
 
     class _Database:
@@ -276,7 +300,10 @@ def test_saving_a_camera_drops_its_cached_probe(monkeypatch):
             saved[key] = value
 
     monkeypatch.setattr(cameras_router, 'effective_cameras_config', lambda: list(cameras))
-    monkeypatch.setattr(cameras_router, 'validate_camera_settings', lambda payload, **_kw: dict(payload))
+    monkeypatch.setattr(
+        cameras_router, 'validate_camera_settings',
+        lambda data, current=None, **_kw: {**current, **data} if current else dict(data),
+    )
     monkeypatch.setattr(cameras_router, 'link_camera_profiles', lambda settings, _presets: (settings, []))
     monkeypatch.setattr(cameras_router, 'write_audit_log', lambda *_a, **_kw: None)
     monkeypatch.setattr(cameras_router, 'profile_status', lambda _camera_id: {})
@@ -285,13 +312,23 @@ def test_saving_a_camera_drops_its_cached_probe(monkeypatch):
         SimpleNamespace(_cameras_config_write_lock=threading.Lock()),
     )
     profile_automation._onvif_probe_cache[('cam-a', '10.0.0.1', 80)] = (1.0, 'night', None)
-
     cameras_router._upsert_camera(
-        'cam-a', {'name': 'A2'}, object(), _Database(), lambda _settings: None,
+        'cam-a', payload, object(), _Database(), lambda _settings: None,
     )
+    return profile_automation, saved
 
-    assert ('cam-a', '10.0.0.1', 80) not in profile_automation._onvif_probe_cache
+
+def test_saving_unrelated_camera_settings_keeps_the_cached_probe(monkeypatch):
+    old = {'id': 'cam-a', 'name': 'A', 'host': '10.0.0.1', 'username': 'u', 'password': 'p'}
+    profile_automation, saved = _save_camera(monkeypatch, [old], {'name': 'A2'})
+    assert ('cam-a', '10.0.0.1', 80) in profile_automation._onvif_probe_cache
     assert saved['cameras'][0]['name'] == 'A2'
+
+
+def test_saving_new_onvif_credentials_drops_the_cached_probe(monkeypatch):
+    old = {'id': 'cam-a', 'name': 'A', 'host': '10.0.0.1', 'username': 'u', 'password': 'p'}
+    profile_automation, _saved = _save_camera(monkeypatch, [old], {'password': 'new'})
+    assert ('cam-a', '10.0.0.1', 80) not in profile_automation._onvif_probe_cache
 
 
 def test_onvif_imaging_probe_reads_ircut_filter(monkeypatch):

@@ -66,6 +66,26 @@ def _probe_ir_state(
     return ir_state, error
 
 
+def forget_onvif_probe_if_changed(
+    old_camera: dict[str, Any], new_camera: dict[str, Any],
+) -> None:
+    """Drop the cached verdict only when a probe input actually changed.
+
+    Saving an unrelated field (the name, a detection profile) must not cost the
+    camera a fresh HTTP probe; a new host, port or credential must take effect
+    immediately.
+    """
+    old_id = str(old_camera.get('id') or '')
+    new_id = str(new_camera.get('id') or '')
+    if old_id != new_id:
+        # Renamed: the entry is keyed by the old id and can never be reused.
+        forget_onvif_probe(old_id)
+        forget_onvif_probe(new_id)
+        return
+    if _probe_inputs(old_camera) != _probe_inputs(new_camera):
+        forget_onvif_probe(new_id)
+
+
 def forget_onvif_probe(camera_id: Any) -> None:
     """Drop a camera's cached ONVIF verdict after its settings change.
 
@@ -223,6 +243,24 @@ def profile_status(camera_id: str) -> dict[str, Any]:
     }
 
 
+def _probe_endpoint(camera: dict[str, Any]) -> tuple[str, int]:
+    """Host and HTTP port the ONVIF imaging probe uses for a camera."""
+    ptz = camera.get('ptz') if isinstance(camera.get('ptz'), dict) else {}
+    try:
+        port = int(ptz.get('http_port') or camera.get('http_port') or 80)
+    except (TypeError, ValueError):
+        # A junk port must not abort the whole poll (and with it every other
+        # camera's profile switch); fall back to the default HTTP port.
+        port = 80
+    return _camera_host(camera), port
+
+
+def _probe_inputs(camera: dict[str, Any]) -> tuple[str, int, str, str]:
+    """Everything that decides what the probe asks and who it asks as."""
+    host, port = _probe_endpoint(camera)
+    return (host, port, str(camera.get('username') or ''), str(camera.get('password') or ''))
+
+
 def _camera_host(camera: dict[str, Any]) -> str:
     host = str(camera.get('host') or '').strip()
     if host:
@@ -252,16 +290,9 @@ def _select_target(camera: dict[str, Any], profiles: dict[str, Any]) -> tuple[st
     if source != 'onvif' or str(camera.get('backend') or '').lower() not in {'onvif', 'rtsp'}:
         return profiles['active'], 'manual', None, None
 
-    host = _camera_host(camera)
+    host, http_port = _probe_endpoint(camera)
     if not host:
         return scheduled, 'schedule_fallback', None, 'Camera host is unavailable for ONVIF imaging status.'
-    ptz = camera.get('ptz') if isinstance(camera.get('ptz'), dict) else {}
-    try:
-        http_port = int(ptz.get('http_port') or camera.get('http_port') or 80)
-    except (TypeError, ValueError):
-        # A junk port must not abort the whole poll (and with it every other
-        # camera's profile switch); fall back to the default HTTP port.
-        http_port = 80
     ir_state, probe_error = _probe_ir_state(camera, host, http_port)
     if ir_state in {'day', 'night'}:
         return ir_state, 'onvif_ir', ir_state, None

@@ -38,7 +38,7 @@ from app.deps import (
 from app.payload_validators import validate_camera_settings, validate_camera_stream_source, validate_cameras_settings
 from app.ptz import ptz_connection, ptz_presets, send_ptz_command, VALID_COMMANDS as PTZ_VALID_COMMANDS
 from app.ptz_tracking import note_manual_ptz
-from app.profile_automation import forget_onvif_probe
+from app.profile_automation import forget_onvif_probe, forget_onvif_probe_if_changed
 from app.detection_state import clear_camera_motion, mark_camera_motion
 from app.profile_automation import (
     profile_status,
@@ -150,15 +150,21 @@ def _persist_and_apply_cameras(settings, db, apply_cameras_settings) -> list:
         db.set_setting('cameras', settings, utc_now())
         apply_cameras_settings(settings)
     # A saved host/credential edit must take effect now, not when the probe
-    # cache entry expires; ids that are gone (removed or renamed) are dropped
-    # too so their entries do not linger.
+    # cache entry expires; an unrelated edit keeps the entry. Ids that are gone
+    # (removed or renamed) are dropped too so their entries do not linger.
+    old_by_id = {str(camera.get('id') or ''): camera for camera in old_configs}
     known_ids = {str(camera.get('id') or '') for camera in settings}
     for old in old_configs:
         old_id = str(old.get('id') or '')
         if old_id and old_id not in known_ids:
             forget_onvif_probe(old_id)
     for camera in settings:
-        forget_onvif_probe(camera.get('id'))
+        previous = old_by_id.get(str(camera.get('id') or ''))
+        if previous is None:
+            # A new (or reused) id has no usable cache entry.
+            forget_onvif_probe(camera.get('id'))
+        else:
+            forget_onvif_probe_if_changed(previous, camera)
     return settings
 
 
@@ -192,7 +198,7 @@ def _upsert_camera(normalized, payload, request, db, apply_cameras_settings):
                 settings_list, _changed = link_camera_profiles(settings_list, db.get_setting('camera_profile_presets'))
                 db.set_setting('cameras', settings_list, utc_now())
                 apply_cameras_settings(settings_list)
-                forget_onvif_probe(normalized)
+                forget_onvif_probe_if_changed(current, settings_list[index])
                 write_audit_log(request, db, 'update', 'settings.camera', normalized, {'camera_name': settings_list[index].get('name')})
                 return {
                     **_redact_camera(settings_list[index]),
