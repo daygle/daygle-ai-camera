@@ -198,7 +198,7 @@ def _coerce_camera_motion_override(flat_key: str, value: Any) -> int | float:
 
 def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_email_alert_settings()
-    allowed = {'enabled', 'host', 'port', 'username', 'password', 'from_address', 'use_tls', 'use_ssl'}
+    allowed = {'enabled', 'host', 'port', 'username', 'password', 'from_address', 'use_tls', 'use_ssl', 'verify_tls'}
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
         if key in allowed:
@@ -206,6 +206,15 @@ def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
     for key in ('enabled', 'use_tls', 'use_ssl'):
         value = updated.get(key, False)
         updated[key] = value.lower() in {'1', 'true', 'yes', 'on'} if isinstance(value, str) else bool(value)
+    # Certificate verification defaults ON: rows written before this setting
+    # existed carry no key, and a missing key must not leave smtplib's own
+    # unverified context in place (it accepts any certificate).
+    verify_tls = updated.get('verify_tls', True)
+    updated['verify_tls'] = (
+        True if verify_tls is None
+        else (verify_tls.strip().lower() in {'1', 'true', 'yes', 'on'}
+              if isinstance(verify_tls, str) else bool(verify_tls))
+    )
     try:
         updated['port'] = int(updated.get('port') or 587)
     except (TypeError, ValueError) as exc:

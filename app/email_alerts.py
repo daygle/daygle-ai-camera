@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import smtplib
+import ssl
 from contextlib import contextmanager
 from email.header import Header
 from email.message import Message
@@ -329,21 +330,43 @@ class EmailAlertService:
         port = int(self.settings.get("port") or (465 if self.settings.get("use_ssl") else 587))
         username = str(self.settings.get("username") or "")
         password = str(self.settings.get("password") or "")
+        # Verify the server's certificate and hostname unless the operator
+        # turned it off for a relay with a self-signed certificate. Passing no
+        # context lets smtplib fall back to its own context, which has
+        # ``check_hostname=False`` and ``CERT_NONE``: the SMTP password and
+        # every alert would then travel over an unauthenticated TLS channel.
+        tls_context = ssl.create_default_context()
+        if not self.settings.get("verify_tls", True):
+            # Documented opt-out for a self-signed relay: order matters, a
+            # check_hostname left on would raise when CERT_NONE is set.
+            tls_context.check_hostname = False
+            tls_context.verify_mode = ssl.CERT_NONE
 
         smtp: smtplib.SMTP | None = None
         try:
             if self.settings.get("use_ssl"):
-                smtp = smtplib.SMTP_SSL(host, port, timeout=10)
+                smtp = smtplib.SMTP_SSL(host, port, timeout=10, context=tls_context)
             else:
                 smtp = smtplib.SMTP(host, port, timeout=10)
                 if self.settings.get("use_tls", True):
-                    smtp.starttls()
+                    smtp.starttls(context=tls_context)
             if username:
                 smtp.login(username, password)
             yield smtp
         except EmailAlertError as exc:
             logger.warning('SMTP session setup failed: %s', exc)
             raise
+        except ssl.SSLCertVerificationError as exc:
+            # Name the likely cause: an operator with a self-signed relay or an
+            # uninstalled CA otherwise only sees a bare handshake error.
+            logger.warning(
+                'SMTP TLS certificate verification failed: host=%s %s', host, exc,
+            )
+            raise EmailAlertError(
+                f'TLS certificate verification failed for {host}: {exc}. Install the mail '
+                'server certificate (or its CA), or turn off "Verify TLS Certificate" in '
+                'Settings > Email Delivery for a self-signed relay.'
+            ) from exc
         except Exception as exc:  # pragma: no cover - depends on external mail servers
             logger.warning(
                 'SMTP session setup failed: host=%s port=%s exc=%s: %s',

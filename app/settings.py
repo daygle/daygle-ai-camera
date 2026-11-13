@@ -57,6 +57,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "from_address": "",
             "use_tls": True,
             "use_ssl": False,
+            # Verify the mail server's certificate; off only for a relay with
+            # a self-signed certificate (Settings > Email Delivery).
+            "verify_tls": True,
         },
         "push_notification": {
             "enabled": False,

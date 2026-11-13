@@ -79,6 +79,7 @@ const FIELD_LABELS = {
   from_address: 'From Address',
   use_tls: 'STARTTLS',
   use_ssl: 'SSL',
+  verify_tls: 'Verify TLS Certificate',
   host: 'SMTP Host',
   port: 'Port',
   username: 'Username',
@@ -292,6 +293,7 @@ const FORM_DEFAULTS = {
     from_address: '',
     use_tls: 'true',
     use_ssl: 'false',
+    verify_tls: 'true',
   },
   push: {
     enabled: 'false',
@@ -330,7 +332,7 @@ const FIELD_TYPES = {
     'always_run_object_detection', 'object_detection_region_boost', 'motion_denoise',
     'object_detection_second_look',
     'adaptive_detection_enabled',
-    'use_tls', 'use_ssl', 'autostart', 'tunnel_loopback_only',
+    'use_tls', 'use_ssl', 'verify_tls', 'autostart', 'tunnel_loopback_only',
   ]),
   integer: new Set([
     'width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds',

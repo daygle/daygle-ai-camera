@@ -75,6 +75,7 @@ def test_admin_can_send_test_alert_email(tmp_path, monkeypatch):
                 "from_address": "alerts@example.com",
                 "use_tls": True,
                 "use_ssl": False,
+                "verify_tls": True,
             },
             "admin@example.com",
         )]
@@ -483,7 +484,7 @@ def test_email_alert_mentions_state_row_and_plain_line():
         def __init__(self, *_a, **_k): pass
         def __enter__(self): return self
         def __exit__(self, *_a): return False
-        def starttls(self): pass
+        def starttls(self, **_kwargs): pass
         def login(self, *_a, **_k): pass
         def send_message(self, message): sent_messages.append(message)
 
@@ -535,6 +536,59 @@ def test_email_alert_mentions_state_row_and_plain_line():
         smtplib.SMTP_SSL = _original_smtp_ssl
 
 
+def test_smtp_session_verifies_tls_by_default_and_can_opt_out():
+    """SMTP TLS verifies the certificate unless ``verify_tls`` is off.
+
+    smtplib's own default context (used when no context is passed) has
+    ``check_hostname=False`` and ``CERT_NONE``, so the SMTP password and every
+    alert travelled over an unauthenticated TLS channel. The opt-out is the
+    documented escape hatch for a relay with a self-signed certificate.
+    """
+    from app.email_alerts import EmailAlertService
+    import smtplib
+    import ssl
+
+    contexts: list[dict] = []
+
+    class FakeSMTP:
+        def __init__(self, _host, _port, timeout=10, context=None):
+            contexts.append({'context': context})
+        def starttls(self, *, context=None):
+            contexts.append({'context': context})
+        def login(self, *_a, **_k): pass
+        def send_message(self, message): pass
+        def quit(self): pass
+
+    _original_smtp = smtplib.SMTP
+    _original_smtp_ssl = smtplib.SMTP_SSL
+    try:
+        smtplib.SMTP = FakeSMTP
+        smtplib.SMTP_SSL = FakeSMTP
+        base = {
+            'enabled': True, 'host': 'smtp.example.test', 'port': 587,
+            'from_address': 'alerts@example.test', 'use_tls': True, 'use_ssl': False,
+        }
+        EmailAlertService(dict(base)).send_test('owner@example.test')
+        verifying = contexts[-1]['context']
+        assert verifying is not None, 'STARTTLS must be given the TLS context'
+        assert verifying.verify_mode == ssl.CERT_REQUIRED
+        assert verifying.check_hostname is True
+
+        contexts.clear()
+        EmailAlertService({**base, 'verify_tls': False}).send_test('owner@example.test')
+        relaxed = contexts[-1]['context']
+        assert relaxed.verify_mode == ssl.CERT_NONE
+        assert relaxed.check_hostname is False
+
+        # Implicit SSL (port 465) gets the same verifying context.
+        contexts.clear()
+        EmailAlertService({**base, 'use_ssl': True, 'use_tls': False}).send_test('owner@example.test')
+        assert contexts[-1]['context'].verify_mode == ssl.CERT_REQUIRED
+    finally:
+        smtplib.SMTP = _original_smtp
+        smtplib.SMTP_SSL = _original_smtp_ssl
+
+
 def test_email_alert_subject_lists_all_triggered_labels():
     """A single event whose detections include both cat and person must produce
     TWO alert emails (one per rule), each citing "Cat, Person detected" in the
@@ -549,7 +603,7 @@ def test_email_alert_subject_lists_all_triggered_labels():
         def __init__(self, *_a, **_k): pass
         def __enter__(self): return self
         def __exit__(self, *_a): return False
-        def starttls(self): pass
+        def starttls(self, **_kwargs): pass
         def login(self, *_a, **_k): pass
         def send_message(self, message): sent_messages.append(message)
 
@@ -816,7 +870,7 @@ def test_alert_email_settings_get_and_update(tmp_path, monkeypatch):
         csrf = _login(client)
         status, _headers, settings = client.request("/api/settings/alert-email")
         assert status == 200
-        expected_keys = {"enabled", "host", "port", "username", "password", "from_address", "use_tls", "use_ssl"}
+        expected_keys = {"enabled", "host", "port", "username", "password", "from_address", "use_tls", "use_ssl", "verify_tls"}
         assert expected_keys <= set(settings)
         status, _headers, updated = client.request(
             "/api/settings/alert-email",

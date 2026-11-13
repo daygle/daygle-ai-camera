@@ -330,6 +330,21 @@ def test_validate_alert_email_settings_use_ssl_disables_use_tls(monkeypatch, pv)
     assert out['use_tls'] is False
 
 
+def test_validate_alert_email_settings_verifies_tls_by_default(monkeypatch, pv):
+    """A row without ``verify_tls`` (written before the setting existed) must
+    be treated as verifying, not as opting into smtplib's unverified default."""
+    _install_validator_dependencies(monkeypatch)
+    assert pv.validate_alert_email_settings({})['verify_tls'] is True
+
+
+def test_validate_alert_email_settings_can_turn_tls_verification_off(monkeypatch, pv):
+    """The self-signed-relay opt-out round-trips, including from a form string."""
+    _install_validator_dependencies(monkeypatch)
+    assert pv.validate_alert_email_settings({'verify_tls': 'no'})['verify_tls'] is False
+    assert pv.validate_alert_email_settings({'verify_tls': False})['verify_tls'] is False
+    assert pv.validate_alert_email_settings({'verify_tls': 'true'})['verify_tls'] is True
+
+
 def test_validate_alert_email_settings_coerces_enabled_string_truthy(monkeypatch, pv):
     _install_validator_dependencies(monkeypatch)
     out = pv.validate_alert_email_settings({'enabled': 'YES', 'host': 'smtp.example.com', 'from_address': 'a@b.com'})
