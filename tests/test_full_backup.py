@@ -9,6 +9,9 @@ import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -160,3 +163,58 @@ def test_create_full_backup_skips_backups_dir_inside_recordings(tmp_path, monkey
             assert not any("daygle-full-" in name for name in names)
     finally:
         archive.unlink(missing_ok=True)
+
+
+def test_archive_directory_skips_a_clip_purged_mid_scan(tmp_path, monkeypatch):
+    """A recording removed by retention mid-scan must not abort the backup.
+
+    ``purge_recordings_by_policy`` runs while a backup can be archiving the
+    same tree, so a file can disappear between the ``stat`` and the
+    ``ZipFile.write`` that stores it.
+    """
+    media = tmp_path / 'recordings'
+    media.mkdir()
+    (media / 'a.mp4').write_bytes(b'a' * 32)
+    (media / 'b.mp4').write_bytes(b'b' * 32)
+    archive_path = tmp_path / 'archive.zip'
+    real_write = zipfile.ZipFile.write
+    calls = {'count': 0}
+
+    def flaky_write(self, filename, arcname=None, **kwargs):
+        calls['count'] += 1
+        if calls['count'] == 1:
+            raise FileNotFoundError(str(filename))
+        return real_write(self, filename, arcname, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, 'write', flaky_write)
+    with zipfile.ZipFile(archive_path, 'w') as archive:
+        section = backup_module._archive_directory(
+            archive, media, 'recordings',
+            excluded_abs=set(), excluded_names=frozenset(),
+        )
+    assert section['files'] == 1
+    with zipfile.ZipFile(archive_path) as zf:
+        assert len(zf.namelist()) == 1
+
+
+def test_extract_full_backup_caps_the_bytes_it_actually_writes(tmp_path, monkeypatch):
+    """The size cap must not trust the central directory's claimed sizes.
+
+    ``_validate_full_backup_archive`` sums ``file_size`` from the archive
+    metadata, which a crafted archive can understate; without a running cap on
+    the extraction stream a zip bomb would fill the staging disk before the
+    CRC check failed.
+    """
+    archive_path = tmp_path / 'bomb.zip'
+    with zipfile.ZipFile(archive_path, 'w') as archive:
+        archive.writestr('database/daygle.sqlite3', b'x' * 4096)
+        archive.writestr('manifest.json', '{}')
+    monkeypatch.setattr(
+        backup_module,
+        '_validate_full_backup_archive',
+        lambda _path: ({}, 'database/daygle.sqlite3'),
+    )
+    monkeypatch.setattr(backup_module, 'FULL_BACKUP_MAX_UNCOMPRESSED_BYTES', 1024)
+    with pytest.raises(HTTPException) as excinfo:
+        backup_module._extract_full_backup(archive_path, tmp_path / 'staging')
+    assert excinfo.value.status_code == 400

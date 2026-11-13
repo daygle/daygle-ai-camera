@@ -335,6 +335,7 @@ class CloudflareTunnelManager:
 
     def configure(self, token: str | None, *, source: str = "database", autostart: bool = False) -> None:
         with self._lock:
+            previous_token = self._token
             self._token = _normalise_token(token)
             self._source = source if self._token else "none"
             self._autostart = bool(autostart) if self._token else False
@@ -343,9 +344,28 @@ class CloudflareTunnelManager:
                 # down, so drop supervisor intent before releasing the process.
                 self._desired_running = False
                 self._shutdown_supervisor_locked()
-                if self._process is not None:
-                    self._process.stop()
-                    self._process = None
+                self._retire_process_locked()
+                return
+            if previous_token == self._token:
+                return
+            # A live connector keeps the token it was spawned with (it arrives
+            # through the child's environment), and cloudflared retries a
+            # rejected token internally instead of exiting, so the supervisor
+            # would never notice the change. Replacing the token therefore has
+            # to replace the process: without this, rotating a leaked token --
+            # or correcting a wrong one -- left the tunnel authenticating with
+            # the old secret indefinitely while the status card reported a
+            # healthy, configured connector.
+            self._retire_process_locked()
+            if not self._desired_running:
+                return
+            # The connector was up under the previous token, so bring the new
+            # one up immediately and clear the backoff those failures built.
+            self._restart_backoff = TUNNEL_RESTART_BACKOFF_MIN_SECONDS
+            self._restart_attempts = 0
+            self._next_restart_at = 0.0
+            if not self._start_locked():
+                self._schedule_retry_locked(time.monotonic())
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -488,19 +508,30 @@ class CloudflareTunnelManager:
         self._supervisor_stop = None
         self._supervisor_thread = None
 
+    def _retire_process_locked(self) -> None:
+        """Stop and forget the current connector, tolerating a stuck child.
+
+        Caller must hold ``self._lock``. Both callers reach this point after
+        the token file and the ``app_settings`` row have already been written,
+        so a failure must not escape as an HTTP 500 describing a change the
+        operator has in fact made -- it is reported on the status card instead.
+        """
+        process = self._process
+        self._process = None
+        self._started_at = None
+        if process is None:
+            return
+        try:
+            process.stop()
+        except Exception as exc:
+            self._last_error = f"Unable to stop cloudflared ({type(exc).__name__})."
+            logger.warning("Cloudflare Tunnel stop failed: %s", self._last_error)
+
     def stop(self) -> dict[str, Any]:
         with self._lock:
             self._desired_running = False
             self._shutdown_supervisor_locked()
-            if self._process is not None:
-                try:
-                    self._process.stop()
-                except Exception as exc:
-                    self._last_error = f"Unable to stop cloudflared ({type(exc).__name__})."
-                    logger.warning("Cloudflare Tunnel stop failed: %s", self._last_error)
-                finally:
-                    self._process = None
-                    self._started_at = None
+            self._retire_process_locked()
             return self.status()
 
     def shutdown(self) -> None:

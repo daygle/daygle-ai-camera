@@ -39,6 +39,7 @@ from fastapi import HTTPException
 
 import app.state as _state
 from app.config_facades import (
+    effective_ai_config,
     effective_auth_config,
     effective_cameras_config,
     effective_face_recognition_config,
@@ -215,10 +216,18 @@ def _archive_directory(
                 size = child.stat().st_size
             except OSError:
                 continue
-            if size < 1024 * 1024:
-                archive.write(child, arcname, compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
-            else:
-                archive.write(child, arcname, compress_type=zipfile.ZIP_STORED)
+            try:
+                if size < 1024 * 1024:
+                    archive.write(child, arcname, compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
+                else:
+                    archive.write(child, arcname, compress_type=zipfile.ZIP_STORED)
+            except FileNotFoundError:
+                # Retention (``purge_recordings_by_policy``, every five
+                # minutes) can delete a clip between the ``stat`` above and
+                # this write. ``ZipFile.write`` stats and opens the file BEFORE
+                # adding the member, so a vanished one leaves the archive
+                # intact -- skip it rather than fail the whole backup.
+                continue
             manifest_section['files'] += 1
             manifest_section['bytes'] += size
     return manifest_section
@@ -402,6 +411,7 @@ def validate_full_backup(path: Path) -> dict[str, Any]:
 def _extract_full_backup(path: Path, destination: Path) -> tuple[dict[str, Any], Path]:
     manifest, database_member = _validate_full_backup_archive(path)
     destination.mkdir(parents=True, exist_ok=True)
+    written_total = 0
     with zipfile.ZipFile(path) as archive:
         for info in archive.infolist():
             name = _normalise_archive_member(info.filename)
@@ -411,8 +421,23 @@ def _extract_full_backup(path: Path, destination: Path) -> tuple[dict[str, Any],
             if not target.is_relative_to(destination.resolve(strict=False)):
                 raise HTTPException(status_code=400, detail='Full backup extraction escaped its staging directory.')
             target.parent.mkdir(parents=True, exist_ok=True)
+            # Enforce the size cap on the bytes actually written, not on the
+            # ``file_size`` the central directory claims: that number is
+            # attacker-controlled metadata, so a crafted archive can understate
+            # it and a zip bomb would fill the staging disk before the CRC
+            # check failed.
             with archive.open(info, 'r') as source, target.open('wb') as output:
-                shutil.copyfileobj(source, output, length=1024 * 1024)
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written_total += len(chunk)
+                    if written_total > FULL_BACKUP_MAX_UNCOMPRESSED_BYTES:
+                        raise HTTPException(
+                            status_code=400,
+                            detail='Full backup is too large to restore safely.',
+                        )
+                    output.write(chunk)
     return manifest, destination / database_member
 
 
@@ -706,6 +731,17 @@ def refresh_runtime_after_database_restore() -> None:
     # The object-label groups cache may have been primed from the OLD database;
     # re-read so zone/alert matching reflects the restored group map.
     refresh_label_groups()
+    # AI is the one settings family the applies above do not cover. A restore
+    # can change the backend / model path / confidence AND a full backup may
+    # just have replaced the model files themselves, but the detector keeps the
+    # ONNX session it built at startup -- so the restored configuration only
+    # took effect after the next AI-settings save or a process restart.
+    # ``reload_detector`` publishes an unavailable-detector sentinel (with
+    # ``last_detector_error``) instead of raising, so a backup whose model
+    # cannot load cannot fail the restore that already succeeded.
+    reload_detector = getattr(_state, 'reload_detector', None)
+    if callable(reload_detector):
+        reload_detector(effective_ai_config())
 
 
 _AUTOMATIC_RECORDING_RETENTION_INTERVAL_SECONDS = 300.0

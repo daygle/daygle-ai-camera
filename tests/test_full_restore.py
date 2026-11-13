@@ -218,3 +218,52 @@ def test_restore_upload_validates_multipart_file(tmp_path, monkeypatch):
     assert response.status_code == 400
     assert response.json()['detail'] == 'Uploaded backup is empty.'
     assert not list(tmp_path.glob('.restore-*'))
+
+
+def test_refresh_after_restore_rebuilds_the_detector(monkeypatch):
+    """AI settings must be re-applied like the other settings families.
+
+    A restore can change the backend / model path / confidence, and a full
+    restore may have replaced the model files; the live detector otherwise
+    keeps the ONNX session it built at startup, so the restored configuration
+    only took effect after the next AI-settings save or a restart.
+    """
+    calls: list[object] = []
+    monkeypatch.setattr(state, 'database', SimpleNamespace(init=lambda: calls.append('db')))
+    monkeypatch.setattr(
+        state, 'auth',
+        SimpleNamespace(init=lambda: calls.append('auth'), apply_config=lambda _c: calls.append('auth_config')),
+    )
+    monkeypatch.setattr(state, 'apply_storage_and_recording_settings', lambda: calls.append('storage'))
+    monkeypatch.setattr(state, 'apply_cameras_settings', lambda _c: calls.append('cameras'))
+    monkeypatch.setattr(backup_module, 'effective_cameras_config', lambda: [])
+    monkeypatch.setattr(backup_module, 'effective_auth_config', lambda: {})
+    monkeypatch.setattr(backup_module, 'effective_ai_config', lambda: {'backend': 'onnx'})
+    monkeypatch.setattr(backup_module, 'refresh_label_groups', lambda: calls.append('labels'))
+    monkeypatch.setattr(state, 'reload_detector', lambda settings: calls.append(('detector', settings)))
+
+    backup_module.refresh_runtime_after_database_restore()
+
+    assert calls[:3] == ['db', 'auth', 'storage']
+    assert calls[-1] == ('detector', {'backend': 'onnx'})
+
+
+def test_refresh_after_restore_survives_a_standalone_host(monkeypatch):
+    """``reload_detector`` is wired by camera_lifecycle; a host without it must
+    still complete the restore refresh."""
+    calls: list[object] = []
+    monkeypatch.setattr(state, 'database', SimpleNamespace(init=lambda: calls.append('db')))
+    monkeypatch.setattr(
+        state, 'auth',
+        SimpleNamespace(init=lambda: None, apply_config=lambda _c: None),
+    )
+    monkeypatch.setattr(state, 'apply_storage_and_recording_settings', lambda: None)
+    monkeypatch.setattr(state, 'apply_cameras_settings', lambda _c: None)
+    monkeypatch.setattr(backup_module, 'effective_cameras_config', lambda: [])
+    monkeypatch.setattr(backup_module, 'effective_auth_config', lambda: {})
+    monkeypatch.setattr(backup_module, 'refresh_label_groups', lambda: None)
+    monkeypatch.setattr(state, 'reload_detector', None)
+
+    backup_module.refresh_runtime_after_database_restore()
+
+    assert calls == ['db']

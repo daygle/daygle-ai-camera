@@ -449,3 +449,89 @@ def test_restart_leaves_one_supervisor_thread() -> None:
     assert not old.is_alive()
     assert manager._supervisor_thread is not None and manager._supervisor_thread.is_alive()
     manager.stop()
+
+
+def test_replacing_the_token_restarts_a_running_connector() -> None:
+    """A saved new token must take effect without a manual restart.
+
+    cloudflared receives the token through its environment and retries a
+    rejected one internally instead of exiting, so the supervisor never
+    respawns it. Without the restart, rotating a leaked token -- or correcting
+    a wrong one -- left the connector authenticating with the old secret
+    indefinitely while the status card said ``running``.
+    """
+    created: list[FakeProcess] = []
+
+    def factory() -> FakeProcess:
+        process = FakeProcess()
+        created.append(process)
+        return process
+
+    manager = CloudflareTunnelManager(
+        CloudflareTunnelSettings('first-token', 'database', True, 'cloudflared'),
+        process_factory=factory,
+        supervisor_interval=0.01,
+    )
+    try:
+        manager.start()
+        assert created[0].started_tokens == ['first-token']
+
+        manager.configure('second-token', source='database', autostart=True)
+
+        assert created[0].stop_count == 1
+        assert len(created) == 2
+        assert created[1].started_tokens == ['second-token']
+        assert manager.status()['running'] is True
+    finally:
+        manager.stop()
+
+
+def test_resaving_the_same_token_does_not_bounce_the_connector() -> None:
+    """Saving unrelated tunnel settings must not tear down a healthy tunnel."""
+    created: list[FakeProcess] = []
+
+    def factory() -> FakeProcess:
+        process = FakeProcess()
+        created.append(process)
+        return process
+
+    manager = CloudflareTunnelManager(
+        CloudflareTunnelSettings('first-token', 'database', True, 'cloudflared'),
+        process_factory=factory,
+        supervisor_interval=0.01,
+    )
+    try:
+        manager.start()
+        manager.configure('first-token', source='database', autostart=False)
+        assert len(created) == 1
+        assert created[0].stop_count == 0
+    finally:
+        manager.stop()
+
+
+def test_stop_failure_while_clearing_the_token_is_reported_not_raised() -> None:
+    """Disabling the tunnel must not 500 after the secret was already cleared.
+
+    ``configure`` runs after the token file and ``app_settings`` row have been
+    written, so a child that refuses to die has to be reported on the status
+    card rather than propagated back as a failed save.
+    """
+
+    class StuckProcess(FakeProcess):
+        def stop(self) -> None:
+            raise subprocess.TimeoutExpired('cloudflared', 5)
+
+    manager = CloudflareTunnelManager(
+        CloudflareTunnelSettings('secret-token', 'database', True, 'cloudflared'),
+        process_factory=StuckProcess,
+        supervisor_interval=0.01,
+    )
+    try:
+        manager.start()
+        manager.configure(None, source='database', autostart=False)
+        status = manager.status()
+        assert status['running'] is False
+        assert status['configured'] is False
+        assert 'Unable to stop' in status['error']
+    finally:
+        manager.stop()
