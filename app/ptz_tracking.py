@@ -43,7 +43,8 @@ tracker undoes its own zoom-in straight away (roughly - zoom pulses are timed,
 not measured); return-home later restores the exact home zoom.
 
 Manual PTZ use always wins: a command from the Live page pauses tracking for
-``MANUAL_PAUSE_SECONDS``.
+``MANUAL_PAUSE_SECONDS`` and cancels any pending return-home, so a camera a
+person deliberately aimed is not pulled back home later.
 
 Camera commands run on a small worker pool, never on the detection thread, and
 a camera with a command still in flight is skipped rather than queued, so a
@@ -60,6 +61,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from collections.abc import Callable
 
+import app.state as _state
 from app.diagnostics import log_camera_diagnostic
 from app.utils import normalize_bool_setting
 
@@ -133,6 +135,10 @@ MAX_BOOSTED_PULSE_SECONDS = 2.5
 EDGE_ERROR = 0.35
 MAX_EDGE_PUSHES = 2
 MANUAL_PAUSE_SECONDS = 30.0
+# A queued pulse older than this was computed from a frame the subject has long
+# left: sending it would steer at a stale offset, so it is dropped and the next
+# detection cycle re-decides from fresh geometry.
+STALE_COMMAND_SECONDS = 5.0
 HOME_MOVE_SECONDS = 4.0
 
 # A track must have been seen this many cycles before the camera moves for it.
@@ -371,14 +377,108 @@ class _CameraState:
 # job may run inline on the calling thread (tests, a saturated pool).
 _lock = threading.RLock()
 _states: dict[str, _CameraState] = {}
+
+# Cameras this tracker has moved and not yet returned home. Persisted so a
+# restart does not leave a camera pointing wherever the last pulse left it: the
+# in-memory ``moved_since_home`` flag dies with the process. Loaded lazily (one
+# KV read), written only when a camera actually enters or leaves the set.
+_OFF_HOME_KEY = 'ptz_off_home'
+_off_home: set[str] | None = None
+# Only the entries that existed when this process first loaded the set: those
+# are the cameras a PREVIOUS process left away from home. Cameras this process
+# moves are tracked in ``_off_home`` too, but they already have their own live
+# ``moved_since_home`` timer and must not be pulled home early.
+_startup_recovery: set[str] = set()
+
+
+def _load_off_home_locked() -> set[str]:
+    global _off_home
+    if _off_home is not None:
+        return _off_home
+    _off_home = set()
+    try:
+        raw = _state.database.get_setting(_OFF_HOME_KEY)
+    except Exception as exc:  # noqa: BLE001 - no DB yet / locked: nothing to recover
+        logger.debug('PTZ off-home state load failed: %s', exc)
+        return _off_home
+    if isinstance(raw, list):
+        _off_home = {str(camera_id) for camera_id in raw if str(camera_id)}
+    _startup_recovery.update(_off_home)
+    return _off_home
+
+
+def _set_off_home_locked(camera_id: str, off_home: bool) -> None:
+    """Record (and persist) whether ``camera_id`` is away from home."""
+    known = _load_off_home_locked()
+    if (camera_id in known) == off_home:
+        return
+    if off_home:
+        known.add(camera_id)
+    else:
+        known.discard(camera_id)
+    try:
+        _state.database.set_setting(
+            _OFF_HOME_KEY, sorted(known),
+            time.strftime('%Y-%m-%dT%H:%M:%S+00:00', time.gmtime()),
+        )
+    except Exception as exc:  # noqa: BLE001 - recovery is best-effort
+        logger.debug('PTZ off-home state save failed: %s', exc)
+
+
+def _recover_off_home_locked(
+    camera_id: str,
+    state: _CameraState,
+    settings: dict[str, Any],
+    conn: Any,
+    now: float,
+    mover: Callable[..., None],
+) -> bool:
+    """Return a camera a previous process left away from home, once.
+
+    Called only when there is nothing to follow, so a restart cannot pull the
+    camera home while a subject is actually in view.
+    """
+    _load_off_home_locked()  # populates _startup_recovery on the first call
+    if camera_id not in _startup_recovery or now < state.next_command_at:
+        return False
+    if settings['return_home_seconds'] <= 0:
+        # Homing is disabled now: respect that instead of retrying on every
+        # restart for ever.
+        _startup_recovery.discard(camera_id)
+        _set_off_home_locked(camera_id, False)
+        return False
+    preset = settings['home_preset']
+    if not _dispatch(camera_id, state, lambda: mover('home', camera_id, conn, preset), 'startup home'):
+        return False
+    _startup_recovery.discard(camera_id)
+    _set_off_home_locked(camera_id, False)
+    state.moved_since_home = False
+    state.zoom_in_seconds = 0.0
+    state.next_command_at = now + HOME_MOVE_SECONDS
+    state.settle = None
+    state.state = 'returning'
+    return True
 _executor: ThreadPoolExecutor | None = None
+_executor_workers = 0
+# A shared pool sized to the cameras that actually track. With a fixed four
+# workers, five or more pulsing cameras queued behind each other and each pulse
+# ran seconds after the frame it was computed from. The pool is grown (never
+# shrunk) when another camera starts tracking; the previous pool keeps its own
+# pending jobs and stops accepting new ones.
+MAX_TRACK_WORKERS = 32
 
 
 def _get_executor() -> ThreadPoolExecutor:
-    global _executor
-    if _executor is None:
-        _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='ptz-track')
-    return _executor
+    global _executor, _executor_workers
+    with _lock:
+        wanted = max(4, min(MAX_TRACK_WORKERS, len(_states)))
+        if _executor is None or wanted > _executor_workers:
+            previous = _executor
+            _executor = ThreadPoolExecutor(max_workers=wanted, thread_name_prefix='ptz-track')
+            _executor_workers = wanted
+            if previous is not None:
+                previous.shutdown(wait=False)
+        return _executor
 
 
 def _state_for(camera_id: str) -> _CameraState:
@@ -404,7 +504,13 @@ def note_manual_ptz(camera_id: str, *, now: float | None = None) -> None:
         state = _state_for(str(camera_id))
         state.paused_until = now + MANUAL_PAUSE_SECONDS
         state.drop_target()
-        state.moved_since_home = True
+        state.moved_since_home = False
+        # A manual aim is the operator's end state: forget the persisted
+        # "away from home" mark too, or the next restart would undo it.
+        _startup_recovery.discard(str(camera_id))
+        _set_off_home_locked(str(camera_id), False)
+        # (moved_since_home was cleared just above, which also cancels a
+        # pending return-home; a later tracking pulse arms it again.)
         state.last_seen = now
         # The operator may have zoomed: the tracker's own zoom accounting no
         # longer describes the lens, so it must not "undo" their zoom later.
@@ -416,9 +522,20 @@ def _dispatch(camera_id: str, state: _CameraState, job: Callable[[], None], what
     if state.busy:
         return False
     state.busy = True
+    submitted_at = time.monotonic()
 
     def _run() -> None:
         try:
+            waited = time.monotonic() - submitted_at
+            if waited > STALE_COMMAND_SECONDS:
+                # The pool was saturated by other cameras long enough for this
+                # pulse to describe the past. Move nothing and let the next
+                # cycle steer from a current frame instead.
+                logger.debug(
+                    'Dropping a stale %s command for %s after %.1fs in the queue',
+                    what, camera_id, waited,
+                )
+                return
             job()
         except Exception as exc:  # noqa: BLE001 - a camera error must not kill the worker
             # Command failures are per-camera ground truths: they belong in
@@ -613,6 +730,11 @@ def update_auto_tracking(
             state.state = 'paused'
             return _status(state, now)
         note: dict[str, Any] = {}
+        if not candidates and not visible and _recover_off_home_locked(
+            camera_id, state, settings, conn, now, mover,
+        ):
+            # A previous process moved this camera and never brought it back.
+            return _status(state, now, {'event': 'home', 'recovered': True})
 
         # After pushing the camera off the edge after a lost target, the
         # target reappears somewhere else in the frame: accept the nearest
@@ -744,6 +866,7 @@ def update_auto_tracking(
                 state.next_command_at = now + duration + SETTLE_SECONDS
                 _begin_settle(state, now, duration)
                 state.moved_since_home = True
+                _set_off_home_locked(camera_id, True)
                 state.zoom_in_seconds += zoom_amount(zoom, duration)
                 note.update(event='move', move=_move_note(pan, tilt, zoom, duration))
                 if boost > 1.0:
@@ -780,6 +903,7 @@ def update_auto_tracking(
                 if _dispatch(camera_id, state, lambda: mover('move', camera_id, conn, pan, tilt, zoom, duration), 'edge follow'):
                     state.edge_pushes += 1
                     state.moved_since_home = True
+                    _set_off_home_locked(camera_id, True)
                     state.last_steer_at = now
                     state.zoom_in_seconds = max(0.0, state.zoom_in_seconds + zoom_amount(zoom, duration))
                     state.next_command_at = now + duration + SETTLE_SECONDS
@@ -813,6 +937,7 @@ def update_auto_tracking(
             preset = settings['home_preset']
             if _dispatch(camera_id, state, lambda: mover('home', camera_id, conn, preset), 'return home'):
                 state.moved_since_home = False
+                _set_off_home_locked(camera_id, False)
                 state.zoom_in_seconds = 0.0
                 state.next_command_at = now + HOME_MOVE_SECONDS
                 state.settle = None

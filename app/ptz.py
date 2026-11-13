@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import weakref
 from dataclasses import dataclass
 from html import escape as _xml_escape
 
@@ -587,7 +588,15 @@ def send_ptz_command_tcp(host: str, port: int, address: int, command: str, speed
 # Requests run on parallel API worker threads; without this a held button's
 # repeat ``move`` could overtake the ``stop`` sent on release and leave the
 # camera drifting for another step.
-_camera_command_locks: dict[tuple[str, int], threading.Lock] = {}
+#
+# Weak values: the registry is keyed by (host, port), so a renamed camera or a
+# changed port would otherwise leave a lock here for the life of the process.
+# A WeakValueDictionary keeps a lock alive exactly as long as someone is using
+# it (a thread inside the critical section holds its own reference) and drops
+# it afterwards, so two live commands can never end up on different locks.
+_camera_command_locks: 'weakref.WeakValueDictionary[tuple[str, int], threading.Lock]' = (
+    weakref.WeakValueDictionary()
+)
 _camera_command_locks_guard = threading.Lock()
 
 

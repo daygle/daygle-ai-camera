@@ -1,6 +1,7 @@
 """ONVIF discovery, profile selection, stale-token retry and Pelco-D framing (app/ptz.py)."""
 from __future__ import annotations
 
+import gc
 import sys
 import threading
 import time
@@ -211,6 +212,16 @@ def test_failed_stop_after_a_move_is_retried(monkeypatch):
     conn = ptz.ptz_connection({'host': 'cam', 'ptz': {'enabled': True}})
     ptz.ptz_move(conn, 0.5, 0.0, 0.4)
     assert len(stops) == 2
+
+
+def test_camera_command_locks_are_reclaimed_when_unused():
+    """The per-camera lock registry must not grow for the life of the process."""
+    key = ('10.9.9.9', 80)
+    lock = ptz.camera_command_lock(*key)
+    assert ptz.camera_command_lock(*key) is lock
+    del lock
+    gc.collect()
+    assert key not in ptz._camera_command_locks
 
 
 def test_a_tracking_pulse_cannot_cancel_a_concurrent_manual_command(monkeypatch):

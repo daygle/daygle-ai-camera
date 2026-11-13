@@ -12,6 +12,9 @@ if str(REPO_ROOT) not in sys.path:
 
 import app.ptz_tracking as pt  # noqa: E402
 
+# Captured before the autouse fixture swaps ``_get_executor`` for an inline one.
+_real_get_executor = pt._get_executor
+
 
 class _Inline:
     """Executor stand-in that runs jobs immediately."""
@@ -24,8 +27,11 @@ class _Inline:
 def _inline_executor(monkeypatch):
     monkeypatch.setattr(pt, '_get_executor', lambda: _Inline())
     pt.reset_auto_tracking()
+    monkeypatch.setattr(pt, '_off_home', None)
+    pt._startup_recovery.clear()
     yield
     pt.reset_auto_tracking()
+    pt._startup_recovery.clear()
 
 
 def _camera(**auto_track):
@@ -151,7 +157,7 @@ def test_lost_target_then_return_home():
     assert sum(call[0] == 'home' for call in mover.calls) == 1  # only once
 
 
-def test_manual_use_pauses_tracking():
+def test_manual_use_pauses_tracking_and_is_not_dragged_home():
     mover = _Mover()
     camera = _camera()
     pt.note_manual_ptz('cam', now=10.0)
@@ -159,6 +165,103 @@ def test_manual_use_pauses_tracking():
     assert status['state'] == 'paused' and status['resumes_in'] == pytest.approx(25.0)
     assert mover.calls == []
     assert _step(camera, 41.0, candidates=[_det('cat', 0.9, 0.5)], mover=mover)['state'] == 'tracking'
+
+
+def _fake_settings_db(stored):
+    class _Database:
+        def __init__(self):
+            self.settings = dict(stored)
+            self.saved = []
+
+        def get_setting(self, key):
+            return self.settings.get(key)
+
+        def set_setting(self, key, value, updated_at=None):
+            self.settings[key] = value
+            self.saved.append(key)
+
+    return _Database()
+
+
+def test_a_camera_left_off_home_is_brought_home_after_a_restart(monkeypatch):
+    database = _fake_settings_db({'ptz_off_home': ['cam']})
+    # Patch the module object production code holds: the integration suite
+    # rebuilds the app namespace mid-run, so a separate import can be stale.
+    monkeypatch.setattr(pt._state, 'database', database)
+    mover = _Mover()
+    camera = _camera(return_home_seconds=10, home_preset='2')
+    status = _step(camera, 10.0, mover=mover)
+    assert status['state'] == 'returning' and status['recovered'] is True
+    assert mover.calls[-1] == ('home', '2')
+    # Cleared once, so the next cycle/restart does not home it again.
+    assert database.settings['ptz_off_home'] == []
+    assert _step(camera, 11.0, mover=mover)['state'] != 'returning'
+
+
+def test_startup_homing_waits_while_something_is_in_view(monkeypatch):
+    database = _fake_settings_db({'ptz_off_home': ['cam']})
+    monkeypatch.setattr(pt._state, 'database', database)
+    mover = _Mover()
+    camera = _camera(return_home_seconds=10, home_preset='2')
+    _step(camera, 10.0, candidates=[_det('cat', 0.9, 0.5)], mover=mover)
+    assert all(call[0] != 'home' for call in mover.calls)
+
+
+def test_a_disabled_return_home_forgets_the_break_mark(monkeypatch):
+    database = _fake_settings_db({'ptz_off_home': ['cam']})
+    monkeypatch.setattr(pt._state, 'database', database)
+    mover = _Mover()
+    _step(_camera(return_home_seconds=0), 10.0, mover=mover)
+    assert mover.calls == []
+    assert database.settings['ptz_off_home'] == []
+
+
+def test_a_manual_aim_is_not_auto_homed_after_the_pause():
+    """A person pointing the camera has chosen where it should stay."""
+    mover = _Mover()
+    camera = _camera(return_home_seconds=10)
+    pt.note_manual_ptz('cam', now=10.0)
+    for at in (12.0, 45.0, 120.0):  # after the 30s pause, and long after return_home
+        _step(camera, at, mover=mover)
+    assert all(call[0] != 'home' for call in mover.calls)
+
+
+def test_a_pulse_that_waited_too_long_in_the_pool_is_dropped(monkeypatch):
+    """A saturated pool must not steer the camera at a stale offset."""
+    submitted = []
+
+    class _Deferred:
+        def submit(self, fn):
+            submitted.append(fn)
+
+    clock = {'now': 1000.0}
+
+    class _Clock:
+        monotonic = staticmethod(lambda: clock['now'])
+
+    monkeypatch.setattr(pt, '_get_executor', lambda: _Deferred())
+    monkeypatch.setattr(pt, 'time', _Clock)
+    mover = _Mover()
+    camera = _camera()
+    _step(camera, 10.0, candidates=[_det('cat', 0.9, 0.5)], mover=mover)
+    assert len(submitted) == 1
+    clock['now'] = 1000.0 + pt.STALE_COMMAND_SECONDS + 1.0
+    submitted[0]()
+    assert mover.calls == []
+    assert pt._states['cam'].busy is False  # the drop still frees the camera
+
+
+def test_the_command_pool_grows_with_the_cameras_that_track(monkeypatch):
+    for index in range(6):
+        pt._state_for(f'cam-{index}')
+    executor = _real_get_executor()
+    try:
+        assert pt._executor_workers >= 6
+        assert executor._max_workers >= 6  # noqa: SLF001 - the sizing is the point
+    finally:
+        executor.shutdown(wait=False)
+        monkeypatch.setattr(pt, '_executor', None)
+        monkeypatch.setattr(pt, '_executor_workers', 0)
 
 
 def test_busy_camera_is_skipped_not_queued(monkeypatch):
