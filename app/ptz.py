@@ -594,7 +594,7 @@ def send_ptz_command_tcp(host: str, port: int, address: int, command: str, speed
 # A WeakValueDictionary keeps a lock alive exactly as long as someone is using
 # it (a thread inside the critical section holds its own reference) and drops
 # it afterwards, so two live commands can never end up on different locks.
-_camera_command_locks: 'weakref.WeakValueDictionary[tuple[str, int], threading.Lock]' = (
+_camera_command_locks: weakref.WeakValueDictionary[tuple[str, int], threading.Lock] = (
     weakref.WeakValueDictionary()
 )
 _camera_command_locks_guard = threading.Lock()
@@ -750,11 +750,6 @@ def _send_stop_locked(conn: PtzConnection) -> None:
         send_ptz_command_tcp(conn.host, conn.tcp_port, conn.address, 'stop', 0)
     else:
         stop_ptz_onvif(conn.host, conn.http_port, conn.username, conn.password)
-
-
-def ptz_stop(conn: PtzConnection) -> None:
-    with conn.lock:
-        _send_stop_locked(conn)
 
 
 def ptz_goto_home(conn: PtzConnection, preset: str = '') -> bool:

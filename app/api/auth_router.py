@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hmac
 import logging
-
+from collections.abc import Callable
 from html import escape
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -48,6 +48,22 @@ def _csrf_double_submit_ok(data: dict, request: Request) -> bool:
     return hmac.compare_digest(str(submitted).encode('utf-8'), str(cookie).encode('utf-8'))
 
 
+async def _record_login_audit(write: Callable[[], None], logger) -> None:
+    """Run one login audit write in the threadpool, never failing the login.
+
+    ``/login`` is unauthenticated and attacker-reachable, and a database write
+    can wait on the shared write slots and SQLite's busy timeout (up to 30 s).
+    Running it inline would stall every stream and request during a burst of
+    login attempts, so it is offloaded like ``auth.authenticate``. Callers pass
+    a lambda wrapping a literal ``db.add_audit_log(...)`` call so the audit
+    filter coverage scan (tests/test_audit_filter_coverage.py) still sees it.
+    """
+    try:
+        await run_in_threadpool(write)
+    except Exception as unexpected_exc:
+        logger.warning('Unexpected error writing a login audit entry: %s', unexpected_exc)
+
+
 @router.post('/login')
 async def login(request: Request, db=Depends(get_database), auth=Depends(get_auth), auth_enabled=Depends(get_auth_enabled), logger=Depends(get_logger)):
     data = await form_data(request)
@@ -65,19 +81,16 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
     wait = login_limiter.get_wait_seconds(ip)
     if wait > 0:
         retry_after = str(int(wait) + 1)
-        try:
-            db.add_audit_log(
-                created_at=utc_now(),
-                user_id=None,
-                username=username or 'unknown',
-                action='login',
-                resource='rate_limit',
-                ip_address=ip,
-                status='failed',
-                details={'reason': f'Rate limited - retry after {retry_after}s.'},
-            )
-        except Exception as unexpected_exc:
-            logger.warning('Unexpected error during login rate-limit log: %s', unexpected_exc)
+        await _record_login_audit(lambda: db.add_audit_log(
+            created_at=utc_now(),
+            user_id=None,
+            username=username or 'unknown',
+            action='login',
+            resource='rate_limit',
+            ip_address=ip,
+            status='failed',
+            details={'reason': f'Rate limited - retry after {retry_after}s.'},
+        ), logger)
         from app.auth_helpers import csrf_token_response
         error_msg = f'Too many login attempts. Please wait {retry_after} seconds before trying again.'
         page_body = (
@@ -99,19 +112,17 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
         _user, token, _csrf_token, expires_at = await run_in_threadpool(auth.authenticate, username, data.get('password', ''), ip)
     except AuthError as exc:
         login_limiter.record_failure(ip)
-        try:
-            db.add_audit_log(
-                created_at=utc_now(),
-                user_id=None,
-                username=username,
-                action='login',
-                resource='session',
-                ip_address=ip,
-                status='failed',
-                details={'reason': str(exc)},
-            )
-        except Exception as unexpected_exc:
-            logger.warning('Unexpected error during login callback: %s', unexpected_exc)
+        reason = str(exc)
+        await _record_login_audit(lambda: db.add_audit_log(
+            created_at=utc_now(),
+            user_id=None,
+            username=username,
+            action='login',
+            resource='session',
+            ip_address=ip,
+            status='failed',
+            details={'reason': reason},
+        ), logger)
         # Keep authentication internals out of the HTML response; the audit
         # entry retains the detailed reason for administrators. A locked
         # account deliberately gets the generic message: only accounts that
@@ -124,18 +135,16 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
         return login_page(request, safe_error, return_to=data.get('return_to'), auth=auth, auth_enabled=auth_enabled)
 
     login_limiter.record_success(ip)
-    try:
-        db.add_audit_log(
-            created_at=utc_now(),
-            user_id=int(_user['id']),
-            username=str(_user['username']),
-            action='login',
-            resource='session',
-            ip_address=ip,
-            status='success',
-        )
-    except Exception as unexpected_exc:
-        logger.warning('Unexpected error during login: %s', unexpected_exc)
+    user_id, user_name = int(_user['id']), str(_user['username'])
+    await _record_login_audit(lambda: db.add_audit_log(
+        created_at=utc_now(),
+        user_id=user_id,
+        username=user_name,
+        action='login',
+        resource='session',
+        ip_address=ip,
+        status='success',
+    ), logger)
     # Honour the page the user was on before being kicked to /login. Validated
     # through the same hardened _safe_return_to() used by the GET handler so
     # no caller can craft a post-body return_to to bypass the loop guards.
