@@ -614,15 +614,23 @@ class RecordingService:
             )
         if not alive:
             return False
-        self._shared_continuous[camera_key] = {
-            'chunks_dir': chunks_dir,
-            'chunk_seconds': int(chunk_seconds),
-            'on_chunk_complete': on_chunk_complete,
-        }
+        # Stop the dedicated recorder BEFORE publishing this request: the ingest
+        # only notices ``_shared_continuous`` on its next tick, so publishing
+        # first let its new ffmpeg open chunks in ``continuous-<key>/`` while the
+        # dedicated recorder was still in its several-second SIGTERM teardown.
+        # Two recorders in one directory is the overlap
+        # ``_ensure_continuous_chunk_worker`` joins threads to prevent. If the
+        # ingest dies in the gap, the next monitor cycle simply calls start
+        # again, which attaches or falls back to a dedicated recorder.
         with self._continuous_lock:
             dedicated = self._continuous_workers.pop(camera_key, None)
             if dedicated:
                 self._stop_worker(dedicated, join_timeout=self.CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS)
+            self._shared_continuous[camera_key] = {
+                'chunks_dir': chunks_dir,
+                'chunk_seconds': int(chunk_seconds),
+                'on_chunk_complete': on_chunk_complete,
+            }
         return True
 
     @staticmethod
@@ -1110,8 +1118,16 @@ class RecordingService:
         # Render exactly the footage between where the first selected segment
         # starts and the capture deadline. The keyframe-aligned lead before
         # start_ts is kept (and reported via content_start_ts) rather than
-        # silently eating the same amount off the end of the clip.
-        content_seconds = max(1.0, min(end_ts - content_start_ts, max_duration_seconds + 10.0))
+        # silently eating the same amount off the end of the clip. The cap is
+        # one maximum-believable prebuffer segment, not a fixed 10s: segments
+        # close on a keyframe, so a camera with a sparse keyframe interval leads
+        # the window by a whole segment, and a 10s allowance then cut the
+        # remainder off the post-event tail - the exact footage loss this window
+        # is meant to avoid.
+        content_seconds = max(
+            1.0,
+            min(end_ts - content_start_ts, max_duration_seconds + self.PREBUFFER_SEGMENT_MAX_PROBED_SECONDS),
+        )
 
         list_path = file_path.with_name(f'{file_path.stem}.concat.txt')
         tmp_path = file_path.with_name(f'{file_path.stem}.prebuffer.tmp{file_path.suffix}')
