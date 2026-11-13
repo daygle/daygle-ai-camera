@@ -32,12 +32,6 @@ const liveEls = {
   motionZones: document.getElementById('liveMotionZones'),
   monitorPill: document.getElementById('liveMonitorPill'),
   monitorPillText: document.getElementById('liveMonitorPillText'),
-  // Zones-page stats (null on live page - harmless)
-  statZoneCount: document.getElementById('statZoneCount'),
-  statRuleCount: document.getElementById('statRuleCount'),
-  statAlertRules: document.getElementById('statAlertRules'),
-  statCameraName: document.getElementById('statCameraName'),
-  liveStreamSelect: document.getElementById('liveStreamSelect'),
   liveAiTrackToggle: document.getElementById('liveAiTrackToggle'),
   liveAiTrackGroup: document.getElementById('liveAiTrackGroup'),
   liveAiTrackCanvas: document.getElementById('liveAiTrackCanvas'),

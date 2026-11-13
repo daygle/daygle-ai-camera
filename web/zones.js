@@ -645,12 +645,9 @@ function updateZonesStats() {
   if (!selectedCamera) return;
   const detection = cameraDetection();
   const zones = detection.zones || [];
-  const ruleCount = zones.reduce((sum, zone) => sum + (zone.object_rules?.length || 0), 0);
-  if (liveEls.statZoneCount) liveEls.statZoneCount.textContent = String(zones.length);
-  if (liveEls.statRuleCount) liveEls.statRuleCount.textContent = String(ruleCount);
-  if (liveEls.statCameraName) {
-    liveEls.statCameraName.textContent = selectedCamera.name || selectedCamera.id || '-';
-  }
+  // The "N areas" label beside the zone list is the only counter the page has;
+  // the old stat cards (zone count, rule count, camera name) are gone from
+  // zones.html, so their lookups were dead hooks writing nowhere.
   const zonesListCount = document.getElementById('zonesListCount');
   if (zonesListCount) {
     zonesListCount.textContent = `${zones.length} area${zones.length === 1 ? '' : 's'}`;
