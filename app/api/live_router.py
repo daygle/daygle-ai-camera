@@ -118,6 +118,15 @@ def live_pipeline_timing_api(request: Request, camera_id: str | None = None):
 # width gets the one frame encoded once: (camera, width) -> (frame ts, bytes).
 LIVE_SNAPSHOT_MIN_WIDTH = 160
 LIVE_SNAPSHOT_MAX_WIDTH = 3840
+# The cache key includes the requested width and every signed-in viewer can
+# reach this endpoint, so an unquantised width let one client walk
+# ``width=160..3840`` and pin thousands of full-frame JPEGs (hundreds of MB)
+# per camera, re-encoding a frame for each new width. Rounding the width DOWN
+# to the minimum-width step (the grid UI already asks for 320-px multiples)
+# keeps the documented "at most width" contract while bounding the keys to 24
+# per camera; the entry cap then covers cameras that were removed or renamed.
+LIVE_SNAPSHOT_WIDTH_STEP = LIVE_SNAPSHOT_MIN_WIDTH
+_SCALED_SNAPSHOT_CACHE_LIMIT = 64
 _scaled_snapshots: dict[tuple[str, int], tuple[float, bytes]] = {}
 _scaled_snapshots_lock = threading.Lock()
 
@@ -126,6 +135,10 @@ def _scaled_snapshot(camera_id: str, image_bytes: bytes, timestamp: float, width
     """The frame at most ``width`` pixels wide (never upscaled)."""
     if not width:
         return image_bytes
+    width = max(
+        LIVE_SNAPSHOT_MIN_WIDTH,
+        (min(width, LIVE_SNAPSHOT_MAX_WIDTH) // LIVE_SNAPSHOT_WIDTH_STEP) * LIVE_SNAPSHOT_WIDTH_STEP,
+    )
     from app.live_snapshot import render_live_snapshot_jpeg_overlay
 
     key = (camera_id, width)
@@ -135,7 +148,13 @@ def _scaled_snapshot(camera_id: str, image_bytes: bytes, timestamp: float, width
         return cached[1]
     scaled = render_live_snapshot_jpeg_overlay(image_bytes, [], max_width=width)
     with _scaled_snapshots_lock:
+        # Re-insert so the newest frame counts as most recently used, then drop
+        # oldest-first: the cache is a bound on viewer-driven growth, not a
+        # permanent record of every width a camera was ever viewed at.
+        _scaled_snapshots.pop(key, None)
         _scaled_snapshots[key] = (timestamp, scaled)
+        while len(_scaled_snapshots) > _SCALED_SNAPSHOT_CACHE_LIMIT:
+            _scaled_snapshots.pop(next(iter(_scaled_snapshots)), None)
     return scaled
 
 

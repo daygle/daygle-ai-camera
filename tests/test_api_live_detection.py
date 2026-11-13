@@ -171,6 +171,48 @@ def test_live_snapshot_queues_foreground_detection_frame(monkeypatch):
     )]
 
 
+def test_scaled_snapshot_cache_is_bounded_by_width_step(monkeypatch):
+    """One viewer walking every width must not grow the shared downscale cache.
+
+    ``/api/live/snapshot`` is reachable by any signed-in viewer and its cache
+    key is the requested width, so an unquantised width let a single client
+    pin thousands of full-frame JPEGs per camera (and force a resize + encode
+    for each). Widths are rounded down to a step and the cache is capped.
+    """
+    import app.api.live_router as live_router
+    import app.live_snapshot as live_snapshot
+
+    rendered: list[int] = []
+
+    def fake_render(_image_bytes, _detections, *, max_width=None):
+        rendered.append(max_width)
+        return b'frame:%d' % max_width
+
+    monkeypatch.setattr(live_snapshot, 'render_live_snapshot_jpeg_overlay', fake_render)
+    live_router._scaled_snapshots.clear()
+    try:
+        # Widths in the same step share one downscale, which is never wider
+        # than the requested width.
+        first = live_router._scaled_snapshot('camera-1', b'frame', 1.0, 500)
+        again = live_router._scaled_snapshot('camera-1', b'frame', 1.0, 480)
+        assert first == again == b'frame:480'
+        assert live_router._scaled_snapshot('camera-1', b'frame', 1.0, 100) == b'frame:160'
+        assert rendered == [480, 160]
+
+        for width in range(160, 3841):
+            live_router._scaled_snapshot('camera-1', b'frame', 2.0, width)
+        assert len(rendered) == 2 + 24  # one per 160-px step, not one per width
+        assert len(live_router._scaled_snapshots) == 24
+
+        # The hard cap still holds when several cameras together exceed it.
+        for index in range(3):
+            for width in range(160, 3841, 160):
+                live_router._scaled_snapshot(f'camera-{index}', b'frame', 3.0, width)
+        assert len(live_router._scaled_snapshots) == live_router._SCALED_SNAPSHOT_CACHE_LIMIT
+    finally:
+        live_router._scaled_snapshots.clear()
+
+
 def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
