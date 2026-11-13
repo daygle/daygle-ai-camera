@@ -8,6 +8,9 @@ a circular import between those modules.
 from __future__ import annotations
 
 import logging
+import os
+import shutil
+import time
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
@@ -96,3 +99,157 @@ def delete_recording_files(
         thumbnail = path_resolver(recording.get('thumbnail_path'), roots=('snapshots_dir',))
         if thumbnail is not None and thumbnail.exists() and thumbnail.is_file():
             _unlink_quietly(thumbnail)
+
+
+# Start-up artifact sweep
+#
+# The recording pipeline writes every intermediate beside the file it belongs
+# to and renames or deletes it on success: ``<stem>.recording.tmp.mp4`` (event
+# capture), ``<stem>.prebuffer.tmp.mp4`` + ``<stem>.concat.txt`` (prebuffer
+# render), ``<stem>.audio.mp4`` (audio mux) and ``<stem>.<id>.tmp.mp4``
+# (playback conversion). A crash or SIGKILL between write and rename leaves one
+# behind for good - nothing in the service ever looks at a file whose recording
+# row was never created, so these accumulate on the recordings drive forever.
+# The same is true of footage the database never learned about: a
+# continuous-recording chunk finalised after its callback stopped, or one whose
+# insert failed, is invisible to the row-driven retention purge.
+#
+# The sweep runs at start-up (see ``app_lifespan``) BEFORE the ingest and
+# continuous workers start, and every deletion is additionally age-guarded so a
+# later call can never remove a file that is still being written.
+ORPHAN_ARTIFACT_MIN_AGE_SECONDS = 3600.0
+
+
+def _normalise_media_path(path: str | Path) -> str:
+    """Comparable form of a persisted path: absolute, case-folded on Windows."""
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    """True when ``path`` is ``root`` or below it."""
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def sweep_orphaned_recording_artifacts(
+    recordings_root: Path | str,
+    *,
+    referenced_paths: set[str] | frozenset[str],
+    min_age_seconds: float = ORPHAN_ARTIFACT_MIN_AGE_SECONDS,
+) -> dict[str, int]:
+    """Delete recording artifacts a previous session left behind.
+
+    ``referenced_paths`` is every path the database still knows about (see
+    ``RecordingsMixin.recording_file_paths``); a continuous chunk that is not in
+    it and is older than ``min_age_seconds`` was never registered, so nothing
+    else will ever delete it. Temp intermediates and aged-out ``.prebuffer`` /
+    ``.audio`` ingest segments are matched by name and age alone - no row ever
+    references them. ``.frames`` (last-frame fallbacks), playback sidecars and
+    the ``.playback.failed`` retry markers are deliberately left alone.
+
+    Returns per-category counts plus the total bytes reclaimed. A single locked
+    or unreadable artifact is logged and left for the next start instead of
+    aborting the sweep.
+    """
+    root = Path(recordings_root).expanduser()
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    root = root.absolute()
+    report = {
+        'files_deleted': 0,
+        'bytes_deleted': 0,
+        'temp_files': 0,
+        'orphaned_chunks': 0,
+        'ingest_segments': 0,
+        'staging_dirs': 0,
+    }
+    if not root.is_dir():
+        return report
+    cutoff = time.time() - max(0.0, float(min_age_seconds))
+    referenced = {_normalise_media_path(path) for path in referenced_paths}
+    prebuffer_root = root / '.prebuffer'
+    audio_root = root / '.audio'
+
+    def remove(path: Path) -> bool:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return True
+        except OSError as exc:
+            logger.warning('Could not remove orphaned recording artifact %s: %s', path, exc)
+            return False
+        report['files_deleted'] += 1
+        report['bytes_deleted'] += size
+        return True
+
+    def aged_out(path: Path) -> bool:
+        try:
+            return path.stat().st_mtime < cutoff
+        except OSError:
+            # Vanished between listing and stat: nothing left to clean. Metadata
+            # that cannot be read is left alone rather than deleted blindly.
+            return False
+
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        current = Path(dirpath)
+        # Never follow a symlinked directory: restored libraries are untrusted
+        # and the sweep must not be able to reach outside the recordings root.
+        dirnames[:] = [name for name in dirnames if not (current / name).is_symlink()]
+        for name in list(dirnames):
+            if not name.startswith('daygle-audio-mux-'):
+                continue
+            staging = current / name
+            if not aged_out(staging):
+                continue
+            try:
+                shutil.rmtree(staging)
+            except OSError as exc:
+                logger.warning('Could not remove abandoned audio-mux staging %s: %s', staging, exc)
+                continue
+            dirnames.remove(name)
+            report['staging_dirs'] += 1
+        in_prebuffer = _is_within(current, prebuffer_root)
+        in_audio = _is_within(current, audio_root)
+        in_chunks = current.parent == root and current.name.startswith('continuous-')
+        for name in filenames:
+            path = current / name
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+            except OSError:
+                continue
+            lower = name.lower()
+            if lower.endswith('.concat.txt') or '.tmp' in lower or lower.startswith('.playback-failed-'):
+                # ``.playback-failed-*`` are mkstemp leftovers from writing a
+                # failure marker; the marker itself (``.playback.failed``) is a
+                # deliberate retry guard and does not match this rule.
+                if aged_out(path) and remove(path):
+                    report['temp_files'] += 1
+                continue
+            if in_audio:
+                if lower.startswith('aud-') and lower.endswith('.wav') and aged_out(path) and remove(path):
+                    report['ingest_segments'] += 1
+                continue
+            if in_prebuffer:
+                if lower.startswith('segment-') and lower.endswith(('.mp4', '.ts')) and aged_out(path) and remove(path):
+                    report['ingest_segments'] += 1
+                continue
+            if lower.endswith('.audio.mp4'):
+                # Audio-mux output: the mux renames it over the silent render,
+                # so a surviving one belongs to a session that died mid-mux.
+                if _normalise_media_path(path) not in referenced and aged_out(path) and remove(path):
+                    report['temp_files'] += 1
+                continue
+            if in_chunks and lower.startswith('continuous_') and lower.endswith('.mp4'):
+                if _normalise_media_path(path) in referenced:
+                    continue
+                if aged_out(path) and remove(path):
+                    report['orphaned_chunks'] += 1
+    return report

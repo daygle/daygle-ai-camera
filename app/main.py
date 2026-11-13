@@ -190,6 +190,25 @@ async def app_lifespan(_app: FastAPI):
     removed = _state.database.cleanup_incomplete_recordings()
     if removed:
         _logger.info(f'Cleaned up {len(removed)} incomplete recording(s) from previous session')
+    # Reclaim what a crashed session left behind: render/transcode intermediates
+    # and footage the database never learned about. This runs BEFORE
+    # ``start_live_alert_monitor()`` starts the ingest and continuous workers, so
+    # nothing is being written yet; the sweep's age guard covers a later call.
+    try:
+        from app.recording_files import sweep_orphaned_recording_artifacts
+        swept = sweep_orphaned_recording_artifacts(
+            _state.recording_service.recordings_dir,
+            referenced_paths=_state.database.recording_file_paths(),
+        )
+        if swept['files_deleted'] or swept['staging_dirs']:
+            _logger.info(
+                'Startup sweep removed %d orphaned recording artifact(s) (%d bytes; '
+                '%d temp file(s), %d orphaned chunk(s), %d stale ingest segment(s), %d staging dir(s))',
+                swept['files_deleted'], swept['bytes_deleted'], swept['temp_files'],
+                swept['orphaned_chunks'], swept['ingest_segments'], swept['staging_dirs'],
+            )
+    except Exception:
+        _logger.warning('Startup recording artifact sweep failed', exc_info=True)
     log_detector_initialization()
     # No model download here on purpose: a clean install stays without one
     # until an admin installs one from the Object Models tab, and the ONNX

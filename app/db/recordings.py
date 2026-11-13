@@ -446,6 +446,20 @@ class RecordingsMixin:
             db.execute(f"UPDATE alert_history SET recording_id = NULL WHERE recording_id IN ({placeholders})", batch)
             db.execute(f"UPDATE events SET recording_id = NULL WHERE recording_id IN ({placeholders})", batch)
 
+    def recording_file_paths(self) -> set[str]:
+        """Every recording row's media path, for the start-up artifact sweep.
+
+        The sweep needs to tell footage the database never learned about (an
+        orphaned chunk, an abandoned audio-mux output) from one it did. Loading
+        only the paths keeps that check to a narrow scan instead of assembling
+        full recording rows for a large library.
+        """
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT file_path FROM recordings WHERE file_path IS NOT NULL AND file_path != ''"
+            ).fetchall()
+        return {str(row["file_path"]) for row in rows}
+
     def cleanup_incomplete_recordings(self) -> list[dict[str, Any]]:
         """Delete recordings whose files were never written (e.g. service restarted mid-capture)."""
         with self.write_slot(), self.connect() as db:
