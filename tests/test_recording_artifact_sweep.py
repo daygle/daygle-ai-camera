@@ -114,6 +114,38 @@ def test_sweep_removes_stale_temps_and_orphans_but_keeps_live_media(tmp_path):
     assert report['bytes_deleted'] == 7 * 64
 
 
+def test_sweep_reclaims_event_clips_whose_row_is_gone(tmp_path):
+    """Retention deletes the rows first and unlinks the media after. When the
+    unlink fails (a player, a still-finalising render or an antivirus scanner
+    holds the file -- common on Windows) the clip loses its only index: the row
+    is gone, so nothing else ever looks at it again. The sweep reclaims it,
+    while leaving the derived artifacts that share its stem alone."""
+    root = tmp_path / 'recordings'
+    database = EventDatabase(str(tmp_path / 'event-sweep.sqlite3'))
+
+    referenced = _write(root / 'event_1_20260101_000000_000000.mp4', old=True)
+    _recording_row(database, referenced)
+    orphan = _write(root / 'event_2_20260101_000000_000000.mp4', old=True)
+    young_orphan = _write(root / 'event_3_20260101_000000_000000.mp4')
+    # A surviving audio-mux output is cleaned by its own temp rule; the browser
+    # playback copy and the detection track are real artifacts and must stay.
+    audio_mux = _write(root / 'event_2_20260101_000000_000000.audio.mp4', old=True)
+    browser_copy = _write(root / 'event_2_20260101_000000_000000.browser.mp4', old=True)
+    track = _write(root / 'event_2_20260101_000000_000000.track.json', old=True)
+
+    report = sweep_orphaned_recording_artifacts(
+        root, referenced_paths=database.recording_file_paths()
+    )
+
+    assert not orphan.exists()
+    assert not audio_mux.exists()
+    for kept in (referenced, young_orphan, browser_copy, track):
+        assert kept.exists(), kept
+    assert report['orphaned_event_clips'] == 1
+    assert report['temp_files'] == 1
+    assert report['files_deleted'] == 2
+
+
 def test_lifespan_sweeps_before_the_ingest_workers_start(tmp_path, monkeypatch):
     import asyncio
 

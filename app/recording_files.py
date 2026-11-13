@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -112,12 +113,22 @@ def delete_recording_files(
 # row was never created, so these accumulate on the recordings drive forever.
 # The same is true of footage the database never learned about: a
 # continuous-recording chunk finalised after its callback stopped, or one whose
-# insert failed, is invisible to the row-driven retention purge.
+# insert failed, is invisible to the row-driven retention purge. It is also true
+# of an event clip whose row retention deleted but whose file could not be
+# unlinked at the time (a player or a still-finalising render held it open).
 #
 # The sweep runs at start-up (see ``app_lifespan``) BEFORE the ingest and
 # continuous workers start, and every deletion is additionally age-guarded so a
 # later call can never remove a file that is still being written.
 ORPHAN_ARTIFACT_MIN_AGE_SECONDS = 3600.0
+
+# Root-level event clips are named ``event_<id>_<YYYYmmdd>_<HHMMSS>_<micros>.<ext>``
+# (app.recordings.event_recording_metadata). Matching the exact shape keeps the
+# sweep away from derived artifacts that start with the same stem but carry a
+# second suffix -- ``<stem>.audio.mp4`` (audio mux), ``<stem>.browser.mp4`` /
+# ``.h264.mp4`` / ``.playback.mp4`` (playback copies) and ``<stem>.track.json``
+# -- all of which are either rebuilt on demand or cleaned by their own rule.
+_EVENT_CLIP_NAME_RE = re.compile(r'^event_\d+_\d{8}_\d{6}_\d{6}\.[a-z0-9]+$')
 
 
 def _normalise_media_path(path: str | Path) -> str:
@@ -163,6 +174,7 @@ def sweep_orphaned_recording_artifacts(
         'bytes_deleted': 0,
         'temp_files': 0,
         'orphaned_chunks': 0,
+        'orphaned_event_clips': 0,
         'ingest_segments': 0,
         'staging_dirs': 0,
     }
@@ -240,6 +252,18 @@ def sweep_orphaned_recording_artifacts(
             if in_prebuffer:
                 if lower.startswith('segment-') and lower.endswith(('.mp4', '.ts')) and aged_out(path) and remove(path):
                     report['ingest_segments'] += 1
+                continue
+            if current == root and _EVENT_CLIP_NAME_RE.match(lower):
+                # Event clips are row-backed from the moment of trigger, so an
+                # unreferenced one is footage whose row retention (or an admin
+                # delete) already removed but whose file could not be unlinked
+                # -- a player, a finishing render or an antivirus scanner held
+                # it open, which is common on Windows. The row is the only
+                # index to that file, so without this rule its space is never
+                # reclaimed. Age-guarded like every other category so a clip
+                # being written right now is never at risk.
+                if _normalise_media_path(path) not in referenced and aged_out(path) and remove(path):
+                    report['orphaned_event_clips'] += 1
                 continue
             if lower.endswith('.audio.mp4'):
                 # Audio-mux output: the mux renames it over the silent render,
