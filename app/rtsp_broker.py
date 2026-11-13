@@ -377,7 +377,14 @@ class RtspBroker:
         if location_match is None:
             return message
         location = location_match.group(1).decode('utf-8', errors='replace')
-        if not _location_authority_matches(self._scheme, self._hostname, self._port, location):
+        try:
+            matches = _location_authority_matches(self._scheme, self._hostname, self._port, location)
+        except ValueError:
+            # urlsplit/.port raise on unparseable Locations (invalid port,
+            # malformed IPv6). Fail closed like any other non-match.
+            logger.warning('Blocked RTSP redirect with unparseable Location from %s:%s', self._hostname, self._port)
+            return None
+        if not matches:
             parsed = urlsplit(location)
             logger.warning(
                 'Blocked RTSP redirect from %s:%s to %s://%s:%s',

@@ -125,6 +125,34 @@ async def _read_bounded_body(request: Request, limit: int, label: str) -> bytes:
     return b''.join(chunks)
 
 
+# Defensive cap on JSON nesting depth. The parser's own recursion guard
+# (RecursionError) is interpreter-version dependent -- the C scanner moved
+# to the heap in Python 3.13, so on newer interpreters json.loads happily
+# builds arbitrarily deep structures instead of raising. This explicit
+# check keeps the "deeply nested JSON is a client error" guarantee on
+# every supported interpreter. 100 is far above anything a settings or
+# camera payload legitimately nests (they are typically under 10).
+_MAX_JSON_DEPTH = 100
+
+
+def _exceeds_json_depth(value: Any, limit: int = _MAX_JSON_DEPTH) -> bool:
+    """True if ``value`` (parsed JSON) nests deeper than ``limit`` containers.
+
+    Iterative, so measuring the depth never recurses into the structure
+    being rejected.
+    """
+    stack: list[tuple[Any, int]] = [(value, 0)]
+    while stack:
+        node, depth = stack.pop()
+        if depth > limit:
+            return True
+        if isinstance(node, (list, tuple)):
+            stack.extend((child, depth + 1) for child in node)
+        elif isinstance(node, dict):
+            stack.extend((child, depth + 1) for child in node.values())
+    return False
+
+
 async def read_json_body(request: Request) -> Any:
     """Parse the request body as strict JSON, or raise ``HTTPException(400)``.
 
@@ -132,13 +160,17 @@ async def read_json_body(request: Request) -> Any:
     non-standard ``NaN`` / ``Infinity`` / ``-Infinity`` literals. Those pass
     ``<``/``>`` range checks (every comparison with NaN is False) and crash
     ``int()`` with OverflowError, so they are rejected here, once, for every
-    settings payload. The body is size-capped at ``MAX_JSON_BYTES`` (413).
+    settings payload. The body is size-capped at ``MAX_JSON_BYTES`` (413)
+    and its nesting depth at ``_MAX_JSON_DEPTH`` (400).
     """
     body = await _read_bounded_body(request, MAX_JSON_BYTES, 'JSON body')
     try:
-        return json.loads(body, parse_constant=_reject_non_finite, parse_float=_parse_finite_float)
+        parsed = json.loads(body, parse_constant=_reject_non_finite, parse_float=_parse_finite_float)
     except (ValueError, UnicodeDecodeError, RecursionError) as exc:
         raise HTTPException(status_code=400, detail='Request body must be valid JSON.') from exc
+    if _exceeds_json_depth(parsed):
+        raise HTTPException(status_code=400, detail='Request body must be valid JSON.')
+    return parsed
 
 
 async def read_json_object(request: Request) -> dict[str, Any]:

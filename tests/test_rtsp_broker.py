@@ -151,6 +151,20 @@ def test_broker_blocks_redirect_to_different_scheme(upstream_factory):
         assert _exchange(broker.url) == b''
 
 
+def test_broker_blocks_redirect_with_unparseable_location(upstream_factory):
+    # An invalid port or malformed IPv6 literal makes urlsplit/.port raise
+    # ValueError; the broker must drop the connection, not leak an
+    # unhandled exception from the handler thread.
+    for location in (b'rtsp://127.0.0.1:notaport/stream', b'rtsp://[::1/stream'):
+        upstream = upstream_factory(
+            b'RTSP/1.0 302 Found\r\nCSeq: 1\r\n'
+            b'Location: ' + location + b'\r\n'
+            b'Content-Length: 0\r\n\r\n'
+        )
+        with RtspBroker(f'rtsp://127.0.0.1:{upstream.port}/stream') as broker:
+            assert _exchange(broker.url) == b''
+
+
 def test_broker_rewrites_same_authority_redirect_to_itself(upstream_factory):
     upstream = upstream_factory(
         b'RTSP/1.0 302 Found\r\nCSeq: 1\r\n'

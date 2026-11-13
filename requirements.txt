@@ -91,3 +91,11 @@ ai-edge-litert>=2.3.0,<3.0
 # being present: a zone it cannot resolve is rejected at save time with the
 # same rule the solar suggestion applies at runtime.
 tzdata>=2026.6
+# Directly imported by the motion-detection image-decode path in
+# app/detection_state.py (lazy ``from PIL import Image`` for JPEG/PNG byte
+# inputs). It had only ever arrived transitively -- via ultralytics, and as
+# pillow==13.0.0 in requirements.cpu.lock.txt -- so a future ultralytics
+# upgrade that drops its Pillow dependency would silently break motion
+# detection at runtime. Declared explicitly so the import surface always
+# matches the declared requirements.
+Pillow>=11.0.0,<14.0
