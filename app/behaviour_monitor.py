@@ -14,6 +14,7 @@ import threading
 import time
 from datetime import datetime, UTC
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import app.state as _state
 from app import behaviour, behaviour_baseline
@@ -261,12 +262,16 @@ def _enabled_zones_with_loiter(settings: Any) -> list[dict[str, Any]]:
 def _ensure_loiter_loaded_locked() -> None:
     if _loiter_state['loaded']:
         return
-    _loiter_state['loaded'] = True  # set first: a load failure must not retry every cycle
     try:
         raw = _state.database.get_setting(_LOITER_BASELINES_KEY)
     except Exception as exc:  # noqa: BLE001 - a missing/locked DB just means "start fresh"
-        logger.warning('Loiter baseline load failed: %s', exc)
+        # NOT marked loaded: the read is retried next cycle. Marking it loaded
+        # here would leave the in-memory map empty, and the first flush then
+        # writes that empty map over the stored baselines -- a transient DB
+        # error would erase everything the site has learned.
+        logger.debug('Loiter baseline load failed: %s', exc)
         return
+    _loiter_state['loaded'] = True
     if isinstance(raw, dict):
         for key, value in raw.items():
             if not isinstance(value, dict):
@@ -282,6 +287,10 @@ def _ensure_loiter_loaded_locked() -> None:
 
 
 def _flush_loiter_baselines_locked(now: float, now_iso: str) -> None:
+    if not _loiter_state['loaded']:
+        # Never write a map that could not be read: this flush would replace the
+        # stored baselines with whatever partial state is in memory.
+        return
     if not _loiter_state['dirty'] or (now - _loiter_state['last_flush']) < _LOITER_FLUSH_INTERVAL_SECONDS:
         return
     try:
@@ -387,6 +396,29 @@ def _emit_loiter(camera_id: str, settings: dict[str, Any], fire: dict[str, Any],
     logger.info('Loiter on %s: %s in %s (%.0fs, event %s)', camera_id, label, zone_name, dwell, event_id)
 
 
+def _camera_wall_clock(settings: Any, now: float) -> datetime:
+    """The camera's own wall clock for an epoch instant.
+
+    Hour-of-day learning and its day boundary are the SITE's local time: a
+    camera stores an IANA ``timezone`` (``normalize_camera_settings``) and every
+    other schedule in the app -- solar day/night windows, profile automation --
+    is evaluated in it. Reading the host clock instead learned the wrong hour
+    and rolled the day over at the wrong instant whenever the server ran in
+    another zone, which also split one local day's activity across two commits
+    and drifted the baseline. An absent or unresolvable zone keeps the previous
+    host-clock behaviour (Windows images without the optional IANA tzdata).
+    """
+    name = str(settings.get('timezone') or '').strip() if isinstance(settings, dict) else ''
+    if name.upper() == 'UTC':
+        return datetime.fromtimestamp(now, tz=UTC)
+    if name:
+        try:
+            return datetime.fromtimestamp(now, tz=ZoneInfo(name))
+        except (ValueError, ZoneInfoNotFoundError):
+            pass
+    return datetime.fromtimestamp(now)
+
+
 # ─── Tier-2 behavioural intelligence: unusual time-of-day ────────────────────
 # Per-(camera, zone, label) hour-of-day baselines learn which local hours a
 # zone is normally active, and fire on activity in a normally-quiet hour. The
@@ -417,12 +449,13 @@ def _enabled_zones_with_time(settings: Any) -> list[dict[str, Any]]:
 def _ensure_time_loaded_locked() -> None:
     if _time_state['loaded']:
         return
-    _time_state['loaded'] = True
     try:
         raw = _state.database.get_setting(_TIME_BASELINES_KEY)
     except Exception as exc:  # noqa: BLE001 - a missing/locked DB just means "start fresh"
-        logger.warning('Time-of-day baseline load failed: %s', exc)
+        # Retried next cycle, never marked loaded: see the loiter loader.
+        logger.debug('Time-of-day baseline load failed: %s', exc)
         return
+    _time_state['loaded'] = True
     if isinstance(raw, dict):
         for key, value in raw.items():
             if isinstance(value, dict):
@@ -431,6 +464,9 @@ def _ensure_time_loaded_locked() -> None:
 
 
 def _flush_time_baselines_locked(now: float, now_iso: str) -> None:
+    if not _time_state['loaded']:
+        # Never overwrite baselines that could not be read this run.
+        return
     if not _time_state['dirty'] or (now - _time_state['last_flush']) < _TIME_FLUSH_INTERVAL_SECONDS:
         return
     try:
@@ -454,7 +490,10 @@ def emit_time_of_day_anomalies(camera_id: str, settings: dict[str, Any], detecti
     from app.zone_detection import detection_matches_zone
 
     now = time.time()
-    local = datetime.fromtimestamp(now)  # local wall-clock: "time of day" is local
+    # "Time of day" is the CAMERA's wall clock, not the server's: the learned
+    # hour bucket, the day boundary and the reported hour all follow the zone
+    # its operator reads (see ``_camera_wall_clock``).
+    local = _camera_wall_clock(settings, now)
     hour = local.hour
     day = local.toordinal()
 
@@ -576,12 +615,13 @@ def _enabled_zones_with_activity(settings: Any) -> list[dict[str, Any]]:
 def _ensure_activity_loaded_locked() -> None:
     if _activity_state['loaded']:
         return
-    _activity_state['loaded'] = True
     try:
         raw = _state.database.get_setting(_ACTIVITY_BASELINES_KEY)
     except Exception as exc:  # noqa: BLE001 - a missing/locked DB just means "start fresh"
-        logger.warning('Activity baseline load failed: %s', exc)
+        # Retried next cycle, never marked loaded: see the loiter loader.
+        logger.debug('Activity baseline load failed: %s', exc)
         return
+    _activity_state['loaded'] = True
     if isinstance(raw, dict):
         for key, value in raw.items():
             if not isinstance(value, dict):
@@ -597,6 +637,9 @@ def _ensure_activity_loaded_locked() -> None:
 
 
 def _flush_activity_baselines_locked(now: float, now_iso: str) -> None:
+    if not _activity_state['loaded']:
+        # Never overwrite baselines that could not be read this run.
+        return
     if not _activity_state['dirty'] or (now - _activity_state['last_flush']) < _ACTIVITY_FLUSH_INTERVAL_SECONDS:
         return
     try:
@@ -620,7 +663,9 @@ def emit_activity_spike_anomalies(camera_id: str, settings: dict[str, Any], dete
     from app.zone_detection import detection_matches_zone
 
     now = time.time()
-    local = datetime.fromtimestamp(now)
+    # The learned hour bucket is the CAMERA's wall clock, like the unusual-time
+    # monitor above (see ``_camera_wall_clock``).
+    local = _camera_wall_clock(settings, now)
     hour = local.hour
     day = local.toordinal()
 
