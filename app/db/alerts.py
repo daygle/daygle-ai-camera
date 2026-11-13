@@ -62,6 +62,67 @@ class AlertsMixin:
             db.execute("DELETE FROM alert_history")
             return int(count)
 
+    # -- Alert delivery outbox -------------------------------------------
+    # Rows are deliveries the mail relay or ntfy server never accepted (see
+    # app.alert_outbox). One row is one rule's batch for one channel, so a
+    # retry repeats exactly a delivery that delivered nothing.
+
+    def enqueue_alert_delivery(
+        self, *, created_at: str, event_id: int, channel: str,
+        dedupe_key: str, payload: str, next_attempt_at: float,
+    ) -> bool:
+        """Insert one failed delivery; False when it is already queued."""
+        with self.write_slot(), self.connect() as db:
+            cursor = db.execute(
+                """
+                INSERT OR IGNORE INTO alert_delivery_outbox
+                    (created_at, event_id, channel, dedupe_key, payload, attempts, next_attempt_at)
+                VALUES (?, ?, ?, ?, ?, 0, ?)
+                """,
+                (created_at, int(event_id), channel, dedupe_key, payload, float(next_attempt_at)),
+            )
+            return cursor.rowcount > 0
+
+    def due_alert_deliveries(self, now: float, limit: int = 20) -> list[dict[str, Any]]:
+        """Queued deliveries whose next attempt is due, oldest first."""
+        with self.connect() as db:
+            rows = db.execute(
+                """
+                SELECT * FROM alert_delivery_outbox
+                WHERE next_attempt_at <= ?
+                ORDER BY next_attempt_at, id
+                LIMIT ?
+                """,
+                (float(now), int(limit)),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def reschedule_alert_delivery(
+        self, row_id: int, attempts: int, next_attempt_at: float, last_error: str,
+    ) -> None:
+        with self.write_slot(), self.connect() as db:
+            db.execute(
+                """
+                UPDATE alert_delivery_outbox
+                SET attempts = ?, next_attempt_at = ?, last_error = ?
+                WHERE id = ?
+                """,
+                (int(attempts), float(next_attempt_at), last_error, int(row_id)),
+            )
+
+    def delete_alert_delivery(self, row_id: int) -> None:
+        with self.write_slot(), self.connect() as db:
+            db.execute("DELETE FROM alert_delivery_outbox WHERE id = ?", (int(row_id),))
+
+    def prune_alert_deliveries(self, older_than: str) -> int:
+        """Drop rows created before the ISO-8601 ``older_than`` bound."""
+        with self.write_slot(), self.connect() as db:
+            cursor = db.execute(
+                "DELETE FROM alert_delivery_outbox WHERE created_at < ?",
+                (older_than,),
+            )
+            return int(cursor.rowcount or 0)
+
     def delete_all_objects(self) -> int:
         """Truncate the detections table. Kept alongside alert housekeeping ops
         because it's exposed via the same ``Reset operational data`` admin

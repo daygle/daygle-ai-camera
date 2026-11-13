@@ -36,10 +36,15 @@ from app.config_facades import (
     effective_email_alert_settings,
     effective_push_notification_settings,
 )
-from app.email_alerts import EmailAlertService, EmailAlertError
+from app import alert_outbox
+from app.email_alerts import EmailAlertError, EmailAlertService, EmailAlertUnavailable
 from app.live_snapshot import filter_object_priority_detections, render_live_snapshot_jpeg_overlay
 from app.media_utils import safe_storage_path
-from app.push_notifications import PushNotificationService, PushNotificationError
+from app.push_notifications import (
+    PushNotificationError,
+    PushNotificationService,
+    PushNotificationUnavailable,
+)
 from app.alert_recipients import resolve_email_recipients, resolve_push_topics
 
 logger = logging.getLogger('daygle.ai.alerts')
@@ -362,6 +367,42 @@ def deliver_alert_notifications(
         logger.warning('Push notification delivery failed for event %s: %s', event_id, exc)
 
 
+def _email_snapshot_bytes(event: dict[str, Any], event_id: int) -> bytes | None:
+    """Annotated snapshot JPEG for an alert email, or None when unavailable.
+
+    Shared with the delivery outbox, which re-renders it when it re-sends a
+    queued alert and the event's image is still on disk.
+    """
+    snapshot_path = str(event.get('snapshot_path') or '')
+    if not snapshot_path:
+        return None
+    try:
+        snap_path = safe_storage_path(snapshot_path, roots=('snapshots_dir',))
+        if snap_path is not None and snap_path.exists():
+            raw_bytes = snap_path.read_bytes()
+            db_detections = event.get('detections') or []
+            _email_min_conf = compute_minimum_rule_confidence()
+            overlay_detections = filter_object_priority_detections([
+                {
+                    'label': d.get('label'),
+                    'confidence': d.get('confidence'),
+                    'box': {
+                        'x': d.get('x', 0),
+                        'y': d.get('y', 0),
+                        'width': d.get('width', 0),
+                        'height': d.get('height', 0),
+                    },
+                    'motion_event': d.get('motion_event', False),
+                }
+                for d in db_detections
+                if float(d.get('confidence') or 0) >= _email_min_conf
+            ])
+            return render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
+    except Exception as exc:
+        logger.debug('Failed to annotate snapshot for email alert event %s: %s', event_id, exc)
+    return None
+
+
 def deliver_email_alerts(
     triggered: list[dict[str, Any]],
     event_id: int,
@@ -453,33 +494,7 @@ def deliver_email_alerts(
     )
     if _has_face_rule_emails:
         any_email_enabled = True
-    snapshot_bytes: bytes | None = None
-    snapshot_path = str(event.get('snapshot_path') or '')
-    if any_email_enabled and snapshot_path:
-        try:
-            snap_path = safe_storage_path(snapshot_path, roots=('snapshots_dir',))
-            if snap_path is not None and snap_path.exists():
-                raw_bytes = snap_path.read_bytes()
-                db_detections = event.get('detections') or []
-                _email_min_conf = compute_minimum_rule_confidence()
-                overlay_detections = filter_object_priority_detections([
-                    {
-                        'label': d.get('label'),
-                        'confidence': d.get('confidence'),
-                        'box': {
-                            'x': d.get('x', 0),
-                            'y': d.get('y', 0),
-                            'width': d.get('width', 0),
-                            'height': d.get('height', 0),
-                        },
-                        'motion_event': d.get('motion_event', False),
-                    }
-                    for d in db_detections
-                    if float(d.get('confidence') or 0) >= _email_min_conf
-                ])
-                snapshot_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
-        except Exception as exc:
-            logger.debug('Failed to annotate snapshot for email alert event %s: %s', event_id, exc)
+    snapshot_bytes = _email_snapshot_bytes(event, event_id) if any_email_enabled else None
     mailer = EmailAlertService(email_settings)
 
     def _send_rule_email(recipients: list[str], alert: dict[str, Any], kind: str) -> None:
@@ -500,6 +515,18 @@ def deliver_email_alerts(
                 snapshot_bytes=snapshot_bytes,
                 triggered_labels=all_triggered_labels,
                 detected_at=detected_at,
+            )
+        except EmailAlertUnavailable as exc:
+            logger.warning(
+                'Failed to send %s email alert for event %s rule %s: %s',
+                kind, event_id, alert.get('rule_name'), exc,
+            )
+            # Nothing was handed to the server, so the whole batch can be
+            # retried later without duplicating an alert.
+            alert_outbox.enqueue(
+                'email', event_id, alert, recipients=recipients,
+                camera_name=camera_name, triggered_labels=all_triggered_labels,
+                detected_at=detected_at, error=str(exc),
             )
         except EmailAlertError as exc:
             logger.warning(
@@ -674,6 +701,20 @@ def deliver_push_notifications(
                     event_id,
                     rule_name,
                 )
+        except PushNotificationUnavailable as exc:
+            logger.error(
+                'Failed to send push notification for event %s rule %r: %s',
+                event_id,
+                rule_name,
+                exc,
+            )
+            # No topic accepted the push, so a later retry cannot duplicate it.
+            alert_outbox.enqueue(
+                'push', event_id, alert, topics=topics,
+                camera_name=camera_name, camera_id=camera_id,
+                triggered_labels=all_triggered_labels, detected_at=detected_at,
+                error=str(exc),
+            )
         except PushNotificationError as exc:
             logger.error(
                 'Failed to send push notification for event %s rule %r: %s',

@@ -288,6 +288,25 @@ class EventDatabase(
                 CREATE INDEX IF NOT EXISTS idx_detections_event_label ON detections(event_id, label);
                 CREATE INDEX IF NOT EXISTS idx_alert_history_event_id ON alert_history(event_id, id);
                 CREATE INDEX IF NOT EXISTS idx_alert_history_recording ON alert_history(recording_id);
+
+                -- Alert deliveries the transports could not hand over (mail
+                -- relay or ntfy unreachable past their own retries). A
+                -- background worker re-sends each row; success, a permanent
+                -- failure or an exhausted attempt budget deletes it. The
+                -- dedupe key keeps a re-dispatched event from queueing the
+                -- same rule twice.
+                CREATE TABLE IF NOT EXISTS alert_delivery_outbox (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    event_id INTEGER NOT NULL,
+                    channel TEXT NOT NULL,
+                    dedupe_key TEXT NOT NULL UNIQUE,
+                    payload TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    next_attempt_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_alert_outbox_due ON alert_delivery_outbox(next_attempt_at);
                 CREATE TABLE IF NOT EXISTS recordings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     event_id INTEGER,

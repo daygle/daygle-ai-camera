@@ -23,6 +23,16 @@ class EmailAlertError(Exception):
     pass
 
 
+class EmailAlertUnavailable(EmailAlertError):
+    """The SMTP server could not be reached; no recipient got the alert.
+
+    Separate from ``EmailAlertError`` so the dispatcher can queue the rule's
+    email for a later retry (app.alert_outbox). Every other failure -- a
+    rejected login, a bad address, a certificate problem -- would only fail
+    again, so those stay plain ``EmailAlertError``.
+    """
+
+
 logger = logging.getLogger('daygle.notifications')
 
 
@@ -334,7 +344,7 @@ class EmailAlertService:
                 'SMTP session setup failed after %d attempt(s): host=%s port=%s exc=%s: %s',
                 attempts, host, port, type(exc).__name__, exc,
             )
-            raise EmailAlertError(str(exc)) from exc
+            raise EmailAlertUnavailable(str(exc)) from exc
         delay = alert_retry.retry_backoff_seconds(attempt)
         logger.warning(
             'SMTP server unreachable (attempt %d/%d): host=%s port=%s exc=%s: %s; '

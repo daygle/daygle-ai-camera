@@ -15,6 +15,15 @@ class PushNotificationError(Exception):
     pass
 
 
+class PushNotificationUnavailable(PushNotificationError):
+    """ntfy could not be reached (or answered 5xx/429): the request was not accepted.
+
+    Separate from ``PushNotificationError`` so the dispatcher can queue the
+    push for a later retry (app.alert_outbox); a 4xx response is a
+    configuration problem that a retry would only repeat.
+    """
+
+
 # Failures are logged here with their cause, not only raised as
 # PushNotificationError, so a misconfigured ntfy server can be diagnosed from
 # app.log.
@@ -91,13 +100,25 @@ class PushNotificationService:
             self._deliver(title, body, tags=tags)
             return
         errors: list[str] = []
+        delivered = 0
+        unavailable = True
         for topic in dict.fromkeys(topics):
             try:
                 self._deliver(title, body, tags=tags, topic=topic)
+                delivered += 1
+            except PushNotificationUnavailable as exc:
+                errors.append(f'{topic}: {exc}')
             except PushNotificationError as exc:
                 errors.append(f'{topic}: {exc}')
+                unavailable = False
         if errors:
-            raise PushNotificationError('; '.join(errors))
+            message = '; '.join(errors)
+            # Only a batch where nothing was accepted is safe to queue: a
+            # retry of it cannot duplicate the topics that already got the
+            # push, and when some did the dispatcher must not queue any.
+            if unavailable and delivered == 0:
+                raise PushNotificationUnavailable(message)
+            raise PushNotificationError(message)
 
     def send_test(self, topics: list[str] | None = None) -> None:
         """Send the test notification to ``topics`` (users' own topics), or
@@ -155,7 +176,8 @@ class PushNotificationService:
                     'ntfy push delivery failed: server=%s status=%s reason=%s',
                     url, exc.code, exc.reason,
                 )
-                raise PushNotificationError(f"ntfy server returned {exc.code}: {exc.reason}") from exc
+                error_type = PushNotificationUnavailable if retryable else PushNotificationError
+                raise error_type(f"ntfy server returned {exc.code}: {exc.reason}") from exc
             # Network-layer failures only (DNS, connect, timeout, TLS), so
             # programming errors are not reported as "ntfy delivery failed".
             # HTTPError is a URLError subclass and is handled above first.
@@ -173,4 +195,4 @@ class PushNotificationService:
                     'ntfy push delivery failed: server=%s exc=%s: %s',
                     url, type(exc).__name__, exc,
                 )
-                raise PushNotificationError(str(exc)) from exc
+                raise PushNotificationUnavailable(str(exc)) from exc

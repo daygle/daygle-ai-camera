@@ -30,6 +30,7 @@ from app.ai_settings import log_detector_initialization
 from app.camera_instance import create_camera_instances
 from app.config_facades import effective_auth_config, effective_ai_config, effective_cameras_config, effective_recording_config, effective_storage_config
 from app.diagnostics import log_camera_diagnostic
+from app.alert_outbox import start_worker as start_alert_outbox_worker, stop_worker as stop_alert_outbox_worker
 from app.live_monitor import start_live_alert_monitor, stop_live_alert_monitor
 from app.profile_automation import start_profile_monitor, stop_profile_monitor
 from app.postprocess_pool import shutdown_pools
@@ -215,6 +216,9 @@ async def app_lifespan(_app: FastAPI):
     # page's Status tab reports detection as off with a link to do it.
     start_live_alert_monitor()
     start_profile_monitor()
+    # Re-sends alert deliveries the transports could not hand over in an
+    # earlier session (mail relay or ntfy unreachable).
+    start_alert_outbox_worker()
 
     def _run_periodic_retention() -> None:
         from app.backup import purge_recordings_by_policy
@@ -238,6 +242,7 @@ async def app_lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        stop_alert_outbox_worker()
         stop_live_alert_monitor()
         stop_profile_monitor()
         stop_sound_monitor()
