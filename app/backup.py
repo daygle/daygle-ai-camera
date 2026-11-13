@@ -775,6 +775,17 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
             'snapshot_bytes_deleted': 0,
             'recordings': [],
         }
+    # Both bounds are validated to ``>= 1`` by the settings API
+    # (app.payload_validators), but this policy also reads a hand-edited
+    # config YAML / restored database, where ``0`` (or a negative) is a
+    # plausible way to write "no limit" -- and it is exactly how the rest of
+    # this codebase spells it (``storage_metrics`` reports a missing cap as
+    # ``None`` for ``max_gb <= 0``, and the face-recognition
+    # ``retention_days`` is documented as "0 = keep indefinitely"). Taken
+    # literally here, ``0`` would compute a cutoff of *now* and a byte cap of
+    # zero, deleting every recording on the next sweep. Treat a non-positive
+    # bound as "no limit" instead, so an ambiguous value can only ever retain
+    # too much rather than destroy the library.
     retention_days = int(recording_settings.get('retention_days', 14))
     max_storage_gb = int(recording_settings.get('max_storage_gb', 20))
     # ``older_than`` is already in canonical UTC ``+00:00`` form from
@@ -785,10 +796,14 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
     # mismatch could sort a cutoff before the row it should be comparing
     # against).
     from app.utils import _normalize_iso_to_utc
-    older_than = _normalize_iso_to_utc(
-        (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
+    older_than = (
+        _normalize_iso_to_utc(
+            (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
+        )
+        if retention_days > 0
+        else None
     )
-    max_storage_bytes = max_storage_gb * 1024 * 1024 * 1024
+    max_storage_bytes = max_storage_gb * 1024 * 1024 * 1024 if max_storage_gb > 0 else None
     # Capture linked events while the recording rows still exist. Events with
     # another surviving recording are retained by the database cleanup below.
     linked_event_ids: list[int] = []
@@ -809,9 +824,13 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
     # age out older frameless/snapshot-only events. The database methods keep
     # events that are still backed by another recording.
     removed_events = _state.database.purge_events_without_recordings(linked_event_ids)
-    removed_events.extend(
-        _state.database.purge_expired_events_without_recordings(older_than)
-    )
+    if older_than is not None:
+        # With no age bound (an explicit "keep indefinitely") there is nothing
+        # to age out; skip the sweep rather than bind a NULL cutoff that can
+        # only ever match nothing.
+        removed_events.extend(
+            _state.database.purge_expired_events_without_recordings(older_than)
+        )
     snapshot_files_deleted, snapshot_bytes_deleted = delete_snapshot_files(removed_events)
     return {
         'purged': len(purged),

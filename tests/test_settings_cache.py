@@ -57,3 +57,30 @@ def test_absent_key_is_cached_as_none(tmp_path):
     assert db.get_setting('missing') is None  # served from cache, still None
     db.set_setting('missing', {'x': 1}, utc_now())
     assert db.get_setting('missing') == {'x': 1}  # write invalidates the None entry
+
+
+def test_entry_stored_after_a_concurrent_write_is_not_served(tmp_path):
+    """A read that races a write must never leave a permanently stale entry.
+
+    ``get_setting`` reads the generation, queries, then stores. If a writer
+    invalidates between the store decision and the store itself, a value read
+    before that write would otherwise be memoised forever (nothing else clears
+    it until the next write). Entries are therefore tagged with the generation
+    they were read under and rejected once that generation has moved on.
+    """
+    db = _db(tmp_path)
+    db.set_setting('objects', {'default_mode': 'moving'}, utc_now())
+    db.get_setting('objects')  # populate the cache at the current generation
+
+    # Reproduce the interleaving exactly: the entry lands in the dict tagged
+    # with a generation that a writer has since superseded. ``invalidate``
+    # popped the key in that window only if the store happened first -- the
+    # bug was the store happening *after* the pop, so the entry survives.
+    cache = db._settings_cache()
+    stale_gen, _raw = cache['objects']
+    db.__dict__['_settings_cache_gen'] = stale_gen + 1
+    cache['objects'] = (stale_gen, '{"default_mode": "STALE"}')
+
+    # Without generation tagging this returns STALE and keeps doing so until
+    # the next write, because nothing else ever clears the entry.
+    assert db.get_setting('objects') == {'default_mode': 'moving'}

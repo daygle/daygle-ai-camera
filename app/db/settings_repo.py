@@ -61,15 +61,25 @@ class SettingsRepoMixin:
         cache = self._settings_cache()
         cached = cache.get(key, _MISS)
         if cached is not _MISS:
-            return json.loads(cached) if cached is not None else None
+            # Entries are tagged with the generation they were read under, so a
+            # writer that invalidated between our read and our store cannot
+            # leave a permanently stale entry behind. A monotonic generation
+            # makes the validity test exact: any increment invalidates every
+            # entry stored under an older generation.
+            cached_gen, cached_raw = cached
+            if cached_gen == self.__dict__.get('_settings_cache_gen', 0):
+                return json.loads(cached_raw) if cached_raw is not None else None
+            cache.pop(key, None)
         gen_before = self.__dict__.get('_settings_cache_gen', 0)
         with self.connect() as db:
             row = db.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
         raw = row["value"] if row else None
-        # Only cache when no write landed while we were reading; otherwise the
-        # value we just read may already be stale and must not be memoised.
-        if self.__dict__.get('_settings_cache_gen', 0) == gen_before:
-            cache[key] = raw
+        # Tag the entry with the generation observed BEFORE the read. If a write
+        # landed while we were reading, the value we just read may already be
+        # stale -- tagging it with ``gen_before`` makes any later reader reject
+        # it, which closes the window a bare "store only if unchanged" test
+        # leaves open between that test and this assignment.
+        cache[key] = (gen_before, raw)
         return json.loads(raw) if raw is not None else None
 
     def has_setting(self, key: str) -> bool:
