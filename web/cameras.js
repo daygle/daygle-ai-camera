@@ -172,6 +172,17 @@ function parsePtzTrackLabels(value) {
     });
 }
 
+// The camera grid is rebuilt on every edit-panel open/close/save, and each
+// rebuild re-binds a fresh follow-picker. Registering the outside-click handler
+// on `document` inside the bind therefore added one listener per render - and
+// kept every discarded picker's DOM reachable - for the life of the page. One
+// listener at module level closes whichever picker is currently open instead.
+var openPtzTrackPicker = null;
+document.addEventListener('click', function(event) {
+  if (!openPtzTrackPicker || openPtzTrackPicker.dropdown.hidden) return;
+  if (!openPtzTrackPicker.picker.contains(event.target)) openPtzTrackPicker.close();
+});
+
 // Chip multi-select for Follow These Objects. The hidden input keeps the
 // comma-separated value the save code (and the backend) already expect, so a
 // saved "cat, dog" opens as two chips.
@@ -230,9 +241,14 @@ function bindPtzTrackPicker(form) {
     dropdown.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open) {
+      // Only one picker is open at a time (a single camera edit panel), and the
+      // module-level listener below closes whichever it is on an outside click.
+      openPtzTrackPicker = { picker: picker, dropdown: dropdown, close: function() { setOpen(false); } };
       filter.value = '';
       renderOptions();
       filter.focus();
+    } else if (openPtzTrackPicker && openPtzTrackPicker.picker === picker) {
+      openPtzTrackPicker = null;
     }
   }
 
@@ -273,10 +289,6 @@ function bindPtzTrackPicker(form) {
       remove(button.dataset.remove);
     }
   });
-  document.addEventListener('click', function(event) {
-    if (!dropdown.hidden && !picker.contains(event.target)) setOpen(false);
-  });
-
   renderChips();
   loadPtzTrackChoices().then(function(loaded) {
     choices = loaded;

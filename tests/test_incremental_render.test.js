@@ -253,6 +253,18 @@ test('a non-array list is treated as empty rather than throwing', () => {
   assert.doesNotThrow(() => sandbox.renderIncrementally(container, undefined, rowHtml));
 });
 
+test('a missing container returns a no-op cancel instead of throwing', () => {
+  // Regression: the null guard sat BELOW the "a newer render supersedes the
+  // older one" line, which dereferenced the container first, so a page passing
+  // a getElementById() that came back null threw a TypeError instead of
+  // settling. The cancel it hands back must be safe to call too.
+  const { sandbox } = loadUtils();
+  let cancel = null;
+  assert.doesNotThrow(() => { cancel = sandbox.renderIncrementally(null, [1, 2, 3], rowHtml); });
+  assert.equal(typeof cancel, 'function', 'callers rely on getting a cancel function');
+  assert.doesNotThrow(() => cancel());
+});
+
 test('onComplete fires once, after the final batch', () => {
   const { sandbox, flushFrames } = loadUtils();
   const container = containerWith(sandbox);

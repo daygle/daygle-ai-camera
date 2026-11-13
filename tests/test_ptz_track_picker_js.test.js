@@ -34,6 +34,19 @@ test('the follow field is a picker backed by a hidden comma-separated input', ()
   assert.match(source, /labels: getName\('ptz_auto_track_labels'\)/);
 });
 
+test('the outside-click handler is registered once, not per picker bind', () => {
+  // The camera grid is rebuilt (and the picker re-bound) on every edit-panel
+  // open/close/save. Registering the document listener inside
+  // bindPtzTrackPicker therefore added one listener per render - and kept each
+  // discarded dropdown's DOM reachable - for the life of the page. The bind
+  // must only publish the open picker's state to the single module listener.
+  const listeners = source.match(/document\.addEventListener\('click'/g) || [];
+  assert.equal(listeners.length, 1, `expected one document click listener, found ${listeners.length}`);
+  assert.match(source, /var openPtzTrackPicker = null;/);
+  assert.doesNotMatch(extractFunction('bindPtzTrackPicker'),
+    /document\.addEventListener\('click'/, 'the bind runs per render and must not add document listeners');
+});
+
 test('saved labels open as de-duplicated lowercase chips', () => {
   const parse = new Function(`${extractFunction('parsePtzTrackLabels')}; return parsePtzTrackLabels;`)();
   assert.deepEqual(parse('Cat, dog,, cat , Pet'), ['cat', 'dog', 'pet']);

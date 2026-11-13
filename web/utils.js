@@ -174,6 +174,12 @@ function renderIncrementally(container, items, renderItem, options = {}) {
     append = false,
   } = options;
 
+  // A missing container is a caller bug, but pages pass the result of a
+  // getElementById() that can be null, and the supersede line below reads the
+  // element: answer with a no-op cancel instead of throwing on a null
+  // dereference (the guard used to sit after that line).
+  if (!container) return () => {};
+
   // A newer render always supersedes an older one, otherwise two incremental
   // passes interleave into the same container and duplicate rows.
   if (container._daygleRenderCancel) container._daygleRenderCancel();
@@ -191,8 +197,6 @@ function renderIncrementally(container, items, renderItem, options = {}) {
     }
     container._daygleRenderCancel = null;
   };
-
-  if (!container) return cancel;
 
   if (!list.length) {
     if (!append) container.innerHTML = '';
