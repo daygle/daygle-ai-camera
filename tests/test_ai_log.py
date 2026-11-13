@@ -628,18 +628,23 @@ def test_face_scaling_sync_records_reach_the_ai_log(monkeypatch, caplog):
 
     with caplog.at_level('WARNING'):
         svc._sync_stored_embeddings()
-    assert [entry['details']['step'] for entry in events] == ['scaling_sync', 'scaling_sync', 'scaling_sync']
+    assert [entry['details']['step'] for entry in events] == ['scaling_sync'] * 4
     # The per-face re-embed failure...
     assert events[0]['severity'] == 'warning'
     assert events[0]['message'].startswith('Could not re-embed stored face person_faces/4')
-    # ...the summary outcome...
+    # ...the summary outcome (row 4 failed, it is not counted as having no
+    # picture; only row 3 genuinely has none)...
     assert events[1]['severity'] == 'info'
     assert events[1]['details']['re_embedded'] == 1
     assert events[1]['details']['removed'] == 1
-    assert events[1]['details']['left'] == 2
-    # ...and the no-picture warning.
+    assert events[1]['details']['left'] == 1
+    assert events[1]['details']['failed'] == 1
+    # ...the no-picture warning...
     assert events[2]['severity'] == 'warning'
     assert 'no picture to re-embed from' in events[2]['message']
+    # ...and the separate failed-re-embed warning for row 4.
+    assert events[3]['severity'] == 'warning'
+    assert 'could not be re-embedded from their picture' in events[3]['message']
     assert stored['face_embedding_input_scaling']['test-face-model'] == 'raw'
     assert not [record for record in caplog.records if record.levelname == 'WARNING']
 def _replacer(monkeypatch, module):

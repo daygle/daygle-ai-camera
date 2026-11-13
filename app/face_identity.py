@@ -25,6 +25,7 @@ from typing import Any
 from app.diagnostics import log_ai_diagnostic
 from app.face_detection_rules import (
     _coerce_bool,
+    _coerce_optional_float,
     effective_face_detection_rules,
     is_unknown_rule,
     rule_scope_matches,
@@ -112,7 +113,7 @@ def _maybe_enrich_person(
     # cycle re-offers the same track.
     from app.postprocess_pool import PRIORITY_BACKGROUND, enrichment_pool
 
-    enrichment_pool().submit(
+    queued = enrichment_pool().submit(
         _store_enriched_embedding,
         # Copy the crop: a view would pin the whole frame in memory while the
         # job waits and read whatever the frame buffer holds when it runs.
@@ -121,6 +122,16 @@ def _maybe_enrich_person(
         label=f'enriched-embedding-{camera_id}',
         block=False,
     )
+    if not queued:
+        # The queue was full or shut down, so nothing was written: forget the
+        # track so a later cycle offers it again. The mark above is written
+        # BEFORE the submit (to keep one enrichment per track under concurrent
+        # cameras), so leaving it in place made this the only attempt the track
+        # ever got -- a single rejected job silently skipped that face's
+        # enrichment for the rest of its life. The capture path already cleared
+        # its own marker on a rejected job for the same reason.
+        with _lock:
+            _enriched_tracks.get(camera_id, set()).discard(track_id)
 
 
 def _store_enriched_embedding(
@@ -532,8 +543,13 @@ def unknown_face_alerts(camera_id: str, detections: list[dict[str, Any]]) -> lis
                 continue
             # Per-rule confidence gate: only faces at/above the rule's
             # ``min_confidence`` fire it. Blank = any detected face.
-            rule_min_conf = rule.get('min_confidence')
-            if rule_min_conf is not None and det_conf < float(rule_min_conf):
+            # Coerce the way the known-person path does: a stored rule can
+            # hold a non-numeric ``min_confidence`` (a hand-edited settings row,
+            # a restored backup), and a bare ``float()`` here would raise out of
+            # the camera's alert pass every cycle instead of treating the value
+            # as "no per-rule gate".
+            rule_min_conf = _coerce_optional_float(rule.get('min_confidence'))
+            if rule_min_conf is not None and det_conf < rule_min_conf:
                 continue
             rule_ids.append(str(rule.get('id') or ''))
         if rule_ids:

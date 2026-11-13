@@ -361,3 +361,35 @@ def test_unknown_alert_without_rule_min_confidence_gates_nothing(monkeypatch):
     _use_rule(monkeypatch, _unknown_rule())
     fi.reset_camera_identities('uH')
     assert len(fi.unknown_face_alerts('uH', [_unknown_face(1, confidence=0.1)])) == 1
+
+
+def test_unknown_alert_with_malformed_min_confidence_still_alerts(monkeypatch):
+    # A stored rule can hold a non-numeric min_confidence (hand-edited settings
+    # row, restored backup). It must be treated like a blank one -- no gate --
+    # not raise out of the camera's alert pass every cycle.
+    _use_service(monkeypatch, _AlertService())
+    _use_rule(monkeypatch, _unknown_rule(min_confidence='high'))
+    fi.reset_camera_identities('uI')
+    assert len(fi.unknown_face_alerts('uI', [_unknown_face(1, confidence=0.3)])) == 1
+
+
+def test_auto_enrich_is_reoffered_when_the_background_queue_is_full(monkeypatch):
+    # The enrichment is marked as done BEFORE the background submit (to keep it
+    # to one per track under concurrent cameras), so a rejected submit must
+    # clear the mark: otherwise one full queue silently skips that face's
+    # enrichment for the rest of its track.
+    import app.postprocess_pool as pool
+    import app.state as state
+
+    monkeypatch.setattr(state, 'database', None, raising=False)
+    _use_service(monkeypatch, _StubService(MatchResult(7, 'Alex', 0.99, 3), auto_enrich=True))
+
+    class _FullPool:
+        def submit(self, *_args, **_kwargs):
+            return False
+
+    monkeypatch.setattr(pool, 'enrichment_pool', lambda: _FullPool())
+    fi.reset_camera_identities('camFull')
+    fi.annotate_face_identities('camFull', [_face(1)], _frame())
+    assert not fi._enriched_tracks.get('camFull'), 'the track must be offered again next cycle'
+    fi.reset_camera_identities('camFull')

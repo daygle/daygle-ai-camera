@@ -165,7 +165,7 @@ class FaceRecognitionService:
                 details={'step': 'scaling_sync', 'model_id': self.model_id, 'error': str(exc)},
             )
             return
-        redone = removed = left = 0
+        redone = removed = left = failed = 0
         for row in rows:
             try:
                 if row['source'] == 'auto' and row['table'] == 'person_faces':
@@ -180,7 +180,7 @@ class FaceRecognitionService:
                 )
                 redone += 1
             except Exception as exc:
-                left += 1
+                failed += 1
                 log_ai_diagnostic(
                     'ai_face_service',
                     f'Could not re-embed stored face {row["table"]}/{row["id"]}: {exc}',
@@ -205,7 +205,7 @@ class FaceRecognitionService:
             f'Face embedding input scaling is now {scaling}: re-embedded {redone} stored face(s) from their '
             f'pictures and removed {removed} auto-learned face(s) learned under the old scaling.',
             details={'step': 'scaling_sync', 'model_id': self.model_id, 'scaling': scaling,
-                     're_embedded': redone, 'removed': removed, 'left': left},
+                     're_embedded': redone, 'removed': removed, 'left': left, 'failed': failed},
         )
         if left:
             log_ai_diagnostic(
@@ -214,6 +214,20 @@ class FaceRecognitionService:
                 'delete them on the People card and add a new photo.',
                 severity='warning',
                 details={'step': 'scaling_sync', 'model_id': self.model_id, 'left': left},
+            )
+        if failed:
+            # A failed re-embed is a different problem from a missing picture:
+            # the face has one, it just could not be processed. Counting these
+            # as "no picture" told the operator to look for photos that are
+            # already there. The per-row warning above names the row and the
+            # reason; either way the row keeps its old-scaling embedding, so it
+            # will not match reliably until it is re-added.
+            log_ai_diagnostic(
+                'ai_face_service',
+                f'{failed} stored face(s) could not be re-embedded from their picture and will not match '
+                'reliably; see the failure(s) above for the row and reason.',
+                severity='warning',
+                details={'step': 'scaling_sync', 'model_id': self.model_id, 'failed': failed},
             )
 
     # -- recognition -----------------------------------------------------
