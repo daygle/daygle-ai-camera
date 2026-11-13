@@ -104,12 +104,20 @@ camera_config: dict = {}
 camera_instances: dict = {}
 _camera_instances_lock: threading.Lock = threading.Lock()
 # Serializes the read-validate-persist sections of every cameras-config DB
-# writer: the bulk/single settings API handlers and the 30s profile monitor's
-# automation persist. Without it the monitor can persist a stale whole-list
-# snapshot over a concurrent API edit (last writer wins resurrects a reverted
-# edit, or re-adds a camera the API just changed). A plain Lock (not RLock):
-# never hold it while calling apply_cameras_settings, which takes the
-# unrelated _apply_settings_lock internally.
+# writer: the bulk/single settings API handlers, the model/label-group routers,
+# and the 30s profile monitor's automation persist. Without it the monitor can
+# persist a stale whole-list snapshot over a concurrent API edit (last writer
+# wins resurrects a reverted edit, or re-adds a camera the API just changed).
+#
+# Callers hold this across the persist AND the following
+# ``apply_cameras_settings`` call, so the apply is part of the same serialized
+# write. That is safe because the lock order is one-way:
+# ``_cameras_config_write_lock`` -> ``_apply_settings_lock``. Neither
+# ``apply_cameras_settings`` nor ``apply_storage_and_recording_settings`` ever
+# acquires this lock, so no thread can take them in the reverse order.
+# It stays a plain Lock (not RLock) so a re-entrant acquire from inside a
+# writer -- which would mean a writer calling another writer -- deadlocks
+# loudly here instead of silently nesting.
 _cameras_config_write_lock: threading.Lock = threading.Lock()
 _camera_profile_status_lock: threading.Lock = threading.Lock()
 _camera_profile_status: dict = {}
