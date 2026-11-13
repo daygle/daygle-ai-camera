@@ -123,7 +123,13 @@ def recordings(
     # this path to PUBLIC_PATHS by accident.
     user = require_user(request)
     # round-5 finish / M2: capture identity for post-fetch scope filter.
-    session_user_id = int(user['id'])
+    # ``require_user`` hands back the anonymous administrator (``id: None``)
+    # when auth is disabled, so indexing the id directly raised TypeError and
+    # answered HTTP 500 -- taking the whole recordings list down in a no-auth
+    # deployment. ``0`` is the "no account" sentinel the other ownership
+    # filters in this module already use, and it is never compared here: the
+    # anonymous user is an admin, so ``owner_user_id`` stays None below.
+    session_user_id = int(user.get('id') or 0)
     session_role = str(user.get('role') or '').strip().lower()
     labels: list[str] | None = None
     if label:

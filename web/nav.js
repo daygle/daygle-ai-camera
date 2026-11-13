@@ -592,7 +592,10 @@ window.daygleAuthReady = (async () => {
     if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref(theme);
     setActiveThemeButton(theme);
     const user = window.daygleAuth?.user;
-    if (!user || typeof window.api !== 'function') return;
+    // A no-auth deployment's anonymous user has no account id, so there is no
+    // profile row to persist the choice on: the PUT can only 400 and toast an
+    // error on every theme switch. The choice still applied locally above.
+    if (!user || user.id == null || typeof window.api !== 'function') return;
     user.theme = theme;
     window.api('/api/profile', { method: 'PUT', body: JSON.stringify({ theme }) })
       .catch((error) => window.showToast?.(`Could not save theme: ${error.message}`, true));

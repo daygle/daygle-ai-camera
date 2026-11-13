@@ -901,7 +901,15 @@ class AuthService:
         remaining = current_exp_dt - now_dt
         absolute_dt = _parse_iso_datetime(absolute_expires_at)
         effective_dt = min(current_exp_dt, absolute_dt) if absolute_dt else current_exp_dt
-        if remaining >= self.session_timeout - self._SESSION_RENEWAL_INTERVAL:
+        # Headroom is how much of the window must elapse before the next
+        # renewal is due. Capped at half the configured timeout: the settings
+        # validator floors ``session_timeout_hours`` at 0.25 h, but a
+        # hand-edited YAML can configure a shorter window than the fixed
+        # 5-minute interval, which made the comparison below unsatisfiable --
+        # the session then expired exactly on schedule however actively it was
+        # used, because it could never be renewed.
+        headroom = min(self._SESSION_RENEWAL_INTERVAL, self.session_timeout / 2)
+        if remaining >= self.session_timeout - headroom:
             return effective_dt.isoformat()
         new_exp_dt = now_dt + self.session_timeout
         if absolute_dt is not None:

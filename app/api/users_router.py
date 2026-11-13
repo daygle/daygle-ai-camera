@@ -16,15 +16,39 @@ from app.request_helpers import read_json_object, write_audit_log
 router = APIRouter()
 
 
+def _account_id(user: dict[str, Any]) -> int:
+    """Return the signed-in account id, rejecting the anonymous pseudo-user.
+
+    With ``auth.enabled: false`` ``require_user`` returns an anonymous
+    administrator carrying ``id: None``: there is no profile row to read or
+    update in that configuration, and ``int(user['id'])`` used to raise
+    ``TypeError`` and surface as HTTP 500 from the profile page, the password
+    form and the nav theme toggle's background save. 400 rather than 401 is
+    deliberate -- the frontend treats 401 as session loss and would bounce the
+    user to /login, which is meaningless when authentication is switched off.
+    """
+    user_id = user.get('id')
+    if user_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                'Profile settings require an authenticated account; '
+                'authentication is disabled.'
+            ),
+        )
+    return int(user_id)
+
+
 @router.put('/api/profile')
 async def update_profile(request: Request, auth=Depends(get_auth)):
     user = require_user(request)
+    user_id = _account_id(user)
     payload = await read_json_object(request)
     try:
         # bcrypt verification is CPU-bound: keep it off the event loop.
         updated = await run_in_threadpool(
             auth.update_profile,
-            int(user['id']),
+            user_id,
             username=payload.get('username'),
             first_name=payload.get('first_name'),
             last_name=payload.get('last_name'),
@@ -49,12 +73,13 @@ async def update_profile(request: Request, auth=Depends(get_auth)):
 @router.post('/api/profile/password')
 async def change_profile_password(request: Request, auth=Depends(get_auth)):
     user = require_user(request)
+    user_id = _account_id(user)
     payload = await read_json_object(request)
     session = getattr(request.state, 'session', None) or {}
     try:
         await run_in_threadpool(
             auth.change_password,
-            int(user['id']),
+            user_id,
             str(payload.get('current_password') or ''),
             str(payload.get('new_password') or ''),
             keep_session_token=session.get('session_token'),

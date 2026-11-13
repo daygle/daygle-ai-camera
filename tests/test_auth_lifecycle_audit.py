@@ -49,6 +49,31 @@ def test_renewed_session_never_reports_deadline_past_absolute_cap(auth):
         assert db.execute('SELECT absolute_expires_at FROM user_sessions WHERE session_token=?', (token,)).fetchone()[0] == cap
 
 
+def test_short_session_timeout_still_renews(auth):
+    """A window shorter than the renewal interval must still slide.
+
+    The settings validator floors ``session_timeout_hours`` at 0.25 h, but a
+    hand-edited YAML can configure less. With a fixed five-minute headroom the
+    renewal condition was unsatisfiable for any window under ten minutes, so an
+    actively-used session expired exactly on schedule because it could never be
+    renewed.
+    """
+    auth.apply_config({'session_timeout_hours': 3 / 60})  # 3 minutes
+    token = _sign_in(auth)
+    now = datetime.now(timezone.utc)
+    # One minute of runway left: renewal is due, and with the old fixed
+    # headroom it was skipped (remaining >= 3min - 5min is always true).
+    stale_expiry = (now + timedelta(minutes=1)).isoformat()
+    with auth.connect() as db:
+        db.execute(
+            'UPDATE user_sessions SET expires_at=?, last_seen_at=? WHERE session_token=?',
+            (stale_expiry, (now - timedelta(minutes=2)).isoformat(), token),
+        )
+    session = auth.get_session(token)
+    renewed_at = datetime.fromisoformat(session['expires_at'])
+    assert renewed_at > now + timedelta(minutes=2), session['expires_at']
+
+
 def test_fresh_session_poll_does_not_write_last_seen(auth):
     token = _sign_in(auth)
     with auth.connect() as db:

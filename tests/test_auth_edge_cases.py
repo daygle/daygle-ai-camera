@@ -312,3 +312,55 @@ class TestUsernameEnumerationTimingEqualiser:
         finally:
             server.should_exit = True
             thread.join(timeout=5)
+
+
+class TestAuthDisabledAnonymousSession:
+    """No-auth deployments run every request as an anonymous administrator.
+
+    ``require_user`` returns ``{'id': None, ...}`` in that mode, so any route
+    that fed ``user['id']`` straight into ``int()`` raised ``TypeError`` and
+    answered HTTP 500. These tests pin the anonymous shape's contract at the
+    HTTP level: read routes serve normally, and account-only routes reject
+    cleanly instead of crashing.
+    """
+
+    @pytest.fixture()
+    def client(self, tmp_path, monkeypatch):
+        app, _database_path = _load_app(tmp_path, monkeypatch)
+        import app.state as state
+
+        # ``_state.auth_config`` is the documented compatibility layer for
+        # request-time auth config, so flipping it here exercises exactly the
+        # same merge the settings UI writes into the database.
+        monkeypatch.setattr(
+            state, 'auth_config', {**dict(state.auth_config or {}), 'enabled': False}
+        )
+        server, thread, base_url = _server(app)
+        try:
+            yield LocalClient(base_url)
+        finally:
+            server.should_exit = True
+            thread.join(timeout=5)
+
+    def test_recordings_list_serves_the_anonymous_admin(self, client):
+        """The recordings list used to 500 on ``int(None)`` and take the page down."""
+        status, _headers, payload = client.request('/api/recordings')
+        assert status == 200, payload
+        assert payload['items'] == []
+
+    def test_profile_update_is_rejected_without_an_account(self, client):
+        """The theme toggle's background save used to 500 on every switch."""
+        status, _headers, payload = client.request(
+            '/api/profile', method='PUT', json_body={'theme': 'dark'}
+        )
+        assert status == 400, payload
+        assert 'authenticated account' in payload['detail']
+
+    def test_password_change_is_rejected_without_an_account(self, client):
+        status, _headers, payload = client.request(
+            '/api/profile/password',
+            method='POST',
+            json_body={'current_password': 'x', 'new_password': 'y'},
+        )
+        assert status == 400, payload
+        assert 'authenticated account' in payload['detail']
