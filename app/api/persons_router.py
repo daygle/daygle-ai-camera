@@ -24,7 +24,7 @@ from app.face_recognition import (
     encode_face_thumbnail,
 )
 from app.face_recognition_service import refresh_face_recognition_matcher
-from app.request_helpers import _read_uploaded_image, admin_json_object, write_audit_log
+from app.request_helpers import DbRowId, _read_uploaded_image, admin_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -67,7 +67,7 @@ def create_person(request: Request, db=Depends(get_database), payload: dict[str,
 
 
 @router.get('/api/persons/{person_id}')
-def get_person(person_id: int, request: Request, db=Depends(get_database)):
+def get_person(person_id: DbRowId, request: Request, db=Depends(get_database)):
     require_admin(request)
     person = db.get_person(person_id)
     if person is None:
@@ -77,7 +77,7 @@ def get_person(person_id: int, request: Request, db=Depends(get_database)):
 
 
 @router.patch('/api/persons/{person_id}')
-def update_person(person_id: int, request: Request, db=Depends(get_database), payload: dict[str, Any] = Depends(admin_json_object)):
+def update_person(person_id: DbRowId, request: Request, db=Depends(get_database), payload: dict[str, Any] = Depends(admin_json_object)):
     require_admin(request)
     if db.get_person(person_id) is None:
         raise HTTPException(status_code=404, detail='Person not found.')
@@ -93,7 +93,7 @@ def update_person(person_id: int, request: Request, db=Depends(get_database), pa
 
 
 @router.delete('/api/persons/{person_id}')
-def delete_person(person_id: int, request: Request, db=Depends(get_database)):
+def delete_person(person_id: DbRowId, request: Request, db=Depends(get_database)):
     require_admin(request)
     if not db.delete_person(person_id):
         raise HTTPException(status_code=404, detail='Person not found.')
@@ -104,7 +104,7 @@ def delete_person(person_id: int, request: Request, db=Depends(get_database)):
 
 @router.post('/api/persons/{person_id}/faces')
 async def enroll_face(
-    person_id: int,
+    person_id: DbRowId,
     request: Request,
     db=Depends(get_database),
     service=Depends(get_face_recognition_service),
@@ -165,7 +165,7 @@ async def enroll_face(
 
 
 @router.get('/api/persons/{person_id}/faces/{face_id}/thumbnail')
-def get_face_thumbnail(person_id: int, face_id: int, request: Request, db=Depends(get_database)):
+def get_face_thumbnail(person_id: DbRowId, face_id: DbRowId, request: Request, db=Depends(get_database)):
     """Serve the stored JPEG thumbnail for an enrolled face (admin-only).
 
     Biometric imagery, so this is gated the same as the rest of the People
@@ -188,7 +188,7 @@ def get_face_thumbnail(person_id: int, face_id: int, request: Request, db=Depend
 
 @router.delete('/api/persons/{person_id}/faces')
 def delete_faces_by_source(
-    person_id: int,
+    person_id: DbRowId,
     request: Request,
     source: str = Query(...),
     db=Depends(get_database),
@@ -209,7 +209,7 @@ def delete_faces_by_source(
 
 
 @router.delete('/api/persons/{person_id}/faces/{face_id}')
-def delete_face(person_id: int, face_id: int, request: Request, db=Depends(get_database)):
+def delete_face(person_id: DbRowId, face_id: DbRowId, request: Request, db=Depends(get_database)):
     require_admin(request)
     # Confirm the face belongs to THIS person before deleting. ``delete_person_face``
     # removes by face id alone, so without this check a mismatched URL

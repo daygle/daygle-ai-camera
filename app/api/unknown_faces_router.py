@@ -16,9 +16,15 @@ from app.auth_gates import require_admin
 from app.db.unknown_faces import UnknownFaceAssignmentError
 from app.deps import get_database
 from app.face_recognition_service import refresh_face_recognition_matcher
-from app.request_helpers import admin_json_object, write_audit_log
+from app.request_helpers import SQLITE_MAX_INT, DbRowId, admin_json_object, write_audit_log
 
 router = APIRouter()
+
+# Page offsets are clamped like ``limit``: the query value is caller-supplied and
+# one beyond SQLite's signed 64-bit range raises OverflowError in the driver
+# (an HTTP 500). A million captures is far past anything this review page pages
+# through, so the ceiling costs no useful reach.
+_MAX_UNKNOWN_FACE_OFFSET = 1_000_000
 
 
 @router.get('/api/unknown-faces')
@@ -34,14 +40,14 @@ def list_unknown_faces(
     if status not in ('pending', 'assigned', 'dismissed'):
         raise HTTPException(status_code=400, detail='Invalid status filter.')
     limit = max(1, min(100, limit))
-    offset = max(0, offset)
+    offset = max(0, min(offset, _MAX_UNKNOWN_FACE_OFFSET))
     faces = db.list_unknown_faces(status=status, limit=limit, offset=offset)
     total = db.count_unknown_faces(status=status)
     return {'faces': faces, 'total': total, 'limit': limit, 'offset': offset}
 
 
 @router.get('/api/unknown-faces/{face_id}/thumbnail')
-def get_thumbnail(face_id: int, request: Request, db=Depends(get_database)):
+def get_thumbnail(face_id: DbRowId, request: Request, db=Depends(get_database)):
     """Return the JPEG thumbnail for an unknown face capture."""
     require_admin(request)
     thumb = db.get_unknown_face_thumbnail(face_id)
@@ -52,7 +58,7 @@ def get_thumbnail(face_id: int, request: Request, db=Depends(get_database)):
 
 @router.post('/api/unknown-faces/{face_id}/assign')
 def assign_unknown_face(
-    face_id: int,
+    face_id: DbRowId,
     request: Request,
     db=Depends(get_database),
     payload: dict[str, Any] = Depends(admin_json_object),
@@ -75,7 +81,7 @@ def assign_unknown_face(
             person_id = int(raw_person_id)
         except (TypeError, ValueError, OverflowError) as exc:
             raise HTTPException(status_code=400, detail='person_id must be a positive integer.') from exc
-        if person_id <= 0:
+        if person_id <= 0 or person_id > SQLITE_MAX_INT:
             raise HTTPException(status_code=400, detail='person_id must be a positive integer.')
     elif new_name is not None:
         name = str(new_name).strip()
@@ -117,7 +123,7 @@ def assign_unknown_face(
 
 
 @router.post('/api/unknown-faces/{face_id}/dismiss')
-def dismiss_unknown_face(face_id: int, request: Request, db=Depends(get_database)):
+def dismiss_unknown_face(face_id: DbRowId, request: Request, db=Depends(get_database)):
     """Mark an unknown face as dismissed (reviewed, no action taken)."""
     require_admin(request)
     face = db.get_unknown_face(face_id)
@@ -131,7 +137,7 @@ def dismiss_unknown_face(face_id: int, request: Request, db=Depends(get_database
 
 
 @router.delete('/api/unknown-faces/{face_id}')
-def delete_unknown_face(face_id: int, request: Request, db=Depends(get_database)):
+def delete_unknown_face(face_id: DbRowId, request: Request, db=Depends(get_database)):
     """Permanently remove an unknown face capture."""
     require_admin(request)
     if not db.delete_unknown_face(face_id):

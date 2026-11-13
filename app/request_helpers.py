@@ -13,10 +13,10 @@ import logging
 import math
 import re
 from datetime import date, datetime
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import parse_qs
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Path, Request
 
 from app.auth import utc_now
 from app.auth_gates import _request_ip, require_admin
@@ -30,6 +30,15 @@ MAX_FORM_BYTES: int = 64 * 1024
 # a cap ``request.body()`` buffers whatever the client sends before any
 # validation runs, so a 1 MiB ceiling bounds the allocation for every JSON route.
 MAX_JSON_BYTES: int = 1024 * 1024
+
+# ``sqlite3`` binds integers as signed 64-bit values and raises ``OverflowError``
+# (an HTTP 500 with a traceback) for anything wider, so an absurd but harmless
+# ``/api/events/999...`` crashed the route instead of being rejected. Database
+# row ids in path parameters are annotated with this alias, which lets FastAPI
+# answer 422 before the value reaches the driver. Negative ids stay bindable
+# and already answer 404, so they are deliberately not constrained here.
+SQLITE_MAX_INT: int = 2 ** 63 - 1
+DbRowId = Annotated[int, Path(le=SQLITE_MAX_INT)]
 
 # Audit-log redactor: any key whose lowercase name matches one of these
 # patterns has its value replaced by ``***`` so credentials never reach

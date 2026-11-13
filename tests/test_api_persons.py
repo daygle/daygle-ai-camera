@@ -223,3 +223,54 @@ def test_persons_require_admin(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_out_of_range_row_ids_are_rejected_instead_of_500ing(tmp_path, monkeypatch):
+    """An id wider than SQLite's INTEGER must not reach the driver.
+
+    ``sqlite3`` raises ``OverflowError`` for a value beyond signed 64-bit, so
+    an absurd but harmless ``/api/events/<huge>`` used to answer 500 with a
+    traceback instead of a validation error. The same bound is enforced on the
+    body-level ``person_id`` and on the unknown-faces page offset.
+    """
+    app, _db = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    huge = '99999999999999999999999999'
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        for path in (
+            f'/api/events/{huge}',
+            f'/api/events/{huge}/snapshot',
+            f'/api/persons/{huge}',
+            f'/api/persons/{huge}/faces/{huge}/thumbnail',
+            f'/api/unknown-faces/{huge}/thumbnail',
+        ):
+            status, _h, body = client.request(path)
+            assert status == 422, (path, status, body)
+
+        for method, path in (
+            ('DELETE', f'/api/events/{huge}'),
+            ('DELETE', f'/api/persons/{huge}'),
+            ('POST', f'/api/unknown-faces/{huge}/dismiss'),
+        ):
+            status, _h, body = client.request(
+                path, method=method, headers={'X-CSRF-Token': csrf},
+            )
+            assert status == 422, (method, path, status, body)
+
+        # A page offset is clamped, like ``limit``, rather than raising.
+        status, _h, body = client.request(f'/api/unknown-faces?offset={huge}')
+        assert status == 200
+        assert body['offset'] == 1_000_000
+
+        # A body-level person id is range-checked before the DB call too.
+        status, _h, body = client.request(
+            '/api/unknown-faces/1/assign', **_json(csrf, {'person_id': int(huge)})
+        )
+        assert status == 400, (status, body)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

@@ -8,7 +8,7 @@ from fastapi.responses import Response
 
 from app.auth_gates import require_admin, require_user
 from app.deps import get_database
-from app.request_helpers import write_audit_log
+from app.request_helpers import DbRowId, write_audit_log
 from app.media_utils import safe_storage_path
 from app.live_snapshot import (
     SNAPSHOT_THUMB_MAX_WIDTH,
@@ -133,7 +133,7 @@ def event_search(
 
 
 @router.get('/api/events/{event_id}')
-def event_detail(event_id: int, request: Request, db=Depends(get_database)):
+def event_detail(event_id: DbRowId, request: Request, db=Depends(get_database)):
     user = require_user(request)
     event = db.get_event(event_id)
     if event is None:
@@ -146,7 +146,7 @@ def event_detail(event_id: int, request: Request, db=Depends(get_database)):
 
 @router.get('/api/events/{event_id}/snapshot')
 def event_snapshot(
-    event_id: int,
+    event_id: DbRowId,
     request: Request,
     boxes: bool = Query(True, description='Draw green detection boxes on the snapshot (as in alert emails).'),
     thumb: bool = Query(False, description='Serve the capture-time gallery thumbnail (416px wide) when one was stored; otherwise downscale on the fly.'),
@@ -202,7 +202,7 @@ def event_snapshot(
 
 
 @router.delete('/api/events/{event_id}')
-def delete_event(event_id: int, request: Request, db=Depends(get_database)):
+def delete_event(event_id: DbRowId, request: Request, db=Depends(get_database)):
     require_admin(request)
     event = db.delete_event(event_id)
     if event is None:
