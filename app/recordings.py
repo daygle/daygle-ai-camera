@@ -86,6 +86,11 @@ class RecordingService:
     # this holds no video (even 4s at 64 kbit/s is ~32 KB), so it is skipped.
     PREBUFFER_EMPTY_SEGMENT_MAX_BYTES = 16 * 1024
     SEGMENT_TIMELINE_CACHE_MAX_ENTRIES = 64
+    # Same bound rationale for the per-segment probed-duration cache. Unlike
+    # the timeline cache it has no per-directory prune for cameras that have
+    # been removed, so cap it outright -- a probe miss just pays one extra
+    # ffprobe for the segment.
+    SEGMENT_DURATION_CACHE_MAX_ENTRIES = 4096
     # One event used to launch up to six ffprobe processes while validating and
     # measuring the render, then validating the mux. Keep completed probe
     # results keyed by the file identity so those consumers share one process
@@ -418,7 +423,16 @@ class RecordingService:
                 '+faststart',
                 str(tmp_path),
             ]
-            result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
+            try:
+                result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
+            except subprocess.TimeoutExpired as exc:
+                # subprocess.run has already killed ffmpeg; just make sure
+                # the partial clip does not linger. No janitor sweeps
+                # ``*.recording.tmp*`` files, and the tmp name is
+                # event-scoped, so an orphan here is never reused or
+                # cleaned up.
+                tmp_path.unlink(missing_ok=True)
+                raise RuntimeError(f'ffmpeg timed out recording RTSP clip after {exc.timeout:.0f}s.') from exc
         if result.returncode != 0:
             # Stream may have dropped mid-clip; keep partial footage if ffmpeg
             # wrote a decodable file before dying rather than discarding it.
@@ -661,6 +675,11 @@ class RecordingService:
         camera_key = self._camera_key(camera_id)
         self._shared_continuous.pop(camera_key, None)
         self._ingest_decode.pop(camera_key, None)
+        # A removed camera must not leave its no-audio memory behind: if the
+        # camera is later re-added with a different stream, the replacement
+        # worker would otherwise inherit video-only mode without ever
+        # re-probing the new stream.
+        self._audio_disabled_marker(camera_key).unlink(missing_ok=True)
         with self._prebuffer_lock:
             worker = self._prebuffer_workers.pop(camera_key, None)
             if worker:
@@ -1346,8 +1365,16 @@ class RecordingService:
                 # a different camera's footage after a URL change), so any
                 # memoised timeline for this camera is about to be wrong.
                 self._invalidate_segment_timeline_cache()
-            if restart_reason == 'stream_url_changed':
-                self._audio_disabled_marker(camera_key).unlink(missing_ok=True)
+                if existing.get('stream_url') != stream_url:
+                    # The marker was recorded against the OLD stream's audio
+                    # layout, so the new stream must be probed fresh. Clearing
+                    # only on the live-worker path (``restart_reason``) left the
+                    # marker in place when the old worker had ALREADY exited
+                    # on its own: the replacement worker read it at startup
+                    # and ran video-only forever. Clearing after the join is
+                    # race-safe on both paths -- a dead worker cannot
+                    # re-touch the file, and a live one was just joined.
+                    self._audio_disabled_marker(camera_key).unlink(missing_ok=True)
 
             stop_event = threading.Event()
             worker_state = {
@@ -2187,6 +2214,12 @@ class RecordingService:
                 ' (still being written)' if still_writing else ', so clips including it may be mistimed',
             )
         with self._segment_duration_lock:
+            # Bounded like the timeline cache: removed cameras' entries are
+            # never pruned by ``_prune_segment_duration_cache`` (which only
+            # runs for a directory being probed), so drop the whole cache
+            # rather than grow without limit across camera churn.
+            if len(self._segment_duration_cache) >= self.SEGMENT_DURATION_CACHE_MAX_ENTRIES:
+                self._segment_duration_cache.clear()
             self._segment_duration_cache[key] = (signature, duration)
         return duration
 
@@ -3215,7 +3248,14 @@ class RecordingService:
             '+faststart',
             str(tmp_path),
         ]
-        result = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
+        except subprocess.TimeoutExpired as exc:
+            # Same orphan-tmp cleanup as ``write_rtsp_clip``: subprocess.run
+            # killed ffmpeg, but the partial tmp clip would otherwise stay
+            # on disk forever.
+            tmp_path.unlink(missing_ok=True)
+            raise RuntimeError('ffmpeg timed out generating placeholder clip.') from exc
         if result.returncode != 0 or not tmp_path.exists() or tmp_path.stat().st_size <= 0:
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)

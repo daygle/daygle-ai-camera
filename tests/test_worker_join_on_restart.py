@@ -229,6 +229,77 @@ def test_ensure_prebuffer_worker_url_change_clears_marker_after_old_thread_exits
     thread.join(timeout=10)  # let the test settle; the new worker is still running
 
 
+def test_ensure_prebuffer_worker_url_change_clears_marker_when_old_thread_dead(
+    tmp_path, monkeypatch
+):
+    """Marker clear must not depend on the old worker still being alive.
+
+    The marker is recorded against the OLD stream's audio layout. If the old
+    worker already exited on its own (crash, SIGKILL, OOM) before a URL
+    change, the replacement path used to skip the clear (``restart_reason``
+    was only set in the live-worker branch), so the new worker read the
+    stale marker at startup and ran video-only forever."""
+    recordings_module = importlib.import_module("app.recordings")
+    from app.recordings import RecordingService
+
+    service = RecordingService(
+        {
+            "storage": {"recordings_dir": str(tmp_path / "rec")},
+            "recording": {},
+        }
+    )
+    monkeypatch.setattr(recordings_module.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+    popen_count = [0]
+    _install_fake_popen(monkeypatch, recordings_module, popen_count)
+
+    # Start worker #1, wait for its ffmpeg, then stop it so its thread is
+    # fully dead before the URL change.
+    service._ensure_prebuffer_worker("cam", "rtsp://example/stream", 20, camera_id="cam")
+    _wait_for_first_popen(popen_count)
+    _stop_current_worker(service, "_prebuffer_lock")
+
+    # The old URL was video-only.
+    key = RecordingService._camera_key("cam")
+    marker = service._audio_disabled_marker(key)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+    assert marker.exists()
+
+    popen_count[0] = 0
+    service._ensure_prebuffer_worker(
+        "cam", "rtsp://example/stream/v2", 20, camera_id="cam"
+    )
+    _wait_for_first_popen(popen_count)
+
+    assert not marker.exists(), (
+        ".no_audio marker must be cleared on URL change even when the old "
+        "worker thread was already dead"
+    )
+    _stop_current_worker(service, "_prebuffer_lock")
+
+
+def test_stop_camera_workers_clears_no_audio_marker(tmp_path):
+    """Removing a camera must drop its no-audio memory.
+
+    Re-adding the camera with a different stream would otherwise inherit
+    video-only mode without ever re-probing the new stream."""
+    from app.recordings import RecordingService
+
+    service = RecordingService(
+        {
+            "storage": {"recordings_dir": str(tmp_path / "rec")},
+            "recording": {},
+        }
+    )
+    marker = service._audio_disabled_marker(RecordingService._camera_key("cam"))
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+    assert marker.exists()
+
+    service.stop_camera_workers("cam")
+    assert not marker.exists()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # _ensure_continuous_chunk_worker
 # ─────────────────────────────────────────────────────────────────────────────

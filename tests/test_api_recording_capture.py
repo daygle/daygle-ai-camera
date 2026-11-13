@@ -1516,6 +1516,60 @@ def test_write_rtsp_clip_explicitly_records_optional_audio_as_aac(tmp_path, monk
     assert command[command.index('-b:a') + 1] == '128k'
 
 
+def test_write_rtsp_clip_timeout_cleans_partial_temp(tmp_path, monkeypatch):
+    # subprocess.run kills ffmpeg on timeout but raises TimeoutExpired. The
+    # partial ``.recording.tmp`` file must not linger -- nothing sweeps it and
+    # the name is event-scoped, so the orphan would sit on disk forever.
+    import app.recordings as recordings_module
+    RecordingService = recordings_module.RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'format': 'mp4'},
+    })
+
+    def fake_run(command, *_args, **_kwargs):
+        if '-i' not in command:  # capability probes: no output file
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+        Path(command[-1]).write_bytes(b'partial-clip')
+        raise subprocess.TimeoutExpired(command, timeout=25)
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+
+    file_path = tmp_path / 'recordings' / 'event_timeout.mp4'
+    with pytest.raises(RuntimeError, match='timed out recording RTSP clip'):
+        service.write_rtsp_clip('rtsp://example/stream', file_path, 5.0)
+
+    assert not file_path.exists()
+    assert not file_path.with_name(f'{file_path.stem}.recording.tmp{file_path.suffix}').exists()
+
+
+def test_placeholder_clip_timeout_cleans_partial_temp(tmp_path, monkeypatch):
+    # Same orphan-tmp cleanup for the ffmpeg placeholder clip path.
+    import app.recordings as recordings_module
+    RecordingService = recordings_module.RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'format': 'mp4'},
+    })
+
+    def fake_run(command, *_args, **_kwargs):
+        Path(command[-1]).write_bytes(b'partial-clip')
+        raise subprocess.TimeoutExpired(command, timeout=60)
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+
+    file_path = tmp_path / 'recordings' / 'event_timeout.mp4'
+    with pytest.raises(RuntimeError, match='timed out generating placeholder clip'):
+        service._write_ffmpeg_placeholder_clip(file_path, 5.0)
+
+    assert not file_path.exists()
+    assert not file_path.with_name(f'{file_path.stem}.tmp{file_path.suffix}').exists()
+
+
 def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     mods = _m()
