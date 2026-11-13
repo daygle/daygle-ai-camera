@@ -109,3 +109,38 @@ jobs:
       run: npm run lint
     - name: Test dashboard scripts with node:test
       run: npm test
+
+  # Web / auth / middleware suites on the light dependency set, so the HTTP
+  # layer gets a verdict on every push without waiting for `build`'s multi-GB
+  # detection-stack install (those suites run there too, under the full
+  # coverage gate). requirements-test.txt is shared with
+  # scripts/install_test_deps.sh so a local run resolves identical pins.
+  # No ffmpeg step: these suites never shell out to it.
+  web-auth:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: "3.13"
+        cache: pip
+        cache-dependency-path: requirements-test.txt
+    - name: Install web/auth test dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-test.txt
+    - name: Test web, auth and middleware suites
+      # --no-cov: pytest.ini's coverage floor is measured over the whole app, so
+      # one area cannot reach it; `build` runs these files under the full gate.
+      run: |
+        pytest -q --no-cov \
+          tests/test_middleware.py \
+          tests/test_web_auth_router_integration.py \
+          tests/test_auth_gates.py \
+          tests/test_auth_edge_cases.py \
+          tests/test_auth_lifecycle_audit.py \
+          tests/test_auth_admin_concurrency_audit.py \
+          tests/test_api_auth_settings.py \
+          tests/test_security_web_regressions.py \
+          tests/test_page_url_moves.py \
+          tests/test_xss_static_guards.py

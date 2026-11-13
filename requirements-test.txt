@@ -1,0 +1,21 @@
+# Test-only dependencies: everything the web, auth and middleware suites need,
+# and nothing from the detection stack.
+#
+# requirements.txt installs ultralytics (and its torch dependency), onnxruntime,
+# the sound runtime and opencv. No HTTP-layer test imports those, but importing
+# app.main does import cv2 and numpy at module scope, so that native pair stays.
+# The shared pins mirror requirements.txt -- bump them together, and only after
+# the review that file asks for (the numpy/onnxruntime ceilings are deliberate).
+#
+# Used by scripts/install_test_deps.sh and the web-auth job in
+# .github/workflows/python-app.yml, so a local run and CI resolve the same set.
+fastapi>=0.162.0,<1.0
+uvicorn>=0.54.0,<1.0
+PyYAML>=6.0.3,<7.0
+bcrypt>=5.0.0,<6.0
+python-multipart>=0.0.33,<1.0
+numpy>=2.2.6,<2.3
+opencv-python-headless>=5.0.0.93,<6.0
+pytest
+pytest-asyncio
+pytest-cov
