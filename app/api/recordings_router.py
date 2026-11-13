@@ -69,12 +69,18 @@ def _playable_stream_path(file_path: Path) -> Path | None:
             with _PLAYABLE_STREAM_CACHE_LOCK:
                 _PLAYABLE_STREAM_CACHE.move_to_end(key)
             return stream_path
-    stream_path = recording_stream_path(file_path)
-    if stream_path.is_symlink() or not stream_path.exists() or not mp4_has_video_stream(stream_path):
-        return None
     try:
+        stream_path = recording_stream_path(file_path)
+        if stream_path.is_symlink() or not stream_path.exists() or not mp4_has_video_stream(stream_path):
+            return None
         stream_stat = stream_path.stat()
     except OSError:
+        # A purge (retention sweep, another admin's delete) can remove the clip,
+        # its playback copy or its ``.playback.failed`` marker while this probe
+        # is reading them. ``_fresh_sidecar`` and the codec probe stat those
+        # paths, and the caller's existence check already happened, so a file
+        # that vanishes here raises instead of returning a path. A routine race
+        # must read as "not playable" (415), never as an HTTP 500.
         return None
     with _PLAYABLE_STREAM_CACHE_LOCK:
         _PLAYABLE_STREAM_CACHE[key] = (stream_path, stream_stat.st_mtime_ns, stream_stat.st_size)

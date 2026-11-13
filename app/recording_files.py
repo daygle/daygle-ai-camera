@@ -7,11 +7,14 @@ a circular import between those modules.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 
 from app.media_utils import recording_playback_sidecar_path, safe_storage_path
+
+logger = logging.getLogger('daygle.ai.recording')
 
 
 def recording_track_sidecar_path(file_path: Path) -> Path:
@@ -44,6 +47,24 @@ def delete_snapshot_files(events: list[dict[str, Any]]) -> tuple[int, int]:
     return files_deleted, bytes_deleted
 
 
+def _unlink_quietly(path: Path) -> None:
+    """Remove one recording artifact, tolerating a file another process holds.
+
+    Retention deletes a whole batch of rows in one transaction and only then
+    unlinks their media. On Windows (and for a denied/read-only file anywhere)
+    ``unlink`` raises while a player or a finishing capture still has the file
+    open, so letting it propagate aborted the rest of the batch: the remaining
+    rows were already deleted, which orphaned their media with nothing left to
+    find it, and the admin delete returned 500 after destroying the row.
+    Best-effort per artifact matches ``delete_snapshot_files`` and
+    ``_safe_rmtree_no_follow``; one locked file is logged and left behind.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning('Could not delete recording artifact %s: %s', path, exc)
+
+
 def delete_recording_files(
     recordings: list[dict[str, Any]],
     *,
@@ -59,7 +80,7 @@ def delete_recording_files(
         file_path = path_resolver(recording.get('file_path'), roots=('recordings_dir',))
         if file_path is not None:
             if file_path.exists() and file_path.is_file():
-                file_path.unlink(missing_ok=True)
+                _unlink_quietly(file_path)
             playback_paths = [
                 recording_playback_sidecar_path(file_path),
                 recording_track_sidecar_path(file_path),
@@ -71,7 +92,7 @@ def delete_recording_files(
             ]
             for playback_path in playback_paths:
                 if playback_path.exists() and playback_path.is_file():
-                    playback_path.unlink(missing_ok=True)
+                    _unlink_quietly(playback_path)
         thumbnail = path_resolver(recording.get('thumbnail_path'), roots=('snapshots_dir',))
         if thumbnail is not None and thumbnail.exists() and thumbnail.is_file():
-            thumbnail.unlink(missing_ok=True)
+            _unlink_quietly(thumbnail)

@@ -538,16 +538,16 @@ class RecordingsMixin:
                     is_within_grace = created_at >= bound_grace_cutoff
                     if storage_limit_crossed:
                         # Older rows are over-cap and should be removed without
-                        # stats. Only check recent rows to preserve the existing
-                        # protection for a capture whose file is not finalized yet.
+                        # stats. A row created inside the grace window is left
+                        # for a later sweep even when its file already exists:
+                        # an event capture inserts its row at trigger time and
+                        # writes the media only after the post-event wait, so an
+                        # existing file can still be the clip ffmpeg is growing.
+                        # Requiring ``stat`` to fail protected only captures
+                        # that had not written a byte yet, and deleted a file
+                        # mid-render as soon as it appeared.
                         if is_within_grace:
-                            try:
-                                path = safe_storage_path(row["file_path"], roots=('recordings_dir',))
-                                if path is None:
-                                    raise OSError('recording path is outside configured storage')
-                                path.stat()
-                            except OSError:
-                                continue
+                            continue
                         purge_ids.add(recording_id)
                         continue
                     # Grace period: don't treat a recent missing file as an orphan.
@@ -567,6 +567,13 @@ class RecordingsMixin:
                         size += recording_playback_sidecar_path(path).stat().st_size
                     retained_bytes += size
                     if retained_bytes > max_storage_bytes:
+                        # Same grace rule as above: never evict the media of a
+                        # capture that may still be writing it. Its size stays
+                        # counted, so this sweep evicts an older clip instead
+                        # and the next one removes the recent row once its
+                        # grace window has passed.
+                        if is_within_grace:
+                            continue
                         purge_ids.add(recording_id)
                         storage_limit_crossed = True
             elif bound_older_than:

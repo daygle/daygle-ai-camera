@@ -112,6 +112,59 @@ def test_delete_recording_files_skips_out_of_tree_paths(monkeypatch, tmp_path):
     assert protected.exists()
 
 
+def test_delete_recording_files_keeps_going_when_one_file_is_locked(monkeypatch, tmp_path):
+    """One held file must not abort the rest of a retention/delete batch.
+
+    The rows are deleted before their media is unlinked, so an exception here
+    leaves every later recording's files behind with nothing left referencing
+    them. Windows raises ``PermissionError`` for a clip a player still has open.
+    """
+    from app import recording_extension
+
+    root = tmp_path / "recordings"
+    root.mkdir()
+    locked = root / "locked.mp4"
+    locked.write_bytes(b"busy")
+    deletable = root / "deletable.mp4"
+    deletable.write_bytes(b"free")
+    monkeypatch.setattr(
+        recording_extension,
+        "safe_storage_path",
+        lambda raw, **_kwargs: Path(str(raw)) if raw else None,
+    )
+    original_unlink = Path.unlink
+
+    def _unlink(path, *args, **kwargs):
+        if path == locked:
+            raise PermissionError(13, "The process cannot access the file", str(path))
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", _unlink)
+
+    recording_extension.delete_recording_files([
+        {"file_path": str(locked)},
+        {"file_path": str(deletable)},
+    ])
+
+    assert locked.exists()
+    assert not deletable.exists()
+
+
+def test_playable_stream_path_reads_a_purge_race_as_unplayable(monkeypatch, tmp_path):
+    """A clip purged while its playback path is probed answers 415, not 500."""
+    from app.api import recordings_router
+
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"video")
+
+    def _purged(_path):
+        raise FileNotFoundError(str(_path))
+
+    monkeypatch.setattr(recordings_router, "recording_stream_path", _purged)
+
+    assert recordings_router._playable_stream_path(clip) is None
+
+
 def test_database_media_checks_ignore_out_of_tree_recording_paths(monkeypatch, tmp_path):
     from app.database import EventDatabase
     import app.db.recordings as recordings_db

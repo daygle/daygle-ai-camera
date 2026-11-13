@@ -7,7 +7,8 @@
   session behind (which linked every later event on the camera to a clip-less
   recording and blocked new recordings until a restart).
 * A capture session long past its hard deadline is retired, not extended.
-* The storage cap counts browser-playback transcodes.
+* The storage cap counts browser-playback transcodes, and leaves a clip that
+  may still be written inside the grace window.
 * Snapshot filenames are unique even within the same microsecond.
 * The face detector does not inherit the primary model's ``nms_free`` flag,
   and a string ``"false"`` ``nms_free`` is not read as True.
@@ -228,6 +229,54 @@ def test_storage_cap_counts_playback_transcode(tmp_path, monkeypatch):
     purged = database.purge_recordings(max_storage_bytes=150)
 
     assert [row['id'] for row in purged] == [ids[0]]
+
+
+def test_storage_cap_does_not_evict_a_capture_inside_the_grace_window(tmp_path, monkeypatch):
+    """A clip that may still be written is never evicted by the size cap.
+
+    An event capture inserts its row when the event triggers, but its media is
+    written only after the post-event wait, so an existing file can still be
+    the clip ffmpeg is growing. The cap used to purge such a row as soon as the
+    partial file was stat-able, deleting the media under ffmpeg.
+    """
+    database_module = importlib.import_module('app.database')
+    recordings_repo = importlib.import_module('app.db.recordings')
+    database = database_module.EventDatabase(str(tmp_path / 'grace.sqlite3'))
+    recordings_dir = tmp_path / 'rec'
+    recordings_dir.mkdir()
+    monkeypatch.setattr(
+        recordings_repo, 'safe_storage_path',
+        lambda raw, **_kw: Path(str(raw)) if raw else None,
+    )
+    now = datetime.now(timezone.utc)
+
+    def _add(name, size, *, started_at, created_at):
+        clip = recordings_dir / name
+        clip.write_bytes(b'v' * size)
+        return database.add_recording(
+            event_id=None, camera_id='cam', started_at=started_at.isoformat(),
+            ended_at=started_at.isoformat(), duration_seconds=1,
+            file_path=str(clip), thumbnail_path=None, source='camera',
+            created_at=created_at.isoformat(),
+        )
+
+    # Newest first: the fresh over-cap clip is inside the grace window, the
+    # older over-cap clip is not, and the oldest row was created just now (a
+    # restored row), so the sweep also reaches it over-cap inside the window.
+    fresh_id = _add('fresh.mp4', 200, started_at=now, created_at=now)
+    evicted_id = _add(
+        'evicted.mp4', 200, started_at=now - timedelta(hours=1),
+        created_at=now - timedelta(hours=1),
+    )
+    restored_id = _add(
+        'restored.mp4', 50, started_at=now - timedelta(days=2), created_at=now,
+    )
+
+    purged = database.purge_recordings(max_storage_bytes=100)
+
+    assert [row['id'] for row in purged] == [evicted_id]
+    assert database.get_recording(fresh_id) is not None
+    assert database.get_recording(restored_id) is not None
 
 
 def test_snapshot_filenames_are_unique_within_one_instant(tmp_path, monkeypatch):
