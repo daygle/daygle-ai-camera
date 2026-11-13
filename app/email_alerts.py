@@ -15,6 +15,7 @@ from html import escape
 from typing import Any
 from collections.abc import Iterator
 
+from app import alert_retry
 from app.alert_formatting import build_alert_content
 
 
@@ -317,19 +318,114 @@ class EmailAlertService:
             return None
         return self._send_via(smtp, message)
 
+    @staticmethod
+    def _discard(smtp: smtplib.SMTP | None) -> None:
+        """Close a half-opened session after a failed setup, best effort."""
+        if smtp is None:
+            return
+        with contextlib.suppress(Exception):
+            smtp.quit()
+
+    @staticmethod
+    def _retry_setup(attempt: int, attempts: int, exc: BaseException, host: str, port: int) -> None:
+        """Sleep the backoff for a transient setup failure, or raise on the last try."""
+        if attempt >= attempts:
+            logger.warning(
+                'SMTP session setup failed after %d attempt(s): host=%s port=%s exc=%s: %s',
+                attempts, host, port, type(exc).__name__, exc,
+            )
+            raise EmailAlertError(str(exc)) from exc
+        delay = alert_retry.retry_backoff_seconds(attempt)
+        logger.warning(
+            'SMTP server unreachable (attempt %d/%d): host=%s port=%s exc=%s: %s; '
+            'retrying in %.1fs',
+            attempt, attempts, host, port, type(exc).__name__, exc, delay,
+        )
+        alert_retry.sleep_before_retry(attempt)
+
+    def _connect(self, host: str, port: int, tls_context: ssl.SSLContext) -> smtplib.SMTP:
+        """Open, optionally STARTTLS, and log in to the SMTP host.
+
+        A *transient* failure -- the server unreachable (DNS, refused
+        connection, connect timeout, dropped greeting) -- is retried with
+        exponential backoff by ``app.alert_retry``. Only the setup is
+        repeated: no message has been handed to the server yet, so a retry
+        cannot send an alert twice. A rejected login, a certificate problem or
+        any other failure is raised at once, because waiting cannot fix it.
+        """
+        username = str(self.settings.get("username") or "")
+        password = str(self.settings.get("password") or "")
+        attempts = max(1, int(alert_retry.ALERT_DELIVERY_ATTEMPTS))
+        for attempt in range(1, attempts + 1):
+            smtp: smtplib.SMTP | None = None
+            try:
+                if self.settings.get("use_ssl"):
+                    smtp = smtplib.SMTP_SSL(host, port, timeout=10, context=tls_context)
+                else:
+                    smtp = smtplib.SMTP(host, port, timeout=10)
+                    if self.settings.get("use_tls", True):
+                        smtp.starttls(context=tls_context)
+                if username:
+                    smtp.login(username, password)
+                return smtp
+            except ssl.SSLCertVerificationError as exc:
+                # Name the likely cause: an operator with a self-signed relay
+                # or an uninstalled CA otherwise only sees a bare handshake
+                # error.
+                self._discard(smtp)
+                logger.warning(
+                    'SMTP TLS certificate verification failed: host=%s %s', host, exc,
+                )
+                raise EmailAlertError(
+                    f'TLS certificate verification failed for {host}: {exc}. Install the mail '
+                    'server certificate (or its CA), or turn off "Verify TLS Certificate" in '
+                    'Settings > Email Delivery for a self-signed relay.'
+                ) from exc
+            except ssl.SSLError as exc:
+                # TLS negotiation failure: not transient, a retry repeats it.
+                self._discard(smtp)
+                logger.warning(
+                    'SMTP session setup failed: host=%s port=%s exc=%s: %s',
+                    host, port, type(exc).__name__, exc,
+                )
+                raise EmailAlertError(str(exc)) from exc
+            except smtplib.SMTPException as exc:
+                # ``SMTPException`` is an ``OSError`` subclass, so it must be
+                # handled before the socket-error branch: a rejected login or
+                # a bad greeting is not fixed by waiting. Only a server that
+                # dropped the connection during setup gets another try.
+                self._discard(smtp)
+                if not isinstance(exc, smtplib.SMTPServerDisconnected):
+                    logger.warning(
+                        'SMTP session setup failed: host=%s port=%s exc=%s: %s',
+                        host, port, type(exc).__name__, exc,
+                    )
+                    raise EmailAlertError(str(exc)) from exc
+                self._retry_setup(attempt, attempts, exc, host, port)
+            except OSError as exc:
+                # Socket-level failure: DNS, refused connection, timeout.
+                self._discard(smtp)
+                self._retry_setup(attempt, attempts, exc, host, port)
+            except Exception as exc:  # pragma: no cover - depends on external mail servers
+                self._discard(smtp)
+                logger.warning(
+                    'SMTP session setup failed: host=%s port=%s exc=%s: %s',
+                    host, port, type(exc).__name__, exc,
+                )
+                raise EmailAlertError(str(exc)) from exc
+        raise EmailAlertError(f'SMTP connection to {host}:{port} failed.')
+
     @contextmanager
     def _create_smtp_session(self) -> Iterator[smtplib.SMTP]:
-        """Open, optionally STARTTLS, and log in to the configured SMTP host.
+        """Open an authenticated SMTP session, quitting cleanly on exit.
 
-        Yields an authenticated SMTP session suitable for one or more
-        ``_send_via`` calls. Quits cleanly on context exit. Any connect /
-        TLS / login failure is wrapped in ``EmailAlertError`` so callers can
-        catch a uniform exception type.
+        Yields a session suitable for one or more ``_send_via`` calls.
+        Connection setup is retried by ``_connect`` when the server is
+        temporarily unreachable; every other failure is wrapped in
+        ``EmailAlertError`` so callers catch a uniform exception type.
         """
         host = str(self.settings.get("host"))
         port = int(self.settings.get("port") or (465 if self.settings.get("use_ssl") else 587))
-        username = str(self.settings.get("username") or "")
-        password = str(self.settings.get("password") or "")
         # Verify the server's certificate and hostname unless the operator
         # turned it off for a relay with a self-signed certificate. Passing no
         # context lets smtplib fall back to its own context, which has
@@ -342,46 +438,17 @@ class EmailAlertService:
             tls_context.check_hostname = False
             tls_context.verify_mode = ssl.CERT_NONE
 
-        smtp: smtplib.SMTP | None = None
+        smtp = self._connect(host, port, tls_context)
         try:
-            if self.settings.get("use_ssl"):
-                smtp = smtplib.SMTP_SSL(host, port, timeout=10, context=tls_context)
-            else:
-                smtp = smtplib.SMTP(host, port, timeout=10)
-                if self.settings.get("use_tls", True):
-                    smtp.starttls(context=tls_context)
-            if username:
-                smtp.login(username, password)
             yield smtp
-        except EmailAlertError as exc:
-            logger.warning('SMTP session setup failed: %s', exc)
-            raise
-        except ssl.SSLCertVerificationError as exc:
-            # Name the likely cause: an operator with a self-signed relay or an
-            # uninstalled CA otherwise only sees a bare handshake error.
-            logger.warning(
-                'SMTP TLS certificate verification failed: host=%s %s', host, exc,
-            )
-            raise EmailAlertError(
-                f'TLS certificate verification failed for {host}: {exc}. Install the mail '
-                'server certificate (or its CA), or turn off "Verify TLS Certificate" in '
-                'Settings > Email Delivery for a self-signed relay.'
-            ) from exc
-        except Exception as exc:  # pragma: no cover - depends on external mail servers
-            logger.warning(
-                'SMTP session setup failed: host=%s port=%s exc=%s: %s',
-                host, port, type(exc).__name__, exc,
-            )
-            raise EmailAlertError(str(exc)) from exc
         finally:
-            if smtp is not None:
-                try:
-                    smtp.quit()
-                except Exception as exc:
-                    logger.debug(
-                        'SMTP session close failed (resource already gone?): %s: %s',
-                        type(exc).__name__, exc,
-                    )
+            try:
+                smtp.quit()
+            except Exception as exc:
+                logger.debug(
+                    'SMTP session close failed (resource already gone?): %s: %s',
+                    type(exc).__name__, exc,
+                )
 
     def _send_via(self, smtp: smtplib.SMTP, message: Message) -> smtplib.SMTP:
         """Send a single message over an open SMTP session.

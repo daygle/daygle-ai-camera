@@ -116,6 +116,14 @@ class AlertEventLoadOnceTests(unittest.TestCase):
 class PushNotificationsNarrowExceptTests(unittest.TestCase):
     """``PushNotificationService._deliver`` wraps only network-layer errors."""
 
+    def setUp(self) -> None:
+        # These tests are about exception wrapping, not the retry policy: one
+        # attempt keeps them fast and makes each call's failure the outcome.
+        import app.alert_retry as alert_retry
+        retry_patch = patch.object(alert_retry, 'ALERT_DELIVERY_ATTEMPTS', 1)
+        retry_patch.start()
+        self.addCleanup(retry_patch.stop)
+
     def _service(self):
         from app.push_notifications import PushNotificationService
         return PushNotificationService({

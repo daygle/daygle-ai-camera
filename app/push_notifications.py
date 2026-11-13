@@ -7,6 +7,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from app import alert_retry
 from app.alert_formatting import build_alert_content
 
 
@@ -131,21 +132,45 @@ class PushNotificationService:
             headers["Authorization"] = f"Basic {token}"
 
         request = urllib.request.Request(url, data=body.encode("utf-8"), headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(request, timeout=10):
-                pass
-        except urllib.error.HTTPError as exc:
-            logger.warning(
-                'ntfy push delivery failed: server=%s status=%s reason=%s',
-                url, exc.code, exc.reason,
-            )
-            raise PushNotificationError(f"ntfy server returned {exc.code}: {exc.reason}") from exc
-        # Network-layer failures only (DNS, connect, timeout, TLS), so programming
-        # errors are not reported as "ntfy delivery failed". HTTPError is a
-        # URLError subclass and is handled above first.
-        except (urllib.error.URLError, OSError) as exc:
-            logger.warning(
-                'ntfy push delivery failed: server=%s exc=%s: %s',
-                url, type(exc).__name__, exc,
-            )
-            raise PushNotificationError(str(exc)) from exc
+        attempts = max(1, int(alert_retry.ALERT_DELIVERY_ATTEMPTS))
+        for attempt in range(1, attempts + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=10):
+                    return
+            except urllib.error.HTTPError as exc:
+                # 5xx (server temporarily unable) and 429 (rate limited) are
+                # worth another try; any other 4xx is a configuration problem
+                # a retry would only repeat.
+                retryable = exc.code == 429 or exc.code >= 500
+                if retryable and attempt < attempts:
+                    delay = alert_retry.retry_backoff_seconds(attempt)
+                    logger.warning(
+                        'ntfy push delivery failed (attempt %d/%d): server=%s status=%s %s; '
+                        'retrying in %.1fs',
+                        attempt, attempts, url, exc.code, exc.reason, delay,
+                    )
+                    alert_retry.sleep_before_retry(attempt)
+                    continue
+                logger.warning(
+                    'ntfy push delivery failed: server=%s status=%s reason=%s',
+                    url, exc.code, exc.reason,
+                )
+                raise PushNotificationError(f"ntfy server returned {exc.code}: {exc.reason}") from exc
+            # Network-layer failures only (DNS, connect, timeout, TLS), so
+            # programming errors are not reported as "ntfy delivery failed".
+            # HTTPError is a URLError subclass and is handled above first.
+            except (urllib.error.URLError, OSError) as exc:
+                if attempt < attempts:
+                    delay = alert_retry.retry_backoff_seconds(attempt)
+                    logger.warning(
+                        'ntfy push delivery failed (attempt %d/%d): server=%s exc=%s: %s; '
+                        'retrying in %.1fs',
+                        attempt, attempts, url, type(exc).__name__, exc, delay,
+                    )
+                    alert_retry.sleep_before_retry(attempt)
+                    continue
+                logger.warning(
+                    'ntfy push delivery failed: server=%s exc=%s: %s',
+                    url, type(exc).__name__, exc,
+                )
+                raise PushNotificationError(str(exc)) from exc
