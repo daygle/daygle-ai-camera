@@ -177,3 +177,67 @@ def test_playable_stream_is_probed_once_per_unchanged_clip(tmp_path, monkeypatch
     clip.write_bytes(b'rebuilt video')
     assert rr._playable_stream_path(clip) == clip
     assert len(calls) == 2
+
+
+def test_playable_stream_cache_adopts_a_sidecar_built_after_a_failed_conversion(tmp_path, monkeypatch):
+    """A cached "serve the source" answer must not outlive the missing sidecar.
+
+    The first request for an H.265 clip whose conversion failed serves - and
+    caches - the source. The source never changes, so that entry stayed valid
+    for the life of the process: a playback copy built later (background
+    pre-converter, or a retry that succeeded) was ignored and every Range
+    request kept returning the file the browser cannot decode.
+    """
+    import app.api.recordings_router as rr
+    import app.media_utils as mu
+
+    clip = tmp_path / 'clip.mp4'
+    clip.write_bytes(b'hevc')
+    sidecar = mu.recording_playback_sidecar_path(clip)
+
+    def fake_stream_path(path):
+        return sidecar if sidecar.exists() else path
+
+    monkeypatch.setattr(rr, 'recording_stream_path', fake_stream_path)
+    monkeypatch.setattr(rr, 'mp4_has_video_stream', lambda _path: True)
+    monkeypatch.setattr(rr, '_PLAYABLE_STREAM_CACHE', type(rr._PLAYABLE_STREAM_CACHE)())
+
+    assert rr._playable_stream_path(clip) == clip
+    sidecar.write_bytes(b'h264')  # the conversion finished after the first request
+    assert rr._playable_stream_path(clip) == sidecar
+
+
+def test_playable_stream_cache_does_not_pin_a_failed_conversion(tmp_path, monkeypatch):
+    """The retry path must stay reachable while a failure marker is on record.
+
+    Serving the source on top of ``.playback.failed`` is temporary: it stops
+    being right when PLAYBACK_FAILURE_RETRY_SECONDS expires. Memoising it made
+    every later request answer from the cache, so ``recording_stream_path`` -
+    and therefore the retry - never ran again.
+    """
+    import app.api.recordings_router as rr
+
+    clip = tmp_path / 'clip.mp4'
+    clip.write_bytes(b'hevc')
+    marker = clip.with_name('clip.playback.failed')
+    marker.write_bytes(b'')
+    calls = []
+
+    def fake_stream_path(path):
+        calls.append(path)
+        return path
+
+    monkeypatch.setattr(rr, 'recording_stream_path', fake_stream_path)
+    monkeypatch.setattr(rr, 'mp4_has_video_stream', lambda _path: True)
+    monkeypatch.setattr(rr, '_PLAYABLE_STREAM_CACHE', type(rr._PLAYABLE_STREAM_CACHE)())
+
+    assert rr._playable_stream_path(clip) == clip
+    assert rr._playable_stream_path(clip) == clip
+    assert len(calls) == 2, 'each request must reach the retry logic while a failure is on record'
+
+    # A successful conversion deletes the marker, so the answer is stable again
+    # and the per-Range-request probe is suppressed as before.
+    marker.unlink()
+    assert rr._playable_stream_path(clip) == clip
+    assert rr._playable_stream_path(clip) == clip
+    assert len(calls) == 3

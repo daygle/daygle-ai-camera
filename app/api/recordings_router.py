@@ -20,6 +20,7 @@ from app.pagination import decode_cursor, encode_cursor
 from app.media_utils import (
     _recording_timeline_segment,
     mp4_has_video_stream,
+    recording_playback_sidecar_path,
     recording_stream_path,
     safe_storage_path,
 )
@@ -66,9 +67,27 @@ def _playable_stream_path(file_path: Path) -> Path | None:
         except OSError:
             stream_stat = None
         if stream_stat is not None and (stream_stat.st_mtime_ns, stream_stat.st_size) == (mtime_ns, size):
-            with _PLAYABLE_STREAM_CACHE_LOCK:
-                _PLAYABLE_STREAM_CACHE.move_to_end(key)
-            return stream_path
+            # A playback copy can be built AFTER this entry was written - by the
+            # background pre-converter, or by a retry that finally succeeded -
+            # and an entry recorded while it was missing points at the source
+            # clip, whose stat never changes. Without this one extra stat the
+            # entry stayed valid for the life of the process and every Range
+            # request kept answering with the original H.265 file the browser
+            # cannot decode. Cheap enough for the seek-heavy hot path: one
+            # stat, no ffprobe.
+            sidecar = recording_playback_sidecar_path(file_path)
+            try:
+                sidecar_ready = (
+                    stream_path != sidecar
+                    and not sidecar.is_symlink()
+                    and sidecar.stat().st_mtime_ns >= source_stat.st_mtime_ns
+                )
+            except OSError:
+                sidecar_ready = False
+            if not sidecar_ready:
+                with _PLAYABLE_STREAM_CACHE_LOCK:
+                    _PLAYABLE_STREAM_CACHE.move_to_end(key)
+                return stream_path
     try:
         stream_path = recording_stream_path(file_path)
         if stream_path.is_symlink() or not stream_path.exists() or not mp4_has_video_stream(stream_path):
@@ -82,6 +101,17 @@ def _playable_stream_path(file_path: Path) -> Path | None:
         # that vanishes here raises instead of returning a path. A routine race
         # must read as "not playable" (415), never as an HTTP 500.
         return None
+    if stream_path == file_path:
+        # Serving the source is only a stable answer when it is genuinely
+        # browser-playable. On top of a conversion failure it expires with the
+        # ``.playback.failed`` marker (PLAYBACK_FAILURE_RETRY_SECONDS), and
+        # caching it would make every later Range request answer from the entry
+        # itself: ``recording_stream_path`` would never run again and the
+        # documented retry - the only recovery after a failed background
+        # conversion - could not happen before a restart.
+        failed_marker = file_path.with_name(f'{file_path.stem}.playback.failed')
+        if failed_marker.exists() or failed_marker.is_symlink():
+            return stream_path
     with _PLAYABLE_STREAM_CACHE_LOCK:
         _PLAYABLE_STREAM_CACHE[key] = (stream_path, stream_stat.st_mtime_ns, stream_stat.st_size)
         _PLAYABLE_STREAM_CACHE.move_to_end(key)
