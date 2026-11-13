@@ -13,6 +13,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from tests.support import symlink_or_skip
+
 import app.backup as backup_module
 import app.state as state
 
@@ -152,7 +154,7 @@ def test_restore_copy_rejects_dangling_symlink(tmp_path):
     source.mkdir()
     target.mkdir()
     (source / 'clip.mp4').write_bytes(b'restored')
-    (target / 'clip.mp4').symlink_to(tmp_path / 'missing')
+    symlink_or_skip(tmp_path / 'missing', target / 'clip.mp4')
 
     with pytest.raises(HTTPException, match='symbolic link'):
         backup_module._copy_restored_tree(source, target)

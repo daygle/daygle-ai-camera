@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import app.media_utils as media_utils
+from tests.support import symlink_or_skip
 
 
 def _storage(monkeypatch, root: Path) -> None:
@@ -36,11 +37,7 @@ def test_safe_storage_path_rejects_symlinked_media_when_supported(monkeypatch, t
     outside = tmp_path / "secret.txt"
     outside.write_text("do not expose")
     link = root / "clip.mp4"
-    try:
-        link.symlink_to(outside)
-    except OSError:
-        # Windows CI without symlink privileges cannot exercise this branch.
-        return
+    symlink_or_skip(outside, link)
     _storage(monkeypatch, root)
 
     assert media_utils.safe_storage_path(link, roots=("recordings_dir",)) is None
@@ -53,13 +50,13 @@ def test_recording_sidecars_do_not_follow_symlinks(monkeypatch, tmp_path):
     clip.write_bytes(b'video')
     secret = tmp_path / 'secret.json'
     secret.write_text('[{"detections":[{"label":"private"}]}]')
-    (tmp_path / 'clip.track.json').symlink_to(secret)
+    symlink_or_skip(secret, tmp_path / 'clip.track.json')
     assert recording_extension.load_recording_detection_track(clip) is None
 
     outside = tmp_path / 'outside.mp4'
     outside.write_bytes(b'video')
     sidecar = tmp_path / 'clip.h264-audio.mp4'
-    sidecar.symlink_to(outside)
+    symlink_or_skip(outside, sidecar)
     monkeypatch.setattr(media_utils, 'mp4_is_browser_playable', lambda _path: True)
     assert media_utils.recording_stream_path(clip) == clip
 
@@ -70,7 +67,7 @@ def test_recording_track_write_does_not_follow_old_temp_symlink(tmp_path):
     clip = tmp_path / 'clip.mp4'
     protected = tmp_path / 'protected'
     protected.write_bytes(b'private')
-    (tmp_path / 'clip.track.json.tmp').symlink_to(protected)
+    symlink_or_skip(protected, tmp_path / 'clip.track.json.tmp')
     track = [{'detections': [{'label': 'person'}]}]
     recording_extension.write_recording_detection_track(clip, track)
     assert protected.read_bytes() == b'private'

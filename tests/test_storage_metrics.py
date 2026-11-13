@@ -8,6 +8,7 @@ from collections import namedtuple
 import pytest
 
 import app.storage_metrics as storage_metrics
+from tests.support import symlink_or_skip
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +33,7 @@ def test_directory_size_counts_nested_files(tmp_path):
 def test_directory_size_skips_hidden_working_dirs_and_symlinks(tmp_path):
     _write(tmp_path / 'clip.mp4', 100)
     _write(tmp_path / '.prebuffer' / 'seg.ts', 1000)
-    (tmp_path / 'link.mp4').symlink_to(tmp_path / 'clip.mp4')
+    symlink_or_skip(tmp_path / 'clip.mp4', tmp_path / 'link.mp4')
     assert storage_metrics.directory_size(tmp_path) == 100
     assert storage_metrics.directory_size(tmp_path, skip_hidden=False) == 1100
 

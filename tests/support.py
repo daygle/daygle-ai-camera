@@ -21,6 +21,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, HTTPRedirectHandler, Request, build_opener
 
+import pytest
 import uvicorn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -421,6 +422,19 @@ def list_recordings(database, **filters):
     return items
 
 
+def symlink_or_skip(target, link_path) -> None:
+    """Create ``link_path`` -> ``target``, skipping where symlinks are denied.
+
+    Windows requires Developer Mode or an elevated process to create a symlink;
+    without it ``symlink_to`` raises WinError 1314 and the test cannot run. That
+    is a host limitation, not a product failure, so skip instead of failing.
+    """
+    try:
+        Path(link_path).symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip('host does not permit creating symlinks')
+
+
 __all__ = [
     'LocalClient',
     'NoRedirect',
@@ -443,4 +457,5 @@ __all__ = [
     '_zone_camera_settings_with_email',
     'add_event',
     'list_recordings',
+    'symlink_or_skip',
 ]
