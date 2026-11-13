@@ -279,6 +279,31 @@ def test_storage_cap_does_not_evict_a_capture_inside_the_grace_window(tmp_path, 
     assert database.get_recording(restored_id) is not None
 
 
+def test_zero_byte_chunk_row_is_reclaimed_even_under_the_cap(tmp_path, monkeypatch):
+    """A chunk that never received a byte is not media.\n\n    A 0-byte file counts as 0 retained bytes and is not "missing", so under the\n    size cap nothing used to evict the row and it survived until the next\n    start-up ``cleanup_incomplete_recordings``.\n    """
+    database_module = importlib.import_module('app.database')
+    recordings_repo = importlib.import_module('app.db.recordings')
+    database = database_module.EventDatabase(str(tmp_path / 'zero.sqlite3'))
+    recordings_dir = tmp_path / 'rec'
+    recordings_dir.mkdir()
+    monkeypatch.setattr(
+        recordings_repo, 'safe_storage_path',
+        lambda raw, **_kw: Path(str(raw)) if raw else None,
+    )
+    now = datetime.now(timezone.utc)
+    empty = recordings_dir / 'empty.mp4'
+    empty.write_bytes(b'')
+    empty_id = database.add_recording(
+        event_id=None, camera_id='cam',
+        started_at=(now - timedelta(hours=1)).isoformat(),
+        ended_at=(now - timedelta(hours=1)).isoformat(), duration_seconds=1,
+        file_path=str(empty), thumbnail_path=None, source='camera',
+        created_at=(now - timedelta(hours=1)).isoformat(),
+    )
+    purged = database.purge_recordings(max_storage_bytes=10 ** 12)
+    assert [row['id'] for row in purged] == [empty_id]
+
+
 def test_snapshot_filenames_are_unique_within_one_instant(tmp_path, monkeypatch):
     storage_module = importlib.import_module('app.storage')
     frozen = datetime(2026, 9, 28, 12, 0, 0, 123456, tzinfo=timezone.utc)

@@ -574,6 +574,15 @@ class RecordingsMixin:
                         if not is_within_grace:
                             purge_ids.add(recording_id)
                         continue
+                    if size <= 0:
+                        # A chunk row registered before its first byte landed (a
+                        # crash between insert and the first write, or a stream
+                        # that produced no data) is not media: reclaim it here
+                        # instead of counting 0 bytes and keeping it until the
+                        # next start-up ``cleanup_incomplete_recordings``.
+                        if not is_within_grace:
+                            purge_ids.add(recording_id)
+                        continue
                     # A browser-playback transcode (HEVC/incompatible-audio
                     # cameras) is a second full copy of the clip; leaving it out
                     # let real disk use reach ~2x the configured cap.

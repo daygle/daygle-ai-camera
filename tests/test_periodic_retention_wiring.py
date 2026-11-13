@@ -95,3 +95,53 @@ def test_positive_retention_bounds_are_passed_through(monkeypatch):
     assert database.purge_kwargs['max_storage_bytes'] == 5 * 1024 ** 3
     assert database.purge_kwargs['older_than'] is not None
     assert len(database.event_cutoffs) == 1
+
+
+def _stub_retention(monkeypatch, calls, *, record_paths=None):
+    import app.backup as backup
+    import app.recording_files as recording_files
+
+    class _Database(_RecordingDatabase):
+        def recording_file_paths(self):
+            return record_paths or set()
+
+    class _Service:
+        recordings_dir = 'unused-root'
+
+    monkeypatch.setattr(backup, 'effective_recording_config', lambda: {
+        'retention_days': 7, 'max_storage_gb': 5, 'auto_purge_enabled': True,
+    })
+    monkeypatch.setattr(backup._state, 'database', _Database())
+    monkeypatch.setattr(backup._state, 'recording_service', _Service(), raising=False)
+    monkeypatch.setattr(backup, 'delete_recording_files', lambda _rows: None)
+    monkeypatch.setattr(backup, 'delete_snapshot_files', lambda _rows: (0, 0))
+    monkeypatch.setattr(
+        recording_files, 'sweep_orphaned_recording_artifacts',
+        lambda root, **kwargs: calls.append((root, kwargs)) or {
+            'files_deleted': 0, 'bytes_deleted': 0,
+        },
+    )
+    monkeypatch.setattr(backup, '_orphan_sweep_last_started', None)
+    return backup
+
+
+def test_retention_reclaims_files_whose_unlink_failed(monkeypatch):
+    """A file locked during purge must be reclaimed without a restart."""
+    calls = []
+    backup = _stub_retention(monkeypatch, calls, record_paths={'/rec/kept.mp4'})
+    backup.purge_recordings_by_policy()
+    assert calls and calls[0][0] == 'unused-root'
+    assert calls[0][1]['referenced_paths'] == {'/rec/kept.mp4'}
+
+
+def test_the_after_retention_sweep_is_throttled(monkeypatch):
+    calls = []
+    backup = _stub_retention(monkeypatch, calls)
+    clock = {'now': 100.0}
+    monkeypatch.setattr(backup.time, 'monotonic', lambda: clock['now'])
+    backup._sweep_orphans_after_retention()
+    backup._sweep_orphans_after_retention()
+    assert len(calls) == 1
+    clock['now'] += backup._ORPHAN_SWEEP_INTERVAL_SECONDS
+    backup._sweep_orphans_after_retention()
+    assert len(calls) == 2

@@ -745,6 +745,43 @@ def refresh_runtime_after_database_restore() -> None:
 
 
 _AUTOMATIC_RECORDING_RETENTION_INTERVAL_SECONDS = 300.0
+# Retention drops a recording row even when its media file cannot be unlinked
+# (a Windows lock, a transcode still reading it). The start-up sweep reclaims
+# such files, but without a later sweep a file locked for the whole uptime
+# would sit there until the next restart. Throttled because the sweep walks the
+# recordings tree.
+_ORPHAN_SWEEP_INTERVAL_SECONDS = 900.0
+_orphan_sweep_lock = threading.Lock()
+_orphan_sweep_last_started: float | None = None
+
+
+def _sweep_orphans_after_retention() -> dict[str, int]:
+    """Reclaim artifacts retention unlinked the row for but not the file."""
+    global _orphan_sweep_last_started
+    now = time.monotonic()
+    with _orphan_sweep_lock:
+        if (
+            _orphan_sweep_last_started is not None
+            and now - _orphan_sweep_last_started < _ORPHAN_SWEEP_INTERVAL_SECONDS
+        ):
+            return {}
+        _orphan_sweep_last_started = now
+    try:
+        from app.recording_files import sweep_orphaned_recording_artifacts
+
+        swept = sweep_orphaned_recording_artifacts(
+            _state.recording_service.recordings_dir,
+            referenced_paths=_state.database.recording_file_paths(),
+        )
+    except Exception:
+        logger.warning('Recording artifact sweep after retention failed', exc_info=True)
+        return {}
+    if swept.get('files_deleted'):
+        logger.info(
+            'Retention sweep removed %d unreferenced recording artifact(s) (%d bytes)',
+            swept['files_deleted'], swept['bytes_deleted'],
+        )
+    return swept
 _automatic_retention_lock = threading.Lock()
 _automatic_retention_last_started: float | None = None
 _automatic_retention_running = False
@@ -868,6 +905,7 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
             _state.database.purge_expired_events_without_recordings(older_than)
         )
     snapshot_files_deleted, snapshot_bytes_deleted = delete_snapshot_files(removed_events)
+    _sweep_orphans_after_retention()
     return {
         'purged': len(purged),
         'files_deleted': files_deleted,
