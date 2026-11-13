@@ -156,6 +156,38 @@ def test_camera_offline_notification_is_queued_not_sent_inline(monkeypatch):
     assert submitted == [(camera_health._deliver_camera_offline_notification, ('cam', 'Gate', 'offline'))]
 
 
+def test_camera_offline_notification_stays_unclaimed_when_the_queue_rejects_it(monkeypatch):
+    """A rejected submit must leave the notified flag unclaimed.
+
+    ``_submit_camera_notification`` used to claim the flag BEFORE queueing, so
+    a full (or shutting-down) notification queue lost the offline notification
+    for the whole outage: nothing was delivered and the claimed flag stopped
+    every later health check from retrying.
+    """
+    camera_health = importlib.import_module('app.camera_health')
+    postprocess_pool = importlib.import_module('app.postprocess_pool')
+    submitted: list[tuple] = []
+    accept = {'value': False}
+
+    class _Pool:
+        def submit(self, fn, *args, **_kwargs):
+            submitted.append((fn, args))
+            return accept['value']
+
+    marked: list[str] = []
+    monkeypatch.setattr(postprocess_pool, 'notification_pool', lambda: _Pool())
+    monkeypatch.setattr(camera_health, '_mark_camera_offline_notified', marked.append)
+    monkeypatch.setattr(camera_health, 'effective_camera_offline_alert_settings', lambda: {'enabled': True})
+
+    camera_health._submit_camera_notification('cam', 'Gate', 'offline')
+    assert len(submitted) == 1 and marked == []
+
+    # The queue drained: the next health check queues (and claims) it.
+    accept['value'] = True
+    camera_health._submit_camera_notification('cam', 'Gate', 'offline')
+    assert len(submitted) == 2 and marked == ['cam']
+
+
 def test_ipv6_camera_host_is_bracketed():
     utils = importlib.import_module('app.utils')
     assert utils.build_stream_url({'host': 'fd00::10', 'username': 'u', 'password': 'p@ss'}) == (

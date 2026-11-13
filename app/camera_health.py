@@ -361,24 +361,34 @@ def _submit_camera_notification(camera_id: str, camera_name: str, event_type: st
     on all cameras -- typically during a network problem, which is exactly
     when a camera goes offline and the mail server is slow to answer.
 
-    The notified flag is claimed before queueing so the next monitor cycle
-    (every ~0.5s) does not queue the same notification again. While alerts
-    are disabled nothing is claimed, so enabling them during an outage still
+    The notified flag is claimed once the job is queued so the next monitor
+    cycle (every ~0.5s) does not queue the same notification again. A rejected
+    submit leaves it unclaimed: the queue was full or shutting down, nothing
+    will be delivered, and the next cycle has to be able to retry instead of
+    the notification being lost for the whole outage. While alerts are
+    disabled nothing is claimed, so enabling them during an outage still
     notifies, exactly as before.
     """
     if not effective_camera_offline_alert_settings().get('enabled'):
+        return
+    from app.postprocess_pool import notification_pool
+
+    accepted = notification_pool().submit(
+        _deliver_camera_offline_notification, camera_id, camera_name, event_type,
+        block=False, label=f'camera-{event_type}-{camera_id}',
+    )
+    if not accepted:
+        # Claim the flag only after the job is queued. Claiming it first lost
+        # the notification for the whole outage when the queue was full or
+        # shutting down: nothing was delivered, and the flag stopped every
+        # later health check from retrying.
+        logger.warning(
+            'Notification queue full or shutting down; the %s notification for camera %s '
+            'stays unclaimed and will be retried on the next health check.',
+            event_type, camera_id,
+        )
         return
     if event_type == 'offline':
         _mark_camera_offline_notified(camera_id)
     else:
         _mark_camera_recovery_notified(camera_id)
-    from app.postprocess_pool import notification_pool
-
-    if not notification_pool().submit(
-        _deliver_camera_offline_notification, camera_id, camera_name, event_type,
-        block=False, label=f'camera-{event_type}-{camera_id}',
-    ):
-        logger.warning(
-            'Notification queue full; dropped the %s notification for camera %s.',
-            event_type, camera_id,
-        )

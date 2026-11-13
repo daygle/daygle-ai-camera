@@ -477,3 +477,86 @@ def test_live_pipeline_captures_unknown_face_for_review(tmp_path, monkeypatch):
     assert main.database.count_unknown_faces(status='pending') == 1, (
         'an unrecognised face on the live path must be captured for review'
     )
+
+
+# ---------------------------------------------------------------------------
+# Alert-delivery diagnostics: "enabled" is not the same as "configured"
+# ---------------------------------------------------------------------------
+
+
+def test_email_dispatch_warns_when_enabled_without_a_usable_smtp_setup(monkeypatch, caplog):
+    """``enabled`` with no SMTP host/From silently dropped every alert.
+
+    ``EmailAlertService.send_alert`` returns without sending when the host or
+    From address is missing; a settings row restored from an older backup can
+    carry exactly that, and the drop used to leave no trace in the log.
+    """
+    delivered: list[dict] = []
+
+    class FakeEmailAlertService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_alert(self, alert, **kwargs):
+            delivered.append(alert)
+
+    import app.alert_dispatch as dispatch
+    rules = [{'name': 'Cat', 'email_enabled': True, 'email_recipients': ['ops@example.com']}]
+    triggered = [{'label': 'cat', 'rule_name': 'Cat', 'confidence': 0.9, 'message': 'Cat matched'}]
+    event = {'metadata': {}, 'snapshot_path': None, 'created_at': ''}
+    monkeypatch.setattr(dispatch, 'EmailAlertService', FakeEmailAlertService)
+    monkeypatch.setattr(dispatch, 'effective_email_alert_settings', lambda: {'enabled': True})
+
+    caplog.set_level('WARNING', logger='daygle.ai.alerts')
+    dispatch.deliver_email_alerts(triggered, 7, rules=rules, event=event)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any('SMTP host or From address is not configured' in message for message in messages), messages
+
+    # Configured: no warning, and the rule's email still goes out.
+    caplog.clear()
+    monkeypatch.setattr(dispatch, 'effective_email_alert_settings', lambda: {
+        'enabled': True, 'host': 'smtp.example.com', 'from_address': 'alerts@example.com',
+    })
+    dispatch.deliver_email_alerts(triggered, 8, rules=rules, event=event)
+    messages = [record.getMessage() for record in caplog.records]
+    assert not any('SMTP host or From address is not configured' in message for message in messages), messages
+    assert len(delivered) == 2
+
+
+def test_push_dispatch_does_not_report_sent_when_push_is_not_configured(monkeypatch, caplog):
+    """A push ``send_alert`` skipped must not be logged as sent.
+
+    ``PushNotificationService.configured()`` also needs the server URL and
+    topic; an ``enabled`` row without them (e.g. restored from an older
+    backup) made every rule log "Push notification sent" for a push that
+    never left the host.
+    """
+    sent: list[dict] = []
+
+    class FakePushNotificationService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_alert(self, alert, **kwargs):
+            sent.append(alert)
+
+    import app.alert_dispatch as dispatch
+    rules = [{'name': 'Cat', 'push_enabled': True}]
+    triggered = [{'label': 'cat', 'rule_name': 'Cat', 'confidence': 0.9, 'message': 'Cat matched'}]
+    event = {'metadata': {}, 'snapshot_path': None, 'created_at': ''}
+    monkeypatch.setattr(dispatch, 'PushNotificationService', FakePushNotificationService)
+    monkeypatch.setattr(dispatch, 'effective_push_notification_settings', lambda: {'enabled': True})
+
+    caplog.set_level('INFO', logger='daygle.ai.alerts')
+    dispatch.deliver_push_notifications(triggered, 7, rules=rules, event=event)
+    messages = [record.getMessage() for record in caplog.records]
+    assert not any('Push notification sent' in message for message in messages), messages
+    assert any('server URL or topic is not configured' in message for message in messages), messages
+
+    caplog.clear()
+    monkeypatch.setattr(dispatch, 'effective_push_notification_settings', lambda: {
+        'enabled': True, 'server_url': 'https://ntfy.example', 'topic': 'shared',
+    })
+    dispatch.deliver_push_notifications(triggered, 8, rules=rules, event=event)
+    assert any('Push notification sent for event 8' in record.getMessage() for record in caplog.records)
+    assert len(sent) == 2

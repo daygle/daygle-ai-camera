@@ -374,6 +374,18 @@ def deliver_email_alerts(
     if not email_settings.get('enabled'):
         logger.debug('Email alerts disabled globally; skipping event %s', event_id)
         return
+    if not (email_settings.get('host') and email_settings.get('from_address')):
+        # ``EmailAlertService.send_alert`` returns without sending when the
+        # SMTP host or From address is missing, and nothing used to record
+        # why. A settings row restored from an older backup can be
+        # ``enabled`` without them, so every alert then vanished without a
+        # trace. The service still owns the decision; this only makes the
+        # drop visible.
+        logger.warning(
+            'Email alerts are enabled but the SMTP host or From address is not configured; '
+            'event %s is not being emailed',
+            event_id,
+        )
     if event is None:
         event = _state.database.get_event(event_id) or {}
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
@@ -547,6 +559,12 @@ def deliver_push_notifications(
     if not push_settings.get('enabled'):
         logger.debug('Push notifications disabled globally; skipping event %s', event_id)
         return
+    # ``send_alert`` returns early when the service is not configured
+    # (``enabled`` without the server URL or topic the settings validator
+    # requires -- a row restored from an older backup can carry that). The
+    # per-rule log below used to claim a push that never left the host, so
+    # report the outcome from this flag instead.
+    push_configured = bool(push_settings.get('server_url') and push_settings.get('topic'))
     if event is None:
         event = _state.database.get_event(event_id) or {}
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
@@ -647,7 +665,15 @@ def deliver_push_notifications(
                 detected_at=detected_at,
                 topics=topics,
             )
-            logger.info('Push notification sent for event %s rule %r', event_id, rule_name)
+            if push_configured:
+                logger.info('Push notification sent for event %s rule %r', event_id, rule_name)
+            else:
+                logger.warning(
+                    'Push notification not sent for event %s rule %r: push is enabled but '
+                    'the server URL or topic is not configured',
+                    event_id,
+                    rule_name,
+                )
         except PushNotificationError as exc:
             logger.error(
                 'Failed to send push notification for event %s rule %r: %s',
