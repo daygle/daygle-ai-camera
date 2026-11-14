@@ -400,7 +400,8 @@ def test_quantize_int8_passes_real_camera_frames_to_static_quantizer(tmp_path: P
     assert result == int8_cache_path(source)
     assert captured['sample'].shape == (1, 3, 64, 64)
     assert captured['sample'].dtype == np.float32
-    assert float(captured['sample'][0, 2].max()) > 0.9
+    # BGR red (index 2) reaches the model as RGB channel 0, as at inference.
+    assert float(captured['sample'][0, 0].max()) > 0.9
 
 
 def test_quantize_int8_refuses_graph_without_named_output_producer(tmp_path: Path, monkeypatch):
@@ -589,8 +590,11 @@ def test_calibration_reader_uses_real_frames_then_synthetic_fallback():
     assert reader.synthetic_frame_count == 2
     assert first.shape == (1, 3, 64, 64)
     assert first.dtype == np.float32
-    # BGR red channel lands in CHW channel 2 after preprocessing.
-    assert float(first[0, 2].max()) > 0.9
+    # Like detector inference, BGR input is fed to the model as RGB: the red
+    # channel (BGR index 2) lands in CHW channel 0, and blue stays at most
+    # the letterbox gray.
+    assert float(first[0, 0].max()) > 0.9
+    assert float(first[0, 2].max()) < 0.5
     assert second.shape == (1, 3, 64, 64)
     assert second.dtype == np.float32
 

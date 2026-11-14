@@ -1100,7 +1100,7 @@ def filter_motion_detections_by_objects(
         return motion_detections
     return [
         motion for motion in motion_detections
-        if not any(0 < (overlap := _overlap_ratio(motion.get('box'), object_box)) >= threshold for object_box in concrete_boxes)
+        if not any(0 < _overlap_ratio(motion.get('box'), object_box) >= threshold for object_box in concrete_boxes)
     ]
 
 
