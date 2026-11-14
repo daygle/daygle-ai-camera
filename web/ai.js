@@ -23,7 +23,6 @@ const AI_FORM_DEFAULTS = {
 };
 // Alert verification's focus_crop is no longer on this form; the PUT merges
 // onto the stored settings, so its saved value (default on) is kept.
-const AI_BOOLEAN_FIELDS = new Set();
 const AI_INTEGER_FIELDS = new Set(['timeout_seconds']);
 
 function aiMessage(text, isError = false) {
@@ -60,8 +59,7 @@ function aiPayload() {
     const field = aiForm.elements[key];
     if (!field) return;
     const raw = String(field.value ?? '');
-    if (AI_BOOLEAN_FIELDS.has(key)) data[key] = raw === 'true';
-    else if (raw === '' && key !== 'api_key') return;
+    if (raw === '' && key !== 'api_key') return;
     else if (AI_INTEGER_FIELDS.has(key)) data[key] = Number.parseInt(raw, 10);
     else data[key] = raw;
   });
@@ -111,14 +109,19 @@ function renderAiBackfill(status) {
   }
   if (aiBackfillBtn) aiBackfillBtn.disabled = Boolean(status.running);
   if (status.running && !aiBackfillTimer) {
-    aiBackfillTimer = setInterval(async () => {
+    // One poll at a time: a setInterval fired a new request every 3s even
+    // while the previous one was still waiting on a busy server, so slow
+    // responses stacked up and could render out of order. Each poll now
+    // schedules the next only after it has finished.
+    aiBackfillTimer = setTimeout(async () => {
+      let next = null;
       try {
-        const next = await api('/api/settings/ai-verification/describe-backfill');
-        if (!next.running) { clearInterval(aiBackfillTimer); aiBackfillTimer = null; }
-        renderAiBackfill(next);
+        next = await api('/api/settings/ai-verification/describe-backfill');
       } catch (_error) {
-        clearInterval(aiBackfillTimer); aiBackfillTimer = null;
+        // Stop polling; the status line keeps its last known progress.
       }
+      aiBackfillTimer = null;
+      if (next) renderAiBackfill(next);
     }, 3000);
   }
 }

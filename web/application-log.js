@@ -194,6 +194,9 @@ function prependEntry(entry) {
   }
 }
 
+// Newest-request-wins guard for loadEntries (see audit.js).
+let loadEntriesSeq = 0;
+
 async function loadEntries() {
   const level = document.getElementById('filterLevel').value;
   const dateFrom = document.getElementById('filterDateFrom').value;
@@ -208,8 +211,12 @@ async function loadEntries() {
   if (dateTo) params.set('date_to', dateTo);
   // Resolve the date filter against the viewer's local day (matches /timeline).
   if (dateFrom || dateTo) params.set('tz_offset_minutes', String(new Date().getTimezoneOffset()));
+  loadEntriesSeq += 1;
+  const seq = loadEntriesSeq;
   try {
     const data = await api(`/api/application-log?${params}`);
+    // A newer filter request superseded this one; let it render instead.
+    if (seq !== loadEntriesSeq) return;
     applicationLogBody.innerHTML = '';
     if (data.unavailable) {
       liveStatus.textContent = 'journalctl unavailable';
@@ -230,7 +237,7 @@ async function loadEntries() {
     updateCount();
     if (autoScrollCheck.checked) scrollToNewest();
   } catch (err) {
-    if (window.daygleAuth?.redirecting) return;
+    if (seq !== loadEntriesSeq || window.daygleAuth?.redirecting) return;
     window.showToast?.(err.message, true);
   }
 }

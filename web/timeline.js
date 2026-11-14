@@ -605,7 +605,7 @@ function colorForRecording(recording) {
 
 function timelineParams(overrides = {}) {
   const cameraId = overrides.cameraId || els.cameraSelect.value || '';
-  const day = overrides.day || els.timelineDate.value || new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const day = overrides.day || els.timelineDate.value || libraryLocalDateString(new Date());
   return { cameraId, day };
 }
 
@@ -631,7 +631,7 @@ function replaceUrl(recordingId = state.activeRecordingId) {
 
 function populateControls(payload) {
   const selectedCameraId = payload.camera?.id || '';
-  const selectedDay = payload.day || new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const selectedDay = payload.day || libraryLocalDateString(new Date());
   els.cameraSelect.innerHTML = payload.cameras.map((camera) => (
     `<option value="${escapeHtml(camera.id)}" ${camera.id === selectedCameraId ? 'selected' : ''}>${escapeHtml(camera.name)}</option>`
   )).join('');
@@ -1274,8 +1274,7 @@ els.timelineLoadBtn.addEventListener('click', () => {
 // lands on a value the picker can represent (14:25).
 els.timelineNowBtn?.addEventListener('click', () => {
   const now = new Date();
-  const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-  els.timelineDate.value = today;
+  els.timelineDate.value = libraryLocalDateString(now);
   setTimeSelectValue(els.fromTime, '00:00');
   const hh = String(now.getHours()).padStart(2, '0');
   const mm = String(now.getMinutes()).padStart(2, '0');
@@ -1441,7 +1440,7 @@ loadAuth().then(async () => {
   const queryCameraId = params.get('camera_id');
   const queryFromTime = params.get('from_time');
   const queryToTime = params.get('to_time');
-  els.timelineDate.value = queryDay || new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  els.timelineDate.value = queryDay || libraryLocalDateString(new Date());
   if (queryCameraId) els.cameraSelect.innerHTML = `<option value="${escapeHtml(queryCameraId)}" selected>${escapeHtml(queryCameraId)}</option>`;
   if (queryFromTime) setTimeSelectValue(els.fromTime, queryFromTime);
   if (queryToTime) setTimeSelectValue(els.toTime, queryToTime);

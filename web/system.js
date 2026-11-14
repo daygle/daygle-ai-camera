@@ -265,6 +265,8 @@ async function loadSystemResources() {
   await window.daygleAuthReady;
   await Promise.all([loadSystemResources(), loadSystemStorage()]);
   if (els.gpuNote) els.gpuNote.hidden = !(els.gpuCard?.hidden);
-  startPageInterval(() => { loadSystemResources().catch(() => {}); }, 5000);
-  startPageInterval(() => { loadSystemStorage().catch(() => {}); }, 60000);
+  // Pass the loaders themselves: startPageInterval only skips a tick while the
+  // previous one is in flight when the callback RETURNS its promise.
+  startPageInterval(loadSystemResources, 5000);
+  startPageInterval(loadSystemStorage, 60000);
 })();

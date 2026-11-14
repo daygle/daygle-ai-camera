@@ -1036,4 +1036,4 @@ refreshCloudflareTunnelSafely();
 // startPageInterval (web/utils.js) already skips the tick while the tab is
 // hidden and refreshes the tunnel status on refocus, so the manual
 // document.hidden check this used to carry is no longer needed.
-startPageInterval(() => { refreshCloudflareTunnelSafely(); }, 15000);
+startPageInterval(refreshCloudflareTunnelSafely, 15000);

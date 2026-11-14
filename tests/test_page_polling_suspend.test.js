@@ -108,6 +108,24 @@ test('a rejected poll promise does not surface as an unhandled rejection', () =>
   assert.doesNotThrow(() => timers[0].fn());
 });
 
+test('a poll still in flight suppresses the next tick when its promise is returned', async () => {
+  const { sandbox, timers } = loadUtils();
+  let calls = 0;
+  let release;
+  sandbox.startPageInterval(() => {
+    calls += 1;
+    return new Promise((resolve) => { release = resolve; });
+  }, 5000);
+
+  timers[0].fn();
+  timers[0].fn();
+  assert.equal(calls, 1, 'a slow poll must not stack a second request');
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  timers[0].fn();
+  assert.equal(calls, 2);
+});
+
 test('a bad poller registration is ignored instead of throwing', () => {
   const { sandbox, timers } = loadUtils();
   assert.equal(sandbox.startPageInterval(null, 1000), null);
@@ -119,15 +137,18 @@ test('a bad poller registration is ignored instead of throwing', () => {
 test('the System page suspends system resource polling', () => {
   const source = readWeb('system.js');
   assert.doesNotMatch(source, /^setInterval\(/m, 'no raw setInterval on the System page');
-  assert.ok(/startPageInterval\([\s\S]{0,120}?loadSystemResources\(\)/.test(source),
-    'loadSystemResources() should run through startPageInterval');
+  // The loader itself is registered (not a block-bodied wrapper that drops
+  // its promise), so the helper's one-in-flight guard applies.
+  assert.ok(source.includes('startPageInterval(loadSystemResources, 5000);'),
+    'loadSystemResources should run through startPageInterval');
+  assert.doesNotMatch(source, /startPageInterval\(\(\) => \{/, 'poller wrappers must return their promise');
 });
 
 test('the camera list suspends health and resolution polling', () => {
   const source = readWeb('cameras.js');
   assert.doesNotMatch(source, /^setInterval\(/m, 'no raw setInterval on the camera list');
   assert.ok(source.includes('startPageInterval(updateHealthStats, 10000);'));
-  assert.ok(source.includes('startPageInterval(function() { fetchCameraResolutions()'));
+  assert.ok(source.includes('startPageInterval(fetchCameraResolutions, 10000);'));
 });
 
 test('the alerts page suspends policy status polling', () => {
@@ -138,7 +159,7 @@ test('the alerts page suspends policy status polling', () => {
 
 test('the settings page delegates its tunnel-status hidden check to the helper', () => {
   const source = readWeb('settings.js');
-  assert.ok(source.includes('startPageInterval(() => { refreshCloudflareTunnelSafely(); }, 15000);'));
+  assert.ok(source.includes('startPageInterval(refreshCloudflareTunnelSafely, 15000);'));
   // The helper owns the document.hidden check now; a leftover inline one would
   // mean the interval ran (and bailed) instead of being suspended.
   assert.doesNotMatch(source, /setInterval\(\(\) => \{\s*if \(!document\.hidden\)/);

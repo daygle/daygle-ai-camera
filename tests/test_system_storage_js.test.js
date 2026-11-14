@@ -88,5 +88,5 @@ test('the page has a Storage card and polls storage once a minute', () => {
   assert.match(html, /<section class="card" id="storageCard">/);
   assert.match(html, /id="storageVolumes"/);
   assert.match(js, /api\('\/api\/system\/storage'\)/);
-  assert.match(js, /startPageInterval\(\(\) => \{ loadSystemStorage\(\)\.catch\(\(\) => \{\}\); \}, 60000\);/);
+  assert.match(js, /startPageInterval\(loadSystemStorage, 60000\);/);
 });

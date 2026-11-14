@@ -1131,5 +1131,5 @@ loadCameras().catch(function(err) {
 // refresh on refocus, so a background camera list stops hammering /api/cameras
 // (startPageInterval, web/utils.js).
 startPageInterval(updateHealthStats, 10000);
-startPageInterval(function() { fetchCameraResolutions().catch(function() {}); }, 10000);
+startPageInterval(fetchCameraResolutions, 10000);
 updateHealthStats();

@@ -636,8 +636,9 @@ window.daygleAuthReady = (async () => {
   }
 
   /* ── Session countdown ticker ───────────────────────────────────────
-   * Polls /api/auth/session-remaining every 15 s and updates the
-   * countdown element in the account dropdown. Falls back to the
+   * Ticks the countdown element in the account dropdown every 15 s from
+   * the cached expiresAt, and re-syncs it from /api/auth/session-remaining
+   * on start and every sixth tick (~90 s). Falls back to the
    * client-side expiresAt when the fetch fails (e.g. on a transitory
    * network blip). The threshold classes give the user early warning.
    *

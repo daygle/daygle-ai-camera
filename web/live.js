@@ -269,11 +269,18 @@ async function refreshFrame() {
   if (liveEls.frame.dataset.loading === 'true') return;
   liveEls.frame.dataset.loading = 'true';
   const requestedCamera = selectedCamera;
+  // A request that never completes (half-open connection, stalled proxy) left
+  // ``loading`` set forever, so every later tick bailed above and the picture
+  // froze until a reload. Give up after the same stall window the grid tiles
+  // use; the next tick then starts a fresh request.
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const stallTimer = controller ? setTimeout(() => controller.abort(), GRID_FRAME_STALL_MS) : null;
   try {
     const response = await fetch(snapshotUrl(), {
       cache: 'no-store',
       credentials: 'same-origin',
       headers: { Accept: 'image/jpeg' },
+      signal: controller?.signal,
     });
     if (!response.ok) throw new Error(`Snapshot request failed (${response.status})`);
     const frameTimestamp = Number(response.headers.get('X-Frame-Timestamp'));
@@ -294,8 +301,12 @@ async function refreshFrame() {
   } catch (error) {
     liveEls.frame.dataset.loading = 'false';
     if (!window.daygleAuth?.redirecting) {
-      liveEls.status.textContent = error.message;
+      liveEls.status.textContent = error?.name === 'AbortError'
+        ? 'Live footage is taking too long to load. Retrying...'
+        : error.message;
     }
+  } finally {
+    if (stallTimer !== null) clearTimeout(stallTimer);
   }
 }
 

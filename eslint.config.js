@@ -144,6 +144,9 @@ const WEB_SHARED_GLOBALS = {
   // and Snapshots pages (loaded after utils.js, before the page script).
   createLibraryFilters: 'readonly',
   libraryDefaultQuery: 'readonly',
+  // Also used by timeline.js (which loads library_filters.js) for today's
+  // local YYYY-MM-DD.
+  libraryLocalDateString: 'readonly',
 
   // web/detection_log.js - the recording detection log (kept + dropped
   // detections per check) and its dropped-box overlay, used by recordings.js.
