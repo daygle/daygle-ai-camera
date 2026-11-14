@@ -62,7 +62,9 @@ def test_pruning_and_explicit_invalidation_drop_timeline_cache(tmp_path):
     service = _service(tmp_path)
     camera_dir = service.prebuffer_dir / 'cam'
     camera_dir.mkdir(parents=True)
-    old_segment = _write_segment(camera_dir, 'segment-old.mp4', time.time() - 60)
+    old_segment = _write_segment(
+        camera_dir, 'segment-old.mp4', time.time() - 60 - service.PREBUFFER_RENDER_HEADROOM_SECONDS
+    )
     assert service._segment_timeline(camera_dir, service.PREBUFFER_SEGMENT_GLOB, 4.0)
 
     service._prune_prebuffer_segments(camera_dir, 5)

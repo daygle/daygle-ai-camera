@@ -66,6 +66,14 @@ class RecordingService:
     # while keeping event timing reasonably granular.
     PREBUFFER_SEGMENT_SECONDS = 4
     PREBUFFER_SEGMENT_GLOB = 'segment-*.mp4'
+    # Extra video retention beyond the prebuffer window. The window (``pre +
+    # max_clip + 5``) ends at the clip's last frame, but the clip is rendered
+    # only once its post-event capture has finished; with just the 5s margin a
+    # long clip's oldest segment sat right at the retention edge and a few
+    # seconds of scheduling or disk delay let the pruner delete it before
+    # ffmpeg opened it, failing the whole render. ~15 extra 4s segments per
+    # camera is a small price. Mirrors AUDIO_MUX_FINALIZATION_HEADROOM_SECONDS.
+    PREBUFFER_RENDER_HEADROOM_SECONDS = 60
     # How long a segment timeline stays memoised. One event render asks for the
     # same directory more than once within milliseconds (the pre-roll check,
     # then the full window), each time globbing and stat'ing every segment on
@@ -1088,113 +1096,50 @@ class RecordingService:
 
         if content_start_ts is None:
             content_start_ts = start_ts
-        # Surface a partial pre-roll. A total buffer miss already emits a
-        # ``prebuffer_fallback`` above, but a buffer that holds SOME footage just
-        # not reaching all the way back to the requested start renders fine and
-        # was previously silent - producing a mysteriously short clip (e.g. 5s of
-        # pre-roll instead of 10s). Flag it so operators can tell a short clip
-        # apart from a real problem. Only fires when the shortfall exceeds the
-        # jitter tolerance; keyframe lead-in (content_start_ts <= start_ts) never
-        # trips it.
-        preroll_shortfall = content_start_ts - start_ts
-        if preroll_shortfall > self.PREBUFFER_SHORT_PREROLL_TOLERANCE_SECONDS:
-            actual_pre_seconds = max(0.0, triggered_at.timestamp() - content_start_ts)
-            self._emit_diagnostic(
-                camera_id,
-                'prebuffer_short_preroll',
-                f'Only ~{actual_pre_seconds:.0f}s of the requested {pre_seconds}s pre-event buffer was '
-                f'available, so this clip is about {preroll_shortfall:.0f}s shorter at the start. The '
-                'rolling buffer had not filled yet - this is normal right after saving recording settings, '
-                'a camera reconnect, or the camera first coming online, and recovers once the buffer refills.',
-                severity='warning',
-                details={
-                    'reason': 'buffer_not_full',
-                    'requested_pre_seconds': pre_seconds,
-                    'actual_pre_seconds': round(actual_pre_seconds, 1),
-                    'shortfall_seconds': round(preroll_shortfall, 1),
-                    'segment_count': len(segments),
-                },
-            )
-        # Render exactly the footage between where the first selected segment
-        # starts and the capture deadline. The keyframe-aligned lead before
-        # start_ts is kept (and reported via content_start_ts) rather than
-        # silently eating the same amount off the end of the clip. The cap is
-        # one maximum-believable prebuffer segment, not a fixed 10s: segments
-        # close on a keyframe, so a camera with a sparse keyframe interval leads
-        # the window by a whole segment, and a 10s allowance then cut the
-        # remainder off the post-event tail - the exact footage loss this window
-        # is meant to avoid.
-        content_seconds = max(
-            1.0,
-            min(end_ts - content_start_ts, max_duration_seconds + self.PREBUFFER_SEGMENT_MAX_PROBED_SECONDS),
-        )
-
         list_path = file_path.with_name(f'{file_path.stem}.concat.txt')
         tmp_path = file_path.with_name(f'{file_path.stem}.prebuffer.tmp{file_path.suffix}')
-        # No per-file ``duration`` directives: ffmpeg reads each segment's real
-        # timestamps. Declared durations were estimated from mtimes, and one
-        # shorter than the real segment makes concat start the next file early,
-        # squeezing every frame into a compressed timeline that -t then cuts
-        # short (a 6s-keyframe camera lost ~2s per segment that way).
-        list_content = ''.join(self._concat_file_line(segment) for segment in segments)
-        list_path.write_text(list_content, encoding='utf-8')
-        if tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
-        command = [
-            ffmpeg,
-            '-y',
-            '-threads', '1',
-            '-filter_threads', '1',
-            # Do NOT use +discardcorrupt / -err_detect ignore_err on this concat.
-            # Those are for the flaky *live* RTSP feed; on the rolling buffer's own
-            # segments they treat any captured packet corruption as a reason to
-            # drop frames, and once a stream carries some corruption (e.g. a flaky
-            # link) they discard EVERY video packet, yielding a valid-but-videoless
-            # clip (audio only). Verified: corrupted segments rendered 0 video
-            # frames with these flags vs. recovering frames without them. Keep
-            # corrupt frames and just repair timestamps so the video decodes.
-            '-fflags',
-            '+genpts',
-            '-f',
-            'concat',
-            '-safe',
-            '0',
-            '-i',
-            str(list_path),
-            '-map',
-            '0:v:0',
-            '-an',
-            # The rolling prebuffer segments are already browser-oriented H.264
-            # video. Remux it instead of decoding/re-encoding: it is much
-            # cheaper on small boards and preserves recoverable video packets
-            # from imperfect RTSP segments.
-            '-c',
-            'copy',
-            # H.265 copied into MP4 needs the hvc1 tag to play on Apple devices.
-            *hevc_mp4_tag_args(segments[0] if segments else None),
-            '-avoid_negative_ts',
-            'make_zero',
-            '-movflags',
-            '+faststart',
-            '-t',
-            f'{content_seconds:.3f}',
-            str(tmp_path),
-        ]
-        try:
-            # Remuxing should be far faster than realtime, but keep a generous
-            # ceiling for slow disks and large max_clip_seconds settings.
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=max(60, int(content_seconds) + 30),
-                check=False,
+        # The ingest worker keeps pruning the rolling buffer while this clip is
+        # captured. A long clip (large max_clip_seconds) is only rendered once
+        # its post-event window ends, by which time its oldest segments sit at
+        # the edge of retention, and a segment deleted between selection and
+        # ffmpeg opening it failed the WHOLE concat ("Impossible to open
+        # segment-..."). Falling back to live capture at that point records
+        # minutes after the event, so instead re-collect whatever segments
+        # still exist and render those once more.
+        pruned_segment_count = 0
+        for attempt in range(2):
+            # Render exactly the footage between where the first selected segment
+            # starts and the capture deadline. The keyframe-aligned lead before
+            # start_ts is kept (and reported via content_start_ts) rather than
+            # silently eating the same amount off the end of the clip. The cap is
+            # one maximum-believable prebuffer segment, not a fixed 10s: segments
+            # close on a keyframe, so a camera with a sparse keyframe interval leads
+            # the window by a whole segment, and a 10s allowance then cut the
+            # remainder off the post-event tail - the exact footage loss this window
+            # is meant to avoid.
+            content_seconds = max(
+                1.0,
+                min(end_ts - content_start_ts, max_duration_seconds + self.PREBUFFER_SEGMENT_MAX_PROBED_SECONDS),
             )
-        except subprocess.TimeoutExpired:
-            result = None
-        finally:
-            list_path.unlink(missing_ok=True)
-        output_has_video = tmp_path.exists() and tmp_path.stat().st_size > 0 and self.clip_has_video_stream(tmp_path)
+            result = self._run_prebuffer_concat(ffmpeg, segments, list_path, tmp_path, content_seconds)
+            output_has_video = tmp_path.exists() and tmp_path.stat().st_size > 0 and self.clip_has_video_stream(tmp_path)
+            if attempt > 0 or result is None or output_has_video:
+                break
+            missing = [segment for segment in segments if not segment.exists()]
+            if not missing:
+                break
+            retry_segments, retry_start_ts = self._collect_prebuffer_segments(camera_key, start_ts, end_ts)
+            retry_segments = [segment for segment in retry_segments if segment.exists()]
+            if not retry_segments:
+                break
+            logger.warning(
+                'Prebuffer render for %s lost %d segment(s) to buffer pruning; retrying with the %d remaining.',
+                camera_key, len(missing), len(retry_segments),
+            )
+            pruned_segment_count = len(missing)
+            tmp_path.unlink(missing_ok=True)
+            segments = retry_segments
+            content_start_ts = retry_start_ts if retry_start_ts is not None else start_ts
         if result is not None and result.returncode != 0 and output_has_video:
             logger.warning('ffmpeg exited non-zero for prebuffer render of %s but partial footage is usable; keeping it.', camera_key)
 
@@ -1222,11 +1167,50 @@ class RecordingService:
                     'requested_seconds': round(content_seconds, 1),
                     'window_start': datetime.fromtimestamp(start_ts, tz=UTC).isoformat(),
                     'window_end': datetime.fromtimestamp(end_ts, tz=UTC).isoformat(),
-                    'content_start': datetime.fromtimestamp(content_start_ts, tz=UTC).isoformat(),                            'stderr_tail': stderr_tail,
+                    'content_start': datetime.fromtimestamp(content_start_ts, tz=UTC).isoformat(),
+                    'stderr_tail': stderr_tail,
                 },
             )
             return self._live_capture(stream_url, file_path, max_duration_seconds)
 
+        # Surface a partial pre-roll. A total buffer miss already emits a
+        # ``prebuffer_fallback`` above, but a buffer that holds SOME footage just
+        # not reaching all the way back to the requested start renders fine and
+        # was previously silent - producing a mysteriously short clip (e.g. 5s of
+        # pre-roll instead of 10s). Flag it so operators can tell a short clip
+        # apart from a real problem. Only fires when the shortfall exceeds the
+        # jitter tolerance; keyframe lead-in (content_start_ts <= start_ts) never
+        # trips it.
+        preroll_shortfall = content_start_ts - start_ts
+        if preroll_shortfall > self.PREBUFFER_SHORT_PREROLL_TOLERANCE_SECONDS:
+            actual_pre_seconds = max(0.0, triggered_at.timestamp() - content_start_ts)
+            if pruned_segment_count:
+                cause = (
+                    'The oldest buffered footage was pruned before the clip could be rendered - this can '
+                    'happen on long clips when the device is slow to finish the render.'
+                )
+                reason = 'segments_pruned'
+            else:
+                cause = (
+                    'The rolling buffer had not filled yet - this is normal right after saving recording '
+                    'settings, a camera reconnect, or the camera first coming online, and recovers once the '
+                    'buffer refills.'
+                )
+                reason = 'buffer_not_full'
+            self._emit_diagnostic(
+                camera_id,
+                'prebuffer_short_preroll',
+                f'Only ~{actual_pre_seconds:.0f}s of the requested {pre_seconds}s pre-event buffer was '
+                f'available, so this clip is about {preroll_shortfall:.0f}s shorter at the start. {cause}',
+                severity='warning',
+                details={
+                    'reason': reason,
+                    'requested_pre_seconds': pre_seconds,
+                    'actual_pre_seconds': round(actual_pre_seconds, 1),
+                    'shortfall_seconds': round(preroll_shortfall, 1),
+                    'segment_count': len(segments),
+                },
+            )
         # The render can pass the existence/decodability checks above yet still
         # contain far less video than the requested window (e.g. only a single
         # surviving keyframe when the stream's keyframes are sparse or corrupt).
@@ -1287,6 +1271,79 @@ class RecordingService:
 
     def _audio_disabled_marker(self, camera_key: str) -> Path:
         return self.audio_dir / camera_key / self.NO_AUDIO_MARKER_FILENAME
+
+    def _run_prebuffer_concat(
+        self,
+        ffmpeg: str,
+        segments: list[Path],
+        list_path: Path,
+        tmp_path: Path,
+        content_seconds: float,
+    ) -> subprocess.CompletedProcess[str] | None:
+        """Remux ``segments`` into ``tmp_path``; ``None`` means ffmpeg timed out."""
+        # No per-file ``duration`` directives: ffmpeg reads each segment's real
+        # timestamps. Declared durations were estimated from mtimes, and one
+        # shorter than the real segment makes concat start the next file early,
+        # squeezing every frame into a compressed timeline that -t then cuts
+        # short (a 6s-keyframe camera lost ~2s per segment that way).
+        list_content = ''.join(self._concat_file_line(segment) for segment in segments)
+        list_path.write_text(list_content, encoding='utf-8')
+        tmp_path.unlink(missing_ok=True)
+        command = [
+            ffmpeg,
+            '-y',
+            '-threads', '1',
+            '-filter_threads', '1',
+            # Do NOT use +discardcorrupt / -err_detect ignore_err on this concat.
+            # Those are for the flaky *live* RTSP feed; on the rolling buffer's own
+            # segments they treat any captured packet corruption as a reason to
+            # drop frames, and once a stream carries some corruption (e.g. a flaky
+            # link) they discard EVERY video packet, yielding a valid-but-videoless
+            # clip (audio only). Verified: corrupted segments rendered 0 video
+            # frames with these flags vs. recovering frames without them. Keep
+            # corrupt frames and just repair timestamps so the video decodes.
+            '-fflags',
+            '+genpts',
+            '-f',
+            'concat',
+            '-safe',
+            '0',
+            '-i',
+            str(list_path),
+            '-map',
+            '0:v:0',
+            '-an',
+            # The rolling prebuffer segments are already browser-oriented H.264
+            # video. Remux it instead of decoding/re-encoding: it is much
+            # cheaper on small boards and preserves recoverable video packets
+            # from imperfect RTSP segments.
+            '-c',
+            'copy',
+            # H.265 copied into MP4 needs the hvc1 tag to play on Apple devices.
+            *hevc_mp4_tag_args(segments[0] if segments else None),
+            '-avoid_negative_ts',
+            'make_zero',
+            '-movflags',
+            '+faststart',
+            '-t',
+            f'{content_seconds:.3f}',
+            str(tmp_path),
+        ]
+        try:
+            # Remuxing should be far faster than realtime, but keep a generous
+            # ceiling for slow disks and large max_clip_seconds settings.
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=max(60, int(content_seconds) + 30),
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        finally:
+            list_path.unlink(missing_ok=True)
+        return result
 
     @staticmethod
     def _concat_file_line(file_path: Path, duration_seconds: float | None = None) -> str:
@@ -1918,7 +1975,10 @@ class RecordingService:
         return [item[0] for item in selected], selected[0][1]
 
     def _prune_prebuffer_segments(self, camera_dir: Path, keep_seconds: int) -> None:
-        cutoff = time.time() - max(keep_seconds, 5)
+        # ``keep_seconds`` is exactly the longest clip window (pre + max_clip +
+        # 5), but a clip is rendered only AFTER that window closes, so retain
+        # extra headroom or the render loses its oldest segments to this pruner.
+        cutoff = time.time() - max(keep_seconds, 5) - self.PREBUFFER_RENDER_HEADROOM_SECONDS
         removed = False
         for segment in list(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB)) + list(camera_dir.glob('segment-*.ts')):
             try:
