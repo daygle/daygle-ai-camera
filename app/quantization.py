@@ -594,7 +594,7 @@ class _SyntheticCalibrationReader:
         self._rng = None
 
     def _real_frame(self, image: Any) -> Any:
-        """Apply the detector's BGR uint8 -> letterboxed NCHW preprocessing."""
+        """Apply the detector's BGR uint8 -> letterboxed RGB NCHW preprocessing."""
         import cv2
         import numpy as np  # type: ignore[import-untyped]
         batch, channels, height, width = self._shape
@@ -620,6 +620,10 @@ class _SyntheticCalibrationReader:
         left = int(round(pad_x - 0.1))
         top = int(round(pad_y - 0.1))
         canvas[top : top + resized_height, left : left + resized_width] = resized
+        if channels == 3:
+            # Match OnnxYoloDetector._preprocess: OpenCV frames are BGR, but
+            # Ultralytics YOLO exports expect RGB.
+            canvas = canvas[:, :, ::-1]
         tensor = np.transpose(canvas, (2, 0, 1)).astype(np.float32) / 255.0
         return np.broadcast_to(tensor[None, ...], (batch, channels, height, width)).copy()
 
