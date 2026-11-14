@@ -12,7 +12,8 @@
 #     APP_DIR resolution (dirname of the script) finds the committed
 #     requirements.cpu.lock.txt and installs it with --require-hashes. The
 #     lock is compiled for --python-version 3.11 on linux, so the base image
-#     is pinned to 3.11-slim to keep every wheel hash valid.
+#     is pinned to a specific 3.11 patch to keep every wheel hash valid. Bump
+#     the patch here and re-compile the lock in the same change.
 #   * The variant is selected explicitly via the ORT_VARIANT build arg (never
 #     "auto") so the build host's GPU cannot flip the outcome. GPU builds
 #     additionally install the pinned CUDA 12.4 / cuDNN 9.x userspace wheels
@@ -25,7 +26,7 @@
 # built-in defaults are relative to the app directory, which is read-only
 # inside the container.
 
-FROM python:3.11-slim
+FROM python:3.11.18-slim
 
 ARG ORT_VARIANT=cpu
 # Fail the build on an unknown variant rather than silently falling back.
