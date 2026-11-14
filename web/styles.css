@@ -5407,12 +5407,6 @@ button.activity-item-action.activity-item-action-delete:hover {
   color: var(--success);
   border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
 }
-.model-active-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--success);
-  margin-right: 8px;
-}
 .model-status-installed {
   background: rgba(255,255,255,.06);
   color: var(--muted);
@@ -6275,19 +6269,6 @@ button.secondary:disabled, a.secondary:disabled {
   margin-top: 10px;
 }
 .form-stack.group-form .button-row button { min-width: 0; }
-.group-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 14px;
-  margin-bottom: 8px;
-}
-.group-row-main { min-width: 0; }
-.group-name { font-weight: 800; color: var(--text); }
-.group-members { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .group-row-actions { display: flex; gap: 8px; flex-shrink: 0; }
 /* ─── Multi-select (Object Groups member picker) ───────────────────────── */
 .multi-select { position: relative; user-select: none; }
@@ -7466,7 +7447,6 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
 .pixel-threshold-picker { display: flex; gap: 8px; }
 .pixel-threshold-picker > * { flex: 1 1 0; min-width: 0; }
 .pixel-threshold-picker > [hidden] { display: none; }
-.legacy-motion-clear { margin-left: 6px; padding: 4px 10px; font-size: 12px; }
 .alerts-motion-trigger-note { grid-column: 1 / -1; margin: 0; }
 
 /* People card: note + bulk remove for faces auto-enrichment learned. */

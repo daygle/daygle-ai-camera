@@ -154,17 +154,20 @@ async function saveEditedUser(event) {
   }
 }
 
-async function resetPassword(id) {
-  const password = window.prompt('Enter the new password:');
-  if (!password) return;
-  try {
-    await api(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify({ password }) });
-    setMessage('Password reset.');
-    await loadUsers();
-  } catch (error) {
-    if (window.daygleAuth?.redirecting) return;
-    setMessage(error.message, true);
-  }
+// Reset opens the user's edit form on its New Password field. It used to ask
+// through window.prompt(), which shows the password in plain text on screen
+// and offers no password-manager integration; the form's field is masked
+// (type="password", autocomplete="new-password") and saves through the same
+// PATCH as any other edit.
+function resetPassword(id) {
+  const row = Array.from(usersEl.querySelectorAll('tr.user-row')).find((entry) => entry.dataset.userId === String(id));
+  if (!row) return;
+  // openEditUser() toggles: only open when this user's form is not already open.
+  if (!row.nextElementSibling?.classList.contains('user-edit-row')) openEditUser(id);
+  const field = row.nextElementSibling?.querySelector('.user-edit-form [name="password"]');
+  if (!field) return;
+  field.focus();
+  field.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
 }
 
 async function toggleUser(id) {

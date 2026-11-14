@@ -52,14 +52,24 @@ async function loadAuth() {
   await window.daygleAuthReady;
 }
 
+// Newest-request-wins: a slow response to an earlier page/filter request
+// must not overwrite the table after a newer one has rendered.
+let loadEntriesSeq = 0;
+
 async function loadEntries(offset = 0) {
-  currentOffset = offset;
+  loadEntriesSeq += 1;
+  const seq = loadEntriesSeq;
   try {
     const data = await api(`/api/audit?${buildQuery(offset)}`);
+    if (seq !== loadEntriesSeq) return;
+    // Only move the page once it has loaded, so a failed request leaves the
+    // pager pointing at the rows still on screen.
+    currentOffset = offset;
     currentTotal = data.total || 0;
     renderEntries(data.entries || []);
     renderPagination();
   } catch (err) {
+    if (seq !== loadEntriesSeq) return;
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
     window.showToast?.(err.message, true);
