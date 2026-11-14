@@ -194,6 +194,9 @@ async def detect_frame(request: Request, detector=Depends(get_detector)):
     min_confidence = compute_minimum_rule_confidence()
 
     def _run_detection() -> list:
+        if getattr(detector, 'available', True):
+            from app.media_utils import validate_uploaded_image_dimensions
+            validate_uploaded_image_dimensions(image_bytes)
         return detector.detect_image(image_bytes, confidence=min_confidence)
 
     try:

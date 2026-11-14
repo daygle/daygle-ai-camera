@@ -66,8 +66,8 @@ def _motion_region_boxes(
     for _area, nx, ny, nw, nh in scored[:max_regions]:
         px = max(0.0, nx - pad_frac * nw)
         py = max(0.0, ny - pad_frac * nh)
-        pw = min(1.0 - px, nw * (1.0 + 2.0 * pad_frac))
-        ph = min(1.0 - py, nh * (1.0 + 2.0 * pad_frac))
+        pw = min(1.0, nx + nw * (1.0 + pad_frac)) - px
+        ph = min(1.0, ny + nh * (1.0 + pad_frac)) - py
         if pw > 0 and ph > 0:
             boxes.append((px, py, pw, ph))
     return boxes
@@ -171,6 +171,9 @@ def detect_with_region_boost(
         if x2 - x1 < 8 or y2 - y1 < 8:
             continue  # crop too small to help
         crop = frame[y1:y2, x1:x2]
+        # Use the actual integer crop bounds when mapping detections back.
+        rx, ry = x1 / frame_w, y1 / frame_h
+        rw, rh = (x2 - x1) / frame_w, (y2 - y1) / frame_h
         try:
             crop_detections = detector.detect_frame(crop, confidence=confidence)
         except Exception:
@@ -203,10 +206,10 @@ def detect_with_region_boost(
             values = (local_x, local_y, local_width, local_height)
             if not all(math.isfinite(value) for value in values) or local_width <= 0 or local_height <= 0:
                 continue
-            local_x = max(0.0, min(1.0, local_x))
-            local_y = max(0.0, min(1.0, local_y))
-            local_x2 = max(local_x, min(1.0, local_x + local_width))
-            local_y2 = max(local_y, min(1.0, local_y + local_height))
+            local_x2 = min(1.0, local_x + local_width)
+            local_y2 = min(1.0, local_y + local_height)
+            local_x = max(0.0, local_x)
+            local_y = max(0.0, local_y)
             if local_x2 <= local_x or local_y2 <= local_y:
                 continue
             merged.append({
@@ -280,8 +283,8 @@ def _tile_boxes(cols: int, rows: int, overlap: float) -> list[tuple[float, float
         for col in range(cols):
             x = max(0.0, col * tile_w - over_x)
             y = max(0.0, row * tile_h - over_y)
-            w = min(1.0 - x, tile_w + 2.0 * over_x)
-            h = min(1.0 - y, tile_h + 2.0 * over_y)
+            w = min(1.0, (col + 1) * tile_w + over_x) - x
+            h = min(1.0, (row + 1) * tile_h + over_y) - y
             boxes.append((x, y, w, h))
     return boxes
 
@@ -321,6 +324,8 @@ def detect_with_tiling(
         if x2 - x1 < 8 or y2 - y1 < 8:
             continue
         crop = frame[y1:y2, x1:x2]
+        tx, ty = x1 / frame_w, y1 / frame_h
+        tw, th = (x2 - x1) / frame_w, (y2 - y1) / frame_h
         try:
             tile_detections = detector.detect_frame(crop, confidence=confidence)
         except Exception:
@@ -353,10 +358,10 @@ def detect_with_tiling(
             values = (local_x, local_y, local_width, local_height)
             if not all(math.isfinite(value) for value in values) or local_width <= 0 or local_height <= 0:
                 continue
-            local_x = max(0.0, min(1.0, local_x))
-            local_y = max(0.0, min(1.0, local_y))
-            local_x2 = max(local_x, min(1.0, local_x + local_width))
-            local_y2 = max(local_y, min(1.0, local_y + local_height))
+            local_x2 = min(1.0, local_x + local_width)
+            local_y2 = min(1.0, local_y + local_height)
+            local_x = max(0.0, local_x)
+            local_y = max(0.0, local_y)
             if local_x2 <= local_x or local_y2 <= local_y:
                 continue
             width = (local_x2 - local_x) * tw

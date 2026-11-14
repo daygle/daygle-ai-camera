@@ -311,6 +311,20 @@ class LiveInferenceScheduler:
         return True
 
     def _worker_loop(self) -> None:
+        try:
+            self._worker_loop_body()
+        finally:
+            with self._condition:
+                current = threading.current_thread()
+                if current in self._threads:
+                    self._threads.remove(current)
+                # A restart may have observed this worker as alive just as it
+                # was exiting. Replace it so queued work cannot be stranded.
+                if self._started and not self._stopping.is_set():
+                    self._ensure_threads_locked()
+                    self._condition.notify_all()
+
+    def _worker_loop_body(self) -> None:
         while True:
             with self._condition:
                 if self._stopping.is_set() or not self._started:

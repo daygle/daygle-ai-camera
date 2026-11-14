@@ -105,6 +105,13 @@ test('Recording and Retention reset handlers reuse recording defaults', () => {
   assert.match(helper, /fillForm\(forms\[formName\]/);
 });
 
+test('tunnel polling preserves drafts and untouched tokens are omitted on save', () => {
+  assert.match(settingsJs, /!cloudflareTunnelAutostartDraftTouched && status\?\.autostart != null/);
+  assert.match(settingsJs, /autostart\.addEventListener\('change',[\s\S]*?cloudflareTunnelAutostartDraftTouched = true/);
+  assert.match(settingsJs, /if \(!cloudflareTunnelTokenDraftTouched\) delete data\.token/);
+  assert.match(settingsHtml, /Leave the token field untouched to keep the saved token/);
+});
+
 test('nav.js decorates the button with the reset icon', () => {
   assert.match(navJs, /\['reset defaults',\s*DAYGLE_BUTTON_ICONS\.reset\]/);
 });

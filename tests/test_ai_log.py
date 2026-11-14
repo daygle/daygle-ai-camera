@@ -377,7 +377,7 @@ def test_cached_weights_integrity_failure_reaches_the_ai_log(tmp_path, monkeypat
     destination = models_dir / 'facetest.onnx'
 
     def fake_run(command, cwd, capture_output, text, timeout, check):  # noqa: ANN001
-        destination.write_bytes(b'fake onnx')
+        (cwd / 'facetest.onnx').write_bytes(b'fake onnx')
         return subprocess.CompletedProcess(command, 0, stdout='exported', stderr='')
 
     monkeypatch.setattr(mm.subprocess, 'run', fake_run)
@@ -416,7 +416,7 @@ def test_export_success_and_failure_reach_the_ai_log(tmp_path, monkeypatch):
     events.clear()
 
     def ok_run(command, cwd, capture_output, text, timeout, check):  # noqa: ANN001
-        destination.write_bytes(b'fake onnx')
+        (cwd / destination.name).write_bytes(b'fake onnx')
         return subprocess.CompletedProcess(command, 0, stdout='exported', stderr='')
 
     monkeypatch.setattr(mm.subprocess, 'run', ok_run)

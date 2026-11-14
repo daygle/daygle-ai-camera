@@ -734,15 +734,15 @@ function drawClipOverlay(vfcMediaTime) {
   // while the clip recorded, so playback never runs inference. Clips without
   // a track fall back to the event's static boxes.
   const track = recordingTrack();
-  if (track) {
+  if (track && showDroppedBoxes) {
+    drawDroppedBoxesOnCanvas(els.clipOverlay, droppedDetectionsAtTime(track, playerTime), els.clipPlayer);
+  }
+  if (track && track.some((sample) => Array.isArray(sample?.detections) && sample.detections.length)) {
     if (overlayEnabled) {
       const tracked = filterObjectPriorityDetections(
         filterByConfiguredLabels(sampleTrackAtTime(track, playerTime)),
       );
       if (tracked.length) drawDetectionBoxesOnCanvas(els.clipOverlay, tracked, els.clipPlayer);
-    }
-    if (showDroppedBoxes) {
-      drawDroppedBoxesOnCanvas(els.clipOverlay, droppedDetectionsAtTime(track, playerTime), els.clipPlayer);
     }
     return;
   }

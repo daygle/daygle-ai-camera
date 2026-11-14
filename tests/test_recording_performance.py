@@ -5,7 +5,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from app.detection_state import build_track_from_live_history
+from app.detection_state import build_track_from_live_history, record_live_detection_history
 from app.recordings import RecordingService
 import app.state as state
 
@@ -75,6 +75,21 @@ def test_pruning_and_explicit_invalidation_drop_timeline_cache(tmp_path):
 
     service._invalidate_segment_timeline_cache()
     assert service._segment_timeline_cache == {}
+
+
+def test_live_history_inserts_out_of_order_capture_timestamps():
+    camera_id = 'out-of-order-track-camera'
+    box = {'x': 0.1, 'y': 0.1, 'width': 0.1, 'height': 0.1}
+    try:
+        for ts, label in ((30.0, 'later'), (20.0, 'earlier'), (20.0, 'same-time')):
+            record_live_detection_history(camera_id, [{'label': label, 'box': box}],
+                                          sample_ts=ts, live_config={'detection_history_minutes': 1})
+        track = build_track_from_live_history(camera_id, 19.0, 21.0)
+        assert [item['detections'][0]['label'] for item in track] == ['earlier', 'same-time']
+        assert [item['t'] for item in track] == [1.0, 1.0]
+    finally:
+        with state.live_detection_history_lock:
+            state.live_detection_history.pop(camera_id, None)
 
 
 def test_live_history_track_uses_inclusive_timestamp_bounds():

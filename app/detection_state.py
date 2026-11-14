@@ -184,11 +184,20 @@ def record_live_detection_history(
             _state.live_detection_history[camera_id] = history
         ptz_note = _ptz_history_entry(ptz)
         if ptz_note:
-            history.append((sample_ts, sample, dropped_sample, ptz_note))
+            entry = (sample_ts, sample, dropped_sample, ptz_note)
         elif dropped_sample:
-            history.append((sample_ts, sample, dropped_sample))
+            entry = (sample_ts, sample, dropped_sample)
         else:
-            history.append((sample_ts, sample))
+            entry = (sample_ts, sample)
+        if history and sample_ts < history[-1][0]:
+            # Capture timestamps can move backwards, for example when the
+            # ingest clock is recalibrated. Keep the bisected history ordered.
+            entries = list(history)
+            entries.insert(bisect_right(entries, sample_ts, key=_history_sample_ts), entry)
+            history = deque(entries, maxlen=history_maxlen)
+            _state.live_detection_history[camera_id] = history
+        else:
+            history.append(entry)
 
 
 _PTZ_HISTORY_KEYS = (
@@ -452,9 +461,9 @@ def confirm_object_detections(
     any label -- through once it has persisted, so it applies uniformly to
     ``person``, ``car``, ``cat``, and every other class.
 
-    The gate is a pass-through no-op when ``required_frames <= 1`` (the default),
-    preserving the historical single-frame behavior and touching no per-camera
-    state. The window counts detection cycles that actually ran inference (a
+    The gate passes detections through when ``required_frames <= 1`` (the
+    default), clearing any old confirmation history for this camera. The
+    window counts detection cycles that actually ran inference (a
     quiet frame with no motion is skipped upstream and never reaches here), not
     wall-clock frames.
 
@@ -499,8 +508,9 @@ def confirm_object_detections(
     except (TypeError, ValueError):
         required = 1
     if required <= 1:
-        # Feature disabled: do not accumulate state or allocate, so a camera
-        # that never enables confirmation carries no per-camera history.
+        # Do not reuse sightings from before confirmation was disabled.
+        with _state.live_detection_confirm_lock:
+            _state.live_detection_confirm_history.pop(camera_id, None)
         return detections
     try:
         window = int(window_frames)

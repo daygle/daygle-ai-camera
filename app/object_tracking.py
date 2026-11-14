@@ -607,6 +607,7 @@ def update_object_tracks(
 
         # A detection nothing matched may be a parked car that was lost for a
         # while: give it its old track back (see REVIVE_SECONDS).
+        revived_indices: set[int] = set()
         for detection_index, detection in enumerate(detections):
             box = detection.get("box")
             if detection_index in assigned_detection_indices or not isinstance(box, dict):
@@ -616,6 +617,7 @@ def update_object_tracks(
                 tracks.append(revived)
                 assignments[detection_index] = revived
                 assigned_detection_indices.add(detection_index)
+                revived_indices.add(detection_index)
 
         # Apply the precomputed assignments in input order so the returned list
         # remains in detector order; only ownership of a track is order-free.
@@ -648,7 +650,7 @@ def update_object_tracks(
                     and _extent_unstable(previous_box, new_box)
                 )
                 if new_center is not None:
-                    if centers and not extent_flip:
+                    if centers and not extent_flip and detection_index not in revived_indices:
                         # Per-cycle velocity: this step spans the cycles missed
                         # since the last sighting plus this one.
                         elapsed = int(best_track.get("misses") or 0) + 1
@@ -679,9 +681,11 @@ def update_object_tracks(
                 # without reaching into tracker state. ``None`` prev on the
                 # first two sights (need two points to define a crossing).
                 detection["track_center"] = centers[-1] if centers else None
-                detection["track_prev_center"] = centers[-2] if len(centers) >= 2 else None
+                # Revival preserves the anchor and id, but no continuous
+                # motion step can be inferred across the unobserved gap.
+                detection["track_prev_center"] = centers[-2] if len(centers) >= 2 and detection_index not in revived_indices else None
                 detection["track_box"] = boxes_hist[-1] if boxes_hist else None
-                detection["track_prev_box"] = boxes_hist[-2] if len(boxes_hist) >= 2 else None
+                detection["track_prev_box"] = boxes_hist[-2] if len(boxes_hist) >= 2 and detection_index not in revived_indices else None
             else:
                 track_id = state["next_id"]
                 state["next_id"] += 1

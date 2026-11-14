@@ -92,6 +92,21 @@ def test_person_unaffected_by_face_zones():
     assert filter_detections_for_camera([_face(0.75, 0.5)], settings) == []
 
 
+def test_face_only_zone_cannot_activate_its_object_rules_in_overlap():
+    face_zone = _face_zone(monitor_objects=False, object_rules=[
+        {'label': 'face', 'enabled': True, 'alert_schedules': [{'email_enabled': True}]},
+        {'label': 'person', 'enabled': True, 'record_on_detect': True, 'alert_schedules': [{'email_enabled': True}]},
+    ])
+    object_zone = {'id': 'yard', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                   'monitor_objects': True, 'object_rules': []}
+    settings = _settings([face_zone, object_zone])
+    person = _person(0.25, 0.5)
+    assert filter_detections_for_camera([person], settings) == [person]
+    assert zone_object_rule_matches(settings, person, action='record') == []
+    assert zone_object_rule_matches(settings, person, action='alert') == []
+    assert zone_object_rule_matches(settings, _face(0.25, 0.5), action='alert')
+
+
 def test_zone_object_rule_matches_gates_confidence_window():
     settings = _settings([_face_zone()])
     low = zone_object_rule_matches(settings, _face(0.25, 0.5, confidence=0.5), action='alert')

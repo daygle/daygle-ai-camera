@@ -37,6 +37,25 @@ from typing import Any
 from app.utils import _parse_iso_datetime
 
 
+# Compressed uploads can expand far beyond their 10 MiB byte limit. Check the
+# header before OpenCV allocates a decoded array (40 MP accommodates 8K video).
+MAX_UPLOADED_IMAGE_PIXELS = 40_000_000
+
+
+def validate_uploaded_image_dimensions(image_bytes: bytes) -> None:
+    """Reject unreadable or excessively large uploaded images before decoding."""
+    import io
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            width, height = image.size
+            if width <= 0 or height <= 0 or width * height > MAX_UPLOADED_IMAGE_PIXELS:
+                raise ValueError('Uploaded image dimensions are too large.')
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError, SyntaxError) as exc:
+        raise ValueError('Uploaded file is not a readable image or is too large.') from exc
+
+
 def _storage_roots(keys: tuple[str, ...]) -> tuple[Path, ...]:
     """Resolve configured media roots used to validate persisted file paths."""
     # Import lazily to avoid making this low-level ffmpeg helper participate in

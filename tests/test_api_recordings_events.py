@@ -808,6 +808,20 @@ def test_empty_detection_track_is_marker_only(tmp_path, monkeypatch):
     assert loaded is not None and len(loaded) == 2
 
 
+def test_diagnostic_only_recording_track_is_loaded(tmp_path):
+    from app.recording_extension import load_recording_detection_track, write_recording_detection_track
+
+    clip = tmp_path / 'clip.mp4'
+    track = [
+        {'t': 1.0, 'detections': [], 'dropped': [{'label': 'person', 'reason': 'Not confirmed'}]},
+        {'t': 2.0, 'detections': [], 'ptz': {'state': 'tracking'}},
+    ]
+    write_recording_detection_track(clip, track)
+    assert load_recording_detection_track(clip) == track
+    write_recording_detection_track(clip, [track[1]])
+    assert load_recording_detection_track(clip) == [track[1]]
+
+
 def test_build_track_from_live_history_slices_capture_window(tmp_path, monkeypatch):
     """Recording tracks are sliced from the live monitor's in-memory detection
     history - no clip decoding, no re-inference - with timestamps rebased onto

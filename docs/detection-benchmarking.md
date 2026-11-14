@@ -141,15 +141,18 @@ The JSON report keeps both views:
 
 - `benchmark` is the detector output after the global confidence floor and
   optional tiling;
-- `post_pipeline_benchmark` applies the full production decision path.
+- `post_pipeline_benchmark` approximates selected live decision stages.
 
-`--post-pipeline` replays the same stages in the same order as
-`process_live_stream_alerts`:
+`--post-pipeline` runs these stages in order, but it is not a complete live
+replay: moving/still policy, face inference, camera-motion suppression,
+second-look/region boost, behavioural events, event debounce, and recording
+continuation are not modeled. Results are not a guarantee of actual alerts.
+Tracking receives all detector candidates before the per-label floor:
 
 | Stage | What it does | Reported key |
 | --- | --- | --- |
-| label rule floors | drops detections under their per-label rule threshold | `after_label_rules` |
 | tracking | stamps stable track ids and displacement history | `tracked` |
+| label rule floors | drops detections under their per-label rule threshold | `after_label_rules` |
 | camera/zone scope | keeps detections this camera actually monitors | `after_zone_scope` |
 | N-of-M confirmation | the live confirmation window | `after_confirmation` |
 | post-zone action decision | alert rules + record-on-detect | `actionable` |
@@ -161,6 +164,10 @@ can be attributed to a specific stage rather than guessed at.
 required frame count. `--confirm-iou 0` uses label-only persistence; a positive
 value additionally requires the same-label box to overlap across the window.
 Face detections retain the live monitor's face exemption.
+
+Empty inference cycles advance tracking and confirmation; frames on which
+motion-gated inference did not run do not. An explicitly requested model that
+cannot load causes an error rather than a misleading motion-only report.
 
 The evaluator lowers the detector's internal floor to the lowest supplied label
 threshold, then applies the individual rule floors afterward. This mirrors the

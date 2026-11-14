@@ -182,6 +182,15 @@ def test_runtime_wipe_refuses_a_directory_holding_the_database(tmp_path, monkeyp
     assert database.exists()
 
 
+def test_live_settings_reject_nonfinite_values_from_internal_callers(monkeypatch):
+    validators = importlib.import_module('app.payload_validators')
+    monkeypatch.setattr(validators, 'effective_live_config', lambda: {})
+    for field in ('detection_interval_seconds', 'face_detection_interval_seconds', 'event_debounce_seconds', 'detection_history_minutes'):
+        for value in (float('nan'), float('inf')):
+            with pytest.raises(HTTPException):
+                validators.validate_live_settings({field: value})
+
+
 def test_auth_settings_reject_values_that_would_brick_startup(monkeypatch):
     validators = importlib.import_module('app.payload_validators')
     monkeypatch.setattr(validators, 'effective_auth_config', lambda: {})

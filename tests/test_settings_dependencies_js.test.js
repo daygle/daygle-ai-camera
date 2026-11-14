@@ -16,7 +16,8 @@ test('settings page dims Periodic Scan and the confirm fields when they cannot a
   assert.match(source, /setFieldInactive\(form\.elements\.periodic_scan_interval_seconds, alwaysRun/);
   assert.match(source, /\['detection_confirm_window', 'detection_confirm_iou', 'detection_confirm_skip_confidence'\]/);
   // Re-run after every programmatic fill, not only on user edits.
-  assert.equal((source.match(/syncLiveFieldDependencies\(\);/g) || []).length, 2);
+  assert.equal((source.match(/syncLiveFieldDependencies\(\);/g) || []).length, 3);
+  assert.match(source, /if \(name === 'live'\) \{\s*syncPixelThresholdPresets\(forms\.live\);\s*syncLiveFieldDependencies\(\);/);
   // The legacy model is only listed while it is the saved value.
   assert.match(source, /legacy\.hidden = algorithm\.value !== 'diff'/);
 });

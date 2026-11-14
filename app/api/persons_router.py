@@ -133,6 +133,8 @@ async def enroll_face(
         box = {'x': x, 'y': y, 'width': width, 'height': height}
 
     def _embed() -> tuple[object, object]:
+        from app.media_utils import validate_uploaded_image_dimensions
+        validate_uploaded_image_dimensions(image_bytes)
         crop = crop_face_region(decode_bgr_image(image_bytes), box)
         return crop, service.embed_face(crop)
 

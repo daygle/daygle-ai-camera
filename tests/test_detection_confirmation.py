@@ -51,6 +51,18 @@ def test_required_one_is_pass_through_no_state(ds):
     assert 'cam-1' not in _state.live_detection_confirm_history
 
 
+def test_disabling_confirmation_discards_old_sightings(ds):
+    import app.state as _state
+    kwargs = dict(required_frames=2, window_frames=3)
+    assert ds.confirm_object_detections('cam-1', [_det('cat')], **kwargs) == []
+    assert ds.confirm_object_detections('cam-2', [_det('cat')], **kwargs) == []
+    ds.confirm_object_detections('cam-1', [], required_frames=1, window_frames=3)
+    assert 'cam-1' not in _state.live_detection_confirm_history
+    assert 'cam-2' in _state.live_detection_confirm_history
+    assert ds.confirm_object_detections('cam-1', [_det('cat')], **kwargs) == []
+    assert len(ds.confirm_object_detections('cam-2', [_det('cat')], **kwargs)) == 1
+
+
 def test_two_of_three_confirms_on_second_consecutive_cycle(ds):
     # First cycle: 'cat' seen once -> below the 2-frame requirement -> held.
     assert ds.confirm_object_detections('cam-1', [_det('cat')], required_frames=2, window_frames=3) == []

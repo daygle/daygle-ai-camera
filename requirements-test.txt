@@ -16,6 +16,7 @@ bcrypt>=5.0.0,<6.0
 python-multipart>=0.0.33,<1.0
 numpy>=2.2.6,<2.3
 opencv-python-headless>=5.0.0.93,<6.0
+Pillow>=11.0.0,<14.0
 pytest
 pytest-asyncio
 pytest-cov

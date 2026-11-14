@@ -831,6 +831,21 @@ def test_reacquired_parked_car_keeps_its_track_and_reads_still_through_a_streak(
     assert os_.detection_motion_state(out, streak, out.get('track_displacement')) == os_.MODE_STILL
 
 
+def test_revived_track_has_no_motion_step_across_the_gap():
+    cam = 'trk-revive-gap'
+    track_id = _settle(cam)
+    _lose(cam)
+    moved_box = (_FAR_CAR[0] + 0.005, *_FAR_CAR[1:])
+    revived = ot.update_object_tracks(cam, [_det('car', *moved_box)])[0]
+    assert revived['track_id'] == track_id
+    assert revived['track_prev_center'] is None
+    assert revived['track_prev_box'] is None
+    assert 'velocity' not in st._object_tracks[cam]['tracks'][0]
+    next_detection = ot.update_object_tracks(cam, [_det('car', *moved_box)])[0]
+    assert next_detection['track_prev_center'] == revived['track_center']
+    assert next_detection['track_prev_box'] == revived['track_box']
+
+
 def test_reacquired_car_lost_while_other_objects_were_seen_is_revived_too():
     cam = 'trk-revive-busy'
     track_id = _settle(cam)

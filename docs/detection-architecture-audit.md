@@ -102,21 +102,18 @@ Relevant tests include `tests/test_motion_shape_guard.py`,
 
 ## Prioritized follow-ups
 
-All five follow-ups raised by this audit are now implemented. What each one
-does and where it lives:
+The follow-ups below describe the implemented work and its remaining limits.
 
-### P1 - benchmark represents the production decision path (DONE)
+### P1 - benchmark approximates selected production decision stages
 
-`scripts/evaluate_detection.py --post-pipeline` now replays the full decision
-path in the same order as `process_live_stream_alerts`: per-label rule floors →
-tracking → camera/zone scope → N-of-M confirmation → the post-zone action
-decision. `--camera-config` supplies a real camera settings object (the
-persisted `detection` block), so zone geometry and the alert/record decision are
-measured rather than assumed; without it the run reports
-`zone_policy_replayed: false` and says so in the human output instead of
-implying coverage it did not measure. `--label-thresholds` defaults to the
-camera's own per-label rule floors, so the default run measures the camera as
-actually configured.
+`scripts/evaluate_detection.py --post-pipeline` runs tracking → per-label
+floors → camera/zone scope → N-of-M confirmation → the post-zone action rules.
+This is not the full live decision path: moving/still policy, face inference,
+camera-motion suppression, behavioral events, debounce, and recording
+continuation are not replayed. `--camera-config` supplies zone policy; without
+it the report sets `zone_policy_replayed: false`. `--label-thresholds` defaults
+to the camera's per-label floors. See `docs/detection-benchmarking.md` for
+limitations before interpreting results as alert accuracy.
 
 `--scenarios` replays the same clip under BOTH operating modes and reports each
 separately, because their recall differs by construction: a subject that never

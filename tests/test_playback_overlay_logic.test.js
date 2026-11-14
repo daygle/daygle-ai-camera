@@ -21,6 +21,38 @@ const track = [
 ];
 
 
+test('diagnostic-only tracks retain static event overlay and dropped boxes', () => {
+  for (const page of ['recordings.js', 'timeline.js']) {
+    const source = readFileSync(path.resolve(here, '../web', page), 'utf8');
+    const start = source.indexOf('function drawClipOverlay(vfcMediaTime) {');
+    const end = source.indexOf('// Clip segment timeline:', start);
+    assert.ok(start >= 0 && end > start);
+    const draws = [];
+    const kept = { label: 'person', box: box(0.1) };
+    const rejected = { label: 'car', box: box(0.5) };
+    const diagnosticTrack = [{ t: 1, detections: [], dropped: [rejected] }];
+    const context = vm.createContext({
+      els: { clipOverlay: { getContext: () => ({ setTransform() {}, clearRect() {} }) }, clipPlayer: { currentTime: 1 } },
+      overlayEnabled: true, showDroppedBoxes: true,
+      activeRecording: { detections: [kept] },
+      resizeOverlayCanvas() {}, recordingTrack: () => diagnosticTrack,
+      drawDroppedBoxesOnCanvas: (_canvas, items) => draws.push(['dropped', items]),
+      droppedDetectionsAtTime: () => [rejected],
+      drawDetectionBoxesOnCanvas: (_canvas, items) => draws.push(['kept', items]),
+      shouldRenderOverlayForTime: () => true,
+      filterObjectPriorityDetections: (items) => items,
+      filterByConfiguredLabels: (items) => items,
+      GENERIC_TRIGGER_LABELS: new Set(),
+    });
+    vm.runInContext(source.slice(start, end), context);
+    context.drawClipOverlay(1);
+    assert.deepEqual(draws, page === 'recordings.js'
+      ? [['dropped', [rejected]], ['kept', [kept]]]
+      : [['kept', [kept]]]);
+  }
+});
+
+
 test('overlay boxes and label backgrounds use readable transparency', () => {
   assert.match(overlaySource, /const OVERLAY_BOX_ALPHA = 0\.78;/);
   assert.match(overlaySource, /rgba\(7, 11, 19, 0\.58\)/);
@@ -101,6 +133,40 @@ test('matchDetection does not let a higher-overlap no-id box steal an id match',
   const unknown = { label: 'person', confidence: 0.9, box: box(0.72) };
   const target = { label: 'person', track_id: 9, box: box(0.79) };
   assert.equal(sandbox.matchDetection([own, unknown], target).track_id, 9);
+});
+
+
+test('interpolation and projection do not reuse a previous object for new arrivals', () => {
+  const previous = { ...detection(0.2), track_id: 1 };
+  const newcomer = { ...detection(0.21), track_id: 2 };
+  const own = { ...detection(0.25), track_id: 1 };
+  const samples = [{ t: 0, detections: [previous] }, { t: 1, detections: [newcomer, own] }];
+  const interpolated = sandbox.sampleTrackAtTime(samples, 0.5);
+  assert.equal(interpolated.length, 1);
+  assert.equal(interpolated[0].track_id, 1);
+  const projected = sandbox.projectDetections([previous], [newcomer, own], 0, 1, 2, 1);
+  assert.equal(projected[0].box.x, newcomer.box.x);
+  assert.equal(projected[1].box.x, 0.3);
+});
+
+
+test('cached dimensions are isolated by canvas and reference', () => {
+  const canvas = (width, height) => ({ clientWidth: width, clientHeight: height, width: 0, height: 0, getContext: () => ({}) });
+  const a = canvas(100, 50);
+  const b = canvas(300, 150);
+  const refA = { clientWidth: 100, clientHeight: 50 };
+  const refB = { clientWidth: 300, clientHeight: 150 };
+  sandbox.resizeOverlayCanvas(a, refA);
+  sandbox.resizeOverlayCanvas(b, refB);
+  assert.equal(sandbox._readElementDims(a, refA).cssWidth, 100);
+  assert.equal(sandbox._readElementDims(b, refB).cssWidth, 300);
+});
+
+
+test('zero overlap threshold does not suppress unrelated motion', () => {
+  const object = { label: 'person', box: box(0) };
+  const motion = { label: 'motion', box: box(0.8) };
+  assert.equal(sandbox.filterObjectPriorityDetections([object, motion], 0).length, 2);
 });
 
 

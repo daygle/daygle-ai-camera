@@ -880,8 +880,8 @@ class OnnxYoloDetector:
         if original_height <= 0 or original_width <= 0:
             raise ValueError("Image dimensions must be greater than zero")
         scale = min(self.input_width / original_width, self.input_height / original_height)
-        resized_width = int(round(original_width * scale))
-        resized_height = int(round(original_height * scale))
+        resized_width = max(1, int(round(original_width * scale)))
+        resized_height = max(1, int(round(original_height * scale)))
         resized = cv2.resize(image, (resized_width, resized_height), interpolation=cv2.INTER_LINEAR)
 
         # np.empty() + fill(114) avoids the constant-broadcast pass that np.full()
@@ -902,7 +902,8 @@ class OnnxYoloDetector:
         # downstream /255.0 and astype(float32) operate on the same per-pixel
         # values either way - bit-equivalent output, ~4x less memory bandwidth on
         # the transpose pass.
-        chw = np.transpose(canvas, (2, 0, 1))
+        # OpenCV frames are BGR; Ultralytics YOLO exports expect RGB.
+        chw = np.transpose(canvas[:, :, ::-1], (2, 0, 1))
         # Scale the float32 copy in place: one allocation instead of two, with the
         # same arithmetic (bit-identical output).
         tensor = chw.astype(np.float32)
@@ -927,7 +928,7 @@ class OnnxYoloDetector:
             return "unknown"
         if any(dim <= 0 for dim in dims):
             return "unknown"
-        shape_nms_free = OnnxYoloDetector._looks_nms_free(np.empty(dims, dtype=np.float32))
+        shape_nms_free = OnnxYoloDetector._shape_looks_nms_free(dims)
         if shape_nms_free is True:
             return "nms_free"
         if shape_nms_free is False:
@@ -951,7 +952,11 @@ class OnnxYoloDetector:
         an authoritative discriminator that does not depend on the
         filename heuristic in ``_detect_model_type`` being right.
         """
-        dims = [int(d) for d in np.asarray(output).shape if d != 1]
+        return OnnxYoloDetector._shape_looks_nms_free(np.asarray(output).shape)
+
+    @staticmethod
+    def _shape_looks_nms_free(shape: tuple[int, ...]) -> bool | None:
+        dims = [int(d) for d in shape if d != 1]
         if len(dims) == 1:
             # A single end-to-end detection can squeeze down to [6].
             return dims[0] == 6

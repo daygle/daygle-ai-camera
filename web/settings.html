@@ -499,7 +499,7 @@
       </div>
       <form id="cloudflareTunnelForm" class="form-grid">
         <label>
-          <span>Tunnel Token <span class="info-tip" data-tip="The token from Cloudflare Zero Trust. Daygle stores it in its protected SQLite settings store and never returns it to the browser or logs." title="The token from Cloudflare Zero Trust. Daygle stores it in its protected SQLite settings store and never returns it to the browser or logs." tabindex="0" aria-label="Help: Cloudflare Tunnel token"></span> <span id="cloudflareTunnelTokenIndicator" class="cloudflare-token-indicator" aria-live="polite">Checking…</span></span>
+          <span>Tunnel Token <span class="info-tip" data-tip="The token from Cloudflare Zero Trust. Daygle stores it in a protected file and never returns it to the browser or logs." title="The token from Cloudflare Zero Trust. Daygle stores it in a protected file and never returns it to the browser or logs." tabindex="0" aria-label="Help: Cloudflare Tunnel token"></span> <span id="cloudflareTunnelTokenIndicator" class="cloudflare-token-indicator" aria-live="polite">Checking…</span></span>
           <input name="token" type="password" placeholder="Paste Cloudflared Token" autocomplete="new-password" aria-describedby="cloudflareTunnelTokenIndicator" />
         </label>
         <label>
@@ -520,7 +520,7 @@
         </div>
         <span id="cloudflareTunnelTokenSummary" class="cloudflare-token-summary">Token Status: Checking…</span>
       </div>
-      <p class="field-help">Tokens are stored in a protected file and are never returned to the browser or written to logs. Saving this form requires re-entering the token. LAN access while the tunnel runs is controlled on the <strong>LAN &amp; Proxy Access</strong> card (default: enabled). Cloudflare Access can add an additional login layer; Android clients must send its <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code> headers on every request.</p>
+      <p class="field-help">Tokens are stored in a protected file and are never returned to the browser or written to logs. Leave the token field untouched to keep the saved token; to remove it, enter and then clear the field before saving. LAN access while the tunnel runs is controlled on the <strong>LAN &amp; Proxy Access</strong> card (default: enabled). Cloudflare Access can add an additional login layer; Android clients must send its <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code> headers on every request.</p>
       <div class="button-row">
         <button id="saveCloudflareTunnelBtn" type="submit" form="cloudflareTunnelForm">Save Tunnel Settings</button>
         <button id="startCloudflareTunnelBtn" class="btn-info" type="button" disabled>Start Tunnel</button>

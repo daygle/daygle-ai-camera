@@ -8,6 +8,10 @@ reflected immediately.
 """
 from __future__ import annotations
 
+import sqlite3
+
+import pytest
+
 from app.auth import utc_now
 from app.database import EventDatabase
 
@@ -24,6 +28,29 @@ def test_get_setting_reflects_writes_immediately(tmp_path):
     # A second write must be seen on the next read (cache invalidated on write).
     db.set_setting('objects', {'default_mode': 'any'}, utc_now())
     assert db.get_setting('objects') == {'default_mode': 'any'}
+
+
+def test_multi_setting_write_is_atomic_and_invalidates_cache(tmp_path):
+    db = _db(tmp_path)
+    db.set_setting('cloudflare_tunnel', {'tunnel_loopback_only': False}, utc_now())
+    db.set_setting('auth', {'trusted_proxies': []}, utc_now())
+    assert db.get_setting('cloudflare_tunnel')['tunnel_loopback_only'] is False
+    assert db.get_setting('auth')['trusted_proxies'] == []
+    with db.connect() as conn:
+        conn.execute("CREATE TRIGGER reject_auth BEFORE UPDATE ON app_settings "
+                     "WHEN NEW.key = 'auth' BEGIN SELECT RAISE(ABORT, 'rejected'); END")
+    with pytest.raises(sqlite3.IntegrityError, match='rejected'):
+        db.set_settings({'cloudflare_tunnel': {'tunnel_loopback_only': True},
+                         'auth': {'trusted_proxies': ['127.0.0.1']}}, utc_now())
+    db.invalidate_setting_cache()
+    assert db.get_setting('cloudflare_tunnel') == {'tunnel_loopback_only': False}
+    assert db.get_setting('auth') == {'trusted_proxies': []}
+    with db.connect() as conn:
+        conn.execute('DROP TRIGGER reject_auth')
+    db.set_settings({'cloudflare_tunnel': {'tunnel_loopback_only': True},
+                     'auth': {'trusted_proxies': ['127.0.0.1']}}, utc_now())
+    assert db.get_setting('cloudflare_tunnel') == {'tunnel_loopback_only': True}
+    assert db.get_setting('auth') == {'trusted_proxies': ['127.0.0.1']}
 
 
 def test_cached_read_returns_independent_object(tmp_path):

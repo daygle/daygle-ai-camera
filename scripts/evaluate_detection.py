@@ -21,10 +21,10 @@ Full motion + object evaluation with a model, night shadow handling on auto::
 
 Quality benchmarking uses ``--ground-truth annotations.json`` to calculate
 class-aware precision, recall, F1, AP@0.5, and mAP@0.5:0.95 from labeled frames.
-``--post-pipeline`` replays the production decision path after inference (label
-rule floors, tracking, camera/zone scope, N-of-M confirmation, and the post-zone
-action decision), so a tuning study measures what actually alerts rather than
-what the model alone produced. ``--camera-config`` supplies the real zone policy
+``--post-pipeline`` approximates selected production stages after inference
+(tracking, label floors, camera/zone scope, N-of-M confirmation, and the
+post-zone action decision). It does not replay every live decision, such as
+moving/still policy, face detection, camera motion, or event debounce. ``--camera-config`` supplies the real zone policy
 and ``--scenarios`` reports the always-on and motion-gated operating modes
 separately. The JSON format and workflow are documented in
 ``docs/detection-benchmarking.md``.
@@ -63,7 +63,7 @@ def _iter_frames(source: Path, limit: int | None) -> Iterator[Any]:
         for path in files:
             frame = cv2.imread(str(path))
             if frame is None:
-                continue
+                raise ValueError(f'could not read input image {path}')
             yield frame
             count += 1
             if limit and count >= limit:
@@ -257,15 +257,10 @@ def _apply_post_pipeline(
     args: argparse.Namespace,
     settings: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Replay the production decision path after inference.
+    """Approximate selected live decision stages after inference.
 
-    Stage order matches ``process_live_stream_alerts`` so the benchmark measures
-    the alerting decision, not just the model:
-
-    1. per-label rule floors (``--label-thresholds``, or the camera's own rules
-       when ``--camera-config`` is supplied);
-    2. tracking (``update_object_tracks``) so the stable track ids and
-       displacement history the live path depends on exist here too;
+    1. tracking (``update_object_tracks``), including empty inference cycles;
+    2. per-label rule floors (``--label-thresholds``, or camera rules);
     3. camera/zone scope filtering (``filter_detections_for_camera``);
     4. N-of-M temporal confirmation (``--confirm-frames``/``--confirm-window``);
     5. the post-zone action decision (alert rules + record-on-detect), which is
@@ -276,21 +271,18 @@ def _apply_post_pipeline(
     can never imply zone coverage it did not measure.
     """
     stage_counts: dict[str, int] = {'detected': len(detections)}
+    from app.object_tracking import update_object_tracks
+    tracked = update_object_tracks(camera_id, detections)
+    stage_counts['tracked'] = len(tracked)
     candidates = _apply_label_thresholds(
-        detections, getattr(args, 'label_thresholds', {}) or {}
+        tracked, getattr(args, 'label_thresholds', {}) or {}
     )
     stage_counts['after_label_rules'] = len(candidates)
-    if not candidates:
-        return [], stage_counts
 
-    from app.object_tracking import update_object_tracks
-    tracked = update_object_tracks(camera_id, candidates)
-    stage_counts['tracked'] = len(tracked)
-
-    scoped = tracked
+    scoped = candidates
     if settings is not None:
         from app.zone_detection import filter_detections_for_camera
-        scoped = filter_detections_for_camera(tracked, settings)
+        scoped = filter_detections_for_camera(candidates, settings)
     stage_counts['after_zone_scope'] = len(scoped)
 
     confirmed = scoped
@@ -673,9 +665,7 @@ def _build_detector(args: argparse.Namespace):
         input_size=args.input_size,
     )
     if not detector.available:
-        print(f"WARNING: detector unavailable ({detector.unavailable_reason}); "
-              f"running motion-only.", file=sys.stderr)
-        return None
+        raise ValueError(f"detector unavailable ({detector.unavailable_reason})")
     return detector
 
 
@@ -1043,9 +1033,9 @@ def main(argv: list[str] | None = None) -> int:
                              "Default runs it every frame, matching the always-on live default.")
     parser.add_argument(
         "--post-pipeline", action="store_true",
-        help="Replay the production decision path after inference: label-rule floors, "
-             "tracking, camera/zone scope, N-of-M confirmation, and the post-zone "
-             "action decision. Zone and action stages need --camera-config.",
+        help="Approximate selected live stages: tracking, label floors, camera/zone "
+             "scope, confirmation, and action rules. Moving/still and other live "
+             "policies are not replayed. Zone/action stages need --camera-config.",
     )
     parser.add_argument(
         "--camera-config",

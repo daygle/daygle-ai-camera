@@ -177,6 +177,45 @@ class TestUploadContentLengthCap:
         assert content_type == 'image/png'
 
 
+def test_uploaded_image_dimension_guard_rejects_before_inference_or_enrollment(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import io
+    from PIL import Image
+    from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
+
+    app, _ = _load_app(tmp_path, monkeypatch)
+    import app.media_utils as media_utils
+    from app.deps import get_detector, get_face_recognition_service
+
+    calls = []
+    detector = SimpleNamespace(available=True, detect_image=lambda *args, **kwargs: calls.append('detect'))
+    service = SimpleNamespace(available=True, embed_face=lambda *args: calls.append('embed'))
+    app.dependency_overrides[get_detector] = lambda: detector
+    app.dependency_overrides[get_face_recognition_service] = lambda: service
+    monkeypatch.setattr(media_utils, 'MAX_UPLOADED_IMAGE_PIXELS', 100)
+    image = io.BytesIO()
+    Image.new('RGB', (11, 10)).save(image, format='PNG')
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _, created = client.request('/api/persons', method='POST', json_body={'name': 'Test'},
+                                            headers={'X-CSRF-Token': csrf})
+        assert status == 200
+        for path in ('/api/detect/frame', f"/api/persons/{created['id']}/faces"):
+            status, _, _ = client.request(path, method='POST', data=image.getvalue(),
+                                          headers={'Content-Type': 'image/png', 'X-CSRF-Token': csrf})
+            assert status == 400
+        assert calls == []
+        valid = io.BytesIO()
+        Image.new('RGB', (10, 10)).save(valid, format='PNG')
+        media_utils.validate_uploaded_image_dimensions(valid.getvalue())
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 # ── H4: current_password required for email/username changes ─────────────
 
 

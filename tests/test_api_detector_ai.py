@@ -340,18 +340,51 @@ def test_export_yolo_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
         assert "yolov8n.pt" not in command[2]
         assert command[3] == "yolov8n.pt"
         assert command[4] == "640"
-        assert cwd == destination.parent
+        assert cwd.parent == destination.parent
         assert capture_output is True
         assert text is True
         assert timeout == 600
         assert check is False
-        destination.write_bytes(b"fake onnx")
+        (cwd / "yolov8n.onnx").write_bytes(b"fake onnx")
         return subprocess.CompletedProcess(command, 0, stdout="exported", stderr="")
 
     monkeypatch.setattr(main.subprocess, "run", fake_run)
 
     assert mods.model_management.export_yolo_onnx("yolov8n", destination) == len(b"fake onnx")
     assert destination.exists()
+
+
+@pytest.mark.parametrize('filename', ['yolov8n.onnx', 'yolov8n-640.onnx'])
+@pytest.mark.parametrize('output', [None, b''])
+def test_failed_export_preserves_installed_model(tmp_path, monkeypatch, filename, output):
+    import app.model_management as mm
+
+    monkeypatch.setattr(mm, 'MODELS_DIR', tmp_path)
+    destination = tmp_path / filename
+    destination.write_bytes(b'previous model')
+
+    def fake_run(command, cwd, **kwargs):
+        if output is not None:
+            (cwd / 'yolov8n.onnx').write_bytes(output)
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(mm.subprocess, 'run', fake_run)
+    with pytest.raises(RuntimeError):
+        mm.export_yolo_onnx('yolov8n', destination)
+    assert destination.read_bytes() == b'previous model'
+    assert not list(tmp_path.glob('daygle-onnx-*'))
+
+
+def test_export_rejects_unpinned_cached_third_party_weights(tmp_path, monkeypatch):
+    import app.model_management as mm
+
+    monkeypatch.setattr(mm, 'MODELS_DIR', tmp_path)
+    monkeypatch.setattr(mm, 'YOLO_MODELS', {'test': {
+        'pt': 'test.pt', 'onnx': 'test.onnx', 'weights_url': 'https://example.invalid/test.pt',
+    }})
+    (tmp_path / 'test.pt').write_bytes(b'unverified weights')
+    with pytest.raises(RuntimeError, match='pinned'):
+        mm.export_yolo_onnx('test', tmp_path / 'test-640.onnx')
 
 
 def test_same_model_resolutions_coexist_and_switch_independently(tmp_path, monkeypatch):
@@ -910,6 +943,7 @@ def test_export_yolo_onnx_fetches_weights_url(tmp_path, monkeypatch):
         'approx_mb': 6, 'input_size': 640,
         'labels': 'models/face.names', 'keypoint_count': 5,
         'weights_url': 'https://example.invalid/facetest.pt',
+        'weights_sha256': '0' * 64,
         'description': 'synthetic face entry',
     }
     monkeypatch.setattr(mm, 'YOLO_MODELS', catalog)
@@ -926,7 +960,7 @@ def test_export_yolo_onnx_fetches_weights_url(tmp_path, monkeypatch):
     destination = models_dir / 'facetest.onnx'
 
     def fake_run(command, cwd, capture_output, text, timeout, check):  # noqa: ANN001
-        destination.write_bytes(b'fake onnx')
+        (cwd / 'facetest.onnx').write_bytes(b'fake onnx')
         return subprocess.CompletedProcess(command, 0, stdout='exported', stderr='')
 
     monkeypatch.setattr(main.subprocess, 'run', fake_run)

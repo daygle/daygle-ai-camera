@@ -784,7 +784,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         detection_interval_seconds = float(merged.get('detection_interval_seconds', 0.5))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='detection_interval_seconds must be a number.') from exc
-    if detection_interval_seconds < 0.1 or detection_interval_seconds > 10:
+    if not 0.1 <= detection_interval_seconds <= 10:
         raise HTTPException(status_code=400, detail='detection_interval_seconds must be between 0.1 and 10.')
     # Face-model cadence. Same bounds as the object interval so a camera can be
     # pinned to "every cycle" (0.1) or decoupled entirely (10).
@@ -792,13 +792,13 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         face_detection_interval_seconds = float(merged.get('face_detection_interval_seconds', 1.0))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='face_detection_interval_seconds must be a number.') from exc
-    if face_detection_interval_seconds < 0.1 or face_detection_interval_seconds > 10:
+    if not 0.1 <= face_detection_interval_seconds <= 10:
         raise HTTPException(status_code=400, detail='face_detection_interval_seconds must be between 0.1 and 10.')
     try:
         event_debounce_seconds = float(merged.get('event_debounce_seconds', 10.0))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='event_debounce_seconds must be a number.') from exc
-    if event_debounce_seconds < 0 or event_debounce_seconds > 300:
+    if not 0 <= event_debounce_seconds <= 300:
         raise HTTPException(status_code=400, detail='event_debounce_seconds must be between 0 and 300.')
     try:
         motion_object_grace_seconds = float(merged.get('motion_object_grace_seconds', 3.0))
@@ -809,7 +809,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='motion_object_grace_seconds must be between 0 and 10.')
     try:
         detection_history_minutes = int(float(merged.get('detection_history_minutes', 10)))
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise HTTPException(status_code=400, detail='detection_history_minutes must be a whole number.') from exc
     if detection_history_minutes < 1 or detection_history_minutes > 120:
         raise HTTPException(status_code=400, detail='detection_history_minutes must be between 1 and 120.')

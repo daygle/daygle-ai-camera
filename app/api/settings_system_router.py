@@ -18,7 +18,7 @@ from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 
 from app.auth import utc_now
-from app.cloudflare_tunnel import MAX_TUNNEL_TOKEN_LENGTH, CloudflareTunnelSecretStore
+from app.cloudflare_tunnel import MAX_TUNNEL_TOKEN_LENGTH, CloudflareTunnelSecretStore, resolve_cloudflare_tunnel_settings
 from app.auth_gates import require_admin
 from app.camera_lifecycle import apply_storage_and_recording_settings
 from app.config_facades import (
@@ -206,6 +206,15 @@ async def restore_database(request: Request, db=Depends(get_database)):
             await form.close()
 
 
+def _boolean_setting(payload: dict[str, Any], key: str, default: bool) -> bool:
+    if key not in payload:
+        return default
+    value = payload[key]
+    if not isinstance(value, bool):
+        raise HTTPException(status_code=400, detail=f'{key} must be a boolean.')
+    return value
+
+
 def _tunnel_status(db=None):
     """Tunnel manager status plus the effective ``tunnel_loopback_only`` value.
 
@@ -237,45 +246,55 @@ def update_cloudflare_tunnel_settings(request: Request, db=Depends(get_database)
     require_admin(request)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Cloudflare Tunnel settings must be an object.')
+    token_supplied = 'token' in payload
     raw_token = payload.get('token')
-    token = str(raw_token or '').strip() if raw_token is not None else None
+    if token_supplied and raw_token is not None and not isinstance(raw_token, str):
+        raise HTTPException(status_code=400, detail='Cloudflare Tunnel token must be a string or null.')
+    token = raw_token.strip() if isinstance(raw_token, str) else None
     if token is not None and len(token) > MAX_TUNNEL_TOKEN_LENGTH:
         raise HTTPException(status_code=400, detail='Cloudflare Tunnel token is too long.')
     manager = _state.cloudflare_tunnel_manager
     if manager is None:
         raise HTTPException(status_code=503, detail='Cloudflare Tunnel manager is not ready.')
     token_store = CloudflareTunnelSecretStore(db.database_path)
-    if token is None or token == '':
-        # An empty field means clear the persisted token, not an accidental
-        # overwrite of a secret that the browser deliberately never receives.
-        token = None
+    # An explicitly empty token clears the stored token; an omitted token
+    # preserves it for clients updating other settings.
+    token = token or None
     current_persisted = db.get_setting('cloudflare_tunnel') or {}
     if not isinstance(current_persisted, dict):
         current_persisted = {}
-    autostart = bool(payload.get('autostart', current_persisted.get('autostart', False)))
+    autostart = _boolean_setting(payload, 'autostart', bool(current_persisted.get('autostart', False)))
     # Fall back through UI-saved value -> ``server.tunnel_loopback_only``
     # bootstrap default -> False, mirroring ``_tunnel_status`` exactly. A body
     # that omits the field must never silently flip the LAN bind mode, so an
     # omitted field always resolves to the bootstrap default (LAN serving).
     default_loopback = bool(_state.config.get('server', {}).get('tunnel_loopback_only', False))
-    tunnel_loopback_only = bool(
-        payload.get(
-            'tunnel_loopback_only',
-            current_persisted.get('tunnel_loopback_only', default_loopback),
-        )
+    tunnel_loopback_only = _boolean_setting(
+        payload, 'tunnel_loopback_only',
+        bool(current_persisted.get('tunnel_loopback_only', default_loopback)),
     )
-    if token:
+    if token_supplied:
+        if token:
+            try:
+                token_store.write(token)
+            except (OSError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=f'Could not securely store Cloudflare Tunnel token: {type(exc).__name__}.') from exc
+        else:
+            token_store.clear()
+    saved_token = token_store.read() if not token_supplied else None
+    stored_token = token if token_supplied else saved_token or current_persisted.get('token')
+    # SQLite stores only non-secret metadata; the secret lives in a 0600 file.
+    if not token_supplied and stored_token and not saved_token:
+        # Migrate a legacy SQLite token before removing it from metadata.
         try:
-            token_store.write(token)
+            token_store.write(stored_token)
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=f'Could not securely store Cloudflare Tunnel token: {type(exc).__name__}.') from exc
-    else:
-        token_store.clear()
-    # SQLite stores only non-secret metadata; the secret lives in a 0600 file.
-    persisted = {'configured': bool(token), 'autostart': autostart, 'tunnel_loopback_only': tunnel_loopback_only}
+    persisted = {'configured': bool(stored_token), 'autostart': autostart, 'tunnel_loopback_only': tunnel_loopback_only}
     db.set_setting('cloudflare_tunnel', persisted, utc_now())
-    manager.configure(token, source='database', autostart=autostart)
-    write_audit_log(request, db, 'update', 'settings.cloudflare_tunnel', details={'configured': bool(token), 'autostart': autostart})
+    effective = resolve_cloudflare_tunnel_settings(_state.config, persisted, persisted_token=stored_token)
+    manager.configure(effective.token, source=effective.source, autostart=effective.autostart)
+    write_audit_log(request, db, 'update', 'settings.cloudflare_tunnel', details={'configured': bool(effective.token), 'autostart': effective.autostart})
     # Report the value that was actually persisted (like the GET handler),
     # not the bootstrap default derived from an empty read.
     return _tunnel_status(db)
@@ -387,22 +406,17 @@ def update_network_settings(request: Request, db=Depends(get_database), auth=Dep
     if not isinstance(current_persisted, dict):
         current_persisted = {}
     default_loopback = bool(_state.config.get('server', {}).get('tunnel_loopback_only', False))
-    tunnel_loopback_only = bool(
-        payload.get(
-            'tunnel_loopback_only',
-            current_persisted.get('tunnel_loopback_only', default_loopback),
-        )
+    tunnel_loopback_only = _boolean_setting(
+        payload, 'tunnel_loopback_only',
+        bool(current_persisted.get('tunnel_loopback_only', default_loopback)),
     )
-    db.set_setting(
-        'cloudflare_tunnel',
-        {**current_persisted, 'tunnel_loopback_only': tunnel_loopback_only},
-        utc_now(),
-    )
-    # The auth validator merges partial payloads with the current auth
-    # settings, so an omitted trusted_proxies field preserves the saved list.
+    # Validate all fields before writing either settings row.
     auth_payload = {'trusted_proxies': payload['trusted_proxies']} if 'trusted_proxies' in payload else {}
     validated = validate_auth_settings(auth_payload)
-    db.set_setting('auth', validated, utc_now())
+    db.set_settings({
+        'cloudflare_tunnel': {**current_persisted, 'tunnel_loopback_only': tunnel_loopback_only},
+        'auth': validated,
+    }, utc_now())
     auth.apply_config(validated)
     write_audit_log(
         request, db, 'update', 'settings.network',

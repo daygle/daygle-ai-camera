@@ -46,6 +46,27 @@ def test_region_boxes_found_and_capped():
     assert 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0 and w > 0 and h > 0
 
 
+def test_edge_padding_clips_at_original_region_bounds():
+    mask = _mask_with_blob(h=100, w=100, region=(0, 0, 0.1, 0.1))
+    x, y, w, h = rd._motion_region_boxes(mask, max_regions=1, min_area_frac=0.001, pad_frac=0.25)[0]
+    assert (x, y) == (0, 0)
+    assert w == pytest.approx(0.11 * 1.25)
+    assert h == pytest.approx(0.11 * 1.25)
+    tiles = rd._tile_boxes(3, 2, 0.2)
+    assert tiles[0][2] == pytest.approx(1.2 / 3)
+    assert tiles[0][3] == pytest.approx(1.2 / 2)
+
+
+def test_crop_detections_map_from_actual_pixel_bounds(monkeypatch):
+    frame = np.zeros((101, 103, 3), dtype=np.uint8)
+    monkeypatch.setattr(rd, '_motion_region_boxes', lambda *args, **kwargs: [(0.101, 0.201, 0.3, 0.4)])
+    boosted = rd.detect_with_region_boost(_StubDetector(), frame, np.ones((2, 2)), [])[0]['box']
+    assert boosted['x'] == round((10 + 0.4 * (41 - 10)) / 103, 4)
+    assert boosted['y'] == round((20 + 0.4 * (60 - 20)) / 101, 4)
+    tiles = rd.detect_with_tiling(_StubDetector(), frame, [], cols=2, rows=1, overlap=0)
+    assert tiles[0]['box']['x'] == round(0.4 * 51 / 103, 4)
+
+
 def test_region_boxes_skip_full_frame_motion():
     full = np.ones((240, 320), dtype=bool)  # whole frame moving
     assert rd._motion_region_boxes(full, max_regions=3, min_area_frac=0.001, pad_frac=0.2) == []

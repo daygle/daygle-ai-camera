@@ -384,6 +384,15 @@ def test_nms_free_int8_request_loads_fp32_without_quantizing(monkeypatch, tmp_pa
 
 # -- input dtype default ---------------------------------------------------
 
+def test_preprocess_converts_bgr_to_rgb_and_handles_extreme_aspect_ratio():
+    pytest.importorskip("cv2")
+    det = _detector(nms_free=False)
+    frame = np.zeros((1, 2000, 3), dtype=np.uint8)
+    frame[:] = (10, 20, 30)
+    tensor, *_ = det._preprocess(frame)
+    np.testing.assert_allclose(tensor[0, :, 319, 0], np.array([30, 20, 10]) / 255, atol=1e-7)
+
+
 def test_preprocess_defaults_to_float32_when_dtype_unresolved():
     """With no loaded session the input dtype is unresolved (None); the
     preprocess step must still produce a float32 tensor."""

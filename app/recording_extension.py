@@ -537,7 +537,13 @@ def load_recording_detection_track(
         return None
     if not isinstance(data, list):
         return None
-    if not any(isinstance(sample, dict) and sample.get('detections') for sample in data):
+    # A diagnostic-only live track is still useful: it explains rejected
+    # detections and PTZ decisions even when no box survived the live gates.
+    # Preserve the existing marker-only fallback for truly empty tracks.
+    if not any(
+        isinstance(sample, dict) and (sample.get('detections') or sample.get('dropped') or sample.get('ptz'))
+        for sample in data
+    ):
         return None
     return data
 

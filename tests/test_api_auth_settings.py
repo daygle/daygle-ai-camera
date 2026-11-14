@@ -549,11 +549,18 @@ def test_network_settings_card_persists_and_merges(tmp_path, monkeypatch):
         assert system["cloudflare_tunnel"]["tunnel_loopback_only"] is False
         assert system["auth"]["trusted_proxies"] == ["10.0.0.5"]
 
-        # Invalid proxy entries are rejected with 400.
+        # An invalid proxy list must not persist the other field either.
         status, _headers, _body = client.request(
             "/api/settings/system/network",
             method="PUT",
-            json_body={"trusted_proxies": ["not-an-ip"]},
+            json_body={"tunnel_loopback_only": True, "trusted_proxies": ["not-an-ip"]},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 400
+        assert client.request("/api/settings/system/cloudflare-tunnel")[2]["tunnel_loopback_only"] is False
+        status, _headers, _body = client.request(
+            "/api/settings/system/network", method="PUT",
+            json_body={"tunnel_loopback_only": "false"},
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 400
@@ -594,6 +601,33 @@ def test_network_save_keeps_stored_tunnel_token(tmp_path, monkeypatch):
         assert tunnel["configured"] is True
         assert tunnel["autostart"] is True
         assert tunnel["tunnel_loopback_only"] is False
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_tunnel_partial_save_preserves_token_and_explicit_clear_removes_it(tmp_path, monkeypatch):
+    from app.cloudflare_tunnel import CloudflareTunnelSecretStore
+
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    store = CloudflareTunnelSecretStore(database_path)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        headers = {'X-CSRF-Token': csrf}
+        status, _, _ = client.request('/api/settings/system/cloudflare-tunnel', method='PUT',
+                                      json_body={'token': 'test-token', 'autostart': False}, headers=headers)
+        assert status == 200
+        status, _, saved = client.request('/api/settings/system/cloudflare-tunnel', method='PUT',
+                                          json_body={'autostart': True}, headers=headers)
+        assert status == 200 and saved['configured'] and saved['autostart']
+        assert store.read() == 'test-token'
+        status, _, saved = client.request('/api/settings/system/cloudflare-tunnel', method='PUT',
+                                          json_body={'token': '', 'autostart': False}, headers=headers)
+        assert status == 200 and not saved['configured']
+        assert store.read() is None
     finally:
         server.should_exit = True
         thread.join(timeout=5)

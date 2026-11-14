@@ -671,6 +671,47 @@ def test_zone_object_rule_matches_memo_is_not_fooled_by_settings_id_reuse(monkey
     assert zd.zone_object_rule_matches(other, det, action='alert') == []
 
 
+def test_zone_rule_memo_tracks_confidence_aspect_and_detect_window(monkeypatch):
+    from app import zone_detection as zd
+    import app.alerts as alerts_module
+
+    settings = _one_person_zone_settings()
+    rule = settings['detection']['zones'][0]['object_rules'][0]
+    rule.update(min_confidence=0.50004, max_aspect_ratio=1.0,
+                active_start='06:00', active_end='20:00')
+    now = {'value': '12:00'}
+    monkeypatch.setattr(alerts_module, '_now_hm_in_admin_tz', lambda: now['value'])
+    det = {'label': 'person', 'confidence': 0.50003, '_frame_aspect': 1.0,
+           'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}}
+    assert not zd.zone_record_on_detect(det, settings)
+    det['confidence'] = 0.50004
+    assert zd.zone_record_on_detect(det, settings)
+    det['_frame_aspect'] = 2.0
+    assert not zd.zone_record_on_detect(det, settings)
+    det['_frame_aspect'] = 1.0
+    now['value'] = '21:00'
+    assert not zd.zone_record_on_detect(det, settings)
+    now['value'] = '12:00'
+    assert zd.zone_record_on_detect(det, settings)
+
+
+def test_missing_or_invalid_boxes_cannot_match_zone():
+    from app import zone_detection as zd
+    settings = _one_person_zone_settings()
+    for box in (None, {}, {'x': 0, 'y': 0, 'width': 0, 'height': 0},
+                {'x': float('nan'), 'y': 0, 'width': 0.1, 'height': 0.1}):
+        det = {'label': 'person', 'confidence': 0.9, 'box': box}
+        assert not zd.zone_record_on_detect(det, settings)
+        assert zd.zone_object_rule_matches(settings, det, action='alert') == []
+
+
+def test_zero_overlap_threshold_keeps_unrelated_motion():
+    from app import zone_detection as zd
+    motion = {'box': {'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}}
+    obj = {'label': 'person', 'box': {'x': 0.8, 'y': 0.8, 'width': 0.1, 'height': 0.1}}
+    assert zd.filter_motion_detections_by_objects([motion], [obj], min_motion_overlap=0) == [motion]
+
+
 def test_zone_object_rule_matches_label_aliases_human_to_person():
     from app import zone_detection as zd
     settings = {

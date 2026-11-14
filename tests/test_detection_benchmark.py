@@ -167,6 +167,61 @@ def test_post_pipeline_delegates_confirmation_settings(monkeypatch):
     )]
 
 
+def test_post_pipeline_advances_empty_cycles_and_tracks_before_label_floor(monkeypatch):
+    tracking_calls = []
+    confirmation_calls = []
+    monkeypatch.setitem(sys.modules, 'app.object_tracking', SimpleNamespace(
+        update_object_tracks=lambda camera_id, detections: tracking_calls.append(list(detections)) or detections,
+    ))
+    monkeypatch.setitem(sys.modules, 'app.detection_state', SimpleNamespace(
+        confirm_object_detections=lambda camera_id, detections, **kwargs: confirmation_calls.append(list(detections)) or detections,
+    ))
+    args = SimpleNamespace(label_thresholds={'person': 0.5}, confirm_frames=2, confirm_window=3, confirm_iou=0.0)
+    faint = {'label': 'person', 'confidence': 0.4}
+    for detections in ([faint], []):
+        result, stages = evaluate_detection._apply_post_pipeline('eval', detections, args)
+        assert result == []
+        assert stages['after_confirmation'] == 0
+    assert tracking_calls == [[faint], []]
+    assert confirmation_calls == [[], []]
+
+
+def test_empty_inference_cycles_expire_confirmation_history():
+    import app.state as state
+
+    camera_id = 'benchmark-empty-confirmation'
+    args = SimpleNamespace(label_thresholds={}, confirm_frames=2, confirm_window=2, confirm_iou=0.0)
+    try:
+        detection = {'label': 'person', 'confidence': 0.9}
+        assert evaluate_detection._apply_post_pipeline(camera_id, [dict(detection)], args)[0] == []
+        evaluate_detection._apply_post_pipeline(camera_id, [], args)
+        evaluate_detection._apply_post_pipeline(camera_id, [], args)
+        assert evaluate_detection._apply_post_pipeline(camera_id, [dict(detection)], args)[0] == []
+    finally:
+        with state.live_detection_confirm_lock:
+            state.live_detection_confirm_history.pop(camera_id, None)
+        with state._object_tracks_lock:
+            state._object_tracks.pop(camera_id, None)
+
+
+def test_unreadable_image_cannot_shift_ground_truth_frame_indexes(tmp_path, monkeypatch):
+    import cv2
+    (tmp_path / 'bad.png').write_bytes(b'not an image')
+    monkeypatch.setattr(cv2, 'imread', lambda _path: None)
+    with pytest.raises(ValueError, match='could not read input image'):
+        list(evaluate_detection._iter_frames(tmp_path, None))
+
+
+def test_requested_unavailable_model_fails_instead_of_motion_only(monkeypatch):
+    import app.detector
+    monkeypatch.setattr(app.detector, 'OnnxYoloDetector', lambda **kwargs: SimpleNamespace(
+        available=False, unavailable_reason='missing model',
+    ))
+    args = SimpleNamespace(model='missing.onnx', labels='labels', confidence=0.4, input_size=640)
+    with pytest.raises(ValueError, match='detector unavailable.*missing model'):
+        evaluate_detection._build_detector(args)
+
+
 def test_confidence_sweep_writes_comparison_report(tmp_path, monkeypatch):
     output = tmp_path / "reports" / "sweep.json"
 

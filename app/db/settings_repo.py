@@ -111,3 +111,18 @@ class SettingsRepoMixin:
         # Invalidate the read cache so the next get_setting reflects this write.
         self.invalidate_setting_cache(key)
         return value
+
+    def set_settings(self, values: dict[str, Any], updated_at: str) -> None:
+        """Commit a group of settings together, or leave them all unchanged."""
+        updated_at = _normalize_iso_to_utc(updated_at) or updated_at
+        with self.write_slot(), self.connect() as db:
+            for key, value in values.items():
+                db.execute(
+                    """
+                    INSERT INTO app_settings (key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                    """,
+                    (key, json.dumps(value), updated_at),
+                )
+        self.invalidate_setting_cache()

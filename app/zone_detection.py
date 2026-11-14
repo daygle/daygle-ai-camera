@@ -211,9 +211,18 @@ def point_on_segment(x: float, y: float, x1: float, y1: float, x2: float, y2: fl
 
 
 def detection_center_in_zone(detection: dict[str, Any], zone: dict[str, Any]) -> bool:
-    box = detection.get('box') or {}
-    center_x = float(box.get('x') or 0) + float(box.get('width') or 0) / 2
-    center_y = float(box.get('y') or 0) + float(box.get('height') or 0) / 2
+    box = detection.get('box') if isinstance(detection, dict) else None
+    if not isinstance(box, dict):
+        return False
+    try:
+        x, y = float(box['x']), float(box['y'])
+        width, height = float(box['width']), float(box['height'])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if not all(math.isfinite(value) for value in (x, y, width, height)) or width <= 0 or height <= 0:
+        return False
+    center_x = x + width / 2
+    center_y = y + height / 2
     points = zone.get('points') or []
     if isinstance(points, list) and len(points) >= 3:
         return point_in_polygon(center_x, center_y, points)
@@ -702,9 +711,21 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
     box = detection.get('box') if isinstance(detection, dict) else None
     if not isinstance(box, dict):
         return _zone_object_rule_matches_uncached(settings, detection, action)
+    # Rule results also depend on frame aspect and the current detect window.
+    # Include time only when a rule has a window, avoiding a clock lookup for
+    # the common unrestricted case.
+    timed = any(
+        rule.get('active_start') and rule.get('active_end')
+        for zone in camera_policy(settings).zones for rule in zone.rules
+    )
+    if timed:
+        from app.alerts import _now_hm_in_admin_tz
+        minute = _now_hm_in_admin_tz()
+    else:
+        minute = None
     key = (
         action, canonical_label(detection.get('label')),
-        round(float(detection.get('confidence') or 0), 4),
+        float(detection.get('confidence') or 0), float(detection.get('_frame_aspect') or 1.0), minute,
         box.get('x'), box.get('y'), box.get('width'), box.get('height'),
     )
     memo = _memo_for(detection, '_rule_match_memo', settings)
@@ -716,18 +737,17 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
 
 
 def _zone_object_rule_matches_uncached(settings: dict[str, Any], detection: dict[str, Any], action: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
-    # Face-only zones (monitor_objects=False carrying a ``face`` rule) must be
-    # reachable here too: face detections stamped with such a zone's id match
-    # their rule through this matcher. Object detections can never carry that
-    # zone's id -- they are filtered out by the monitor_objects axis upstream
-    # -- so including these zones cannot make an object rule fire.
-    compiled_zones = [
-        compiled_zone for compiled_zone in camera_policy(settings).zones
-        if compiled_zone.zone.get('monitor_objects', True) or _has_enabled_face_rule(compiled_zone.zone)
-    ]
     label = canonical_label(detection.get('label'))
     if not label:
         return []
+    # Face rules are independent of the object axis. A face rule in a
+    # face-only zone must not activate its other object rules, even when an
+    # overlapping object-monitoring zone admitted the same detection.
+    compiled_zones = [
+        compiled_zone for compiled_zone in camera_policy(settings).zones
+        if compiled_zone.zone.get('monitor_objects', True)
+        or (label == 'face' and _has_enabled_face_rule(compiled_zone.zone))
+    ]
     # Hoisted out of the zone/rule loop: one coercion per detection, not one
     # per matched rule.
     confidence = float(detection.get('confidence') or 0)
@@ -812,7 +832,8 @@ def rule_rejection_reason(settings: dict[str, Any], detection: dict[str, Any]) -
         return 'No label'
     compiled_zones = [
         compiled_zone for compiled_zone in camera_policy(settings).zones
-        if compiled_zone.zone.get('monitor_objects', True) or _has_enabled_face_rule(compiled_zone.zone)
+        if compiled_zone.zone.get('monitor_objects', True)
+        or (label == 'face' and _has_enabled_face_rule(compiled_zone.zone))
     ]
     containing = [cz for cz in compiled_zones if _detection_matches_compiled_zone(detection, cz)]
     if not containing:
@@ -1079,7 +1100,7 @@ def filter_motion_detections_by_objects(
         return motion_detections
     return [
         motion for motion in motion_detections
-        if not any(_overlap_ratio(motion.get('box'), object_box) >= threshold for object_box in concrete_boxes)
+        if not any(0 < (overlap := _overlap_ratio(motion.get('box'), object_box)) >= threshold for object_box in concrete_boxes)
     ]
 
 

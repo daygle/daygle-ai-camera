@@ -98,7 +98,10 @@ function filterObjectPriorityDetections(detections, minMotionOverlap = 0.15) {
   return detections.filter((detection) => {
     const label = String(detection?.label || '').trim().toLowerCase();
     const isMotion = detection?.motion_event === true || label === 'motion';
-    return !isMotion || !objectBoxes.some((box) => overlapRatio(detection.box, box) >= threshold);
+    return !isMotion || !objectBoxes.some((box) => {
+      const overlap = overlapRatio(detection.box, box);
+      return overlap > 0 && overlap >= threshold;
+    });
   });
 }
 
@@ -173,10 +176,10 @@ function normalizeDetectionBox(box, frameWidth, frameHeight) {
   }
   if (frameWidth <= 0 || frameHeight <= 0) return null;
   return {
-    x: Math.max(0, Math.min(1, rawX / frameWidth)),
-    y: Math.max(0, Math.min(1, rawY / frameHeight)),
-    width: Math.max(0, Math.min(1, rawWidth / frameWidth)),
-    height: Math.max(0, Math.min(1, rawHeight / frameHeight)),
+    x: rawX / frameWidth,
+    y: rawY / frameHeight,
+    width: rawWidth / frameWidth,
+    height: rawHeight / frameHeight,
   };
 }
 
@@ -221,7 +224,8 @@ function matchDetection(candidates, target) {
   // otherwise every churned sample snapped to its own box instead of
   // interpolating.
   const targetIdPresent = Boolean(targetTrackId) && candidates.some(
-    (candidate) => Number.isInteger(candidate?.track_id) && candidate.track_id === targetTrackId,
+    (candidate) => String(candidate?.label || '').toLowerCase() === targetLabel
+      && Number.isInteger(candidate?.track_id) && candidate.track_id === targetTrackId,
   );
   for (const candidate of candidates) {
     if (String(candidate?.label || '').toLowerCase() !== targetLabel) continue;
@@ -262,6 +266,29 @@ function matchDetection(candidates, target) {
   return nearestDist <= MAX_MATCH_CENTER_DISTANCE_SQ ? nearest : null;
 }
 
+// Reserve exact track identities first, then use geometry only for unmatched
+// detections. A previous box must never be reused for two current objects.
+function matchDetectionPairs(previous, current) {
+  const remaining = previous.slice();
+  const matches = new Array(current.length).fill(null);
+  for (let i = 0; i < current.length; i++) {
+    const target = current[i];
+    if (!Number.isInteger(target?.track_id) || target.track_id <= 0) continue;
+    const index = remaining.findIndex((candidate) => candidate?.track_id === target.track_id
+      && String(candidate?.label || '').toLowerCase() === String(target?.label || '').toLowerCase());
+    if (index !== -1) matches[i] = remaining.splice(index, 1)[0];
+  }
+  for (let i = 0; i < current.length; i++) {
+    if (matches[i]) continue;
+    const match = matchDetection(remaining, current[i]);
+    if (match) {
+      matches[i] = match;
+      remaining.splice(remaining.indexOf(match), 1);
+    }
+  }
+  return matches;
+}
+
 // Projects detections from where they were observed (`curTime`) to a target
 // time, using the per-unit velocity measured between the two most recent
 // samples. All three time arguments must share one clock: the video's
@@ -282,11 +309,12 @@ function projectDetections(prevDetections, curDetections, prevTime, curTime, tar
   if (!(interval > 0)) return curDetections;
   let lead = targetTime - curTime;
   if (lead <= 0) return curDetections;
-  const cap = Number.isFinite(maxLead) ? maxLead : interval;
+  const cap = Number.isFinite(maxLead) ? Math.max(0, maxLead) : interval;
   if (lead > cap) lead = cap;
   const factor = lead / interval;
-  return curDetections.map((curDet) => {
-    const prevDet = matchDetection(prevDetections, curDet);
+  const matches = matchDetectionPairs(prevDetections, curDetections);
+  return curDetections.map((curDet, index) => {
+    const prevDet = matches[index];
     if (!prevDet?.box || !curDet?.box) return curDet;
     const project = (a, b) => Math.max(0, Math.min(1, b + (b - a) * factor));
     return {
@@ -391,8 +419,10 @@ function sampleTrackAtTime(track, t) {
   if (factor <= 0) return prev.detections || [];
   if (factor >= 1) return next.detections || [];
   const matchedPrev = new Set();
-  const interpolated = (next.detections || []).flatMap((nextDet) => {
-    const prevDet = matchDetection(prev.detections || [], nextDet);
+  const nextDetections = next.detections || [];
+  const matches = matchDetectionPairs(prev.detections || [], nextDetections);
+  const interpolated = nextDetections.flatMap((nextDet, index) => {
+    const prevDet = matches[index];
     // Interpolate only observed pairs. A new object must wait for its own
     // sample rather than snap to a future position throughout the interval.
     if (!prevDet) return [];
@@ -419,7 +449,7 @@ function sampleTrackAtTime(track, t) {
 
 // Dimensions are read once per frame by resizeOverlayCanvas and reused by
 // drawDetectionBoxesOnCanvas to avoid triggering forced layout twice.
-let _lastKnownDims = null;
+const _lastKnownDims = new WeakMap();
 
 // eslint-disable-next-line no-unused-vars -- ESLint: exported for playback pages (app/recordings/timeline/live)
 function resizeOverlayCanvas(canvas, referenceEl) {
@@ -427,7 +457,7 @@ function resizeOverlayCanvas(canvas, referenceEl) {
   const dpr = window.devicePixelRatio || 1;
   const cssWidth = Math.max(1, canvas.clientWidth || referenceEl.clientWidth);
   const cssHeight = Math.max(1, canvas.clientHeight || referenceEl.clientHeight);
-  _lastKnownDims = { cssWidth, cssHeight, dpr };
+  _lastKnownDims.set(canvas, { referenceEl, cssWidth, cssHeight, dpr });
   const w = Math.max(1, Math.round(cssWidth * dpr));
   const h = Math.max(1, Math.round(cssHeight * dpr));
   if (canvas.width !== w || canvas.height !== h) {
@@ -440,14 +470,11 @@ function resizeOverlayCanvas(canvas, referenceEl) {
   }
 }
 
-function _readElementDims(referenceEl) {
-  // Use cached dimensions from resizeOverlayCanvas (called first per frame)
-  // to avoid a second forced-layout read of clientWidth/clientHeight.
-  if (_lastKnownDims) {
-    const dims = _lastKnownDims;
-    _lastKnownDims = null; // Consume once so stale values aren't reused
-    return dims;
-  }
+function _readElementDims(canvas, referenceEl) {
+  // Consume dimensions only for the canvas and reference that produced them.
+  const dims = _lastKnownDims.get(canvas);
+  _lastKnownDims.delete(canvas);
+  if (dims?.referenceEl === referenceEl) return dims;
   // Fallback if drawDetectionBoxesOnCanvas is called standalone (live.js path)
   return {
     cssWidth: Math.max(1, referenceEl.clientWidth),
@@ -470,7 +497,7 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
 
   // Reuse dimensions cached by resizeOverlayCanvas (called earlier in the
   // same frame) instead of reading clientWidth/clientHeight again.
-  const { cssWidth, cssHeight, dpr } = _readElementDims(referenceEl);
+  const { cssWidth, cssHeight, dpr } = _readElementDims(canvas, referenceEl);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const srcW = Math.max(1, Number(referenceEl.videoWidth || referenceEl.naturalWidth || cssWidth));
@@ -486,8 +513,8 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
     if (!box) continue;
     const x = Math.min(Math.max(Number(box.x ?? 0), 0), 1);
     const y = Math.min(Math.max(Number(box.y ?? 0), 0), 1);
-    const w = Math.min(Math.max(Number(box.width ?? 0), 0), 1);
-    const h = Math.min(Math.max(Number(box.height ?? 0), 0), 1);
+    const w = Math.min(Math.max(Number(box.x) + Number(box.width) - x, 0), 1 - x);
+    const h = Math.min(Math.max(Number(box.y) + Number(box.height) - y, 0), 1 - y);
     if (w <= 0 || h <= 0) continue;
     const dx = offsetX + x * renderWidth;
     const dy = offsetY + y * renderHeight;

@@ -15,6 +15,7 @@ requireElements([
 const messageEl = document.getElementById('systemMessage');
 let cloudflareTunnelServerStatus = null;
 let cloudflareTunnelTokenDraftTouched = false;
+let cloudflareTunnelAutostartDraftTouched = false;
 
 function titleCaseWords(value) {
   return String(value || '')
@@ -647,7 +648,9 @@ function renderCloudflareTunnel(status) {
   );
 
   const autostart = forms.cloudflareTunnel?.elements.autostart;
-  if (autostart && status?.autostart != null) autostart.value = status.autostart ? 'true' : 'false';
+  if (autostart && !cloudflareTunnelAutostartDraftTouched && status?.autostart != null) {
+    autostart.value = status.autostart ? 'true' : 'false';
+  }
 
   const startBtn = document.getElementById('startCloudflareTunnelBtn');
   const stopBtn = document.getElementById('stopCloudflareTunnelBtn');
@@ -692,18 +695,24 @@ forms.cloudflareTunnel?.elements.token.addEventListener('input', () => {
   );
 });
 
+forms.cloudflareTunnel?.elements.autostart.addEventListener('change', () => {
+  cloudflareTunnelAutostartDraftTouched = true;
+});
+
 forms.cloudflareTunnel?.addEventListener('submit', guard(async (event) => {
   event.preventDefault();
   const saveBtn = document.getElementById('saveCloudflareTunnelBtn');
   if (saveBtn) saveBtn.disabled = true;
   try {
     const data = payloadFor(forms.cloudflareTunnel);
+    if (!cloudflareTunnelTokenDraftTouched) delete data.token;
     const saved = await api('/api/settings/system/cloudflare-tunnel', {
       method: 'PUT',
       body: JSON.stringify(data),
     });
     forms.cloudflareTunnel.elements.token.value = '';
     cloudflareTunnelTokenDraftTouched = false;
+    cloudflareTunnelAutostartDraftTouched = false;
     renderCloudflareTunnel(saved);
     setMessage('Cloudflare Tunnel settings saved.');
   } finally {
@@ -730,6 +739,10 @@ function bindForm(name, label, endpointName = name) {
       const updated = await api(`/api/settings/system/${endpointName}`, { method: 'PUT', body: JSON.stringify(payloadFor(forms[name])) });
       const defaults = name === 'retention' ? FORM_DEFAULTS.recording : FORM_DEFAULTS[name];
       fillForm(forms[name], updated, defaults);
+      if (name === 'live') {
+        syncPixelThresholdPresets(forms.live);
+        syncLiveFieldDependencies();
+      }
       setMessage(`${label} settings saved.`);
     } finally {
       if (btn) btn.disabled = false;

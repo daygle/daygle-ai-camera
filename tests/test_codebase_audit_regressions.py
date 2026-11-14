@@ -6,6 +6,7 @@ import importlib
 import json
 import sqlite3
 import threading
+import time
 import zipfile
 from collections import deque
 from contextlib import closing
@@ -253,6 +254,44 @@ def test_scheduler_creation_is_shared_across_concurrent_callers(monkeypatch):
     assert len(instances) == 8
     assert len(constructed) == 1
     assert all(instance is constructed[0] for instance in instances)
+
+
+def test_monitor_restart_reuses_scheduler_with_unfinished_worker(monkeypatch):
+    monitor = importlib.import_module('app.live_monitor')
+    state = importlib.import_module('app.state')
+    scheduler_module = importlib.import_module('app.inference_scheduler')
+    entered = threading.Event()
+    release = threading.Event()
+    second_started = threading.Event()
+
+    def runner(_image, _frame, settings):
+        if settings['id'] == 'first':
+            entered.set()
+            release.wait(3)
+        else:
+            second_started.set()
+
+    scheduler = scheduler_module.LiveInferenceScheduler(runner, max_workers=1)
+    original_stop = scheduler.stop
+    monkeypatch.setattr(scheduler, 'stop', lambda: original_stop(timeout=0))
+    monkeypatch.setattr(state, 'live_inference_scheduler', scheduler)
+    monkeypatch.setattr(state, 'live_alert_monitor_thread', None)
+    monkeypatch.setattr(state, 'live_alert_monitor_stop', threading.Event())
+    monkeypatch.setattr(monitor, '_scheduler_workers_refreshed_at', time.time())
+    scheduler.start()
+    try:
+        assert scheduler.submit('cam', {'id': 'first'}, lambda: ('frame', {}))
+        assert entered.wait(2)
+        monitor.stop_live_alert_monitor()
+        restarted = monitor.get_live_inference_scheduler()
+        assert restarted is scheduler
+        assert restarted.submit('cam', {'id': 'second'}, lambda: ('frame', {}))
+        assert not second_started.wait(0.1)
+        release.set()
+        assert second_started.wait(2)
+    finally:
+        release.set()
+        original_stop(timeout=2)
 
 
 def test_backup_manifest_size_is_bounded(tmp_path, monkeypatch):

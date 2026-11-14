@@ -163,6 +163,16 @@ def test_headlights_then_car_make_one_car_event(tmp_path, monkeypatch):
     assert [event['id'] for event in main.database.search_events(limit=10)] == [event_id]
 
 
+def test_unconfirmed_object_does_not_hide_overlapping_motion(tmp_path, monkeypatch):
+    main, cycle, labels, _base = _pipeline(tmp_path, monkeypatch)
+    main.database.set_setting('live', {'motion_object_grace_seconds': 0,
+                                      'detection_confirm_frames': 2,
+                                      'detection_confirm_window': 2}, main.utc_now())
+    event_id = cycle(0.0, motion=True, car=True)
+    assert event_id is not None
+    assert labels(event_id) == ['motion']
+
+
 def test_motion_without_an_object_fires_after_the_hold_at_its_start(tmp_path, monkeypatch):
     main, cycle, labels, base = _pipeline(tmp_path, monkeypatch)
     assert cycle(0.0, motion=True) is None

@@ -707,14 +707,13 @@ def stop_live_alert_monitor() -> None:
     if _state.live_alert_monitor_thread and _state.live_alert_monitor_thread.is_alive():
         _state.live_alert_monitor_thread.join(timeout=5)
     _state.live_alert_monitor_thread = None
-    # Stop the shared scheduler too: its workers would otherwise keep serving
-    # queued cameras after detection was supposed to have stopped. Dropping the
-    # instance makes the next ``get_live_inference_scheduler()`` build a fresh
-    # one, so a restart-in-place (settings apply) is clean.
-    scheduler = getattr(_state, 'live_inference_scheduler', None)
-    if scheduler is not None:
-        scheduler.stop()
-        _state.live_inference_scheduler = None
+    # Retain the pool across restarts: a worker can outlive stop's timeout,
+    # and a fresh scheduler would admit another job for the same camera and
+    # exceed the shared concurrency limit. Serialize stop with creation/start.
+    with _scheduler_creation_lock:
+        scheduler = getattr(_state, 'live_inference_scheduler', None)
+        if scheduler is not None:
+            scheduler.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -1579,13 +1578,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _telemetry_rejected[REJECT_CAMERA_SCOPE] = max(
         0, _camera_scope_input - len(object_detections),
     )
-    # Object detector boxes are authoritative over generic motion boxes. This
-    # suppresses only motion regions explained by a concrete object that the
-    # camera actually accepts; unrelated motion remains available for
-    # motion-only rules and recordings.
-    motion_detections = filter_motion_detections_by_objects(motion_detections, object_detections)
-    shadow_motion_detections = filter_motion_detections_by_objects(shadow_motion_detections, object_detections)
-
     # Temporal confirmation gate: require an object label to persist across
     # several detection cycles before it can raise an alert or a recording.
     # Defaults to 1 for minimum first-alert latency; set to 2 with a 3-frame
@@ -1820,6 +1812,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Released motion is stamped and pictured at the moment it began.
     _motion_hold_reason = None
     _priority_objects = list(object_alert_detections) + record_only_detections
+    # Only objects that survived confirmation and can alert or record may
+    # suppress motion. A rejected object must not hide a valid motion event.
+    motion_detections = filter_motion_detections_by_objects(motion_detections, _priority_objects)
+    shadow_motion_detections = filter_motion_detections_by_objects(shadow_motion_detections, _priority_objects)
     _motion_zones = [
         zone for zone in (settings.get('detection') or {}).get('zones', [])
         if zone.get('enabled', True) and zone.get('monitor_motion', True)

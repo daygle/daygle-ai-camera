@@ -536,7 +536,9 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
     if weights_url:
         cached_source = MODELS_DIR / pt_name
         expected_sha256 = info.get('weights_sha256')
-        if cached_source.is_file() and expected_sha256 and _sha256_file(cached_source) != expected_sha256:
+        if not expected_sha256:
+            raise RuntimeError(f'weights_url {weights_url} has no pinned weights_sha256; refusing to use it.')
+        if cached_source.is_file() and _sha256_file(cached_source) != str(expected_sha256).lower():
             # A cached copy from before the hash was pinned (or one altered on
             # disk) is not trusted: discard it and fetch a verified one.
             log_ai_diagnostic(
@@ -570,35 +572,26 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
         "from ultralytics import YOLO\n"
         f"YOLO(sys.argv[1]).export({export_kwargs}, imgsz=int(sys.argv[2]))\n"
     )
-    # Ultralytics always emits ``<weights-stem>.onnx``. Export resolution
-    # variants in an isolated directory so producing ``yolo11n-1024.onnx``
-    # cannot overwrite the legacy ``yolo11n.onnx`` or another variant.
-    export_dir = destination.parent
-    temporary_export_dir: tempfile.TemporaryDirectory[str] | None = None
-    if destination.name != info['onnx']:
-        temporary_export_dir = tempfile.TemporaryDirectory(prefix='daygle-onnx-', dir=str(destination.parent))
-        export_dir = Path(temporary_export_dir.name)
-        # Keep Ultralytics' relative-weight lookup/cache behavior while
-        # isolating the export output. A cached local weight is copied into the
-        # temporary directory; otherwise Ultralytics may download it there.
+    # Every export runs separately from the installed artifact. Validate the
+    # new file before replacing an existing model, even for legacy filenames.
+    temporary_export_dir = tempfile.TemporaryDirectory(prefix='daygle-onnx-', dir=str(destination.parent))
+    export_dir = Path(temporary_export_dir.name)
+    try:
         if cached_weights.is_file():
             shutil.copy2(cached_weights, export_dir / pt_name)
-    try:
         command = [sys.executable, '-c', export_script, pt_name, str(imgsz)]
         result = subprocess.run(command, cwd=export_dir, capture_output=True, text=True, timeout=600, check=False)
         if result.returncode != 0:
             details = (result.stderr or result.stdout or '').strip()
             raise RuntimeError(details or f'Ultralytics export exited with status {result.returncode}.')
         exported = export_dir / info['onnx']
-        if exported != destination and exported.exists():
-            exported.replace(destination)
-        if not destination.exists():
+        if not exported.is_file():
             details = (result.stderr or result.stdout or '').strip()
             raise RuntimeError(details or f'Ultralytics export did not create {destination.name}.')
-        if destination.stat().st_size <= 0:
-            destination.unlink(missing_ok=True)
+        exported_bytes = exported.stat().st_size
+        if exported_bytes <= 0:
             raise RuntimeError('Exported model file is empty.')
-        exported_bytes = destination.stat().st_size
+        exported.replace(destination)
         log_ai_diagnostic(
             'ai_model_install',
             f'Exported {model_name} ONNX to {destination.name} ({exported_bytes} bytes) '
@@ -618,12 +611,10 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
         )
         raise
     finally:
-        if temporary_export_dir is not None:
-            # Ultralytics may download the source weights into its cwd when
-            # they were not already cached. Preserve that download before the
-            # isolated directory is removed, so the next resolution reuses it.
+        try:
+            # Preserve Ultralytics' downloaded built-in weights for reuse.
             downloaded_weights = export_dir / pt_name
-            if downloaded_weights.is_file() and not cached_weights.is_file():
+            if not weights_url and downloaded_weights.is_file() and not cached_weights.is_file():
                 cached_weights.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(downloaded_weights, cached_weights)
                 log_ai_diagnostic(
@@ -631,6 +622,7 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
                     f'Ultralytics downloaded {pt_name} into the export sandbox; cached it for reuse.',
                     details={'step': 'download', 'file': pt_name, 'via': 'ultralytics'},
                 )
+        finally:
             temporary_export_dir.cleanup()
 
 
