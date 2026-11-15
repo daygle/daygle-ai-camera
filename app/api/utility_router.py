@@ -98,6 +98,11 @@ def video_decode_status() -> dict:
     names = {str(camera.get('id') or ''): str(camera.get('name') or camera.get('id') or '') for camera in _state.cameras_config}
     service = getattr(_state, 'recording_service', None)
     decoders = service.ingest_decode_status() if service and hasattr(service, 'ingest_decode_status') else {}
+    # During a storage/recording settings swap ``_state.recording_service`` is
+    # briefly a ``_SentinelRecordingService`` whose methods all return None;
+    # treat anything that isn't a mapping as "no ingest decoders yet".
+    if not isinstance(decoders, dict):
+        decoders = {}
     return {
         'setting': normalize_video_decode(effective_live_config().get('video_decode')),
         **probe_gpu_decode(),
@@ -105,6 +110,7 @@ def video_decode_status() -> dict:
             {'camera_id': entry.get('camera_id'), 'name': names.get(str(entry.get('camera_id')), entry.get('camera_id')),
              'decode': entry.get('decode'), 'gpu_fallback': bool(entry.get('gpu_fallback'))}
             for entry in decoders.values()
+            if isinstance(entry, dict)
         ],
     }
 

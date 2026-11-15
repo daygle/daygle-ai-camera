@@ -79,6 +79,11 @@ class _SentinelRecordingService:
     def should_record(self, *args: Any, **kwargs: Any) -> tuple[bool, str, str | None]:
         return (False, '', None)
 
+    def ingest_decode_status(self) -> dict[str, dict[str, Any]]:
+        # System > Health iterates this mapping; ``None`` would 500 the
+        # ``/api/system/resources`` endpoint during the swap window.
+        return {}
+
     @staticmethod
     def _no_op(*args: Any, **kwargs: Any) -> Any:
         # Match the return-shape of the most-common monitor queries so the
