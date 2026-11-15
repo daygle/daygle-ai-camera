@@ -71,3 +71,16 @@ test('entries can be filtered by a grouped Source', () => {
     assert.match(js, new RegExp(`\\n  ${value}: '`), `${value} has no SOURCE_LABELS entry`);
   }
 });
+
+test('Source labels are Title Case full words', () => {
+  const labels = js.match(/const SOURCE_LABELS = \{([\s\S]*?)\n\};/)[1];
+  for (const [, label] of labels.matchAll(/: '([^']+)'/g)) {
+    for (const word of label.split(/[\s-]+/)) {
+      if (word === 'and') continue;
+      assert.match(word, /^[A-Z]/, `"${label}" is not Title Case`);
+    }
+    assert.doesNotMatch(label, /\bApp\b|&/, `"${label}" uses an abbreviation`);
+  }
+  // Unknown sources are title-cased too rather than shown as raw keys.
+  assert.match(js, /charAt\(0\)\.toUpperCase\(\)/);
+});
