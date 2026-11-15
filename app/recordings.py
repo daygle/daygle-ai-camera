@@ -2894,6 +2894,14 @@ class RecordingService:
         duration_seconds: float,
         camera_id: str | None = None,
     ) -> tuple[bool, bool]:
+        # A stream the ingest worker probed as carrying no audio track (it writes
+        # ``.no_audio`` once) never produces ``aud-*.wav`` sidecars, so this
+        # window is always empty. Skip the mux outright rather than staging an
+        # empty window and logging "No readable audio sidecars" for every clip
+        # of a camera that simply has no sound.
+        if self._audio_disabled_marker(camera_key).exists():
+            logger.debug('Audio mux skipped for %s: the stream has no audio track.', camera_key)
+            return False, False
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg or duration_seconds <= 0:
             return False, False
@@ -2950,12 +2958,24 @@ class RecordingService:
             # live sidecar between probe and stage); probing once here instead
             # of before AND after staging halves the ffprobe spawns per event
             # (~one per second of clip window).
-            selected_audio = self._audio_segment_starts(self._readable_audio_segments(selected_audio))
+            staged_audio = selected_audio
+            selected_audio = self._audio_segment_starts(self._readable_audio_segments(staged_audio))
             if not selected_audio:
-                logger.info(
-                    'No readable audio sidecars remained for %s before mux; keeping silent video clip.',
-                    camera_key,
-                )
+                # Say whether the window held no sidecars at all or held some
+                # that could not be read: a stalled segmenter and a window of
+                # still-being-written WAVs need different fixes.
+                if staged_audio:
+                    logger.info(
+                        'No readable audio sidecars remained for %s before mux (%d staged, none readable); '
+                        'keeping silent video clip.',
+                        camera_key,
+                        len(staged_audio),
+                    )
+                else:
+                    logger.info(
+                        'No audio sidecars in this clip window for %s; keeping silent video clip.',
+                        camera_key,
+                    )
                 return False, False
 
             # The mux writes a fresh copy of the clip (video stream-copied,

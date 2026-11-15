@@ -20,6 +20,7 @@ without an installed ffmpeg.
 from __future__ import annotations
 
 import importlib
+import logging
 import threading
 import time
 from pathlib import Path
@@ -205,6 +206,74 @@ def test_prebuffer_worker_skips_audio_when_marker_already_present(tmp_path, monk
     assert any(
         "segment-" in str(a) and str(a).endswith(".mp4") for a in captured[0]
     ), "video segments preserved"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Clip finalization: a marked camera never runs the audio mux
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_audio_mux_skips_a_camera_marked_as_having_no_audio(tmp_path, monkeypatch, caplog):
+    """A video-only stream must not attempt the audio mux for every clip.
+
+    With the marker present there is no ``aud-*.wav`` sidecar to find, so the
+    mux used to log "No readable audio sidecars remained ... keeping silent
+    video clip" once per event clip - a line that reads like a fault on a
+    camera whose stream simply carries no sound.
+    """
+    recordings_module = importlib.import_module("app.recordings")
+    from app.recordings import RecordingService
+
+    service = RecordingService(
+        {
+            "storage": {"recordings_dir": str(tmp_path / "rec")},
+            "recording": {},
+        }
+    )
+    camera_key = RecordingService._camera_key("cam")
+    audio_dir = service.audio_dir / camera_key
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    (audio_dir / RecordingService.NO_AUDIO_MARKER_FILENAME).touch()
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+    # The marker check must come before ffmpeg is needed, so this test neither
+    # depends on an installed ffmpeg nor spawns a process.
+    monkeypatch.setattr(recordings_module.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+
+    with caplog.at_level(logging.INFO):
+        assert service._mux_prebuffer_audio("cam", video, time.time() - 1, 1.0) is False
+
+    assert "No readable audio sidecars" not in caplog.text
+    assert "No audio sidecars in this clip window" not in caplog.text
+    # Skipped before staging, so no mux staging directory was created.
+    assert str(service.prebuffer_dir) not in caplog.text
+
+
+def test_audio_mux_reports_an_empty_window_separately(tmp_path, monkeypatch, caplog):
+    """No sidecars at all is a different problem from unreadable sidecars.
+
+    Without the marker the camera is still expected to produce audio, so the
+    mux stays informative: an empty window means the segmenter wrote nothing,
+    which the old single message could not be told apart from damaged WAVs.
+    """
+    recordings_module = importlib.import_module("app.recordings")
+    from app.recordings import RecordingService
+
+    service = RecordingService(
+        {
+            "storage": {"recordings_dir": str(tmp_path / "rec")},
+            "recording": {},
+        }
+    )
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+    monkeypatch.setattr(recordings_module.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+
+    with caplog.at_level(logging.INFO):
+        assert service._mux_prebuffer_audio("cam", video, time.time() - 1, 1.0) is False
+
+    assert "No audio sidecars in this clip window for cam" in caplog.text
+    assert "No readable audio sidecars remained" not in caplog.text
 
 
 # ─────────────────────────────────────────────────────────────────────────────
