@@ -16,10 +16,11 @@ id, but there is still only one cat in view, so it does not alert again.
 
 A key is forgotten once it has been unseen for the absence window (the
 recording's extension step, i.e. how long a clip keeps going after its last
-sighting) AND the recording it was seen in is no longer capturing. So within
-one recording a returning object stays covered; after the clip has ended,
-it raises a new event (and a new recording). Cameras that do not record use
-the same absence window on its own.
+sighting). That holds even while the clip that first saw the object is still
+capturing: an animal that leaves and comes back to the same footage is a new
+sighting, so it raises a new event (linked to the ongoing clip) and its alert
+rule -- including AI verification -- runs again. A subject that stays in view
+never expires, because every cycle it is seen refreshes ``last_seen``.
 
 Rising above one object of a key must hold for
 ``SECOND_OBJECT_CONFIRM_CYCLES`` consecutive sightings, so a detector drawing
@@ -57,10 +58,16 @@ def absence_seconds(recording_config: dict[str, Any] | None) -> float:
     return max(MIN_ABSENCE_SECONDS, value)
 
 
-def _expire(scope: dict[str, dict[str, Any]], now: float, absence: float, recording_id: int | None) -> None:
+def _expire(scope: dict[str, dict[str, Any]], now: float, absence: float) -> None:
+    """Forget every key unseen for longer than ``absence``.
+
+    The clip a key was seen in does not keep it alive: a return to the same
+    footage is a new sighting (see the module docstring), so its alert and AI
+    verification run again. ``observe_presence`` still records the recording id
+    on each entry because ``reopen_rejected`` compares it.
+    """
     for key in [k for k, entry in scope.items()
-                if now - float(entry.get('last_seen') or 0) > absence
-                and (recording_id is None or entry.get('recording_id') != recording_id)]:
+                if now - float(entry.get('last_seen') or 0) > absence]:
         del scope[key]
 
 
@@ -74,14 +81,16 @@ def observe_presence(
 ) -> set[str]:
     """Record this cycle's per-key object counts; return the keys that are new.
 
-    ``recording_id`` is the camera's capturing clip, if any: a key seen while
-    it captures stays covered for as long as that clip does.
+    ``recording_id`` is the camera's capturing clip, if any. It is stored on
+    each entry (``reopen_rejected`` compares it) but does not extend coverage: a
+    key unseen past ``absence`` is forgotten even mid-clip, so its return opens
+    a new event in the same footage.
     """
     now = time.time() if now is None else now
     new: set[str] = set()
     with _state.live_event_presence_lock:
         scope = _state.live_event_presence.setdefault(camera_id, {})
-        _expire(scope, now, absence, recording_id)
+        _expire(scope, now, absence)
         for key, count in counts.items():
             if not key or count <= 0:
                 continue

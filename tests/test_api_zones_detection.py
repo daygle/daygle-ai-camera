@@ -904,7 +904,8 @@ def test_motion_near_a_recorded_subject_is_not_a_new_event():
 def test_ongoing_activity_stays_one_event_until_it_has_been_gone(tmp_path, monkeypatch):
     """No cooldown to outlast: the same person seen on and off for minutes is
     one event; only after the person has been gone longer than the absence
-    window (with no recording keeping it) is the next sighting a new event."""
+    window (a still-capturing clip included) is the next sighting a new
+    event."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
     import app.live_monitor as _lm

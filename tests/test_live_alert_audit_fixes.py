@@ -201,21 +201,26 @@ def test_presence_different_type_fires_immediately(_clean_presence):
     assert _presence({'cat': 1, 'person': 1}, now=1.0) == {'person'}
 
 
-def test_presence_forgets_after_absence_window_without_a_recording(_clean_presence):
+def test_presence_forgets_after_absence_window(_clean_presence):
     assert _presence({'cat': 1}, now=0.0) == {'cat'}
     assert _presence({'cat': 1}, now=40.0, absence=45.0) == set(), 'unseen 40s: still the same cat'
-    assert _presence({'cat': 1}, now=86.0, absence=45.0) == {'cat'}, 'unseen 46s and no recording: new event'
+    assert _presence({'cat': 1}, now=86.0, absence=45.0) == {'cat'}, 'unseen 46s: new event'
 
 
-def test_presence_stays_covered_while_its_recording_captures(_clean_presence):
-    """A cat back after the absence window, while the clip it was seen in is
-    still capturing (other activity kept it going), is the same recording:
-    no new event. Once that clip has ended it is new footage: new event."""
+def test_presence_reappearance_in_the_same_recording_is_new(_clean_presence):
+    """A cat back after the absence window is a new sighting, even while the
+    clip it was first seen in is still capturing (other activity kept it going).
+
+    The return raises a new event on that clip, so its alert rule runs again and
+    AI verification checks the return too: a confirmed sighting does not cover
+    every later appearance in the same footage.
+    """
     assert _presence({'cat': 1}, now=0.0, recording_id=7) == {'cat'}
+    assert _presence({'cat': 1}, now=40.0, recording_id=7) == set(), 'seen continuously: same sighting'
     assert _presence({}, now=100.0, recording_id=7) == set()
-    assert _presence({'cat': 1}, now=101.0, recording_id=7) == set()
-    assert _presence({}, now=300.0, recording_id=8) == set()
-    assert _presence({'cat': 1}, now=301.0, recording_id=8) == {'cat'}
+    assert _presence({'cat': 1}, now=101.0, recording_id=7) == {'cat'}, 'unseen past the window mid-clip'
+    # Once the clip has ended the same absence rule still opens a new event.
+    assert _presence({'cat': 1}, now=200.0, recording_id=None) == {'cat'}
 
 
 def test_presence_rejected_object_is_rechecked_once(_clean_presence):

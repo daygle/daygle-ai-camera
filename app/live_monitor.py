@@ -1996,7 +1996,8 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # before; a different type raises its own at once. Counting (not track ids)
     # keeps an object that briefly hides - and comes back under a new track id -
     # from alerting again. A type is forgotten once unseen for the extension
-    # step and its recording has ended, so it re-alerts only in new footage.
+    # step, even while its clip is still capturing, so an animal that leaves and
+    # returns to the same footage alerts (and is AI-verified) again.
     # This gates EVENT creation for alert-only cameras too, which would
     # otherwise create an event + snapshot every detection cycle.
     _presence_counts: dict[str, int] = {}

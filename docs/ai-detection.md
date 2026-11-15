@@ -400,7 +400,9 @@ missing alert does not necessarily mean ONNX missed the object. The audit of
   trusting track ids. A second object of the same type alerts when both are in
   view at once (the higher count must hold for two sightings); a different type
   alerts straight away. A type is forgotten once it has been unseen for the
-  recording's extension step and its recording has ended. Faces use the same
+  recording's extension step, even while that clip is still capturing, so an
+  animal that leaves and returns to the same footage raises a new event and is
+  AI-verified and notified again. Faces use the same
   gate: one alert per recognised person, and one per unknown-face rule unless
   more strangers are in view together than before. Sound and behaviour rules
   keep their own cooldowns.

@@ -538,11 +538,14 @@ def test_continuing_track_rolls_over_at_max_clip_without_waiting_for_cooldown(tm
         main._state._object_tracks.pop(camera, None)
 
 
-def test_one_cat_event_per_recording_and_a_person_still_fires(tmp_path, monkeypatch):
-    """A cat wandering the yard is ONE cat event for its recording, even when
-    it drops out of sight and the tracker re-acquires it under a new track id;
-    a person walking into the same footage still gets its own event (and only
-    the person's alert) linked to the same clip."""
+def test_cat_return_in_the_same_recording_is_new_and_a_person_still_fires(tmp_path, monkeypatch):
+    """A cat that comes back to the same footage is a new sighting.
+
+    Gone longer than the absence window - even while the clip it was in still
+    captures and under a new track id - it raises a new event, so its alert
+    (and AI verification) runs again. A person walking into the same footage
+    still gets its own event (and only the person's alert) on that clip.
+    """
     _load_app(tmp_path, monkeypatch)
     import app.main as main
     import app.utils
@@ -608,13 +611,18 @@ def test_one_cat_event_per_recording_and_a_person_still_fires(tmp_path, monkeypa
         assert alert_labels(cat_event) == ['cat']
         assert len(started) == 1
         recording_id = started[0]
-        # The same cat keeps wandering, out of sight for longer than the absence
-        # window (and under a new track id) while the clip it is in still
-        # captures: still one cat event for this recording.
+        # The cat comes back after being out of sight longer than the absence
+        # window (and under a new track id) while the clip it was in still
+        # captures: a new sighting, so a new event with its own alert, linked
+        # to the same clip (no second capture is started).
         with main._state.live_event_presence_lock:
             main._state.live_event_presence[camera]['cat']['last_seen'] = now - 600
         main._state._object_tracks.pop(camera, None)
-        assert run() is None
+        return_event = run()
+        assert return_event is not None and return_event != cat_event
+        assert main.database.get_event(return_event)['recording_id'] == recording_id
+        assert len(started) == 1
+        assert alert_labels(return_event) == ['cat'], 'the return is alerted (and verified) again'
         # A person enters the cat's footage: its own event, same recording.
         person_event = run()
         assert person_event is not None and person_event != cat_event
