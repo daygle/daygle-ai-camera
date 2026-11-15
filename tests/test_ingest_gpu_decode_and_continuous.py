@@ -268,3 +268,26 @@ def test_start_continuous_attaches_to_a_live_ingest(tmp_path, monkeypatch):
     finally:
         alive.set()
         thread.join(timeout=2)
+
+
+def test_video_decode_status_tolerates_sentinel_recording_service(monkeypatch):
+    """During a storage/recording settings swap the recording service is a
+    ``_SentinelRecordingService``; System > Health must not 500 on it."""
+    from app.api import utility_router
+    from app.camera_lifecycle import _SentinelRecordingService
+    import app.state as _state
+
+    sentinel = _SentinelRecordingService()
+    assert sentinel.ingest_decode_status() == {}
+
+    monkeypatch.setattr(_state, 'recording_service', sentinel, raising=False)
+    monkeypatch.setattr(_state, 'cameras_config', [], raising=False)
+    monkeypatch.setattr(video_decode, 'probe_gpu_decode', lambda: {})
+    assert utility_router.video_decode_status()['cameras'] == []
+
+    class _NoneReturning:
+        def ingest_decode_status(self):
+            return None
+
+    monkeypatch.setattr(_state, 'recording_service', _NoneReturning(), raising=False)
+    assert utility_router.video_decode_status()['cameras'] == []
