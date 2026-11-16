@@ -75,7 +75,7 @@
         <div class="settings-section-icon" aria-hidden="true">🦙</div>
         <div>
           <h2 id="ollamaTitle">Local Model (Ollama)</h2>
-          <p class="settings-section-subtitle">Install Ollama on this server and download a vision model, without a terminal. Ollama listens on this server only (127.0.0.1) and uses an NVIDIA GPU when its driver is installed. Already run your own model server? Skip this and set the Server URL below.</p>
+          <p class="settings-section-subtitle">Install Ollama on this server, download vision models and keep both up to date, without a terminal. Ollama listens on this server only (127.0.0.1) and uses an NVIDIA GPU when its driver is installed. Already run your own model server? Skip this and set the Server URL below.</p>
         </div>
       </div>
       <p id="ollamaStatus" class="ollama-status muted" aria-live="polite">Checking for Ollama…</p>
@@ -84,14 +84,19 @@
         <button id="ollamaStartBtn" class="secondary" type="button" hidden>Start</button>
         <button id="ollamaRestartBtn" class="secondary" type="button" hidden>Restart</button>
         <button id="ollamaStopBtn" class="secondary" type="button" hidden>Stop</button>
+        <button id="ollamaCheckBtn" class="secondary" type="button" hidden>Check for Updates</button>
       </div>
+      <p id="ollamaCheckedText" class="muted ollama-checked" aria-live="polite"></p>
       <details id="ollamaInstallLogBox" class="ollama-install-log" hidden>
         <summary>Install log</summary>
         <pre id="ollamaInstallLog" class="update-output"></pre>
       </details>
 
       <div id="ollamaModels" class="ollama-models" hidden>
-        <h3 class="settings-group-title">Models</h3>
+        <div class="ollama-models-head">
+          <h3 class="settings-group-title">Models</h3>
+          <button id="ollamaUpdateAllBtn" class="btn-info" type="button" hidden>Update All</button>
+        </div>
         <div class="audit-table-wrap">
           <table class="audit-table ollama-model-table">
             <thead><tr><th scope="col">Model</th><th scope="col">Size</th><th scope="col">Images</th><th scope="col" aria-label="Actions"></th></tr></thead>

@@ -49,3 +49,36 @@ test('model rows escape names and disable Use for models that cannot read images
   assert.match(row, /disabled title="This model cannot read images\."/);
   assert.match(row, /2\.0 GB/);
 });
+
+test('version comparison and the update summary line', () => {
+  const context = loadOllamaScript();
+  assert.equal(vm.runInContext("ollamaNewer('0.41.0', '0.40.16')", context), true);
+  assert.equal(vm.runInContext("ollamaNewer('0.40.16', '0.40.16')", context), false);
+  assert.equal(vm.runInContext("ollamaNewer('0.40.9', '0.40.16')", context), false);
+  assert.equal(vm.runInContext("ollamaNewer(null, '0.40.16')", context), false);
+  context.state = {
+    installed: true, version: '0.40.16', latest_version: '0.40.16', update_available: false,
+    release_checked_at: Date.now() / 1000, models_checked_at: Date.now() / 1000,
+    models: [{ name: 'a', update_available: true }, { name: 'b', update_available: false }],
+  };
+  const text = vm.runInContext('ollamaCheckedText(state)', context);
+  assert.match(text, /Checked for updates just now\./);
+  assert.match(text, /Ollama is up to date\./);
+  assert.match(text, /1 model update available\./);
+});
+
+test('an outdated model gets an Update button and badge', () => {
+  const context = loadOllamaScript();
+  context.state = { openai_url: 'http://127.0.0.1:11434/v1' };
+  const row = vm.runInContext("ollamaModelRow(state, { name: 'gemma3:4b', size: 1, vision: true, update_available: true }, false)", context);
+  assert.match(row, /data-ollama-update="gemma3:4b"/);
+  assert.match(row, /Update available/);
+  const current = vm.runInContext("ollamaModelRow(state, { name: 'gemma3:4b', size: 1, vision: true, update_available: false }, false)", context);
+  assert.doesNotMatch(current, /data-ollama-update/);
+});
+
+test('an unmanaged Ollama with a newer release is told to update itself', () => {
+  const context = loadOllamaScript();
+  context.state = { installed: true, reachable: true, managed: false, binary: '/usr/bin/ollama', version: '0.30.0', latest_version: '0.41.0', models: [{}], install: {} };
+  assert.match(vm.runInContext('ollamaStatusText(state)', context), /0\.41\.0 is available, but this Ollama was installed outside Daygle/);
+});

@@ -67,6 +67,19 @@ MAX_MODEL_NAME_LENGTH = 200
 
 SERVICE_ACTIONS = ('start', 'stop', 'restart')
 
+# Update checks. The latest Ollama release comes from GitHub (the same source
+# the installer downloads from); its checksum comes from that release's
+# sha256sum.txt. A model's newest version is its manifest on the Ollama
+# registry: Ollama's local digest for a model is the SHA-256 of that
+# manifest, so a different remote hash means a newer model is published.
+GITHUB_LATEST_RELEASE_URL = 'https://api.github.com/repos/ollama/ollama/releases/latest'
+GITHUB_RELEASE_FILE_URL = 'https://github.com/ollama/ollama/releases/download/v{version}/{name}'
+OLLAMA_REGISTRY_URL = 'https://registry.ollama.ai'
+UPDATE_CHECK_TTL_SECONDS = 6 * 3600
+UPDATE_CHECK_TIMEOUT_SECONDS = 15.0
+MANIFEST_ACCEPT = 'application/vnd.docker.distribution.manifest.v2+json'
+USER_AGENT = 'daygle-ai-camera-ollama/1.0'
+
 # Vision models offered on the AI page, smallest-memory last. ``memory_gb`` is
 # the approximate GPU memory with the default quantisation.
 SUGGESTED_MODELS: tuple[dict[str, Any], ...] = (
@@ -114,6 +127,67 @@ def _version_tuple(version: str | None) -> tuple[int, ...]:
         return tuple(int(part) for part in str(version or '').split('.')[:3])
     except ValueError:
         return ()
+
+
+def release_asset_name(machine: str | None = None) -> str | None:
+    """The release archive install_ollama.sh installs on this CPU."""
+    import platform
+
+    arch = (machine or platform.machine()).lower()
+    if arch in ('x86_64', 'amd64'):
+        return 'ollama-linux-amd64.tar.zst'
+    if arch in ('aarch64', 'arm64'):
+        return 'ollama-linux-arm64.tar.zst'
+    return None
+
+
+def model_manifest_path(name: str) -> str | None:
+    """Registry manifest path for an Ollama model name, or ``None`` when the
+    model comes from another registry (e.g. hf.co) that is not checked."""
+    base, _, tag = name.partition(':')
+    tag = tag or 'latest'
+    parts = base.split('/')
+    if len(parts) == 3 and parts[0] == 'registry.ollama.ai':
+        parts = parts[1:]
+    if len(parts) == 1:
+        parts = ['library', parts[0]]
+    if len(parts) != 2 or '.' in parts[0]:
+        return None
+    return f'/v2/{parts[0]}/{parts[1]}/manifests/{tag}'
+
+
+def _tagged(name: str) -> str:
+    return name if ':' in name else f'{name}:latest'
+
+
+class UpdateSource:
+    """Internet lookups for update checks (GitHub releases, Ollama registry)."""
+
+    def _get(self, url: str, accept: str | None = None) -> bytes:
+        headers = {'User-Agent': USER_AGENT}
+        if accept:
+            headers['Accept'] = accept
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=UPDATE_CHECK_TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed https hosts
+            return response.read()
+
+    def latest_version(self) -> str | None:
+        payload = json.loads(self._get(GITHUB_LATEST_RELEASE_URL, 'application/vnd.github+json') or b'{}')
+        return _parse_version(str(payload.get('tag_name') or '')) if isinstance(payload, dict) else None
+
+    def release_checksums(self, version: str) -> dict[str, str]:
+        text = self._get(GITHUB_RELEASE_FILE_URL.format(version=version, name='sha256sum.txt')).decode('utf-8', 'replace')
+        checksums = {}
+        for line in text.splitlines():
+            match = re.match(r'^([0-9a-fA-F]{64})\s+\*?(?:\./)?(\S+)$', line.strip())
+            if match:
+                checksums[match.group(2)] = match.group(1).lower()
+        return checksums
+
+    def manifest_digest(self, path: str) -> str:
+        import hashlib
+
+        return hashlib.sha256(self._get(f'{OLLAMA_REGISTRY_URL}{path}', MANIFEST_ACCEPT)).hexdigest()
 
 
 class OllamaHttp:
@@ -175,6 +249,8 @@ class OllamaManager:
         in_container: bool | None = None,
         is_root: bool | None = None,
         which: Callable[[str], str | None] = shutil.which,
+        updates: UpdateSource | None = None,
+        asset_name: str | None = None,
     ) -> None:
         self.base_url = (base_url or os.environ.get(OLLAMA_URL_ENV) or DEFAULT_OLLAMA_URL).rstrip('/')
         self.http = http or OllamaHttp(self.base_url)
@@ -189,8 +265,15 @@ class OllamaManager:
         self._lock = threading.Lock()
         self._install: dict[str, Any] = {'running': False, 'started_at': None, 'finished_at': None, 'ok': None, 'error': None}
         self._install_log: collections.deque[str] = collections.deque(maxlen=LOG_TAIL_LINES)
-        self._pull: dict[str, Any] = {'running': False, 'model': None, 'status': None, 'completed': 0, 'total': 0,
-                                      'started_at': None, 'finished_at': None, 'ok': None, 'error': None}
+        self._pull: dict[str, Any] = self._pull_state(False, None, 'download', [])
+        self._updates = updates or UpdateSource()
+        self._asset = asset_name if asset_name is not None else release_asset_name()
+        # Latest Ollama release: version, the checksum of this CPU's archive,
+        # when it was checked and any error.
+        self._release: dict[str, Any] = {'latest_version': None, 'sha256': None, 'checked_at': None, 'error': None}
+        # Per model: the registry's current manifest digest and when it was read.
+        self._remote_digests: dict[str, dict[str, Any]] = {}
+        self._models_checked_at: float | None = None
 
     # -- helpers ---------------------------------------------------------
 
@@ -259,6 +342,7 @@ class OllamaManager:
             models.append({
                 'name': str(item['name']),
                 'size': int(item.get('size') or 0),
+                'digest': str(item.get('digest') or ''),
                 'modified_at': str(item.get('modified_at') or ''),
                 'parameter_size': str(details.get('parameter_size') or ''),
                 'quantization': str(details.get('quantization_level') or ''),
@@ -296,8 +380,22 @@ class OllamaManager:
             install = dict(self._install)
             install['log'] = list(self._install_log)
             pull = dict(self._pull)
+            release = dict(self._release)
+            remote = {name: dict(info) for name, info in self._remote_digests.items()}
+            models_checked_at = self._models_checked_at
+        for model in models:
+            info = remote.get(_tagged(model['name']))
+            if info is None:
+                model['update_available'] = None
+                model['update_error'] = None
+            else:
+                digest = info.get('digest')
+                model['update_available'] = bool(digest and model['digest'] and digest != model['digest']) if not info.get('error') else None
+                model['update_error'] = info.get('error')
         install_reason = self.install_unavailable_reason()
-        update_available = bool(managed and version and _version_tuple(version) < _version_tuple(PINNED_VERSION))
+        target = self._install_target(release)
+        installed_version = version or api_version
+        update_available = bool(managed and installed_version and _version_tuple(installed_version) < _version_tuple(target['version']))
         return {
             'url': self.base_url,
             'openai_url': f'{self.base_url}/v1',
@@ -305,6 +403,11 @@ class OllamaManager:
             'binary': binary,
             'version': version or api_version,
             'pinned_version': PINNED_VERSION,
+            'latest_version': release['latest_version'],
+            'install_version': target['version'],
+            'release_checked_at': release['checked_at'],
+            'release_check_error': release['error'],
+            'models_checked_at': models_checked_at,
             'managed': managed,
             'update_available': update_available,
             'service': self._service_state() if binary else None,
@@ -318,6 +421,78 @@ class OllamaManager:
             'models_error': models_error,
             'suggested_models': [dict(model) for model in SUGGESTED_MODELS],
         }
+
+    # -- updates -------------------------------------------------------------
+
+    def _install_target(self, release: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The version an install or update installs: the newest release
+        whose checksum is known, never older than the pinned one."""
+        release = release if release is not None else self._release
+        latest = release.get('latest_version')
+        if latest and release.get('sha256') and _version_tuple(latest) > _version_tuple(PINNED_VERSION):
+            return {'version': latest, 'sha256': release['sha256']}
+        return {'version': PINNED_VERSION, 'sha256': None}
+
+    def _check_release(self) -> None:
+        if not self._asset:
+            with self._lock:
+                self._release.update({'checked_at': _now(), 'error': 'No Ollama build for this CPU.'})
+            return
+        try:
+            latest = self._updates.latest_version()
+            if not latest:
+                raise ValueError('GitHub did not report a version.')
+            sha256 = None
+            error = None
+            if _version_tuple(latest) > _version_tuple(PINNED_VERSION):
+                sha256 = self._updates.release_checksums(latest).get(self._asset)
+                if not sha256:
+                    error = f'Ollama {latest} has no checksum for {self._asset}; it cannot be installed from here.'
+            release = {'latest_version': latest, 'sha256': sha256, 'checked_at': _now(), 'error': error}
+        except Exception as exc:  # noqa: BLE001 - network, TLS, rate limit, bad JSON: all "unknown"
+            logger.warning('Ollama release check failed (%s).', exc)
+            with self._lock:
+                self._release.update({'checked_at': _now(), 'error': 'Could not check GitHub for a newer Ollama.'})
+            return
+        with self._lock:
+            self._release = release
+
+    def _check_models(self) -> None:
+        try:
+            models = self.list_models() if self.api_version() else []
+        except (OSError, ValueError, urllib.error.URLError):
+            models = []
+        remote: dict[str, dict[str, Any]] = {}
+        for model in models:
+            name = _tagged(model['name'])
+            path = model_manifest_path(name)
+            if path is None:
+                remote[name] = {'digest': None, 'error': 'Not on the Ollama registry; not checked.'}
+                continue
+            try:
+                remote[name] = {'digest': self._updates.manifest_digest(path), 'error': None}
+            except urllib.error.HTTPError as exc:
+                remote[name] = {'digest': None, 'error': 'No longer on the Ollama registry.' if exc.code == 404 else f'Registry error (HTTP {exc.code}).'}
+            except Exception as exc:  # noqa: BLE001 - reported per model
+                remote[name] = {'digest': None, 'error': f'Could not reach the Ollama registry ({type(exc).__name__}).'}
+        with self._lock:
+            self._remote_digests = remote
+            self._models_checked_at = _now()
+
+    def check_updates(self, force: bool = False) -> dict[str, Any]:
+        """Look for a newer Ollama and newer versions of the installed models.
+
+        Results are kept for ``UPDATE_CHECK_TTL_SECONDS`` unless ``force``, so
+        opening the page does not query GitHub every time."""
+        now = _now()
+        with self._lock:
+            release_checked = self._release.get('checked_at')
+            models_checked = self._models_checked_at
+        if force or not release_checked or now - release_checked > UPDATE_CHECK_TTL_SECONDS:
+            self._check_release()
+        if force or not models_checked or now - models_checked > UPDATE_CHECK_TTL_SECONDS:
+            self._check_models()
+        return self.status()
 
     # -- install -------------------------------------------------------------
 
@@ -333,11 +508,17 @@ class OllamaManager:
                 raise RuntimeError('An Ollama install is already running.')
             self._install = {'running': True, 'started_at': _now(), 'finished_at': None, 'ok': None, 'error': None}
             self._install_log.clear()
-        threading.Thread(target=self._run_install, name='ollama-install', daemon=True).start()
+        target = self._install_target()
+        threading.Thread(target=self._run_install, args=(target,), name='ollama-install', daemon=True).start()
         return self.status()
 
-    def _run_install(self) -> None:
-        command = self._privileged(['bash', str(self.install_script)])
+    def _run_install(self, target: dict[str, Any] | None = None) -> None:
+        # The version and checksum come from this server's own release check,
+        # never from the request. The pinned release needs neither.
+        env_args = []
+        if target and target.get('sha256') and target['version'] != PINNED_VERSION:
+            env_args = ['env', f'DAYGLE_OLLAMA_VERSION={target["version"]}', f'DAYGLE_OLLAMA_SHA256={target["sha256"]}']
+        command = self._privileged([*env_args, 'bash', str(self.install_script)])
         logger.info('Installing Ollama: %s', ' '.join(command))
         ok = False
         error = None
@@ -409,19 +590,67 @@ class OllamaManager:
 
     # -- models --------------------------------------------------------------
 
-    def start_pull(self, model: Any) -> dict[str, Any]:
-        name = validate_model_name(model)
+    @staticmethod
+    def _pull_state(running: bool, model: str | None, kind: str, queue: list[str]) -> dict[str, Any]:
+        return {'running': running, 'kind': kind, 'model': model, 'queue': list(queue), 'index': 1 if running else 0,
+                'status': 'starting' if running else None, 'completed': 0, 'total': 0,
+                'started_at': _now() if running else None, 'finished_at': None, 'ok': None, 'error': None,
+                'failed': [], 'updated': []}
+
+    def _start_pulls(self, names: list[str], kind: str) -> dict[str, Any]:
         if not self.api_version():
-            raise RuntimeError('Ollama is not running, so the model cannot be downloaded.')
+            raise RuntimeError('Ollama is not running, so models cannot be downloaded.')
         with self._lock:
             if self._pull['running']:
                 raise RuntimeError(f'Already downloading {self._pull["model"]}. Wait for it to finish.')
-            self._pull = {'running': True, 'model': name, 'status': 'starting', 'completed': 0, 'total': 0,
-                          'started_at': _now(), 'finished_at': None, 'ok': None, 'error': None}
-        threading.Thread(target=self._run_pull, args=(name,), name='ollama-pull', daemon=True).start()
+            self._pull = self._pull_state(True, names[0], kind, names)
+        threading.Thread(target=self._run_pulls, args=(names,), name='ollama-pull', daemon=True).start()
         return self.status()
 
-    def _run_pull(self, name: str) -> None:
+    def start_pull(self, model: Any) -> dict[str, Any]:
+        return self._start_pulls([validate_model_name(model)], 'download')
+
+    def start_update_models(self, models: Any = None) -> dict[str, Any]:
+        """Re-download installed models that have a newer version.
+
+        ``models`` is a list of names, or ``None`` for every model the last
+        update check found out of date. Pulling an installed model fetches
+        only the layers that changed."""
+        installed = {_tagged(model['name']): model['name'] for model in self.list_models()} if self.api_version() else {}
+        if models is None:
+            names = [model['name'] for model in self.status()['models'] if model.get('update_available')]
+            if not names:
+                raise LookupError('No model updates found. Use Check for Updates first.')
+        else:
+            if not isinstance(models, list) or not models or len(models) > 50:
+                raise ValueError('models must be a list of model names.')
+            names = []
+            for value in models:
+                name = validate_model_name(value)
+                if _tagged(name) not in installed:
+                    raise LookupError(f'Model {name} is not installed.')
+                if installed[_tagged(name)] not in names:
+                    names.append(installed[_tagged(name)])
+        return self._start_pulls(names, 'update')
+
+    def _run_pulls(self, names: list[str]) -> None:
+        for index, name in enumerate(names, start=1):
+            with self._lock:
+                self._pull.update({'model': name, 'index': index, 'status': 'starting', 'completed': 0, 'total': 0})
+            ok, error = self._pull_one(name)
+            with self._lock:
+                if ok:
+                    self._pull['updated'].append(name)
+                else:
+                    self._pull['failed'].append({'model': name, 'error': error})
+        with self._lock:
+            failed = self._pull['failed']
+            error = None
+            if failed:
+                error = failed[0]['error'] if len(names) == 1 else '; '.join(f'{item["model"]}: {item["error"]}' for item in failed)
+            self._pull.update({'running': False, 'finished_at': _now(), 'ok': not failed, 'error': error})
+
+    def _pull_one(self, name: str) -> tuple[bool, str | None]:
         logger.info('Downloading Ollama model %s', name)
         ok = False
         error = None
@@ -460,13 +689,12 @@ class OllamaManager:
             logger.info('Ollama model %s downloaded.', name)
         else:
             logger.warning('Ollama model %s download failed: %s', name, error)
-        with self._lock:
-            self._pull.update({'running': False, 'finished_at': _now(), 'ok': ok, 'error': error})
+        return ok, error
 
     def delete_model(self, model: Any) -> dict[str, Any]:
         name = validate_model_name(model)
         with self._lock:
-            if self._pull['running'] and self._pull['model'] == name:
+            if self._pull['running'] and name in self._pull['queue']:
                 raise RuntimeError('That model is still downloading.')
         try:
             self.http.post_json('/api/delete', {'model': name}, method='DELETE')

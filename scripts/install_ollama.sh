@@ -16,11 +16,16 @@
 # - Does not install NVIDIA drivers. The archive bundles the CUDA runtime
 #   libraries; with a working driver Ollama uses the GPU by itself.
 #
+# Version: the pinned release below by default. The AI page's "Update
+# Ollama" passes a newer release in DAYGLE_OLLAMA_VERSION together with the
+# checksum published with that release (DAYGLE_OLLAMA_SHA256).
+#
 # Ownership: the unit it writes carries DAYGLE_MARKER. An Ollama that was
 # installed some other way (binary present, no marked unit) is left alone
 # unless DAYGLE_OLLAMA_FORCE=1. With DAYGLE_OLLAMA_UPDATE_ONLY=1 (used by
-# update.sh) the script only upgrades an installation it made itself and
-# otherwise exits 0 without doing anything.
+# update.sh) the script only upgrades an installation it made itself, never
+# downgrades one that was updated past the pinned release, and otherwise
+# exits 0 without doing anything.
 set -euo pipefail
 
 VERSION="${DAYGLE_OLLAMA_VERSION:-0.40.16}"
@@ -139,6 +144,16 @@ start_service() {
 }
 
 CURRENT_VERSION="$(installed_version)"
+
+# True when version $1 >= version $2.
+version_at_least() {
+  [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$2" ]]
+}
+if [[ "${DAYGLE_OLLAMA_UPDATE_ONLY:-0}" == "1" && -n "${CURRENT_VERSION}" ]] \
+    && version_at_least "${CURRENT_VERSION}" "${VERSION}"; then
+  echo "Ollama ${CURRENT_VERSION} is installed (pinned: ${VERSION}); leaving it unchanged."
+  exit 0
+fi
 if [[ "${CURRENT_VERSION}" == "${VERSION}" && "${DAYGLE_OLLAMA_FORCE_UPDATE:-0}" != "1" ]] && managed_by_daygle; then
   echo "Ollama ${VERSION} is already installed at ${BINARY}."
   # Refresh the unit and make sure the service runs (an earlier run may have

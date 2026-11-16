@@ -12,6 +12,9 @@ const ollamaEls = {
   start: document.getElementById('ollamaStartBtn'),
   restart: document.getElementById('ollamaRestartBtn'),
   stop: document.getElementById('ollamaStopBtn'),
+  check: document.getElementById('ollamaCheckBtn'),
+  updateAll: document.getElementById('ollamaUpdateAllBtn'),
+  checked: document.getElementById('ollamaCheckedText'),
   logBox: document.getElementById('ollamaInstallLogBox'),
   log: document.getElementById('ollamaInstallLog'),
   models: document.getElementById('ollamaModels'),
@@ -58,17 +61,58 @@ function ollamaInUse(state, name) {
   return ollamaSameServer(current.serverUrl, state?.openai_url) && ollamaTagged(current.model) === ollamaTagged(name);
 }
 
+// True when dotted version a is newer than b.
+function ollamaNewer(a, b) {
+  const parse = (value) => String(value || '').split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const left = parse(a);
+  const right = parse(b);
+  if (!a || !b) return false;
+  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+    if ((left[i] || 0) !== (right[i] || 0)) return (left[i] || 0) > (right[i] || 0);
+  }
+  return false;
+}
+
+function ollamaAgo(seconds) {
+  if (!seconds) return '';
+  const age = Math.max(0, Math.round(Date.now() / 1000 - seconds));
+  if (age < 60) return 'just now';
+  if (age < 3600) return `${Math.round(age / 60)} min ago`;
+  if (age < 86400) return `${Math.round(age / 3600)} h ago`;
+  return `${Math.round(age / 86400)} d ago`;
+}
+
+function ollamaCheckedText(state) {
+  if (!state.release_checked_at && !state.models_checked_at) return '';
+  const when = ollamaAgo(Math.max(state.release_checked_at || 0, state.models_checked_at || 0));
+  const outdated = (state.models || []).filter((model) => model.update_available).length;
+  const parts = [`Checked for updates ${when}.`];
+  if (state.release_check_error) parts.push(state.release_check_error);
+  else if (state.installed && !state.update_available && !ollamaNewer(state.latest_version, state.version)) parts.push('Ollama is up to date.');
+  if (state.models_checked_at && state.models?.length) parts.push(outdated ? `${outdated} model update${outdated === 1 ? '' : 's'} available.` : 'Models are up to date.');
+  return parts.join(' ');
+}
+
 function ollamaStatusText(state) {
   const install = state.install || {};
-  if (install.running) return 'Installing Ollama… This downloads about 1.5 GB and can take several minutes. You can leave this page.';
+  if (install.running) {
+    return state.installed
+      ? `Updating Ollama to ${state.install_version}… This downloads about 1.5 GB; AI checks pause while the server restarts. You can leave this page.`
+      : 'Installing Ollama… This downloads about 1.5 GB and can take several minutes. You can leave this page.';
+  }
   const parts = [];
   if (!state.installed) {
     parts.push('Ollama is not installed on this server.');
     if (state.install_unavailable_reason) parts.push(state.install_unavailable_reason);
   } else if (state.reachable) {
     parts.push(`Ollama ${state.version || ''} is running.`.replace(/\s+\./, '.'));
-    if (state.update_available) parts.push(`Version ${state.pinned_version} is available.`);
-    if (!state.managed && state.binary) parts.push('It was installed outside Daygle, so updates are up to you.');
+    if (state.update_available) parts.push(`Version ${state.install_version} is available.`);
+    if (!state.managed && state.binary) {
+      const newer = ollamaNewer(state.latest_version, state.version);
+      parts.push(newer
+        ? `Version ${state.latest_version} is available, but this Ollama was installed outside Daygle, so update it yourself.`
+        : 'It was installed outside Daygle, so updates are up to you.');
+    }
     if (!state.models?.length) parts.push('Next, download a vision model below.');
   } else {
     parts.push(`Ollama is installed but not answering${state.service ? ` (service: ${state.service})` : ''}.`);
@@ -83,9 +127,14 @@ function renderOllamaButtons(state) {
   const canInstall = Boolean(state.can_install) && !install.running && (!state.installed || state.update_available);
   if (ollamaEls.install) {
     ollamaEls.install.hidden = !canInstall;
-    ollamaEls.install.textContent = state.installed ? `Update Ollama to ${state.pinned_version}` : 'Install Ollama';
+    ollamaEls.install.textContent = state.installed ? `Update Ollama to ${state.install_version}` : 'Install Ollama';
     ollamaEls.install.disabled = ollamaBusy;
   }
+  if (ollamaEls.check) {
+    ollamaEls.check.hidden = !state.installed;
+    ollamaEls.check.disabled = ollamaBusy || Boolean(install.running);
+  }
+  if (ollamaEls.checked) ollamaEls.checked.textContent = ollamaCheckedText(state);
   const control = Boolean(state.can_control_service) && !install.running;
   if (ollamaEls.start) { ollamaEls.start.hidden = !control || state.reachable; ollamaEls.start.disabled = ollamaBusy; }
   if (ollamaEls.restart) { ollamaEls.restart.hidden = !control || !state.reachable; ollamaEls.restart.disabled = ollamaBusy; }
@@ -109,11 +158,17 @@ function ollamaModelRow(state, model, pulling) {
   const useBtn = inUse
     ? '<span class="ollama-in-use">In use</span>'
     : `<button class="secondary" type="button" data-ollama-use="${escapeHtml(name)}"${model.vision === false ? ' disabled title="This model cannot read images."' : ''}>Use</button>`;
+  const updateBtn = model.update_available
+    ? `<button class="btn-info" type="button" data-ollama-update="${escapeHtml(name)}"${pulling ? ' disabled' : ''}>Update</button>`
+    : '';
+  const badge = model.update_available
+    ? '<br><span class="ollama-update-badge">Update available</span>'
+    : model.update_error ? `<br><small class="muted" title="${escapeHtml(model.update_error)}">Updates not checked</small>` : '';
   return `<tr>
-    <td><strong>${escapeHtml(name)}</strong>${details ? `<br><small class="muted">${escapeHtml(details)}</small>` : ''}</td>
+    <td><strong>${escapeHtml(name)}</strong>${details ? `<br><small class="muted">${escapeHtml(details)}</small>` : ''}${badge}</td>
     <td>${escapeHtml(ollamaSize(model.size))}</td>
     <td>${vision}</td>
-    <td class="ollama-model-actions">${useBtn}
+    <td class="ollama-model-actions">${updateBtn}${useBtn}
       <button class="btn-danger" type="button" data-ollama-delete="${escapeHtml(name)}"${pulling || inUse ? ' disabled' : ''}${inUse ? ' title="Switch the AI to another model first."' : ''}>Delete</button></td>
   </tr>`;
 }
@@ -140,6 +195,12 @@ function renderOllamaModels(state) {
       ${escapeHtml(`${model.size_gb} GB download, ~${model.memory_gb} GB GPU memory. ${model.note}`)}</li>`).join('');
   }
   if (ollamaEls.pullBtn) ollamaEls.pullBtn.disabled = Boolean(pull.running) || ollamaBusy;
+  const outdated = models.filter((model) => model.update_available).length;
+  if (ollamaEls.updateAll) {
+    ollamaEls.updateAll.hidden = outdated < 2;
+    ollamaEls.updateAll.textContent = `Update All (${outdated})`;
+    ollamaEls.updateAll.disabled = Boolean(pull.running) || ollamaBusy;
+  }
   if (ollamaEls.pullName && !ollamaEls.pullName.value && !models.length) ollamaEls.pullName.value = suggested[0]?.name || '';
   renderOllamaPull(pull);
 }
@@ -158,9 +219,11 @@ function renderOllamaPull(pull) {
     else ollamaEls.bar.removeAttribute('value');
   }
   if (ollamaEls.barText) {
+    const verb = pull.kind === 'update' ? 'Updating' : 'Downloading';
+    const queue = Array.isArray(pull.queue) && pull.queue.length > 1 ? ` (${pull.index} of ${pull.queue.length})` : '';
     ollamaEls.barText.textContent = pull.running
-      ? `Downloading ${pull.model}: ${total ? `${percent}% (${ollamaSize(done)} of ${ollamaSize(total)})` : pull.status || 'starting'}`
-      : `Download of ${pull.model} failed: ${pull.error}`;
+      ? `${verb} ${pull.model}${queue}: ${total ? `${percent}% (${ollamaSize(done)} of ${ollamaSize(total)})` : pull.status || 'starting'}`
+      : `${pull.kind === 'update' ? 'Update' : 'Download'} failed: ${pull.error}`;
   }
 }
 
@@ -168,11 +231,15 @@ function renderOllamaPull(pull) {
 function announceOllamaChanges(previous, state) {
   if (!previous) return;
   if (previous.install?.running && !state.install?.running) {
-    if (state.install?.ok) ollamaToast('Ollama installed. Now download a vision model.');
+    if (state.install?.ok) ollamaToast(previous.installed ? `Ollama updated to ${state.version || state.install_version}.` : 'Ollama installed. Now download a vision model.');
     else ollamaToast(`Ollama install failed: ${state.install?.error || 'see the install log'}`, true);
   }
   if (previous.pull?.running && !state.pull?.running) {
-    if (state.pull?.ok) ollamaToast(`Downloaded ${state.pull.model}. Click Use to switch the AI to it.`);
+    const updated = state.pull?.updated || [];
+    if (state.pull?.kind === 'update') {
+      if (state.pull.ok) ollamaToast(`Updated ${updated.length === 1 ? updated[0] : `${updated.length} models`}.`);
+      else ollamaToast(`Model update failed: ${state.pull.error || 'unknown error'}`, true);
+    } else if (state.pull?.ok) ollamaToast(`Downloaded ${state.pull.model}. Click Use to switch the AI to it.`);
     else ollamaToast(`Download of ${state.pull?.model} failed: ${state.pull?.error || 'unknown error'}`, true);
   }
 }
@@ -223,10 +290,10 @@ function ollamaPost(path, body) {
 ollamaEls.install?.addEventListener('click', () => ollamaAction(async () => {
   const update = Boolean(ollamaState?.installed);
   const question = update
-    ? `Update Ollama to ${ollamaState.pinned_version}? The model server restarts, so AI checks pause for a minute.`
-    : `Install Ollama ${ollamaState?.pinned_version || ''} on this server? It downloads about 1.5 GB and needs about 6 GB of disk, plus 2-8 GB per model.`;
+    ? `Update Ollama to ${ollamaState.install_version}? It downloads about 1.5 GB, then the model server restarts, so AI checks pause for a minute (alerts are still sent).`
+    : `Install Ollama ${ollamaState?.install_version || ''} on this server? It downloads about 1.5 GB and needs about 6 GB of disk, plus 2-8 GB per model.`;
   if (!window.confirm(question)) return null;
-  return ollamaPost('/api/settings/ollama/install');
+  return ollamaPost(update ? '/api/settings/ollama/update' : '/api/settings/ollama/install');
 }));
 
 [['start', ollamaEls.start], ['restart', ollamaEls.restart], ['stop', ollamaEls.stop]].forEach(([action, button]) => {
@@ -237,6 +304,17 @@ ollamaEls.install?.addEventListener('click', () => ollamaAction(async () => {
     return state;
   }));
 });
+
+ollamaEls.check?.addEventListener('click', () => ollamaAction(async () => {
+  const state = await ollamaPost('/api/settings/ollama/check-updates', { force: true });
+  ollamaToast(ollamaCheckedText(state) || 'Checked for updates.');
+  return state;
+}));
+
+ollamaEls.updateAll?.addEventListener('click', () => ollamaAction(async () => {
+  if (!window.confirm('Download the newer version of every model with an update? Only the changed parts are downloaded.')) return null;
+  return ollamaPost('/api/settings/ollama/models/update', { all: true });
+}));
 
 ollamaEls.pullBtn?.addEventListener('click', () => ollamaAction(async () => {
   const model = String(ollamaEls.pullName?.value || '').trim();
@@ -257,6 +335,11 @@ ollamaEls.card?.addEventListener('click', (event) => {
   const suggest = target.getAttribute('data-ollama-suggest');
   const use = target.getAttribute('data-ollama-use');
   const remove = target.getAttribute('data-ollama-delete');
+  const update = target.getAttribute('data-ollama-update');
+  if (update) {
+    ollamaAction(() => ollamaPost('/api/settings/ollama/models/update', { models: [update] }));
+    return;
+  }
   if (suggest && ollamaEls.pullName) {
     ollamaEls.pullName.value = suggest;
     ollamaEls.pullName.focus();
@@ -283,6 +366,17 @@ async function loadOllama() {
   } catch (error) {
     if (window.daygleAuth?.redirecting) return;
     if (ollamaEls.status) ollamaEls.status.textContent = `Could not check Ollama: ${error.message}`;
+    return;
+  }
+  // Look for Ollama and model updates in the background. The server keeps
+  // the result for 6 hours, so this rarely leaves the server.
+  if (ollamaState?.installed) {
+    try {
+      const state = await ollamaPost('/api/settings/ollama/check-updates', { force: false });
+      if (!ollamaBusy) renderOllama(state);
+    } catch (_error) {
+      // Offline or rate limited: the page works without update information.
+    }
   }
 }
 

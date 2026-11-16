@@ -663,6 +663,10 @@ textarea {
 .ollama-models { margin-top: 18px; display: grid; gap: 12px; }
 .ollama-models h3 { margin: 0; }
 .ollama-model-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.ollama-checked { margin: 4px 0 0; font-size: 13px; }
+.ollama-checked:empty { display: none; }
+.ollama-models-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.ollama-update-badge { display: inline-block; margin-top: 4px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent); }
 .ollama-in-use { align-self: center; color: var(--success); font-weight: 700; font-size: 13px; }
 .ollama-pull-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
 .ollama-pull-row label { display: grid; gap: 6px; flex: 1 1 240px; max-width: 360px; }

@@ -62,14 +62,34 @@ The card also starts, stops and restarts the service, lists the installed
 models (with whether each can read images) and deletes them. Every action is
 in the Audit Log.
 
+#### Keeping Ollama and models up to date
+
+When the page opens it checks for updates in the background (at most every
+6 hours); **Check for Updates** checks now. The line under the buttons says
+when it last checked and what it found.
+
+- **Ollama:** the newest release is read from Ollama's GitHub releases.
+  **Update Ollama to x.y.z** downloads it, checks it against the SHA-256 in
+  that release's `sha256sum.txt`, and restarts the service on the new
+  version. Models are kept. AI checks pause for about a minute while it
+  restarts; alerts are still sent. If GitHub cannot be reached (or the
+  release has no checksum for this CPU), the version pinned with this Daygle
+  release is offered instead. Only an Ollama that Daygle installed is
+  updated; for your own install the card says a newer version exists.
+- **Models:** each installed model is compared with the Ollama registry. A
+  model with a newer version shows **Update available** and an **Update**
+  button; **Update All** appears when several do. Updating downloads only
+  the parts that changed and keeps the model's name, so the AI settings do
+  not change. Models from other registries (such as `hf.co/...`) are not
+  checked.
+- The in-app Daygle updater also moves an Ollama older than the pinned
+  release forward, and never downgrades one updated past it.
+
 - **GPU:** Ollama uses an NVIDIA GPU when the NVIDIA driver is installed; it
   bundles its own CUDA libraries. Daygle does not install drivers. Pascal
   cards such as the Tesla P4 need driver 570 or newer (see
   [docs/tesla-p4-gpu-setup.md](tesla-p4-gpu-setup.md)). Without a GPU the
   model runs on the CPU, which is much slower.
-- **Updates:** the in-app updater (`scripts/update.sh`) moves an Ollama that
-  Daygle installed to the release pinned by the new version. A failure there
-  never fails the update.
 - **Your own Ollama is left alone.** If Ollama was installed another way, the
   card manages its models but does not install over it, update it or replace
   its service. To hand it over to Daygle, run
