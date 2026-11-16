@@ -22,7 +22,7 @@ function getFilters() {
   return {
     date_from: document.getElementById('filterDateFrom').value,
     date_to: document.getElementById('filterDateTo').value,
-    camera_id: document.getElementById('filterCamera').value.trim(),
+    camera_id: document.getElementById('filterCamera').value,
     event_type: document.getElementById('filterEventType').value,
     severity: document.getElementById('filterSeverity').value,
     q: document.getElementById('filterSearch').value.trim(),
@@ -46,7 +46,7 @@ function buildQuery(offset) {
 function formatDetails(details) {
   if (!details || typeof details !== 'object' || Object.keys(details).length === 0) return '-';
   return Object.entries(details)
-    .map(([k, v]) => `${k}: ${v === true ? 'yes' : v === false ? 'no' : v}`)
+    .map(([k, v]) => `${logLabel(k)}: ${v === true ? 'Yes' : v === false ? 'No' : v}`)
     .join(' · ');
 }
 
@@ -62,7 +62,8 @@ function severityBadgeClass(severity) {
 
 // The Event column reads as words (matching the filter dropdown, which is
 // the single source of truth for these values). Unknown or future types
-// fall back to their raw machine code.
+// fall back to their machine code in Title Case (the raw code stays as the
+// tooltip).
 const EVENT_TYPE_LABELS = {
   // Connectivity
   camera_offline: 'Camera Offline',
@@ -78,7 +79,7 @@ const EVENT_TYPE_LABELS = {
   audio_mux_disk_full: 'Audio Mux Disk Full',
   prebuffer_fallback: 'Prebuffer Fallback',
   prebuffer_partial: 'Prebuffer Partial',
-  prebuffer_short_preroll: 'Prebuffer Short Pre-roll',
+  prebuffer_short_preroll: 'Prebuffer Short Pre-Roll',
   prebuffer_restart: 'Prebuffer Restart',
   // PTZ
   ptz_track_acquired: 'PTZ Track Acquired',
@@ -92,7 +93,7 @@ const EVENT_TYPE_LABELS = {
 
 function eventTypeLabel(eventType) {
   const key = String(eventType || '').trim();
-  return EVENT_TYPE_LABELS[key] || key || '-';
+  return EVENT_TYPE_LABELS[key] || logLabel(key) || '-';
 }
 
 async function loadAuth() {
@@ -216,14 +217,40 @@ document.getElementById('clearLogBtn').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('filterCamera').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') loadEntries(0);
-});
+document.getElementById('filterCamera').addEventListener('change', () => loadEntries(0));
 document.getElementById('filterSearch').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') loadEntries(0);
 });
 
-loadAuth().then(() => loadEntries(0)).catch((err) => {
+// Camera filter: the configured cameras by name, so nobody has to know the
+// internal id. A camera removed since keeps its old rows (unfiltered view).
+async function loadCameraOptions() {
+  const select = document.getElementById('filterCamera');
+  let cameras;
+  try {
+    const payload = await api('/api/cameras');
+    cameras = Array.isArray(payload?.cameras) ? payload.cameras : [];
+  } catch (_err) {
+    // Leave just "All cameras"; the log itself still loads (and api() has
+    // already handled a lost session).
+    return;
+  }
+  const options = cameras
+    .map((camera) => ({ id: String(camera.id || ''), name: String(camera.name || camera.id || '') }))
+    .filter((camera) => camera.id)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  for (const camera of options) {
+    const option = document.createElement('option');
+    option.value = camera.id;
+    option.textContent = camera.name;
+    select.appendChild(option);
+  }
+}
+
+loadAuth().then(() => {
+  loadCameraOptions();
+  return loadEntries(0);
+}).catch((err) => {
   if (window.daygleAuth?.redirecting) return;
   window.showToast?.(err.message, true);
 });

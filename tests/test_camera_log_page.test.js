@@ -34,9 +34,9 @@ test('every filterable event type reads as words, with the raw code as tooltip',
       `${value} has no friendly label in EVENT_TYPE_LABELS`,
     );
   }
-  // Unknown or future event types fall back to the raw code, not '-'. And the
+  // Unknown or future event types fall back to the code in Title Case, not '-'. And the
   // tooltip carries the raw machine code (including empty → undefined).
-  assert.ok(/EVENT_TYPE_LABELS\[key\] \|\| key \|\| '-';/.test(js));
+  assert.ok(/EVENT_TYPE_LABELS\[key\] \|\| logLabel\(key\) \|\| '-';/.test(js));
   assert.ok(/title: entry\.event_type \|\| undefined/.test(js));
 });
 
@@ -69,3 +69,52 @@ test('free-text search reaches the API server-side', () => {
   assert.match(js, /filterSearch'\)\.value = ''/);
   assert.match(js, /filterSearch[\s\S]{0,200}Enter/);
 });
+
+const utils = readFileSync(path.resolve(here, '../web/utils.js'), 'utf8');
+
+function loadLogLabel() {
+  const start = utils.indexOf('const LOG_LABEL_ACRONYMS');
+  const end = utils.indexOf('\n}\n', utils.indexOf('function logLabel(')) + 3;
+  return new Function(`${utils.slice(start, end)}; return logLabel;`)();
+}
+
+test('log labels are Title Case with acronyms kept', () => {
+  const logLabel = loadLogLabel();
+  assert.equal(logLabel('stderr_tail'), 'Stderr Tail');
+  assert.equal(logLabel('gpu_fallback'), 'GPU Fallback');
+  assert.equal(logLabel('camera_id'), 'Camera ID');
+  assert.equal(logLabel('sha256'), 'SHA-256');
+  assert.equal(logLabel('update_check'), 'Update Check');
+  assert.equal(logLabel(''), '');
+});
+
+for (const page of ['camera-log', 'ai-log']) {
+  const pageJs = readFileSync(path.resolve(here, `../web/${page}.js`), 'utf8');
+  const pageHtml = readFileSync(path.resolve(here, `../web/${page}.html`), 'utf8');
+
+  test(`${page}: cameras are picked by name from a dropdown`, () => {
+    assert.match(pageHtml, /<select id="filterCamera" aria-label="Camera">\s*<option value="">All cameras<\/option>/);
+    assert.doesNotMatch(pageHtml, /Filter by camera id/);
+    assert.match(pageJs, /api\('\/api\/cameras'\)/);
+    assert.match(pageJs, /option\.value = camera\.id;/);
+    assert.match(pageJs, /option\.textContent = camera\.name;/);
+    assert.match(pageJs, /filterCamera'\)\.addEventListener\('change'/);
+  });
+
+  test(`${page}: labels are Title Case full words`, () => {
+    // Filter buttons match the Application Log, away from the destructive Clear Log.
+    assert.match(pageHtml, />Apply Filters<\/button>/);
+    assert.match(pageHtml, />Reset Filters<\/button>/);
+    // Details keys are labelled, values kept as-is.
+    assert.match(pageJs, /\$\{logLabel\(k\)\}: /);
+    const labels = pageJs.match(/const EVENT_TYPE_LABELS = \{([\s\S]*?)\n\};/)[1];
+    for (const [, label] of labels.matchAll(/: '([^']+)'/g)) {
+      for (const word of label.split(/[\s-]+/)) {
+        assert.match(word, /^[A-Z0-9]/, `"${label}" is not Title Case`);
+      }
+      assert.doesNotMatch(label, /&|\bVerify\b/, `"${label}" uses an abbreviation`);
+    }
+    const select = pageHtml.match(/<select id="filterEventType"[\s\S]*?<\/select>/)[0];
+    assert.doesNotMatch(select, /&/);
+  });
+}

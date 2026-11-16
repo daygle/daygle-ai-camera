@@ -31,7 +31,7 @@ test('every filterable AI event type reads as words, with the raw code as toolti
       `${value} has no friendly label in EVENT_TYPE_LABELS`,
     );
   }
-  assert.ok(/EVENT_TYPE_LABELS\[key\] \|\| key \|\| '-';/.test(js));
+  assert.ok(/EVENT_TYPE_LABELS\[key\] \|\| logLabel\(key\) \|\| '-';/.test(js));
   assert.ok(/title: entry\.event_type \|\| undefined/.test(js));
 });
 
@@ -48,7 +48,7 @@ test('engineering events show their step as a badge, not duplicated in Details',
   // repeat it.
   assert.match(js, /function stepLabel\(/);
   assert.match(js, /k !== 'step'/);
-  assert.match(js, /\.replace\(\/_\/g, ' '\)/);
+  assert.match(js, /return step \? logLabel\(step\) : '';/);
   assert.match(js, /stepBadge\.className = 'step-badge'/);
 });
 

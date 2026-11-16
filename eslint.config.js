@@ -112,6 +112,7 @@ const WEB_SHARED_GLOBALS = {
   timeAgo: 'readonly',
   timeSelectValue: 'readonly',
   titleCase: 'readonly',
+  logLabel: 'readonly',
   setFieldInactive: 'readonly',
   RECORDINGS_OVERLAY_TOGGLE_KEY: 'readonly',
   TIMELINE_OVERLAY_TOGGLE_KEY: 'readonly',

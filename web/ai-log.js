@@ -22,7 +22,7 @@ function getFilters() {
   return {
     date_from: document.getElementById('filterDateFrom').value,
     date_to: document.getElementById('filterDateTo').value,
-    camera_id: document.getElementById('filterCamera').value.trim(),
+    camera_id: document.getElementById('filterCamera').value,
     event_type: document.getElementById('filterEventType').value,
     severity: document.getElementById('filterSeverity').value,
     q: document.getElementById('filterSearch').value.trim(),
@@ -47,7 +47,7 @@ function formatDetails(details) {
   if (!details || typeof details !== 'object' || Object.keys(details).length === 0) return '-';
   const rendered = Object.entries(details)
     .filter(([k]) => k !== 'step') // the step badge lives in the Event column; avoid a duplicate
-    .map(([k, v]) => `${k}: ${v === true ? 'yes' : v === false ? 'no' : v}`)
+    .map(([k, v]) => `${logLabel(k)}: ${v === true ? 'Yes' : v === false ? 'No' : v}`)
     .join(' · ');
   return rendered || '-';
 }
@@ -62,23 +62,24 @@ function severityBadgeClass(severity) {
 
 // The Event column reads as words (matching the filter dropdown, which is
 // the single source of truth for these values). Unknown or future types
-// fall back to their raw machine code.
+// fall back to their machine code in Title Case (the raw code stays as the
+// tooltip).
 const EVENT_TYPE_LABELS = {
   // Verification
-  ai_verification_filtered: 'AI Verify Filtered',
-  ai_verification_recheck: 'AI Verify Re-check',
-  ai_verification_unsure: 'AI Verify Unsure',
-  ai_verification_unavailable: 'AI Verify Unavailable',
-  ai_verification_queue_full: 'AI Verify Queue Full',
-  ai_verification_store_failed: 'AI Verify Store Failed',
+  ai_verification_filtered: 'AI Verification Filtered',
+  ai_verification_recheck: 'AI Verification Recheck',
+  ai_verification_unsure: 'AI Verification Unsure',
+  ai_verification_unavailable: 'AI Verification Unavailable',
+  ai_verification_queue_full: 'AI Verification Queue Full',
+  ai_verification_store_failed: 'AI Verification Store Failed',
   // Descriptions
   ai_description_unavailable: 'AI Description Unavailable',
   ai_description_store_failed: 'AI Description Store Failed',
   // Tag Alerts
   ai_tag_alert_fired: 'AI Tag Alert',
-  ai_tag_alert_suppressed: 'AI Tag Suppressed',
+  ai_tag_alert_suppressed: 'AI Tag Alert Suppressed',
   ai_tag_check_unavailable: 'AI Tag Check Unavailable',
-  // Relabel & Search
+  // Relabel and Search
   ai_relabel: 'AI Relabel',
   ai_relabel_store_failed: 'AI Relabel Store Failed',
   ai_search_fallback: 'AI Search Fallback',
@@ -87,7 +88,7 @@ const EVENT_TYPE_LABELS = {
   face_capture_failed: 'Face Capture Failed',
   ai_face_embedder: 'Face Embedder',
   ai_face_service: 'Face Recognition',
-  // Models & Startup
+  // Models and Startup
   ai_detector_startup: 'Detector Startup',
   ai_detector_backend: 'Detector Backend',
   ai_int8_quantization: 'INT8 Quantization',
@@ -97,7 +98,7 @@ const EVENT_TYPE_LABELS = {
 
 function eventTypeLabel(eventType) {
   const key = String(eventType || '').trim();
-  return EVENT_TYPE_LABELS[key] || key || '-';
+  return EVENT_TYPE_LABELS[key] || logLabel(key) || '-';
 }
 
 // Engineering events carry a `step` in their details: Model Install
@@ -108,7 +109,7 @@ function eventTypeLabel(eventType) {
 // without a step render exactly as before.
 function stepLabel(details) {
   const step = details && typeof details === 'object' ? String(details.step || '').trim() : '';
-  return step ? step.replace(/_/g, ' ') : '';
+  return step ? logLabel(step) : '';
 }
 
 async function loadAuth() {
@@ -237,14 +238,40 @@ document.getElementById('clearLogBtn').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('filterCamera').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') loadEntries(0);
-});
+document.getElementById('filterCamera').addEventListener('change', () => loadEntries(0));
 document.getElementById('filterSearch').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') loadEntries(0);
 });
 
-loadAuth().then(() => loadEntries(0)).catch((err) => {
+// Camera filter: the configured cameras by name, so nobody has to know the
+// internal id. A camera removed since keeps its old rows (unfiltered view).
+async function loadCameraOptions() {
+  const select = document.getElementById('filterCamera');
+  let cameras;
+  try {
+    const payload = await api('/api/cameras');
+    cameras = Array.isArray(payload?.cameras) ? payload.cameras : [];
+  } catch (_err) {
+    // Leave just "All cameras"; the log itself still loads (and api() has
+    // already handled a lost session).
+    return;
+  }
+  const options = cameras
+    .map((camera) => ({ id: String(camera.id || ''), name: String(camera.name || camera.id || '') }))
+    .filter((camera) => camera.id)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  for (const camera of options) {
+    const option = document.createElement('option');
+    option.value = camera.id;
+    option.textContent = camera.name;
+    select.appendChild(option);
+  }
+}
+
+loadAuth().then(() => {
+  loadCameraOptions();
+  return loadEntries(0);
+}).catch((err) => {
   if (window.daygleAuth?.redirecting) return;
   window.showToast?.(err.message, true);
 });

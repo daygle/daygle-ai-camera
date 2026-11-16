@@ -44,8 +44,11 @@ function loadPage(file, bodyId) {
   const sandbox = {
     LOG_PAGE_SIZE: 50,
     formatLogTime: (value) => String(value || ''),
+    logLabel: (value) => String(value || ''),
     requireElements() {},
     api(url) {
+      // The camera filter's one-off option list is not a log page request.
+      if (url === '/api/cameras') return Promise.resolve({ cameras: [] });
       return new Promise((resolve, reject) => requests.push({ url, resolve, reject }));
     },
     URLSearchParams,
