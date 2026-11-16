@@ -44,30 +44,34 @@ const LEVEL_SETS = {
 
 // Friendly names for each entry's ``source`` (set by app_log_router from the
 // logger name). The Source filter's options are the single source of truth
-// for the values; unknown or future sources fall back to their raw key.
+// for the values; labels are Title Case full words, and unknown or future
+// sources fall back to their key in Title Case.
 const SOURCE_LABELS = {
   cameras: 'Cameras',
   recording: 'Recording',
   ptz: 'PTZ',
-  rtsp_broker: 'RTSP broker',
+  rtsp_broker: 'RTSP Broker',
   detection: 'Detection',
-  analysis: 'AI analysis',
+  analysis: 'AI Analysis',
   models: 'Models',
   faces: 'Faces',
   sound: 'Sound',
-  alerts: 'Alerts & notifications',
-  auth: 'Sign-in & security',
-  storage: 'Database & storage',
+  alerts: 'Alerts and Notifications',
+  auth: 'Sign-In and Security',
+  storage: 'Database and Storage',
   updates: 'Updates',
   tunnel: 'Cloudflare Tunnel',
-  web: 'Web server',
-  core: 'App core',
-  other: 'Raw output',
+  web: 'Web Server',
+  core: 'Application Core',
+  other: 'Raw Output',
 };
 
 function sourceLabel(source) {
   const key = String(source || '').trim();
-  return SOURCE_LABELS[key] || key || '-';
+  if (SOURCE_LABELS[key]) return SOURCE_LABELS[key];
+  // Unknown or future sources: title-case the raw key (``new_area`` -> ``New Area``).
+  return key.split(/[_\s]+/).filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') || '-';
 }
 
 function levelBadgeClass(level) {
