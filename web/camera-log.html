@@ -39,7 +39,9 @@
         <label class="application-log-date-field">To
           <input id="filterDateTo" type="date" aria-label="To date" />
         </label>
-        <input id="filterCamera" placeholder="Filter by camera id" aria-label="Filter by camera id" />
+        <select id="filterCamera" aria-label="Camera">
+          <option value="">All cameras</option>
+        </select>
         <input id="filterSearch" type="search" placeholder="Search messages & details…" aria-label="Search messages and details" />
         <select id="filterEventType" aria-label="Event type">
           <option value="">All event types</option>
@@ -59,7 +61,7 @@
             <option value="audio_mux_disk_full">Audio Mux Disk Full</option>
             <option value="prebuffer_fallback">Prebuffer Fallback</option>
             <option value="prebuffer_partial">Prebuffer Partial</option>
-            <option value="prebuffer_short_preroll">Prebuffer Short Pre-roll</option>
+            <option value="prebuffer_short_preroll">Prebuffer Short Pre-Roll</option>
             <option value="prebuffer_restart">Prebuffer Restart</option>
           </optgroup>
           <optgroup label="PTZ">
@@ -76,8 +78,8 @@
           <option value="warning">Warning</option>
           <option value="error">Error</option>
         </select>
-        <button id="applyFiltersBtn" type="button">Apply</button>
-        <button id="clearFiltersBtn" class="secondary" type="button">Clear</button>
+        <button id="applyFiltersBtn" type="button">Apply Filters</button>
+        <button id="clearFiltersBtn" class="secondary" type="button">Reset Filters</button>
       </div>
 
       <div id="logEmpty" hidden>No camera diagnostic events match the current filters.</div>

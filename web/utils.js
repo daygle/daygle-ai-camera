@@ -1433,6 +1433,24 @@ function titleCase(value) {
     .join(' ');
 }
 
+// Words the log pages keep as acronyms when turning a machine key into a
+// label (``gpu_fallback`` -> ``GPU Fallback``, ``sha256`` -> ``SHA-256``).
+const LOG_LABEL_ACRONYMS = {
+  ai: 'AI', api: 'API', cpu: 'CPU', gpu: 'GPU', fps: 'FPS', id: 'ID', ids: 'IDs',
+  int8: 'INT8', ip: 'IP', json: 'JSON', nms: 'NMS', onnx: 'ONNX', ptz: 'PTZ',
+  rtsp: 'RTSP', sha256: 'SHA-256', tflite: 'TFLite', url: 'URL', yamnet: 'YAMNet',
+};
+
+// Title Case label for a log machine key (event type, details key, step).
+function logLabel(value) {
+  return String(value || '')
+    .split(/[\s_]+/)
+    .filter(Boolean)
+    .map((token) => LOG_LABEL_ACRONYMS[token.toLowerCase()]
+      || token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ');
+}
+
 // Normalise the persisted shape of an email-recipients field so the
 // /sounds and /zones rule editors agree on what the backend needs to see.
 // Inputs arrive in two shapes: (1) a comma-separated string from the rule
