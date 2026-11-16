@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import Any
 
 from app.db.library_filters import (
+    event_ai_check_condition,
     event_alerted_condition,
     event_camera_condition,
     event_face_condition,
@@ -258,6 +259,46 @@ class EventsMixin:
             db.execute("DELETE FROM events")
             return int(count)
 
+    def ai_verification_stats(self, since: str) -> dict[str, Any]:
+        """AI verification outcomes for events since ``since`` (app.ai_verification).
+
+        ``statuses`` counts events per verdict; ``stopped`` is how many
+        filtered events had every notification stopped; ``avg_latency_ms`` is
+        the mean model time of the checks that got an answer.
+        """
+        since = _normalize_iso_to_utc(since)
+        with self.connect() as db:
+            rows = db.execute(
+                """
+                SELECT json_extract(m, '$.ai_verification.status') AS status,
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN json_extract(m, '$.ai_verification.delivered') = 0 THEN 1 ELSE 0 END) AS stopped,
+                       AVG(json_extract(m, '$.ai_verification.latency_ms')) AS avg_latency
+                FROM (
+                    SELECT CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END AS m
+                    FROM events WHERE created_at >= ?
+                )
+                WHERE json_type(m, '$.ai_verification') = 'object'
+                GROUP BY status
+                """,
+                [since],
+            ).fetchall()
+        statuses: dict[str, int] = {}
+        stopped = 0
+        latency_sum = latency_count = 0.0
+        for row in rows:
+            status = str(row['status'] or 'unknown')
+            statuses[status] = statuses.get(status, 0) + int(row['total'])
+            stopped += int(row['stopped'] or 0)
+            if status in ('confirmed', 'filtered', 'unsure') and row['avg_latency'] is not None:
+                latency_sum += float(row['avg_latency']) * int(row['total'])
+                latency_count += int(row['total'])
+        return {
+            'statuses': statuses,
+            'stopped': stopped,
+            'avg_latency_ms': int(latency_sum / latency_count) if latency_count else None,
+        }
+
     def search_events(
         self,
         label: str | None = None,
@@ -291,6 +332,7 @@ class EventsMixin:
         query: str | None = None,
         face: str | None = None,
         sort: str = 'newest',
+        ai_check: str | None = None,
     ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
         """Return ``(events, next_raw_cursor)`` ordered by ``(created_at, id)``.
 
@@ -303,6 +345,10 @@ class EventsMixin:
         params: list[Any] = []
         if with_recording:
             conditions.append(f'EXISTS (SELECT 1 FROM recordings r WHERE {_EVENT_RECORDING_LINKS})')
+        ai_condition = event_ai_check_condition('e', ai_check)
+        if ai_condition is not None:
+            conditions.append(ai_condition[0])
+            params.extend(ai_condition[1])
         return self._event_list_page(
             conditions, params,
             label=label, limit=limit, alerted_only=alerted_only, since=since, until=until,

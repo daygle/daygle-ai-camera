@@ -194,22 +194,54 @@ function eventCameraLabel(event) {
 }
 
 // AI alert verification verdict (see app/ai_verification.py): "Filtered"
-// when the vision model found no real object and the notification was not
-// sent; "Verified" when it confirmed every checked label. Errors and skips
-// show nothing - those alerts were delivered as normal.
-function aiVerificationBadge(event) {
-  const record = (event.metadata || {}).ai_verification;
-  if (!record || (record.status !== 'filtered' && record.status !== 'confirmed')) return '';
-  const details = Object.entries(record.labels || {})
-    .map(([label, value]) => `${label}: ${value.present === false ? 'not present' : value.present ? 'confirmed' : 'unchecked'}${value.reason ? ` (${value.reason})` : ''}${value.instead ? `, looks like a ${value.instead}` : ''}`)
-    .join('; ');
-  const filtered = record.status === 'filtered';
-  // A filtered event can still notify when another of its alerts passed.
-  const summary = !filtered ? 'The AI model confirmed this alert.'
-    : record.delivered === false ? 'Notification not sent: the AI model judged this a false alarm.'
+// when the vision model found no real object (the notification may have been
+// stopped), "Verified" when it confirmed every checked label, and
+// "Unverified" when the alert went out without a verdict (the model was
+// unsure, unreachable, slow or skipped for a backlog), so a model that has
+// stopped answering is visible here rather than only in the AI Log. The
+// reasons sit in an info bubble beside the badge: a hover-only title never
+// shows on a phone, and the bubble opens on tap and keyboard focus too.
+function aiVerdictText(label, value) {
+  const name = String(label).replace(/_/g, ' ');
+  let verdict = value.error ? `error (${value.error})`
+    : value.unsure ? 'unsure'
+      : value.present === false ? 'not present'
+        : value.present ? 'confirmed' : 'unchecked';
+  if (value.reason && !value.error) verdict += ` - ${value.reason}`;
+  if (value.instead) verdict += `; looks like ${/^[aeiou]/i.test(value.instead) ? 'an' : 'a'} ${value.instead}`;
+  return `${name}: ${verdict}`;
+}
+
+function aiVerificationInfo(record) {
+  if (!record || typeof record !== 'object') return null;
+  const details = Object.entries(record.labels || {}).map(([label, value]) => aiVerdictText(label, value || {})).join('. ');
+  if (record.status === 'confirmed') {
+    return { kind: 'verified', text: 'Verified', summary: 'The AI model confirmed this alert.', details };
+  }
+  if (record.status === 'filtered') {
+    // A filtered event can still notify when another of its alerts passed.
+    const summary = record.delivered === false
+      ? 'Notification not sent: the AI model judged this a false alarm.'
       : 'The AI model rejected part of this alert; the rest was still sent.';
-  const title = `${summary} ${details}`.trim();
-  return `<span class="detection ${filtered ? 'detection-ai-filtered' : 'detection-ai-verified'}" title="${escapeHtml(title)}">🤖 ${filtered ? 'Filtered' : 'Verified'}</span>`;
+    return { kind: 'filtered', text: 'Filtered', summary, details };
+  }
+  if (['unsure', 'error', 'skipped'].includes(record.status)) {
+    const summary = record.status === 'unsure'
+      ? 'The AI model could not tell from the snapshot, so the alert was sent.'
+      : record.status === 'skipped'
+        ? `Sent without AI verification${record.reason ? `: ${String(record.reason).replace(/[.\s]+$/, '')}` : ''}.`
+        : 'The AI model could not check this alert, so it was sent unverified.';
+    return { kind: 'unverified', text: 'Unverified', summary, details };
+  }
+  return null;
+}
+
+function aiVerificationBadge(event) {
+  const info = aiVerificationInfo((event.metadata || {}).ai_verification);
+  if (!info) return '';
+  const tip = escapeHtml(`${info.summary}${info.details ? ` ${info.details}.` : ''}`.replace(/\.\.$/, '.'));
+  return `<span class="detection detection-ai-${info.kind}">🤖 ${info.text}</span>`
+    + `<span class="info-tip ai-verdict-tip" data-tip="${tip}" title="${tip}" tabindex="0" role="note" aria-label="AI verification: ${tip}"></span>`;
 }
 
 // An alert row is written when a rule matches; AI verification may then stop
@@ -495,6 +527,7 @@ function eventsQueryString(query) {
   if (query.label) params.set('label', query.label);
   if (query.face) params.set('face', query.face);
   if (query.alerted_only) params.set('alerted_only', 'true');
+  if (query.ai_check) params.set('ai_check', query.ai_check);
   if (query.sort && query.sort !== 'newest') params.set('sort', query.sort);
   return params.toString();
 }
@@ -554,6 +587,7 @@ document.addEventListener('DOMContentLoaded', () => {
     noun: 'events',
     types: ['all', 'object', 'motion', 'sound'],
     searchPlaceholder: 'Search events: person, driveway, red car, a face name…',
+    showAiCheck: true,
     onAiSearch: runEventSearch,
     onChange: (_query, reason) => {
       // The type pill only re-filters what is loaded; everything else is a
