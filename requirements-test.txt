@@ -9,7 +9,7 @@
 #
 # Used by scripts/install_test_deps.sh and the web-auth job in
 # .github/workflows/python-app.yml, so a local run and CI resolve the same set.
-fastapi>=0.162.0,<1.0
+fastapi>=0.162.5,<1.0
 uvicorn>=0.54.0,<1.0
 PyYAML>=6.0.3,<7.0
 bcrypt>=5.0.0,<6.0
