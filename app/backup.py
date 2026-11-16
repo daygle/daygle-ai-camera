@@ -926,12 +926,17 @@ def purge_camera_diagnostics_by_policy() -> int:
     (``retention_days``) so diagnostics age out alongside the recordings they
     explain.
     """
+    if _state.database is None:
+        # Not started yet (or a unit test without a database): nothing to purge.
+        return 0
     try:
         retention_days = max(1, int(effective_recording_config().get('retention_days', 14)))
         older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_camera_diagnostics_older_than(older_than)
     except Exception as exc:  # noqa: BLE001 - retention is best-effort and retried on the next tick
-        logger.debug('Camera diagnostics purge failed: %s', exc)
+        # Warning, not debug: a purge that keeps failing means rows are no
+        # longer aged out, which must be visible in the Application Log.
+        logger.warning('Camera diagnostics purge failed: %s', exc)
         return 0
 
 
@@ -942,12 +947,15 @@ def purge_ai_diagnostics_by_policy() -> int:
     insert and this time-based purge following the recording retention
     window, so the AI log ages out alongside the recordings it explains.
     """
+    if _state.database is None:
+        # Not started yet (or a unit test without a database): nothing to purge.
+        return 0
     try:
         retention_days = max(1, int(effective_recording_config().get('retention_days', 14)))
         older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_ai_diagnostics_older_than(older_than)
     except Exception as exc:  # noqa: BLE001 - retention is best-effort and retried on the next tick
-        logger.debug('AI diagnostics purge failed: %s', exc)
+        logger.warning('AI diagnostics purge failed: %s', exc)
         return 0
 
 
@@ -959,6 +967,9 @@ def purge_face_identities_by_policy() -> int:
     indefinitely, so this is a no-op then. Otherwise events older than the window
     have their ``face_identities`` block stripped (the event itself is kept).
     """
+    if _state.database is None:
+        # Not started yet (or a unit test without a database): nothing to purge.
+        return 0
     try:
         retention_days = int(effective_face_recognition_config().get('retention_days', 0) or 0)
         if retention_days <= 0:
@@ -966,7 +977,7 @@ def purge_face_identities_by_policy() -> int:
         older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_face_identities(older_than=older_than)
     except Exception as exc:  # noqa: BLE001 - retention is best-effort and retried on the next tick
-        logger.debug('Face identity purge failed: %s', exc)
+        logger.warning('Face identity purge failed: %s', exc)
         return 0
 
 
@@ -980,6 +991,9 @@ def purge_unknown_faces_by_policy() -> int:
     captures are always kept -- they are the active review queue (and are already
     bounded by a hard cap at capture time).
     """
+    if _state.database is None:
+        # Not started yet (or a unit test without a database): nothing to purge.
+        return 0
     try:
         retention_days = int(effective_face_recognition_config().get('retention_days', 0) or 0)
         if retention_days <= 0:
@@ -987,5 +1001,5 @@ def purge_unknown_faces_by_policy() -> int:
         older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_old_unknown_faces(older_than)
     except Exception as exc:  # noqa: BLE001 - retention is best-effort and retried on the next tick
-        logger.debug('Unknown-face capture purge failed: %s', exc)
+        logger.warning('Unknown-face capture purge failed: %s', exc)
         return 0
