@@ -32,6 +32,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "gpu_temp_critical_c": 90,
     },
     "cloudflare_tunnel": {"binary": "cloudflared"},
+    # Built-in Ollama management on the AI page (app/ollama_manager.py).
+    # allow_install lets an admin install Ollama as a system service from the
+    # web UI; url is Ollama's native API (default http://127.0.0.1:11434, or
+    # the DAYGLE_OLLAMA_URL environment variable).
+    "ollama": {"allow_install": True},
     "ai": {
         "enabled": True,
         "backend": "onnx",

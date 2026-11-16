@@ -39,6 +39,10 @@ services:
       # Optional: headless Cloudflare Tunnel (takes precedence over the UI).
       # Prefer an env_file: DAYGLE_CLOUDFLARED_TOKEN=ey...
       # DAYGLE_CLOUDFLARED_TOKEN: ""
+      # Optional: uncomment with the "ollama" service below, then download a
+      # model on Intelligence -> AI and use http://ollama:11434/v1 as its
+      # Server URL.
+      # DAYGLE_OLLAMA_URL: http://ollama:11434
     # Uncomment on GPU hosts (requires the NVIDIA container toolkit and the
     # Pascal-compatible driver on the host):
     # deploy:
@@ -55,6 +59,27 @@ services:
       start_period: 20s
       retries: 3
 
+  # Optional local vision model for AI verification, descriptions and search
+  # (docs/ai-verification.md). Not published on the host; only the app
+  # reaches it. Uncomment, plus DAYGLE_OLLAMA_URL above (and the "gpus"
+  # block for a GPU host).
+  # ollama:
+  #   image: ollama/ollama:0.40.16
+  #   container_name: daygle-ollama
+  #   restart: unless-stopped
+  #   environment:
+  #     OLLAMA_KEEP_ALIVE: "-1"
+  #   volumes:
+  #     - ollama-models:/root/.ollama
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+
 volumes:
   daygle-data:
   daygle-models:
+  # ollama-models:

@@ -54,6 +54,7 @@ const SOURCE_LABELS = {
   detection: 'Detection',
   analysis: 'AI Analysis',
   models: 'Models',
+  ollama: 'Ollama Local Model',
   faces: 'Faces',
   sound: 'Sound',
   alerts: 'Alerts and Notifications',

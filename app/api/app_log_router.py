@@ -126,7 +126,7 @@ _OPENCV_LEVELS: dict[str, str] = {
 # Keep the keys in step with the Source filter in web/application-log.html.
 _AREA_SOURCES = frozenset({
     'cameras', 'recording', 'ptz', 'rtsp_broker',
-    'detection', 'analysis', 'models', 'faces', 'sound',
+    'detection', 'analysis', 'models', 'ollama', 'faces', 'sound',
     'alerts',
     'auth', 'storage', 'updates', 'tunnel',
 })

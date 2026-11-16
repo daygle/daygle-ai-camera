@@ -656,6 +656,20 @@ textarea {
 .ai-verify-stats .stat-card-value.is-unknown { color: var(--muted); }
 .alerts-ai-warning { margin: 0 0 12px; padding: 10px 12px; font-size: 14px; border-radius: 10px; border: 1px solid rgba(217,119,6,.45); background: rgba(217,119,6,.08); }
 .alerts-ai-apply { grid-column: 1 / -1; }
+/* AI page: Local Model (Ollama) card (ai-ollama.js). */
+.ollama-status { margin: 0 0 4px; }
+.ollama-install-log { margin-top: 12px; }
+.ollama-install-log summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.ollama-models { margin-top: 18px; display: grid; gap: 12px; }
+.ollama-models h3 { margin: 0; }
+.ollama-model-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.ollama-in-use { align-self: center; color: var(--success); font-weight: 700; font-size: 13px; }
+.ollama-pull-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
+.ollama-pull-row label { display: grid; gap: 6px; flex: 1 1 240px; max-width: 360px; }
+button.ollama-suggest { background: none; border: 0; padding: 0; min-height: 0; color: var(--accent); font-weight: 700; font-size: inherit; cursor: pointer; box-shadow: none; }
+.ollama-suggestions { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+.ollama-pull-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.ollama-pull-progress progress { flex: 1 1 200px; max-width: 420px; height: 10px; accent-color: var(--accent); }
 .ai-backfill-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 12px; }
 .ai-backfill-hours { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .ai-backfill-hours select { width: auto; }

@@ -200,6 +200,32 @@ async function loadAiPage() {
   fillAiForm(settings);
   api('/api/settings/ai-verification/describe-backfill').then(renderAiBackfill).catch(() => {});
   loadAiStats();
+  // The Ollama card marks the model in use once the form is filled.
+  document.dispatchEvent?.(new Event('daygle:ai-settings-loaded'));
+}
+
+// Used by ai-ollama.js: point the Model Server at the built-in Ollama,
+// choose one of its models and save, so a fresh install needs no typing.
+async function aiUseLocalModel(serverUrl, model) {
+  if (!aiForm) return;
+  aiForm.elements.server_url.value = serverUrl;
+  aiForm.elements.model.value = model;
+  fillAiForm(await api('/api/settings/ai-verification', {
+    method: 'PUT',
+    body: JSON.stringify(aiPayload()),
+  }));
+  aiMessage(`AI now uses ${model}. Use Test on Latest Event to check it.`);
+}
+
+function aiCurrentModelServer() {
+  return {
+    serverUrl: String(aiForm?.elements?.server_url?.value || ''),
+    model: String(aiForm?.elements?.model?.value || ''),
+  };
+}
+if (typeof window !== 'undefined') {
+  window.daygleAiUseLocalModel = aiUseLocalModel;
+  window.daygleAiCurrentModelServer = aiCurrentModelServer;
 }
 
 aiForm?.addEventListener('submit', aiGuard(async (event) => {

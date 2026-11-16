@@ -38,7 +38,55 @@ OpenLLM. The model must be able to read images.
 On a Tesla P4 or another Pascal GPU, use **Ollama** (or llama.cpp). vLLM, and
 OpenLLM, which serves models through vLLM, need a Volta or newer GPU.
 
-### Ollama on the camera server (Debian)
+### Ollama on the camera server (built in)
+
+On a Debian install (systemd, service running as root) Daygle can install
+Ollama and its models itself. Go to **Intelligence → AI** (admin only); the
+**Local Model (Ollama)** card at the top:
+
+1. **Install Ollama.** Downloads a pinned Ollama release (about 1.5 GB) from
+   its official GitHub release, checks its SHA-256 and installs it with
+   `scripts/install_ollama.sh`: the binary and libraries in `/usr/local`, an
+   `ollama` system user, and an `ollama` systemd service listening on
+   `127.0.0.1:11434` only, with `OLLAMA_KEEP_ALIVE=-1` (below) already set.
+   Allow about 6 GB of disk, plus 2-8 GB per model. The install runs in the
+   background; the card shows its log, which is also in the Application Log
+   (source **Ollama Local Model**).
+2. **Download a model.** Pick a suggestion (`gemma3:4b` is the recommended
+   start) or type any name from [ollama.com/library](https://ollama.com/library)
+   and click **Download**. A progress bar follows the download.
+3. **Use.** Points **Server URL** and **Model** below at that model and saves.
+   Then use **Test on Latest Event**.
+
+The card also starts, stops and restarts the service, lists the installed
+models (with whether each can read images) and deletes them. Every action is
+in the Audit Log.
+
+- **GPU:** Ollama uses an NVIDIA GPU when the NVIDIA driver is installed; it
+  bundles its own CUDA libraries. Daygle does not install drivers. Pascal
+  cards such as the Tesla P4 need driver 570 or newer (see
+  [docs/tesla-p4-gpu-setup.md](tesla-p4-gpu-setup.md)). Without a GPU the
+  model runs on the CPU, which is much slower.
+- **Updates:** the in-app updater (`scripts/update.sh`) moves an Ollama that
+  Daygle installed to the release pinned by the new version. A failure there
+  never fails the update.
+- **Your own Ollama is left alone.** If Ollama was installed another way, the
+  card manages its models but does not install over it, update it or replace
+  its service. To hand it over to Daygle, run
+  `sudo DAYGLE_OLLAMA_FORCE=1 /opt/daygle-ai-camera/scripts/install_ollama.sh`.
+- **Turning it off:** set `ollama: {allow_install: false}` in `config.yaml`
+  to remove the install and service controls (model management stays).
+- **First install:** `DAYGLE_INSTALL_OLLAMA=1 sudo ./scripts/install_debian.sh`
+  installs Ollama with the app.
+- **Docker:** a container cannot install system services. Uncomment the
+  `ollama` service and `DAYGLE_OLLAMA_URL` in `docker-compose.yml`; the card
+  then downloads and manages models in that container, and the Server URL is
+  `http://ollama:11434/v1`.
+- **Not running as root:** the card uses `sudo -n` for the install and the
+  service controls, so they fail with a message unless passwordless sudo is
+  set up for the service user.
+
+### Ollama on the camera server (manual)
 
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
@@ -57,7 +105,7 @@ on thinking and come back empty. A server that rejects the field is asked
 without it. If Test still reports "model spent its whole reply thinking",
 update Ollama or choose a non-thinking model.
 
-By default Ollama unloads an idle model after 5 minutes, so the first alert
+By default (the built-in install sets this already) Ollama unloads an idle model after 5 minutes, so the first alert
 after a quiet period waits a few seconds while the model reloads. To keep it
 loaded:
 

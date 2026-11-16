@@ -24,6 +24,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 - User roles: `admin` and `viewer`
 - Audit log of admin actions, camera diagnostics, and an in-browser application log viewer
 - Database backup / restore (database-only or full with media and model assets) and over-the-air updates
+- Optional local vision model (alert verification, event descriptions, plain-English search), with one-click Ollama install and model downloads on the AI page
 - Debian install script with a systemd service bundle
 - Optional Docker / Docker Compose packaging (CPU image by default, Pascal/Tesla P4 GPU build supported)
 
