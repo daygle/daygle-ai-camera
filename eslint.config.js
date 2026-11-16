@@ -74,6 +74,12 @@ const WEB_SHARED_GLOBALS = {
   detectionPill: 'readonly',
   aiTagPills: 'readonly',
   aiDescriptionTip: 'readonly',
+  // web/utils.js - false-positive badge and admin toggle (events, snapshots,
+  // recordings; app/false_positives.py).
+  eventFalsePositive: 'readonly',
+  falsePositiveBadge: 'readonly',
+  falsePositiveButton: 'readonly',
+  bindFalsePositiveButtons: 'readonly',
   escapeHtml: 'readonly',
   eventFaceIdentities: 'readonly',
   faceIdentityPills: 'readonly',

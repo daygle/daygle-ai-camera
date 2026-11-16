@@ -14,6 +14,7 @@ from app.db.descriptions import EventDescriptionsMixin
 from app.db.diagnostics import CameraDiagnosticsMixin
 from app.db.ai_diagnostics import AiDiagnosticsMixin
 from app.db.events import EventsMixin
+from app.db.false_positives import FalsePositivesMixin
 from app.db.persons import PersonsMixin
 from app.db.recordings import RecordingsMixin
 from app.db.settings_repo import SettingsRepoMixin
@@ -77,6 +78,7 @@ class EventDatabase(
     PersonsMixin,
     UnknownFacesMixin,
     EventDescriptionsMixin,
+    FalsePositivesMixin,
 ):
     def __init__(self, database_path: str) -> None:
         self.database_path = Path(database_path)
@@ -236,6 +238,19 @@ class EventDatabase(
             # Column already exists (or the table is created below).
             with contextlib.suppress(sqlite3.OperationalError):
                 db.execute("ALTER TABLE recordings ADD COLUMN extensions TEXT")
+            # Migration: false-positive marking (app.false_positives). NULL
+            # means not judged yet, 1 a false positive, 0 a real detection;
+            # ``false_positive_by`` says who decided ('ai' or 'user'). New
+            # installs get the columns via the CREATE TABLE block below.
+            for column_sql in (
+                "ALTER TABLE events ADD COLUMN false_positive INTEGER",
+                "ALTER TABLE events ADD COLUMN false_positive_by TEXT",
+                "ALTER TABLE events ADD COLUMN false_positive_at TEXT",
+                "ALTER TABLE events ADD COLUMN false_positive_reason TEXT",
+            ):
+                # Column already exists (or the table is created below).
+                with contextlib.suppress(sqlite3.OperationalError):
+                    db.execute(column_sql)
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -248,6 +263,10 @@ class EventDatabase(
                     dismissed INTEGER NOT NULL DEFAULT 0,
                     recording_id INTEGER,
                     metadata TEXT DEFAULT '{}',
+                    false_positive INTEGER,
+                    false_positive_by TEXT,
+                    false_positive_at TEXT,
+                    false_positive_reason TEXT,
                     FOREIGN KEY(recording_id) REFERENCES recordings(id) ON DELETE SET NULL
                 );
 
@@ -283,6 +302,7 @@ class EventDatabase(
 
                 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
                 CREATE INDEX IF NOT EXISTS idx_events_recording ON events(recording_id);
+                CREATE INDEX IF NOT EXISTS idx_events_false_positive ON events(false_positive, created_at);
                 CREATE INDEX IF NOT EXISTS idx_detections_label ON detections(label);
                 CREATE INDEX IF NOT EXISTS idx_detections_event ON detections(event_id);
                 CREATE INDEX IF NOT EXISTS idx_detections_event_label ON detections(event_id, label);

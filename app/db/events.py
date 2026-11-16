@@ -13,6 +13,7 @@ from app.db.library_filters import (
     event_query_condition,
     face_facet_rows,
 )
+from app.db.false_positives import event_false_positive_condition
 from app.detection_status import GENERIC_TRIGGER_LABELS
 from app.utils import _normalize_iso_to_utc, parse_json_object
 
@@ -333,6 +334,7 @@ class EventsMixin:
         face: str | None = None,
         sort: str = 'newest',
         ai_check: str | None = None,
+        false_positive: str | None = None,
     ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
         """Return ``(events, next_raw_cursor)`` ordered by ``(created_at, id)``.
 
@@ -353,6 +355,7 @@ class EventsMixin:
             conditions, params,
             label=label, limit=limit, alerted_only=alerted_only, since=since, until=until,
             camera_id=camera_id, query=query, face=face, sort=sort, cursor=cursor, owner_user_id=owner_user_id,
+            false_positive=false_positive,
         )
 
     def list_snapshots_page(
@@ -369,6 +372,7 @@ class EventsMixin:
         alerted_only: bool = False,
         face: str | None = None,
         sort: str = 'newest',
+        false_positive: str | None = None,
     ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
         """Return a stable snapshot page (newest first by default) and its next raw cursor."""
         conditions = [
@@ -379,6 +383,7 @@ class EventsMixin:
             conditions, [],
             label=label, limit=limit, alerted_only=alerted_only, since=since, until=until,
             camera_id=camera_id, query=query, face=face, sort=sort, cursor=cursor, owner_user_id=owner_user_id,
+            false_positive=false_positive,
         )
 
     def _event_list_page(
@@ -397,6 +402,7 @@ class EventsMixin:
         sort: str,
         cursor: tuple[str, int] | None,
         owner_user_id: int | None,
+        false_positive: str | None = None,
     ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
         """Keyset-paged event list shared by the Events and Snapshots libraries.
 
@@ -426,6 +432,7 @@ class EventsMixin:
             event_camera_condition('e', camera_id),
             event_query_condition('e', query),
             event_face_condition('e', face),
+            event_false_positive_condition('e', false_positive),
         ):
             if extra is not None:
                 conditions.append(extra[0])

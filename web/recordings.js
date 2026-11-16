@@ -514,7 +514,13 @@ function recordingRowHtml(recording) {
   // per distinct label (with a "×N" multiplier when a label fired across
   // several events), so we no longer append a second row of per-event pills
   // here -- that double-render was showing every shared label twice.
+  // A recording counts as a false positive when its events do (see
+  // app/db/false_positives.py); marking it marks every event in the clip. A
+  // clip with no events (continuous capture) has nothing to mark.
+  const falsePositive = recording.false_positive || null;
+  const markable = Boolean(recording.event_id != null || (recording.events || []).length);
   const actions = [
+    markable ? falsePositiveButton('recording', recording.id, Boolean(falsePositive)) : '',
     `<button class="secondary activity-item-action activity-item-action-delete" data-delete-recording="${recording.id}" type="button" aria-label="Delete recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg><span class="activity-action-label">Delete</span></button>`,
     mediaReady
       ? `<button class="secondary activity-item-action activity-item-action-play" data-play-recording="${recording.id}" type="button" aria-label="Play recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Play</span></button>`
@@ -522,7 +528,7 @@ function recordingRowHtml(recording) {
   ];
   return `
     <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
-      <td class="activity-cell-type"><span class="activity-item-type">${typeLabel}</span><span class="activity-cell-ref">Recording #${recording.id}</span></td>
+      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${typeLabel}</span>${falsePositiveBadge(falsePositive)}</div><span class="activity-cell-ref">Recording #${recording.id}</span></td>
       <td class="activity-cell-camera">${escapeHtml(recordingCameraName(recording))}</td>
       <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}${aiTagPills(recording.ai_labels)}${recordingDescriptionTip(recording)}</div></td>
       <td class="activity-cell-zone">${zoneCell}</td>
@@ -948,6 +954,7 @@ function recordingsQueryParams(query) {
   if (query.q) params.set('q', query.q);
   if (query.face) params.set('face', query.face);
   if (query.alerted_only) params.set('alerted_only', 'true');
+  if (query.false_positive) params.set('false_positive', query.false_positive);
   if (query.type === 'sound') params.set('source_type', 'sound');
   if (query.type === 'object') params.set('source_type', 'object');
   return params;
@@ -1147,6 +1154,7 @@ loadAuth().then(async () => {
       // explicitly (it filters client-side, see loadRecordings).
       extraLabels: [{ value: 'motion', label: 'Motion' }],
       searchPlaceholder: 'Search recordings: person, driveway, red car, a face name…',
+      showFalsePositive: true,
       onChange: (_query, reason) => {
         // Picking an explicit server order drops any column sort so the
         // bar's order is what the table shows.
@@ -1155,6 +1163,16 @@ loadAuth().then(async () => {
       },
     });
   }
+  bindFalsePositiveButtons(els.recordings, (_kind, id, _value, response) => {
+    const recording = currentRecordings.find((item) => String(item.id) === String(id));
+    if (!recording) return;
+    recording.false_positive = response ? response.false_positive || null : null;
+    const row = els.recordings.querySelector(`[data-recording-row="${CSS.escape(String(id))}"]`);
+    if (row) {
+      row.outerHTML = recordingRowHtml(recording);
+      bindRecordingButtons();
+    }
+  });
   await Promise.all([loadCameras(), loadLiveSettings()]);
   await loadRecordings();
   // Auto-play the deep-linked recording inline above the library card.

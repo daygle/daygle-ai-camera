@@ -210,3 +210,47 @@ test('the Events AI Check filter round-trips through the URL only where shown', 
   assert.match(read('events.js'), /showAiCheck: true/);
   assert.match(read('events.js'), /params\.set\('ai_check', query\.ai_check\)/);
 });
+
+test('the False Positives filter round-trips the URL only where a page shows it', () => {
+  const sandbox = createSandbox();
+  const shown = run(sandbox, 'libraryControls({ showFalsePositive: true })');
+  const state = run(sandbox, `libraryStateFromSearch('?false_positive=hide', ['all'], ${JSON.stringify(shown)})`);
+  assert.equal(state.falsePositive, 'hide');
+  assert.equal(run(sandbox, `libraryQueryForState(${JSON.stringify(state)})`).false_positive, 'hide');
+  assert.match(run(sandbox, `librarySearchFromState(${JSON.stringify(state)}, '', ${JSON.stringify(shown)})`), /false_positive=hide/);
+  const hidden = run(sandbox, `libraryStateFromSearch('?false_positive=only', ['all'])`);
+  assert.equal(hidden.falsePositive, '', 'a page without the control ignores the parameter');
+  const bogus = run(sandbox, `libraryStateFromSearch('?false_positive=all', ['all'], ${JSON.stringify(shown)})`);
+  assert.equal(bogus.falsePositive, '');
+});
+
+test('the three library pages offer the False Positives filter and send it to the API', () => {
+  for (const script of ['events.js', 'snapshots.js', 'recordings.js']) {
+    const source = read(script);
+    assert.match(source, /showFalsePositive: true/, `${script} shows the filter`);
+    assert.match(source, /params\.set\('false_positive', query\.false_positive\)/, `${script} sends it`);
+    assert.match(source, /bindFalsePositiveButtons\(/, `${script} wires the mark button`);
+  }
+});
+
+test('false-positive badge and button render for the right users and states', () => {
+  const sandbox = createSandbox();
+  assert.equal(run(sandbox, 'eventFalsePositive({ false_positive: 0 })'), null);
+  assert.equal(run(sandbox, 'eventFalsePositive({ false_positive: null })'), null);
+  const marked = run(sandbox, "eventFalsePositive({ false_positive: 1, false_positive_by: 'ai', false_positive_reason: 'person: a coat' })");
+  assert.equal(marked.by, 'ai');
+  const badge = run(sandbox, `falsePositiveBadge(${JSON.stringify(marked)})`);
+  assert.match(badge, /False Positive · AI/);
+  assert.match(badge, /person: a coat/);
+  assert.equal(run(sandbox, 'falsePositiveBadge(null)'), '');
+  run(sandbox, "window.daygleAuth = { user: { role: 'viewer' } }");
+  assert.equal(run(sandbox, "falsePositiveButton('event', 5, false)"), '', 'viewers get no button');
+  run(sandbox, "window.daygleAuth = { user: { role: 'admin' } }");
+  const mark = run(sandbox, "falsePositiveButton('event', 5, false)");
+  assert.match(mark, /data-false-positive-value="true"/);
+  assert.match(mark, />False Positive</);
+  const unmark = run(sandbox, "falsePositiveButton('recording', 9, true)");
+  assert.match(unmark, /data-false-positive-kind="recording"/);
+  assert.match(unmark, /data-false-positive-value="false"/);
+  assert.match(unmark, />Not False Positive</);
+});
