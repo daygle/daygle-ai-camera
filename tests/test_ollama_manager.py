@@ -496,3 +496,13 @@ def test_raw_exception_text_is_not_returned(tmp_path):
     _wait(lambda: not manager.status()['pull']['running'])
     error = manager.status()['pull']['error']
     assert 'OSError' in error and '/secret/path' not in error
+
+
+def test_install_script_reuses_a_leftover_ollama_group():
+    """A removed Ollama can leave its "ollama" group behind; useradd
+    --user-group then fails with "group ollama exists"."""
+    script = (Path(__file__).resolve().parents[1] / 'scripts' / 'install_ollama.sh').read_text(encoding='utf-8')
+    assert '--user-group' not in script
+    assert 'groupadd --system ollama' in script
+    assert 'useradd --system -g ollama' in script
+    assert 'chown -R ollama:ollama /usr/share/ollama' in script

@@ -116,7 +116,15 @@ EOF
 ensure_user() {
   if ! id -u ollama >/dev/null 2>&1; then
     log "Creating the ollama system user..."
-    useradd --system --user-group --shell /usr/sbin/nologin --create-home --home-dir /usr/share/ollama ollama
+    # An earlier Ollama install that was removed can leave its "ollama"
+    # group (and models in /usr/share/ollama) behind; reuse them.
+    if ! getent group ollama >/dev/null 2>&1; then
+      groupadd --system ollama
+    fi
+    useradd --system -g ollama --shell /usr/sbin/nologin --create-home --home-dir /usr/share/ollama ollama
+    # Files left by a previous "ollama" user carry its old user ID; hand them
+    # to the new user so Ollama can read the models already downloaded.
+    chown -R ollama:ollama /usr/share/ollama
   fi
   # GPU device access.
   local group
