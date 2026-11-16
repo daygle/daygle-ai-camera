@@ -85,9 +85,63 @@ _MAX_RESPONSE_BYTES = 256 * 1024
 # reasoning. Servers that reject the field are remembered and asked without it.
 _NO_REASONING = {'reasoning_effort': 'none'}
 _servers_without_reasoning_effort: set[str] = set()
-# Catch-up/backfill/test/search share the same model as live verification.
-# Pool idleness alone is not atomic admission: serialize actual completions.
-_model_request_lock = threading.RLock()
+
+
+class _ModelGate:
+    """One model request at a time, foreground work first.
+
+    Catch-up/backfill/test/search share the model with live verification, and
+    pool idleness alone is not atomic admission, so every completion holds
+    this gate. Background requests (captions nobody is waiting on) never take
+    the gate while a foreground request (an alert, a search, a test) waits
+    for it, and a foreground request's wait does not run down its timeout
+    while a background request holds the model: an abandoned request keeps
+    the model busy anyway, so giving up on it would only send the alert
+    unverified. The background request's own timeout bounds that wait.
+    """
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._held = False
+        self._holder_background = False
+        self._foreground_waiting = 0
+
+    def acquire(self, blocking: bool = True, timeout: float = -1, *, background: bool = False) -> bool:
+        budget = None if timeout is None or timeout < 0 else float(timeout)
+        deadline = None if budget is None else time.monotonic() + budget
+        with self._cond:
+            if not background:
+                self._foreground_waiting += 1
+            try:
+                while self._held or (background and self._foreground_waiting):
+                    if not blocking:
+                        return False
+                    if self._held and self._holder_background and not background:
+                        # Waiting out a background request costs no budget.
+                        self._cond.wait()
+                        if budget is not None:
+                            deadline = time.monotonic() + budget
+                        continue
+                    remaining = None if deadline is None else deadline - time.monotonic()
+                    if remaining is not None and remaining <= 0:
+                        return False
+                    self._cond.wait(remaining)
+                self._held, self._holder_background = True, background
+                return True
+            finally:
+                if not background:
+                    self._foreground_waiting -= 1
+
+    def release(self) -> None:
+        with self._cond:
+            self._held, self._holder_background = False, False
+            self._cond.notify_all()
+
+
+_model_request_lock = _ModelGate()
+# The shortest request an alert is given once it has waited for the model, so
+# a long wait never leaves it a request too short to be answered.
+_MIN_REQUEST_SECONDS = 5.0
 _description_lock = threading.Lock()
 _descriptions_inflight: set[tuple[int, int]] = set()
 _MODEL_NAME_RE = re.compile(r'^[A-Za-z0-9._:/@+-]{1,200}$')
@@ -97,6 +151,20 @@ SYSTEM_PROMPT = (
     'You check security camera alerts for false alarms. '
     'Answer only with a JSON object and nothing else.'
 )
+# Night frames are infrared: grey, grainy and low-contrast. Small models read
+# that as "nothing clear" and reject real people, so say so up front.
+_NIGHT_HINT = ('Night images may be grainy black-and-white infrared with glowing eyes or washed-out faces; '
+               'judge by shape, size and posture, not colour. ')
+# Each verdict writes its reason before its answer, so the model looks
+# before it decides rather than justifying a first-word guess. "unsure"
+# is for a real-looking shape too dark, blurred or small to tell: it is
+# delivered (an unclear real intruder must not be silently dropped).
+_VERDICT_RULES = (
+    '"present": true when it is really there; false when there is no {thing} at all (an empty or plain '
+    'scene) or it is clearly something else; "unsure" only when something that could be {article} {thing} '
+    'is there but too dark, blurry or small to tell. '
+)
+UNSURE = 'unsure'
 
 
 DESCRIBE_SYSTEM_PROMPT = (
@@ -503,18 +571,29 @@ def _instead_clause(candidates: list[str] | None) -> str:
 def build_prompt(label: str, camera_name: str = '', source: str = 'An object detector',
                  candidates: list[str] | None = None) -> str:
     where = f' from the camera "{camera_name}"' if camera_name else ''
-    # "an animal", not "a animal": a group rule asks about ``animal``.
-    article = 'an' if label[:1].lower() in ('a', 'e', 'i', 'o', 'u') else 'a'
-    example = '{"present": true, "reason": "short reason"' + (', "instead": "none"}' if candidates else '}')
+    label = _spoken(label)
+    article = _article(label)
+    example = '{"reason": "short reason", "present": true' + (', "instead": "none"}' if candidates else '}')
     return (
         f'{source} reported {article} "{label}" in this security camera image{where}. '
         f'Is a real {label} actually visible? It is NOT a real {label} if it is only a shadow, '
         f'reflection, picture, poster, statue, toy, plant, rubbish bin, or another object that '
-        f'looks like {article} {label}, or if the image shows nothing clear. '
+        f'looks like {article} {label}. {_NIGHT_HINT}'
         f'Reply with JSON exactly like {example} '
-        'with "present" true or false and a reason of at most 15 words. '
+        'with a reason of at most 15 words first, then "present". '
+        f'{_VERDICT_RULES.format(thing=label, article=article)}'
         f'{_instead_clause(candidates)}'
     ).strip()
+
+
+def _spoken(label: str) -> str:
+    """A label as words (``fire_hydrant`` -> ``fire hydrant``) for a prompt."""
+    return ' '.join(str(label or '').replace('_', ' ').split())
+
+
+def _article(label: str) -> str:
+    # "an animal", not "a animal": a group rule asks about ``animal``.
+    return 'an' if label[:1].lower() in ('a', 'e', 'i', 'o', 'u') else 'a'
 
 
 def build_check_prompt(labels: list[str], camera_name: str = '', *, content: str | None = None,
@@ -527,9 +606,9 @@ def build_check_prompt(labels: list[str], camera_name: str = '', *, content: str
     a request, the extra reply text is cheap.
     """
     where = f' from the camera "{camera_name}"' if camera_name else ''
-    reported = ', '.join(f'"{label}"' for label in labels)
+    reported = ', '.join(f'"{_spoken(label)}"' for label in labels)
     instead = ', "instead": "none"' if candidates else ''
-    checks = ', '.join(f'"{label}": {{"present": true, "reason": "short reason"{instead}}}' for label in labels)
+    checks = ', '.join(f'"{_spoken(label)}": {{"reason": "short reason", "present": true{instead}}}' for label in labels)
     example = [f'"checks": {{{checks}}}']
     describe = ''
     if content:
@@ -544,12 +623,15 @@ def build_check_prompt(labels: list[str], camera_name: str = '', *, content: str
     return (
         f'{source} reported {reported} in this security camera image{where}. '
         'For each, decide whether a real one is actually visible. It is NOT real if it is only a shadow, '
-        'reflection, picture, poster, statue, toy, plant, rubbish bin, or another object that looks like it, '
-        'or if the image shows nothing clear. '
+        'reflection, picture, poster, statue, toy, plant, rubbish bin, or another object that looks like it. '
+        f'{_NIGHT_HINT}'
         f'{describe}'
         f'Reply with JSON exactly like {{{", ".join(example)}}}. '
-        '"checks": one entry for each reported object, keyed by its name as given, with "present" true or '
-        'false and a reason of at most 15 words. '
+        '"checks": one entry for each reported object, keyed by its name as given, with a reason of at most '
+        '15 words first, then "present". '
+        '"present": true when it is really there; false when it is not there at all (an empty or plain '
+        'scene) or is clearly something else; "unsure" only when something that could be it is there but too '
+        'dark, blurry or small to tell. '
         f'{_instead_clause(candidates)}'
         f'{_describe_fields(content) if content else ""}'
     ).strip()
@@ -583,12 +665,12 @@ def parse_check_reply(
     data = _reply_object(text)
     if data is None:
         return {}, None
-    verdicts: dict[str, tuple[bool, str]] = {}
+    verdicts: dict[str, tuple[Any, ...]] = {}
     checks = data.get('checks')
     if isinstance(checks, dict):
         by_name = {str(key).strip().lower(): value for key, value in checks.items()}
         for label in labels:
-            answer = by_name.get(label.lower(), by_name.get(label.lower().replace('_', ' ')))
+            answer = by_name.get(label.lower(), by_name.get(_spoken(label).lower()))
             if not isinstance(answer, dict):
                 continue
             present = _present_value(answer.get('present'))
@@ -604,12 +686,14 @@ def parse_check_reply(
     return verdicts, description
 
 
-def _present_value(value: Any) -> bool | None:
+def _present_value(value: Any) -> bool | str | None:
+    """True, False, UNSURE, or None for an answer that is none of those."""
     if isinstance(value, bool):
         return value
-    if isinstance(value, str) and value.strip().lower() in {'true', 'false', 'yes', 'no'}:
-        return value.strip().lower() in {'true', 'yes'}
-    return None
+    text = value.strip().lower() if isinstance(value, str) else ''
+    if text in {'true', 'false', 'yes', 'no'}:
+        return text in {'true', 'yes'}
+    return UNSURE if text in {UNSURE, 'uncertain'} else None
 
 
 def parse_verdict(text: str, candidates: list[str] | None = None) -> tuple[Any, ...]:
@@ -621,7 +705,11 @@ def parse_verdict(text: str, candidates: list[str] | None = None) -> tuple[Any, 
     relabel a rejection names (None when it names none, or no JSON came back).
     """
     content = str(text or '').strip()
-    for candidate in _JSON_OBJECT_RE.findall(content):
+    # The outermost object first: a reason containing a brace would cut the
+    # non-greedy match below short.
+    data = _reply_object(content)
+    candidates_json = [json.dumps(data)] if isinstance(data, dict) and 'present' in data else []
+    for candidate in candidates_json + _JSON_OBJECT_RE.findall(content):
         try:
             data = json.loads(candidate)
         except ValueError:
@@ -631,9 +719,10 @@ def parse_verdict(text: str, candidates: list[str] | None = None) -> tuple[Any, 
             if present is not None:
                 reason = ' '.join(str(data.get('reason') or '').split())[:200]
                 return _verdict(data, present, reason, candidates)
-    match = re.match(r'^\W*(yes|no|true|false)\b[\s.,:;-]*(.*)$', content, re.IGNORECASE | re.DOTALL)
+    match = re.match(r'^\W*(yes|no|true|false|unsure)\b[\s.,:;-]*(.*)$', content, re.IGNORECASE | re.DOTALL)
     if match:
-        present = match.group(1).lower() in {'yes', 'true'}
+        word = match.group(1).lower()
+        present = UNSURE if word == UNSURE else word in {'yes', 'true'}
         reason = ' '.join(match.group(2).split())[:200]
         return (present, reason, None) if candidates else (present, reason)
     raise VerificationError(f'unrecognised model reply: {content[:120]!r}')
@@ -642,13 +731,20 @@ def parse_verdict(text: str, candidates: list[str] | None = None) -> tuple[Any, 
 class VisionVerifier:
     """Minimal OpenAI-compatible chat client for yes/no image questions."""
 
-    def __init__(self, settings: dict[str, Any], *, timeout: float | None = None):
+    def __init__(self, settings: dict[str, Any], *, timeout: float | None = None, background: bool = False):
         self.server_url = str(settings.get('server_url') or '').rstrip('/')
         self.model = str(settings.get('model') or '')
         self.api_key = str(settings.get('api_key') or '')
         self.timeout = float(timeout or settings.get('timeout_seconds') or 20)
+        # Background requests (captions nobody waits on) yield the model to
+        # alerts, searches and tests; see _ModelGate.
+        self.background = background
+        # The image of the last request, for the settings page's test preview.
+        self.last_image: bytes | None = None
 
-    def _request(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _request(self, path: str, body: dict[str, Any] | None = None, *,
+                 timeout: float | None = None) -> dict[str, Any]:
+        timeout = float(timeout or self.timeout)
         headers = {'Accept': 'application/json'}
         data = None
         if body is not None:
@@ -661,7 +757,7 @@ class VisionVerifier:
             method='POST' if body is not None else 'GET',
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310 - admin-configured http(s) URL
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - admin-configured http(s) URL
                 raw = response.read(_MAX_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as exc:
             detail = ''
@@ -675,7 +771,7 @@ class VisionVerifier:
                 # next one queues behind it: let background work back off.
                 _note_model_timeout()
                 raise ModelUnavailableError(
-                    f'model did not answer within {self.timeout:.0f}s (busy or slow)'
+                    f'model did not answer within {timeout:.0f}s (busy or slow)'
                 ) from exc
             raise ModelUnavailableError(f'model server unreachable: {reason}') from exc
         if len(raw) > _MAX_RESPONSE_BYTES:
@@ -704,12 +800,27 @@ class VisionVerifier:
             'stream': False,
             'messages': messages,
         }
-        if not _model_request_lock.acquire(timeout=self.timeout):
-            raise ModelUnavailableError('model is busy with another request')
+        waited_from = time.monotonic()
+        if not _model_request_lock.acquire(timeout=self.timeout, background=self.background):
+            error = ModelUnavailableError('model is busy with another request')
+            _note_model_result(error)
+            raise error
+        # Waiting for the gate counts toward the timeout (an alert is held at
+        # most about one timeout), but the request always gets a usable share.
+        request_timeout = max(self.timeout - (time.monotonic() - waited_from), min(self.timeout, _MIN_REQUEST_SECONDS))
         try:
-            payload = self._chat_request(body)
+            payload = self._chat_request(body, timeout=request_timeout)
+            content = self._reply_content(payload)
+        except VerificationError as exc:
+            _note_model_result(exc)
+            raise
         finally:
             _model_request_lock.release()
+        _note_model_result(None)
+        return content
+
+    @staticmethod
+    def _reply_content(payload: dict[str, Any]) -> str:
         try:
             message = payload['choices'][0]['message']
             content = message['content']
@@ -727,22 +838,22 @@ class VisionVerifier:
             raise VerificationError('model server returned empty or invalid message content')
         return content
 
-    def _chat_request(self, body: dict[str, Any]) -> dict[str, Any]:
+    def _chat_request(self, body: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         if self.server_url in _servers_without_reasoning_effort:
-            return self._request('/chat/completions', body)
+            return self._request('/chat/completions', body, timeout=timeout)
         try:
-            return self._request('/chat/completions', {**body, **_NO_REASONING})
+            return self._request('/chat/completions', {**body, **_NO_REASONING}, timeout=timeout)
         except VerificationError as exc:
             text = str(exc).lower()
             if not (text.startswith('http 4') and 'reasoning' in text):
                 raise
         # This server does not accept reasoning_effort: ask without it from now on.
         _servers_without_reasoning_effort.add(self.server_url)
-        return self._request('/chat/completions', body)
+        return self._request('/chat/completions', body, timeout=timeout)
 
-    @staticmethod
-    def _image_part(image_bytes: bytes) -> dict[str, Any]:
-        encoded = base64.b64encode(_shrink_for_model(image_bytes)).decode('ascii')
+    def _image_part(self, image_bytes: bytes) -> dict[str, Any]:
+        self.last_image = _shrink_for_model(image_bytes)
+        encoded = base64.b64encode(self.last_image).decode('ascii')
         return {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{encoded}'}}
 
     def ask(self, image_bytes: bytes, label: str, camera_name: str = '',
@@ -851,6 +962,71 @@ def _note_model_timeout() -> None:
 
 def model_cooling_down() -> bool:
     return time.monotonic() < _model_cooldown_until
+
+
+# ---------------------------------------------------------------------------
+# Model health: what the AI and Alerts pages show about the model server
+# ---------------------------------------------------------------------------
+
+_health_lock = threading.Lock()
+_model_health: dict[str, Any] = {'last_success_at': None, 'last_error': None, 'last_error_at': None}
+
+
+def _note_model_result(error: Exception | None) -> None:
+    now = datetime.now(UTC).isoformat()
+    with _health_lock:
+        if error is None:
+            _model_health['last_success_at'] = now
+        else:
+            _model_health.update(last_error=str(error)[:200], last_error_at=now)
+
+
+def model_health(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The model server's recent state in this process.
+
+    ``state`` is 'ok' when the last request was answered, 'error' when the
+    last one failed, and 'unknown' before any request since startup.
+    """
+    with _health_lock:
+        health = dict(_model_health)
+    success, error = health['last_success_at'], health['last_error_at']
+    if success is None and error is None:
+        state = 'unknown'
+    elif error is None or (success is not None and success >= error):
+        state = 'ok'
+    else:
+        state = 'error'
+    settings = settings if settings is not None else effective_ai_verification_settings()
+    return {**health, 'state': state, 'model': settings.get('model'), 'server_url': settings.get('server_url')}
+
+
+# ---------------------------------------------------------------------------
+# Verification queue backlog
+# ---------------------------------------------------------------------------
+
+# Seconds the AI pool has spent on background captions, so an alert waiting
+# behind one is not mistaken for a backlog of alerts (see _queue_wait).
+_background_pool_seconds = 0.0
+_background_pool_lock = threading.Lock()
+
+
+def _background_pool_clock() -> float:
+    with _background_pool_lock:
+        return _background_pool_seconds
+
+
+def _add_background_pool_time(seconds: float) -> None:
+    global _background_pool_seconds
+    with _background_pool_lock:
+        _background_pool_seconds += max(0.0, seconds)
+
+
+def _queue_wait(submitted_at: float, background_clock: float | None) -> float:
+    """How long an alert job has waited behind other alert work."""
+    waited = time.monotonic() - submitted_at
+    if background_clock is not None:
+        waited -= _background_pool_clock() - background_clock
+    return waited
 
 
 def _shows_label(detection: dict[str, Any], label: str) -> bool:
@@ -1095,11 +1271,13 @@ def verify_and_describe_event(
             logger.exception('AI verification failed unexpectedly for label %s', label)
             record['labels'][label] = {'present': None, 'error': f'unexpected error: {exc}'[:200]}
     record['latency_ms'] = int((time.monotonic() - started) * 1000)
-    results = record['labels'].values()
+    results = list(record['labels'].values())
     if any(result.get('present') is False for result in results):
         record['status'] = 'filtered'
     elif results and all(result.get('present') is True for result in results):
         record['status'] = 'confirmed'
+    elif results and all(result.get('present') is True or result.get('unsure') for result in results):
+        record['status'] = 'unsure'
     else:
         record['status'] = 'error'
     if unavailable:
@@ -1108,7 +1286,10 @@ def verify_and_describe_event(
     return record, description
 
 
-def _label_result(present: bool, reason: str, instead: str | None = None) -> dict[str, Any]:
+def _label_result(present: bool | str, reason: str, instead: str | None = None) -> dict[str, Any]:
+    if present == UNSURE:
+        # Not a rejection: the alert is delivered, marked as unverified.
+        return {'present': None, 'unsure': True, 'reason': reason}
     result: dict[str, Any] = {'present': present, 'reason': reason}
     if instead:
         result['instead'] = instead
@@ -1176,7 +1357,7 @@ def describe_event(
         timeout = None
         if background:
             timeout = max(float(settings.get('timeout_seconds') or 20), BACKGROUND_DESCRIBE_TIMEOUT_SECONDS)
-        verifier = VisionVerifier(settings, timeout=timeout)
+        verifier = VisionVerifier(settings, timeout=timeout, background=background)
     text, tags = verifier.describe(
         image, camera_name, detected=[label.replace('_', ' ') for label in labels], close_up=close_up,
         content=_written_content(content or event_describe_content(event, settings)),
@@ -1271,9 +1452,10 @@ def _describe_and_store_claimed(
 def verify_and_forward(
     triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None,
     camera_name: str = '', submitted_at: float | None = None, camera_id: Any = None,
+    background_clock: float | None = None,
 ) -> None:
     try:
-        _verify_and_forward(triggered, event_id, rules, camera_name, submitted_at, camera_id)
+        _verify_and_forward(triggered, event_id, rules, camera_name, submitted_at, camera_id, background_clock)
     except Exception:
         # Settings/database/model exceptions must not silently discard a job
         # in PostProcessPool. Verification is an optional, fail-open filter.
@@ -1288,6 +1470,7 @@ def _verify_and_forward(
     camera_name: str = '',
     submitted_at: float | None = None,
     camera_id: Any = None,
+    background_clock: float | None = None,
 ) -> None:
     """AI-pool job: verify the alerts, describe the event, queue what survives.
 
@@ -1301,9 +1484,12 @@ def _verify_and_forward(
     if not labels and mode == 'off':
         _forward(triggered, event_id, rules)
         return
-    # A backlog means alerts are already late; deliver rather than add more.
+    # A backlog of alerts means they are already late; deliver rather than
+    # add more. Time spent behind a background caption is not a backlog: the
+    # caption cannot be cut short, and skipping verification for it would
+    # only turn its delay into a false alarm.
     max_wait = max(60.0, 3.0 * float(settings.get('timeout_seconds') or 20))
-    if submitted_at is not None and time.monotonic() - submitted_at > max_wait:
+    if submitted_at is not None and _queue_wait(submitted_at, background_clock) > max_wait:
         if labels:
             _record(event_id, {'status': 'skipped', 'reason': 'Verification queue backlog; delivered unverified.'}, camera_id=camera_id)
         _forward(triggered, event_id, rules)
@@ -1358,6 +1544,16 @@ def _verify_and_forward(
             )
         if rejected and camera_id is not None:
             _reopen_rejected(camera_id, triggered, kept, event)
+        unsure = sorted(label for label, result in record['labels'].items() if result.get('unsure'))
+        if unsure:
+            log_ai_diagnostic(
+                'ai_verification_unsure',
+                'AI verification could not tell for event #{event_id} ({labels}): {reasons}; alert delivered.'.format(
+                    event_id=event_id, labels=', '.join(unsure),
+                    reasons='; '.join(f"{label}: {record['labels'][label].get('reason') or 'unclear'}" for label in unsure),
+                ),
+                camera_id=camera_id, details={'event_id': event_id, 'labels': unsure},
+            )
         for label, result in record['labels'].items():
             if result.get('error'):
                 log_ai_diagnostic(
@@ -1433,7 +1629,11 @@ def describe_only(event_id: int, camera_name: str = '', camera_id: Any = None) -
         # this one to the catch-up instead of queueing behind it.
         start_description_catch_up()
         return
-    _describe_and_store(event, event_id, settings, camera_name, background=True)
+    started = time.monotonic()
+    try:
+        _describe_and_store(event, event_id, settings, camera_name, background=True)
+    finally:
+        _add_background_pool_time(time.monotonic() - started)
 
 
 def submit_event_description(event_id: int, *, camera_id: Any = None, camera_name: str = '',
@@ -1596,6 +1796,7 @@ def submit_alert_notification_with_verification(
         try:
             accepted = verification_pool().submit(
                 verify_and_forward, list(triggered), event_id, rules, camera_name, time.monotonic(), camera_id,
+                _background_pool_clock(),
                 priority=PRIORITY_CLIP, block=False, label=f'verify-event-{event_id}',
             )
         except Exception:
@@ -1653,7 +1854,28 @@ def run_connection_test(settings: dict[str, Any], *, event_id: int | None = None
     if errors and record['status'] == 'error':
         raise VerificationError(errors[0])
     result.update(event_id=event.get('id'), verification=record, latency_ms=record.get('latency_ms'))
+    if verifier.last_image:
+        # What the model was shown (the close-up, when one was used), so the
+        # admin can see whether the crop and size suit the camera.
+        result['image'] = 'data:image/jpeg;base64,' + base64.b64encode(verifier.last_image).decode('ascii')
     return result
+
+
+def verification_stats(days: int = 7) -> dict[str, Any]:
+    """Verdict counts and model health for the AI page's overview card."""
+    since = (datetime.now(UTC) - timedelta(days=max(1, int(days)))).isoformat()
+    stats = _state.database.ai_verification_stats(since)
+    statuses = stats.get('statuses') or {}
+    return {
+        'days': int(days),
+        'confirmed': int(statuses.get('confirmed', 0)),
+        'filtered': int(statuses.get('filtered', 0)),
+        'stopped': int(stats.get('stopped') or 0),
+        'unverified': sum(int(statuses.get(key, 0)) for key in ('error', 'skipped', 'unsure')),
+        'unsure': int(statuses.get('unsure', 0)),
+        'avg_latency_ms': stats.get('avg_latency_ms'),
+        'health': model_health(),
+    }
 
 
 def _latest_object_event() -> dict[str, Any] | None:

@@ -62,6 +62,8 @@ def events(
     q: str | None = Query(None, max_length=300, description='Keywords; every word must appear in a label, zone, camera, AI tag/description or face name.'),
     face: str | None = Query(None, max_length=200, description='Recognised face: any, unknown, id:<person_id> or name:<name>.'),
     sort: str = Query('newest', pattern='^(newest|oldest)$'),
+    ai_check: str | None = Query(None, pattern='^(filtered|confirmed|unverified)$',
+                                 description='AI verification verdict: filtered, confirmed or unverified.'),
     db=Depends(get_database),
 ):
     user = require_user(request)
@@ -83,6 +85,7 @@ def events(
         query=q,
         face=face,
         sort=sort,
+        ai_check=ai_check,
     )
     scoped = [_scope_event_recordings(event, user) for event in event_list]
     return {

@@ -196,3 +196,17 @@ test('the collapsed panel counts its active filters and the caret flips', () => 
   const css = readFileSync(path.resolve(here, '../web/styles.css'), 'utf8');
   assert.match(css, /\.library-more-toggle\[aria-expanded="true"\] \.library-filter-caret \{ transform: rotate\(180deg\); \}/);
 });
+
+test('the Events AI Check filter round-trips through the URL only where shown', () => {
+  const sandbox = createSandbox();
+  const shown = '{ range: true, camera: true, sort: true, aiCheck: true }';
+  const search = run(sandbox, `librarySearchFromState({ ...libraryDefaultState(), aiCheck: 'filtered' }, '', ${shown})`);
+  assert.equal(new URLSearchParams(search).get('ai_check'), 'filtered');
+  assert.equal(run(sandbox, `libraryStateFromSearch(${JSON.stringify(search)}, ['all'], ${shown}).aiCheck`), 'filtered');
+  assert.equal(run(sandbox, `libraryQueryForState({ ...libraryDefaultState(), aiCheck: 'unverified' }).ai_check`), 'unverified');
+  // Recordings and Snapshots do not show it, so it is neither read nor written there.
+  assert.equal(run(sandbox, `libraryStateFromSearch('?ai_check=filtered', ['all']).aiCheck`), '');
+  assert.equal(run(sandbox, `libraryStateFromSearch('?ai_check=bogus', ['all'], ${shown}).aiCheck`), '');
+  assert.match(read('events.js'), /showAiCheck: true/);
+  assert.match(read('events.js'), /params\.set\('ai_check', query\.ai_check\)/);
+});

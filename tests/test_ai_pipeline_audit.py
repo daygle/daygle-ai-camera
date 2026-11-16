@@ -29,7 +29,7 @@ def test_invalid_model_urls_are_client_errors(av, monkeypatch, url):
 @pytest.mark.parametrize('content', ['', None, {}, [], 123])
 def test_empty_or_invalid_chat_content_is_not_success(av, monkeypatch, content):
     verifier = av.VisionVerifier(av.DEFAULT_AI_VERIFICATION_SETTINGS)
-    monkeypatch.setattr(verifier, '_chat_request', lambda _: {'choices': [{'message': {'content': content}}]})
+    monkeypatch.setattr(verifier, '_chat_request', lambda _, **_kw: {'choices': [{'message': {'content': content}}]})
     with pytest.raises(av.VerificationError):
         verifier.chat([])
 
@@ -262,7 +262,7 @@ def test_model_completions_are_serialized_across_threads(av, monkeypatch):
     entered, release = threading.Event(), threading.Event()
     calls = []
     verifier = av.VisionVerifier(av.DEFAULT_AI_VERIFICATION_SETTINGS)
-    def request(_):
+    def request(_, **_kw):
         calls.append(1)
         entered.set()
         assert release.wait(3)

@@ -116,6 +116,24 @@ def event_alerted_condition(alias: str) -> str:
     return f'EXISTS (SELECT 1 FROM alert_history ah WHERE ah.event_id = {alias}.id)'
 
 
+# The Events page's AI Check filter: the AI verification verdict stored in
+# event metadata (app.ai_verification). 'unverified' is every alert that went
+# out without a verdict: the model errored, was unsure, or was skipped.
+AI_CHECK_STATUSES = {
+    'filtered': ('filtered',),
+    'confirmed': ('confirmed',),
+    'unverified': ('error', 'skipped', 'unsure'),
+}
+
+
+def event_ai_check_condition(alias: str, ai_check: str | None) -> tuple[str, list[Any]] | None:
+    statuses = AI_CHECK_STATUSES.get(str(ai_check or '').strip().lower())
+    if not statuses:
+        return None
+    status = f"json_extract({_safe_metadata(alias)}, '$.ai_verification.status')"
+    return f"{status} IN ({', '.join('?' for _ in statuses)})", list(statuses)
+
+
 def _safe_metadata(alias: str) -> str:
     """The event's metadata, or an empty object when the blob is malformed,
     so json_each / json_extract over it can never raise."""

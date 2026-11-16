@@ -7,8 +7,16 @@ person (car, dog, ...) here, or is it a shadow, reflection, bush or poster?"*
 
 - **Rejected alerts are not notified**, but nothing is deleted. The event, its
   recording and its alert rows are kept, and the Events list marks the event
-  **🤖 Filtered**. Hover the badge to see the model's reason. Confirmed alerts
-  show **🤖 Verified**.
+  **🤖 Filtered**. Hover or tap the ⓘ beside the badge to see the model's
+  reason. Confirmed alerts show **🤖 Verified**. Alerts sent without a verdict
+  (the model was unsure, failed or was skipped) show **🤖 Unverified**, so a
+  model that has stopped answering is visible in the list. The **AI Check**
+  filter on the Events page lists just the Filtered, Verified or Unverified
+  events, e.g. to check the model is not stopping real alerts.
+- **When it can't tell, it alerts.** The model may answer *unsure* when
+  something is there but too dark, blurry or small to judge (a grainy night
+  frame). An unsure alert is sent and marked Unverified; only a confident
+  "not there" stops a notification.
 - **Chosen per alert.** Tick **AI Verify** on an object alert on the
   **Alerts** page to have that alert checked. Alerts start unticked.
 - **It fails open.** If the model is unreachable, slow, gives an
@@ -121,16 +129,24 @@ Go to **Intelligence → AI** (admin only). The page has four sections: Model Se
 | Server URL | `http://127.0.0.1:11434/v1` | The OpenAI-compatible base URL. |
 | Model | `gemma3:4b` | Must be a model that can read images. |
 | API Key | (none) | Only if the server requires one. Ollama doesn't. |
-| Timeout (seconds) | 20 | Per question for alerts. On timeout the alert is sent unverified. Background descriptions (Other Events, catch-up, Describe Past Events) wait up to 90 s, because the model keeps working on a request the app gives up on. |
+| Timeout (seconds) | 20 | Per question for alerts, including any wait for another request to finish. On timeout the alert is sent unverified. Background descriptions (Other Events, catch-up, Describe Past Events) wait up to 90 s, because the model keeps working on a request the app gives up on. |
 | Focus on Object | Enabled | Sends a close-up around the detected object, with context, instead of the whole frame. Small models judge small or distant objects much better this way. |
 | Alert Events | Off | Under Descriptions & Search. What the model writes for events that send an alert: **Off**, **Tags only**, **Description only**, or **Description and tags**. See [Event descriptions](#event-descriptions). |
 | Other Events | Off | The same choice for every other event with a snapshot. |
 | Cameras | (all) | Under Descriptions & Search. Tick cameras to limit **Alert Events** and **Other Events** to them. It does not affect verification, which is set per alert. |
 
 **Test on Latest Event** sends the most recent object event's snapshot to the
-model, using the unsaved form values, and shows the verdict and how long it
-took. Use it to check the server, the model name and the speed before you
-tick AI Verify on any alerts.
+model, using the unsaved form values, and shows the verdict, how long it
+took and the image the model was shown (the close-up, when one was used).
+Use it to check the server, the model name, the speed and the crop before
+you tick AI Verify on any alerts.
+
+The cards at the top of the page show the last 7 days of verification:
+**Verified**, **Filtered** (and how many notifications that stopped),
+**Unverified**, and the **Model** server's state (its last answer or last
+error) with the average time per check. The **Alerts** page also warns
+beside an alert with AI Verify ticked when the model is failing or not set
+up, since such alerts are being sent unverified.
 
 ## Event descriptions
 
@@ -291,9 +307,15 @@ the live AI pool is busy, and stops if descriptions are switched off.
 Already-described events are reused rather than captioned twice.
 
 Model completion calls are serialized across live verification, catch-up,
-backfill, search and tests. A live job cannot interrupt an already-running
-background request, but waits at most its configured timeout for admission;
-if the model remains busy, verification fails open.
+backfill, search and tests. Alerts, searches and tests go first: a background
+caption (Other Events, catch-up, Describe Past Events) never starts while one
+of them is waiting. A request already running cannot be interrupted, so an
+alert that arrives during a background caption waits for it to finish
+(bounded by that caption's own 90 s limit) without using up its own timeout,
+then is verified as normal rather than sent unverified. Waiting behind
+another alert or a search does count toward the alert's timeout, so an alert
+is held for at most about one timeout (the request itself always gets at
+least 5 s).
 
 ## Plain-English search
 
@@ -337,10 +359,16 @@ same events in search as in the Events list.
   questions (other labels, its description) are not asked: each would wait
   out the same timeout. Unchecked alerts are sent unverified and the catch-up
   describes the event once the model is idle.
-- If a job waits in the queue longer than `max(60 s, 3 × timeout)`, it is sent
-  unverified. Late alerts are not delayed further.
+- If a job waits in the queue behind other alerts for longer than
+  `max(60 s, 3 × timeout)`, it is sent unverified. Late alerts are not delayed
+  further. Time spent behind a background caption does not count.
 - The verdict is stored in the event's metadata under `ai_verification`, with
-  a status of `filtered`, `confirmed`, `error` or `skipped`, plus each label's
-  answer and reason, the model name, the latency and a timestamp.
-- Filtered alerts are logged at INFO (`AI verification filtered event ...`).
-  Model errors are logged at WARNING.
+  a status of `filtered`, `confirmed`, `unsure`, `error` or `skipped`, plus
+  each label's answer and reason, the model name, the latency and a
+  timestamp. An unsure label is stored as `{"present": null, "unsure": true}`.
+- The model writes each reason before its yes/no answer, so it looks before
+  it decides, and is told that night images may be grainy black-and-white
+  infrared.
+- Filtered and unsure alerts are logged at INFO (`AI verification filtered
+  event ...`, `AI verification could not tell ...`). Model errors are logged
+  at WARNING.

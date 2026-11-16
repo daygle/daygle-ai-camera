@@ -8,6 +8,10 @@ let faceRulesPayload = { rules: [] };
 let cameraIndex = 0;
 let zoneIndex = 0;
 let alertType = 'object';
+// The AI model server's recent state (GET /api/settings/ai-verification/status),
+// so a policy with AI Verify on warns when the model is failing: verification
+// fails open, and every alert would otherwise go out unchecked in silence.
+let aiVerifyStatus = null;
 
 const $ = (id) => document.getElementById(id);
 const currentCamera = () => cameras[cameraIndex];
@@ -316,7 +320,7 @@ function renderPolicies() {
   // the object before notifying; motion and face rules have nothing to check.
   const aiColumn = alertType === 'object';
   const aiVerifiable = (rule) => aiColumn && !['motion', 'face'].includes(String(rule.label || '').toLowerCase());
-  $('alertsList').innerHTML = `<div class="cameras-table-wrap alerts-policy-table-wrap"><table class="rule-table alerts-policy-table${aiColumn ? ' has-ai-column' : ''}"><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Enabled</th><th scope="col">Email</th><th scope="col">Push</th>${aiColumn ? '<th scope="col" class="alerts-ai-verify-col" title="The AI model confirms the object is really there before notifying">AI Verify</th>' : ''}<th scope="col" aria-label="Actions"></th></tr></thead><tbody>${rules.map((rule, index) => {
+  $('alertsList').innerHTML = `${aiColumn ? '<p class="alerts-ai-warning" data-ai-warning role="status" hidden></p>' : ''}<div class="cameras-table-wrap alerts-policy-table-wrap"><table class="rule-table alerts-policy-table${aiColumn ? ' has-ai-column' : ''}"><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Enabled</th><th scope="col">Email</th><th scope="col">Push</th>${aiColumn ? '<th scope="col" class="alerts-ai-verify-col" title="The AI model confirms the object is really there before notifying">AI Verify</th>' : ''}<th scope="col" aria-label="Actions"></th></tr></thead><tbody>${rules.map((rule, index) => {
     const people = alertType === 'people';
     const sound = alertType === 'sound';
     const tripwire = alertType === 'tripwire';
@@ -379,6 +383,7 @@ function renderPolicies() {
       <p class="muted alerts-policy-note">${policyNote}</p>
     </article></td></tr>`;
   }).join('')}</tbody></table></div>`;
+  renderAiVerifyWarning();
   $('alertsList').querySelectorAll('[data-field]').forEach((field) => field.addEventListener('change', () => {
     const policyRow = field.closest('[data-rule-index], [data-policy-details-for]');
     const index = Number(policyRow.dataset.ruleIndex ?? policyRow.dataset.policyDetailsFor);
@@ -520,7 +525,39 @@ function renderPolicies() {
   });
 }
 
+function aiVerifyWarningText(rules, status) {
+  if (!status || !rules.some((rule) => rule.ai_verify && !['motion', 'face'].includes(String(rule.label || '').toLowerCase()))) return '';
+  if (status.configured === false) {
+    return 'AI Verify is on, but no AI model is set up, so these alerts are sent unverified. Set the model up under Intelligence > AI.';
+  }
+  if (status.state === 'error') {
+    return `AI Verify is on, but the AI model is failing${status.last_error ? ` (${status.last_error})` : ''}, so alerts are being sent unverified. Check Intelligence > AI.`;
+  }
+  return '';
+}
+
+function renderAiVerifyWarning() {
+  const el = $('alertsList')?.querySelector('[data-ai-warning]');
+  if (!el) return;
+  const text = alertType === 'object' && currentCamera() && currentZone() ? aiVerifyWarningText(currentRules(), aiVerifyStatus) : '';
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+function loadAiVerifyStatus() {
+  return api('/api/settings/ai-verification/status').then((status) => {
+    aiVerifyStatus = status;
+    renderAiVerifyWarning();
+  }).catch(() => {});
+}
+
+$('alertsList').addEventListener('change', (event) => {
+  if (event.target?.dataset?.field === 'ai_verify') renderAiVerifyWarning();
+});
+
 window.addEventListener('daygle:auth-state-changed', refreshPolicyStatuses);
+window.daygleAuthReady?.then(loadAiVerifyStatus);
+startPageInterval(loadAiVerifyStatus, 60_000);
 window.daygleAuthReady?.then(refreshPolicyStatuses);
 // Policy status polling stops while the tab is hidden and refreshes once on
 // refocus, so a background Alerts tab stops re-checking every rule.
