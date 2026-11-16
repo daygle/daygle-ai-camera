@@ -36,12 +36,32 @@ OUTBOX_POLL_SECONDS = 30.0
 OUTBOX_RETENTION_SECONDS = 7 * 24 * 3600
 OUTBOX_BATCH_SIZE = 20
 
+# Row ids a drainer in this process is delivering right now. The database
+# lease in ``claim_due_alert_deliveries`` keeps two workers apart, but the
+# admin "retry now" action reads a row by id without claiming it, so without
+# this it could send a row the worker has claimed and is still sending.
+_in_flight: set[int] = set()
+_in_flight_lock = threading.Lock()
+
 _worker: threading.Thread | None = None
 _worker_stop = threading.Event()
 
 
 class _ChannelDisabled(Exception):
     """The channel was switched off or unconfigured while the row waited."""
+
+
+def _begin_delivery(row_ids: list[int]) -> set[int]:
+    """Mark rows as being delivered; returns the ids this caller now owns."""
+    with _in_flight_lock:
+        owned = {row_id for row_id in row_ids if row_id not in _in_flight}
+        _in_flight.update(owned)
+        return owned
+
+
+def _end_delivery(row_id: int) -> None:
+    with _in_flight_lock:
+        _in_flight.discard(row_id)
 
 
 def enqueue(
@@ -59,16 +79,15 @@ def enqueue(
 ) -> bool:
     """Persist one delivery the transport could not make.
 
-    Returns False when there is no database yet, the delivery has no
-    recipient/topic, or the same event/rule/label is already queued for this
-    channel (a re-dispatch then adds nothing).
+    Returns False when there is no database yet, an email has no recipient,
+    or the same event/rule/label is already queued for this channel (a
+    re-dispatch then adds nothing). A push with no ``topics`` is queued: that
+    is the shared Settings topic, which the retry resolves when it runs.
     """
     db = getattr(_state, 'database', None)
     if db is None:
         return False
     if channel == 'email' and not recipients:
-        return False
-    if channel == 'push' and not topics:
         return False
     rule_name = str(alert.get('rule_name') or '')
     label = str(alert.get('label') or '')
@@ -196,12 +215,21 @@ def retry_due(now: float | None = None, limit: int = OUTBOX_BATCH_SIZE) -> int:
     # background worker can run concurrently, and a second drainer must not
     # re-deliver a batch this one is already sending.
     rows = db.claim_due_alert_deliveries(time.time() if now is None else now, limit)
+    # Own the whole batch up front, so a manual retry of a row further down
+    # the list cannot deliver it before this loop gets there. A row already
+    # being retried manually is left to that attempt.
+    owned = _begin_delivery([int(row.get('id') or 0) for row in rows])
     for row in rows:
+        row_id = int(row.get('id') or 0)
+        if row_id not in owned:
+            continue
         try:
             _retry_row(row, now)
         except Exception:
             # A failed bookkeeping write must not abort the rest of the batch.
             logger.exception('Alert outbox retry failed for row %s', row.get('id'))
+        finally:
+            _end_delivery(row_id)
     return len(rows)
 
 
@@ -247,15 +275,22 @@ def retry_now(row_id: int) -> dict[str, Any] | None:
     db = getattr(_state, 'database', None)
     if db is None:
         return None
-    row = db.alert_delivery(int(row_id))
-    if row is None:
-        return None
+    row_id = int(row_id)
+    if not _begin_delivery([row_id]):
+        return {'status': 'in_progress', 'error': 'This delivery is already being retried.'}
     try:
+        # Read after taking ownership: a worker pass that just finished this
+        # row has deleted it, and it must not be sent again from a stale copy.
+        row = db.alert_delivery(row_id)
+        if row is None:
+            return None
         return _retry_row(row)
     except Exception as exc:
         # A failed bookkeeping write must not surface as a 500 to the UI.
         logger.exception('Manual alert outbox retry failed for row %s', row_id)
         return {'status': 'error', 'error': str(exc)}
+    finally:
+        _end_delivery(row_id)
 
 
 def retry_all_now(now: float | None = None) -> int:
