@@ -75,7 +75,6 @@ const utils = readFileSync(path.resolve(here, '../web/utils.js'), 'utf8');
 function loadLogLabel() {
   const start = utils.indexOf('const LOG_LABEL_ACRONYMS');
   const end = utils.indexOf('\n}\n', utils.indexOf('function logLabel(')) + 3;
-  // eslint-disable-next-line no-new-func
   return new Function(`${utils.slice(start, end)}; return logLabel;`)();
 }
 

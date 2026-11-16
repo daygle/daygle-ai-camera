@@ -1442,6 +1442,7 @@ const LOG_LABEL_ACRONYMS = {
 };
 
 // Title Case label for a log machine key (event type, details key, step).
+// eslint-disable-next-line no-unused-vars -- ESLint: exported for later scripts
 function logLabel(value) {
   return String(value || '')
     .split(/[\s_]+/)

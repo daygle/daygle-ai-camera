@@ -226,13 +226,13 @@ document.getElementById('filterSearch').addEventListener('keydown', (e) => {
 // internal id. A camera removed since keeps its old rows (unfiltered view).
 async function loadCameraOptions() {
   const select = document.getElementById('filterCamera');
-  let cameras = [];
+  let cameras;
   try {
     const payload = await api('/api/cameras');
     cameras = Array.isArray(payload?.cameras) ? payload.cameras : [];
-  } catch (err) {
-    if (window.daygleAuth?.redirecting) return;
-    // Leave just "All cameras"; the log itself still loads.
+  } catch (_err) {
+    // Leave just "All cameras"; the log itself still loads (and api() has
+    // already handled a lost session).
     return;
   }
   const options = cameras
