@@ -930,7 +930,7 @@ def purge_camera_diagnostics_by_policy() -> int:
         retention_days = max(1, int(effective_recording_config().get('retention_days', 14)))
         older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_camera_diagnostics_older_than(older_than)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - retention is best-effort and retried on the next tick
         logger.debug('Camera diagnostics purge failed: %s', exc)
         return 0
 
@@ -946,7 +946,7 @@ def purge_ai_diagnostics_by_policy() -> int:
         retention_days = max(1, int(effective_recording_config().get('retention_days', 14)))
         older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_ai_diagnostics_older_than(older_than)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - retention is best-effort and retried on the next tick
         logger.debug('AI diagnostics purge failed: %s', exc)
         return 0
 
@@ -965,7 +965,7 @@ def purge_face_identities_by_policy() -> int:
             return 0
         older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_face_identities(older_than=older_than)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - retention is best-effort and retried on the next tick
         logger.debug('Face identity purge failed: %s', exc)
         return 0
 
@@ -986,6 +986,6 @@ def purge_unknown_faces_by_policy() -> int:
             return 0
         older_than = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
         return _state.database.purge_old_unknown_faces(older_than)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - retention is best-effort and retried on the next tick
         logger.debug('Unknown-face capture purge failed: %s', exc)
         return 0

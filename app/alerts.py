@@ -53,7 +53,7 @@ def _alert_datetime_prefs() -> tuple[str, str, str]:
                 )
             else:
                 value = ('UTC', 'iso', '24h')
-        except Exception:
+        except Exception:  # noqa: BLE001 - no auth store or users yet: format in UTC
             value = ('UTC', 'iso', '24h')
         _alert_datetime_prefs_cache = (value, time.time())
         return value

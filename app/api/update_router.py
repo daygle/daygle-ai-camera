@@ -65,7 +65,7 @@ def check_update(request: Request):
             'update_available': False,
             'error': 'Unable to check for updates.',
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - network, TLS and malformed-response failures all mean "unknown"
         logger.warning('Update check failed (%s).', type(exc).__name__)
         return {
             'current_version': current_version,
@@ -138,7 +138,7 @@ def apply_update(request: Request, logger=Depends(get_logger)):
                 time.sleep(3)
                 try:
                     subprocess.run(['systemctl', 'restart', 'daygle-ai-camera'], timeout=30, check=False)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - runs on a detached thread; the flag is cleared in finally
                     logger.warning('Service restart after update failed: %s', exc)
                 finally:
                     with _state._update_lock:

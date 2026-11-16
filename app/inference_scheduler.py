@@ -231,7 +231,7 @@ class LiveInferenceScheduler:
             if self._on_claim is not None:
                 try:
                     self._on_claim(camera_id)
-                except Exception as exc:  # pragma: no cover - defensive
+                except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive
                     logger.debug('Scheduler claim hook failed for %s: %s', camera_id, exc)
             self._ensure_threads_locked()
             self._condition.notify_all()
@@ -242,7 +242,7 @@ class LiveInferenceScheduler:
             return
         try:
             self._on_release(camera_id)
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive
             logger.debug('Scheduler release hook failed for %s: %s', camera_id, exc)
 
     def stats(self) -> dict[str, Any]:
@@ -267,7 +267,7 @@ class LiveInferenceScheduler:
             try:
                 if self._is_priority(job.camera_id):
                     return 2
-            except Exception as exc:  # pragma: no cover - defensive
+            except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive
                 logger.debug('Scheduler priority check failed for %s: %s', job.camera_id, exc)
         last = self._last_finished.get(job.camera_id)
         if last is not None and (self._clock() - last) > _STALE_INTERVAL_MULTIPLE * job.interval:
@@ -363,7 +363,7 @@ class LiveInferenceScheduler:
             image, frame = sample
             run = job.runner or self._runner
             run(image, frame, job.settings)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - one camera's failure must not stop the scheduler worker
             outcome = 'failed'
             logger.warning('Scheduled live detection failed for camera %s: %s', job.camera_id, exc)
         finally:
@@ -383,7 +383,7 @@ class LiveInferenceScheduler:
             if self._on_complete is not None:
                 try:
                     self._on_complete(job.camera_id, self.last_timing(job.camera_id) or {})
-                except Exception as exc:  # pragma: no cover - defensive
+                except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive
                     logger.debug('Scheduler completion hook failed for %s: %s', job.camera_id, exc)
             logger.debug(
                 'Inference scheduler: camera %s waited %.3fs (depth %d), ran %.3fs',

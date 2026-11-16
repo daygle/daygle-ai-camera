@@ -125,7 +125,7 @@ def face_recognition_status(config: dict[str, Any], service: Any = None, databas
         try:
             enrolled_people = len(database.list_persons())
             enrolled_faces = database.count_person_faces(model=config.get('model_id'))
-        except Exception as exc:  # pragma: no cover - defensive: status must never 500
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive: status must never 500
             logger.warning('Could not count enrolled faces for the status card: %s', exc)
     status['enrolled_people'] = enrolled_people
     status['enrolled_faces'] = enrolled_faces

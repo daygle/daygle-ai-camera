@@ -138,7 +138,7 @@ def _persist_and_apply_cameras(settings, db, apply_cameras_settings) -> list:
         if callable(stop_workers):
             try:
                 stop_workers(str(old_id))
-            except Exception as exc:  # sentinel / mid-swap: rename is still safe
+            except Exception as exc:  # noqa: BLE001 - sentinel / mid-swap: rename is still safe
                 logger.debug('Could not stop workers before camera id rename: %s', exc)
         _migrate_camera_id(old_id, new_id)
     # Serialize against the profile monitor's persist (and the other API

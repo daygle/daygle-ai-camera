@@ -81,7 +81,7 @@ def reload_face_recognition(
 def _embedding_model_installed(onnx_name: str) -> bool:
     try:
         return _safe_within_models_dir(onnx_name).exists()
-    except Exception:
+    except (RuntimeError, OSError):
         return False
 
 
@@ -97,7 +97,7 @@ def _embedding_models_response(db, *, reload_succeeded=None, reload_error=None) 
     def _active(onnx_name: str) -> bool:
         try:
             return bool(active_path) and _relative_model_path(_safe_within_models_dir(onnx_name)) == active_path
-        except Exception:
+        except (RuntimeError, OSError, ValueError):
             return False
 
     def _can_delete(onnx_name: str) -> bool:

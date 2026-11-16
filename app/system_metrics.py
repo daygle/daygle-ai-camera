@@ -287,7 +287,7 @@ def _cached_nvidia_smi_devices() -> list[dict] | None:
                 name='gpu-metrics-refresh',
                 daemon=True,
             ).start()
-        except Exception:
+        except Exception:  # noqa: BLE001 - the refreshing flag must be reset whatever start() raises
             with _gpu_snapshot_lock:
                 _gpu_snapshot_refreshing = False
         return stale_snapshot

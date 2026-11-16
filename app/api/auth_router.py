@@ -60,7 +60,7 @@ async def _record_login_audit(write: Callable[[], None], logger) -> None:
     """
     try:
         await run_in_threadpool(write)
-    except Exception as unexpected_exc:
+    except Exception as unexpected_exc:  # noqa: BLE001 - an audit write must never fail the login
         logger.warning('Unexpected error writing a login audit entry: %s', unexpected_exc)
 
 
@@ -180,7 +180,7 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
                 status='failure',
                 details={'ip': setup_ip},
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - an audit write must never fail the request
             # R9 H3: telemetrize the failure so admins can detect a
             # degraded audit pipeline; keep best-effort so a logger
             # fault STILL does not crash the request path.

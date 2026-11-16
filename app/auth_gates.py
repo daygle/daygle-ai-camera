@@ -52,7 +52,7 @@ def _trusted_proxies() -> frozenset[str]:
     try:
         if getattr(_state, "database", None) is not None:
             config = effective_auth_config()
-    except Exception:
+    except Exception:  # noqa: BLE001 - no database yet: fall back to the in-memory config
         config = None
     if config is None:
         config = getattr(_state, "auth_config", None) or {}

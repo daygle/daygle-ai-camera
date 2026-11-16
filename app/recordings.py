@@ -287,7 +287,7 @@ class RecordingService:
             return
         try:
             callback(camera_id, event_type, message, severity=severity, details=details)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a diagnostic callback must never fail the recorder
             logger.debug('Camera diagnostic callback failed for %s/%s: %s', camera_id, event_type, exc)
 
     def should_record(self, detections: list[dict[str, Any]], recording_config: dict[str, Any] | None = None) -> tuple[bool, str, str | None]:
@@ -527,7 +527,7 @@ class RecordingService:
                             severity='warning',
                             details=details,
                         )
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 - a diagnostic callback must never fail the recorder
                         # A misbehaving diagnostic surface must not crash
                         # the shutdown path - the worker thread is hung, we
                         # are racing to start the replacement, every error
@@ -796,13 +796,13 @@ class RecordingService:
                     if on_chunk_complete:
                         try:
                             on_chunk_complete(camera_key, segment_path)
-                        except Exception as exc:
+                        except Exception as exc:  # noqa: BLE001 - a callback failure must not stop the chunk loop
                             logger.warning(
                                 'Continuous chunk callback failed for %s/%s: %s',
                                 camera_key, segment_name, exc,
                             )
                     seen_count = index + 1
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - a callback failure must not stop the chunk loop
                 logger.warning(
                     'Continuous chunk callback failed for %s/%s: %s',
                     camera_key, segment_name, exc,
@@ -1235,7 +1235,7 @@ class RecordingService:
         effective_seconds = rendered_seconds if rendered_seconds is not None else content_seconds
         try:
             self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, effective_seconds, camera_id=camera_id)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - audio is best-effort; keep the rendered video
             # Audio is best-effort: an unexpected mux failure must not discard
             # the video that already rendered (the caller would replace the
             # whole clip with a generated placeholder) or orphan ``tmp_path``.
@@ -3319,12 +3319,12 @@ class RecordingService:
             # Prefer FFmpeg so fallback clips are consistently H.264/MP4 for browsers.
             self._write_ffmpeg_placeholder_clip(file_path, duration_seconds)
             return
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - falls through to the next clip generator
             logger.warning('FFmpeg placeholder clip generation failed for %s: %s', file_path.name, exc)
         try:
             self._write_opencv_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
             return
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - falls through to the next clip generator
             logger.warning('OpenCV clip generation failed for %s: %s', file_path.name, exc)
 
         # Final fallback: persist metadata beside the target path, but never as .mp4 content.

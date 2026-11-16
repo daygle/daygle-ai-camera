@@ -158,7 +158,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
             topics = resolve_push_topics(push_recipients)
             if topics or not push_recipients:
                 notifier._deliver_to_topics(title, body, topics=topics)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a push failure must not stop the email
             logger.warning('Push notify failed for camera %s %s: %s', camera_id, event_type, exc)
     email_settings_obj = effective_email_alert_settings()
     if email_settings_obj.get('enabled'):
@@ -226,7 +226,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                                     # reference when the test fake
                                     # returns ``None`` (back-compat).
                                     active_smtp = mailer._deliver(msg, smtp=active_smtp) or active_smtp
-                                except Exception as exc:  # per-recipient: log and continue
+                                except Exception as exc:  # noqa: BLE001 - per-recipient: log and continue
                                     session_send_errors.append(f'{recipient}: {exc}')
                         finally:
                             # Deterministic close of the LAST-recipient's
@@ -238,7 +238,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                             # SMTP cleanup is best-effort after notification delivery.
                             with contextlib.suppress(Exception):
                                 active_smtp.quit()
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - recorded per session; the notified flag is still stamped
                     # Session-level (connect / TLS / login) failure: record so
                     # operators see it, but do NOT block the flag stamp below.
                     session_send_errors.append(f'session: {exc}')
@@ -249,7 +249,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                     event_type,
                     '; '.join(session_send_errors),
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - runs on a pool thread; the notified flag is still stamped
             logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
     if event_type == 'offline':
         _mark_camera_offline_notified(camera_id)

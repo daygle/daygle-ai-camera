@@ -506,7 +506,7 @@ class OnnxYoloDetector:
                 if invalidate_int8_cache is not None:
                     try:
                         invalidate_int8_cache(self.model_path)
-                    except Exception as invalidate_exc:  # pragma: no cover - filesystem/lock issue
+                    except Exception as invalidate_exc:  # noqa: BLE001  # pragma: no cover - filesystem/lock issue
                         logger.debug('Could not invalidate INT8 cache for %s: %s', self.model_path, invalidate_exc)
                 self._precision = 'fp32'
                 int8_runtime_model = False
@@ -618,7 +618,7 @@ class OnnxYoloDetector:
                     self._run_inference_io_bound(np.ascontiguousarray(warm))
                 elif self.session is not None:
                     self.session.run(self.output_names, {self.input_name: warm})
-            except Exception as warm_exc:
+            except Exception as warm_exc:  # noqa: BLE001 - ONNX Runtime raises its own error types
                 if int8_runtime_model:
                     # A quantized graph can parse successfully but still fail
                     # its first real execution because an integer kernel is
@@ -638,7 +638,7 @@ class OnnxYoloDetector:
                     if invalidate_int8_cache is not None:
                         try:
                             invalidate_int8_cache(self.model_path)
-                        except Exception as invalidate_exc:  # pragma: no cover - filesystem/lock issue
+                        except Exception as invalidate_exc:  # noqa: BLE001  # pragma: no cover - filesystem/lock issue
                             logger.debug('Could not invalidate INT8 cache for %s: %s', self.model_path, invalidate_exc)
                     try:
                         self._precision = 'fp32'
@@ -661,7 +661,7 @@ class OnnxYoloDetector:
                                 )
                             },
                         )
-                    except Exception as fallback_exc:
+                    except Exception as fallback_exc:  # noqa: BLE001 - ONNX Runtime raises its own error types
                         self.session = None
                         self.input_name = None
                         self.unavailable_reason = (
@@ -692,11 +692,11 @@ class OnnxYoloDetector:
                                 dtype=self._input_dtype,
                             )},
                         )
-                    except Exception as rerun_exc:
+                    except Exception as rerun_exc:  # noqa: BLE001 - warm-up is optional
                         logger.debug('Detector warm-up inference skipped: %s', rerun_exc)
                 else:
                     logger.debug('Detector warm-up inference skipped: %s', warm_exc)
-        except Exception as exc:  # pragma: no cover - depends on runtime/model internals
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - depends on runtime/model internals
             self.unavailable_reason = f"Failed to load ONNX model {self.model_path}: {exc}"
 
     def _build_providers(self, use_cuda: bool) -> list[Any]:
@@ -1294,7 +1294,7 @@ def _export_quantize_scheme(session: Any) -> str | None:
     try:
         raw = session.get_modelmeta().custom_metadata_map.get('args')
         args = ast.literal_eval(raw) if raw else None
-    except Exception:
+    except Exception:  # noqa: BLE001 - export metadata is optional
         return None
     if not isinstance(args, dict) or args.get('quantize') is None:
         return None
