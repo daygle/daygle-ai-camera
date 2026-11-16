@@ -33,7 +33,7 @@ from fastapi import HTTPException
 import app.state as _state
 from app.runtime_config import cached_snapshot
 
-logger = logging.getLogger('daygle.ai.false_positives')
+logger = logging.getLogger('daygle.ai.analysis')
 
 SETTINGS_KEY = 'false_positives'
 
@@ -294,12 +294,14 @@ def _next_candidate(settings: dict[str, Any], now: datetime) -> dict[str, Any] |
         before_id = int(page[-1]['id'])
 
 
-def run_checks_once(*, max_events: int = 50, verifier: Any = None, ignore_busy: bool = False) -> int:
+def run_checks_once(*, max_events: int = 50, verifier: Any = None, ignore_busy: bool = False,
+                    stop: threading.Event | None = None) -> int:
     """Check up to ``max_events`` unjudged events while the AI is idle.
 
     Returns how many were checked. Each event is tried once per process, so
     one that cannot be checked (an unreadable reply) is not retried forever;
     when the model cannot be reached the event is released for a later round.
+    ``stop`` (the worker's shutdown flag) ends the round between events.
     """
     from app.ai_verification import effective_ai_verification_settings
 
@@ -310,7 +312,7 @@ def run_checks_once(*, max_events: int = 50, verifier: Any = None, ignore_busy: 
     if not _model_configured(ai_settings):
         return 0
     checked = 0
-    while checked < max_events and not _stop.is_set():
+    while checked < max_events and not (stop is not None and stop.is_set()):
         if not ignore_busy and _ai_busy():
             break
         event = _next_candidate(settings, datetime.now(UTC))
@@ -341,7 +343,7 @@ _worker: threading.Thread | None = None
 def _run_worker() -> None:
     while not _stop.wait(CHECK_POLL_SECONDS):
         try:
-            run_checks_once()
+            run_checks_once(stop=_stop)
         except Exception:  # noqa: BLE001 - a background helper must never crash the app
             logger.exception('AI false-positive checker failed')
 

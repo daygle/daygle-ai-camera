@@ -72,6 +72,7 @@ const EVENT_TYPE_LABELS = {
   ai_verification_unavailable: 'AI Verification Unavailable',
   ai_verification_queue_full: 'AI Verification Queue Full',
   ai_verification_store_failed: 'AI Verification Store Failed',
+  ai_false_positive: 'AI False Positive',
   // Descriptions
   ai_description_unavailable: 'AI Description Unavailable',
   ai_description_store_failed: 'AI Description Store Failed',
