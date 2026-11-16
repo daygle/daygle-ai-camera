@@ -288,39 +288,7 @@ MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024
 
 async def _read_uploaded_image(request: Request) -> tuple[bytes, str | None, str | None]:
     content_type = request.headers.get('content-type', '')
-    # Early-reject any request whose declared size exceeds the cap.
-    # Check the Content-Length header BEFORE reading the body so a
-    # hostile client cannot force a 100MB allocation just to get
-    # rejected at the parse step.
-    declared_length = request.headers.get('content-length')
-    if declared_length is not None:
-        try:
-            if int(declared_length) > MAX_UPLOAD_BYTES:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"Uploaded image exceeds {MAX_UPLOAD_BYTES} bytes (Content-Length: {declared_length}).",
-                )
-        except ValueError:
-            # Malformed Content-Length -> fall through to the streaming cap below.
-            pass
-    # Defence-in-depth: read in chunks and abort if the cumulative
-    # size exceeds the cap even if the client lied about Content-Length
-    # (or sent Transfer-Encoding: chunked with no Content-Length at
-    # all). This protects against header-stripping / chunk-encoding
-    # bypass of the upfront check.
-    chunks: list[bytes] = []
-    total = 0
-    async for chunk in request.stream():
-        if not chunk:
-            continue
-        total += len(chunk)
-        if total > MAX_UPLOAD_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Uploaded image exceeds {MAX_UPLOAD_BYTES} bytes.",
-            )
-        chunks.append(chunk)
-    body = b''.join(chunks)
+    body = await _read_bounded_body(request, MAX_UPLOAD_BYTES, 'Uploaded image')
     if content_type.startswith('image/'):
         return (body, None, content_type)
     boundary = _parse_header_value(content_type, 'boundary')
