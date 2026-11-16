@@ -126,6 +126,17 @@ else
     bash "${APP_DIR}/scripts/install_cloudflared.sh"
 fi
 
+# Move an Ollama that Daygle installed (Intelligence -> AI -> Install Ollama)
+# to the pinned release. An Ollama installed any other way is left alone, and
+# a failure here never fails the update: AI checks fail open.
+if [[ "$(uname -s)" == "Linux" ]] && command -v systemctl >/dev/null 2>&1 \
+    && [[ -f /etc/systemd/system/ollama.service ]]; then
+  echo ""
+  echo "Checking the Daygle-managed Ollama..."
+  run_privileged env DAYGLE_OLLAMA_UPDATE_ONLY=1 bash "${APP_DIR}/scripts/install_ollama.sh" \
+    || echo "WARNING: Ollama was not updated; the AI features keep using the installed version." >&2
+fi
+
 # Existing installations used a direct ``uvicorn app.main:app`` command.
 # Install a narrow drop-in instead of replacing the administrator's unit,
 # preserving its paths, environment, user/group, hardening, and other drop-ins.

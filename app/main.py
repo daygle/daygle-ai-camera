@@ -322,6 +322,8 @@ from app.api.alert_outbox_router import router as alert_outbox_router
 app.include_router(alert_outbox_router)
 from app.api.ai_verification_router import router as ai_verification_router
 app.include_router(ai_verification_router)
+from app.api.ollama_router import router as ollama_router
+app.include_router(ollama_router)
 from app.api.false_positives_router import router as false_positives_router
 app.include_router(false_positives_router)
 from app.api.camera_offline_router import router as camera_offline_router

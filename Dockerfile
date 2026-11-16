@@ -100,6 +100,9 @@ COPY scripts/docker-entrypoint.sh /app/scripts/docker-entrypoint.sh
 # container replacement; the bootstrap config is seeded into the volume so
 # persisted dashboard settings and this file stay together.
 ENV DAYGLE_CONFIG=/data/config.yaml
+# A container cannot install Ollama as a system service; the AI page offers
+# model management against the optional "ollama" compose service instead.
+ENV DAYGLE_IN_CONTAINER=1
 # /app/models is writable by the runtime user so models installed from the
 # ONNX page land there; mount a named volume at /app/models to persist them
 # across container replacement (see docker-compose.yml). /app/data exists

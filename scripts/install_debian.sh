@@ -32,6 +32,7 @@ apt-get install -y --no-install-recommends \
   libgl1 \
   libglib2.0-0 \
   wget \
+  zstd \
   coreutils
 
 # Create system user for optional maintenance access to writable runtime assets
@@ -46,6 +47,13 @@ mkdir -p "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}" "${MODEL_DIR}"
 # Cloudflare Tunnel manager. The helper is idempotent and leaves an existing
 # administrator-managed binary unchanged.
 bash "${REPO_DIR}/scripts/install_cloudflared.sh"
+
+# Optional: the local vision model for AI verification, descriptions and
+# search. Off by default; it can also be installed later from Intelligence ->
+# AI. DAYGLE_INSTALL_OLLAMA=1 sudo ./scripts/install_debian.sh installs it now.
+if [[ "${DAYGLE_INSTALL_OLLAMA:-0}" == "1" ]]; then
+  bash "${REPO_DIR}/scripts/install_ollama.sh"
+fi
 
 # Sync application files
 # Origin-URL allowlist - refuse to install from a tampered repo. Mirrors the
