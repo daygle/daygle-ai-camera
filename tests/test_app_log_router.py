@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from app.api.app_log_router import get_app_log
+from app.api.app_log_router import _parse_entry, get_app_log
 from app.utils import local_day_bounds_to_utc
 
 
@@ -138,3 +138,71 @@ def test_application_log_stream_survives_oversized_journal_line(monkeypatch) -> 
     chunks = asyncio.run(collect())
     assert len(chunks) == 1
     assert json.loads(chunks[0].removeprefix('data: '))['message'] == 'after the long line'
+
+
+def _journal_line(message: str, priority: str = '6') -> dict:
+    return {'__REALTIME_TIMESTAMP': '1760000000000000', 'PRIORITY': priority, 'MESSAGE': message}
+
+
+@pytest.mark.parametrize(
+    ('message', 'level', 'shown'),
+    [
+        # Python logging prefixes (the journal records them all at INFO).
+        ('WARNING:daygle.ai.rtsp_broker:RTSP broker connection to 192.168.40.104:554 failed: timed out',
+         'WARNING', 'RTSP broker connection to 192.168.40.104:554 failed: timed out'),
+        ('ERROR:    Exception in ASGI application', 'ERROR', 'Exception in ASGI application'),
+        ('CRITICAL:daygle.ai:disk gone', 'CRIT', 'disk gone'),
+        ('INFO:daygle.ai.recording:No audio sidecars in this clip window', 'INFO',
+         'No audio sidecars in this clip window'),
+        ('DEBUG:daygle.ai.tunnel:cloudflared: 2026-11-16T05:53:49Z ERR client closed', 'DEBUG',
+         'cloudflared: 2026-11-16T05:53:49Z ERR client closed'),
+        # cloudflared output forwarded at INFO carries its own level.
+        ('INFO:daygle.ai.tunnel:cloudflared: 2026-11-16T01:45:00Z ERR Connection terminated connIndex=2',
+         'ERROR', 'cloudflared: 2026-11-16T01:45:00Z ERR Connection terminated connIndex=2'),
+        ('INFO:daygle.ai.tunnel:cloudflared: 2026-11-16T01:45:00Z WRN Retrying connection', 'WARNING',
+         'cloudflared: 2026-11-16T01:45:00Z WRN Retrying connection'),
+        ('INFO:daygle.ai.tunnel:cloudflared: 2026-11-16T01:45:00Z INF Registered tunnel connection', 'INFO',
+         'cloudflared: 2026-11-16T01:45:00Z INF Registered tunnel connection'),
+        # OpenCV writes straight to stderr with its own markers.
+        ('[ WARN:1@4212.700] global cap_ffmpeg_impl.hpp:453 Stream timeout triggered', 'WARNING',
+         '[ WARN:1@4212.700] global cap_ffmpeg_impl.hpp:453 Stream timeout triggered'),
+        ('[ERROR:1@4242.744] global cap_ffmpeg_impl.hpp:1890 retrieveFrame Picture does not contain data',
+         'ERROR', '[ERROR:1@4242.744] global cap_ffmpeg_impl.hpp:1890 retrieveFrame Picture does not contain data'),
+        # Plain output with no marker keeps the journal priority.
+        ('Stopping daygle-ai-camera.service - Daygle AI Camera FastAPI service...', 'INFO',
+         'Stopping daygle-ai-camera.service - Daygle AI Camera FastAPI service...'),
+    ],
+)
+def test_entry_level_comes_from_the_message_text(message: str, level: str, shown: str) -> None:
+    entry = _parse_entry(_journal_line(message))
+    assert entry['level'] == level
+    assert entry['message'] == shown
+
+
+def test_explicit_journal_priority_is_never_downgraded_by_the_text() -> None:
+    # systemd's own error about the unit stays an error even if it starts "INFO:".
+    assert _parse_entry(_journal_line('INFO:something odd', priority='3'))['level'] == 'ERROR'
+    # ... and a more severe text level still wins over a non-default priority.
+    assert _parse_entry(_journal_line('ERROR:daygle.ai:boom', priority='5'))['level'] == 'ERROR'
+
+
+def test_level_filter_uses_the_text_level_not_journalctl_priority() -> None:
+    lines = [
+        _journal_line('INFO:daygle.ai.recording:clip saved'),
+        _journal_line('WARNING:daygle.ai.rtsp_broker:RTSP broker connection failed'),
+        _journal_line('INFO:daygle.ai.tunnel:cloudflared: 2026-11-16T01:45:00Z ERR Connection terminated'),
+        _journal_line('[ WARN:1@4212.700] global cap_ffmpeg_impl.hpp:453 Stream timeout triggered'),
+    ]
+    completed = SimpleNamespace(stdout='\n'.join(json.dumps(line) for line in lines))
+    with patch.dict(get_app_log.__globals__, {'require_admin': MagicMock()}), \
+         patch('app.api.app_log_router.subprocess.run', return_value=completed) as run:
+        warnings = get_app_log(_request(), lines=200, level='warning', date_from=None, date_to=None, tz_offset_minutes=None)
+        errors = get_app_log(_request(), lines=200, level='error', date_from=None, date_to=None, tz_offset_minutes=None)
+        everything = get_app_log(_request(), lines=200, level=None, date_from=None, date_to=None, tz_offset_minutes=None)
+
+    # journalctl's -p would see every line as INFO and drop them all.
+    for call in run.call_args_list:
+        assert '-p' not in call.args[0]
+    assert [entry['level'] for entry in warnings['entries']] == ['WARNING', 'ERROR', 'WARNING']
+    assert [entry['level'] for entry in errors['entries']] == ['ERROR']
+    assert len(everything['entries']) == 4

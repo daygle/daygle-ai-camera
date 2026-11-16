@@ -29,7 +29,22 @@ _PRIORITY_LABEL: dict[str, str] = {
     '7': 'DEBUG',
 }
 
-# Maps UI level names to journalctl -p values (inclusive of more-severe levels).
+# UI level filter -> most verbose syslog priority it includes (each level
+# also includes everything more severe, as journalctl ``-p`` would).
+_LEVEL_FILTER_MAX_PRIORITY: dict[str, int] = {
+    'error': 3,
+    'warning': 4,
+    'notice': 5,
+    'info': 6,
+    'debug': 7,
+}
+_LABEL_PRIORITY: dict[str, int] = {label: int(priority) for priority, label in _PRIORITY_LABEL.items()}
+# Journal entries read per request. Level filtering happens after parsing (a
+# line's real level often comes from its text, which journalctl cannot see), so
+# a filtered view reads further back to still fill a page.
+_JOURNAL_LINES = 1000
+_JOURNAL_LINES_FILTERED = 5000
+
 _SERVICE = 'daygle-ai-camera'
 # Per-line read limit for the live ``journalctl -f`` pipe (asyncio's default
 # StreamReader limit is 64 KiB). Longer entries are skipped, not fatal.
@@ -71,7 +86,39 @@ def _is_noise(entry: dict) -> bool:
 # ``LEVEL:name:message`` format); it is captured to tag each entry with a
 # ``source``. uvicorn's own formatter writes ``LEVEL:`` + padding with no
 # logger name, so a level prefix without a name is the web server.
-_LEVEL_PREFIX_PATTERN = re.compile(r'^[A-Z]+:(?:(?P<logger>[A-Za-z_][\w.]*):)?\s*')
+_LEVEL_PREFIX_PATTERN = re.compile(r'^(?P<level>[A-Z]+):(?:(?P<logger>[A-Za-z_][\w.]*):)?\s*')
+
+# The service writes its logs to stdout/stderr, which the journal records at
+# priority 6 (INFO) whatever their real severity. The real level is in the
+# text instead, so it is read from there:
+#   * Python logging / uvicorn prefix: ``WARNING:daygle.ai.rtsp_broker:...``
+#   * cloudflared lines the tunnel forwards: ``cloudflared: <time> ERR ...``
+#   * OpenCV's own stderr: ``[ WARN:1@4212.700] ...`` / ``[ERROR:1@...] ...``
+_PYTHON_LEVELS: dict[str, str] = {
+    'CRITICAL': 'CRIT',
+    'ERROR': 'ERROR',
+    'WARNING': 'WARNING',
+    'INFO': 'INFO',
+    'DEBUG': 'DEBUG',
+}
+_CLOUDFLARED_LEVEL_PATTERN = re.compile(r'^cloudflared: \S+ (?P<level>PNC|FTL|ERR|WRN|INF|DBG)\b')
+_CLOUDFLARED_LEVELS: dict[str, str] = {
+    'PNC': 'CRIT',
+    'FTL': 'CRIT',
+    'ERR': 'ERROR',
+    'WRN': 'WARNING',
+    'INF': 'INFO',
+    'DBG': 'DEBUG',
+}
+_OPENCV_LEVEL_PATTERN = re.compile(r'^\[\s*(?P<level>FATAL|ERROR|WARN|INFO|DEBUG|VERBOSE)[:\]]')
+_OPENCV_LEVELS: dict[str, str] = {
+    'FATAL': 'CRIT',
+    'ERROR': 'ERROR',
+    'WARN': 'WARNING',
+    'INFO': 'INFO',
+    'DEBUG': 'DEBUG',
+    'VERBOSE': 'DEBUG',
+}
 
 # Application Log ``source`` for each logger. App modules log on children of
 # ``daygle.ai`` named for their area (``daygle.ai.recording`` etc.), so the
@@ -109,6 +156,42 @@ def _source_for(logger_name: str | None, had_level_prefix: bool) -> str:
     return 'core'
 
 
+def _level_for(priority: str, prefix_level: str | None, message: str) -> str:
+    """Severity label for a journal line, preferring the level in its text.
+
+    ``priority`` is the journal PRIORITY, ``prefix_level`` the Python logging
+    level prefix (already stripped from ``message``), if any.
+    """
+    journal_level = _PRIORITY_LABEL.get(priority, 'INFO')
+    text_level = _PYTHON_LEVELS.get(prefix_level or '')
+    # A forwarded cloudflared/OpenCV line carries its own level, which is more
+    # specific than the INFO it was relayed at. A deliberate DEBUG demotion
+    # (e.g. cloudflared's client-closed noise) is kept.
+    if text_level in (None, 'INFO'):
+        embedded = _CLOUDFLARED_LEVEL_PATTERN.match(message)
+        if embedded:
+            text_level = _CLOUDFLARED_LEVELS[embedded.group('level')]
+        else:
+            embedded = _OPENCV_LEVEL_PATTERN.match(message)
+            if embedded:
+                text_level = _OPENCV_LEVELS[embedded.group('level')]
+    if text_level is None:
+        return journal_level
+    # Priority 6 is the journal's default for stdout/stderr, so it says nothing
+    # and the text wins. Any other priority was set on purpose (systemd's own
+    # messages, a future journal handler): keep the more severe of the two.
+    if priority == '6':
+        return text_level
+    return min(journal_level, text_level, key=lambda label: _LABEL_PRIORITY.get(label, 6))
+
+
+def _passes_level_filter(entry: dict, level: str | None) -> bool:
+    max_priority = _LEVEL_FILTER_MAX_PRIORITY.get(level or '')
+    if max_priority is None:
+        return True
+    return _LABEL_PRIORITY.get(str(entry.get('level')), 6) <= max_priority
+
+
 def _log_date_range(date_from: str | None, date_to: str | None) -> tuple[date | None, date | None]:
     parsed_from = parse_log_date(date_from, 'date_from')
     parsed_to = parse_log_date(date_to, 'date_to')
@@ -140,7 +223,7 @@ def _parse_entry(raw: dict) -> dict:
         message = message[prefix.end():]
     return {
         'timestamp': ts,
-        'level': _PRIORITY_LABEL.get(priority, 'INFO'),
+        'level': _level_for(priority, prefix.group('level') if prefix else None, message),
         'message': message,
         'source': source,
     }
@@ -170,19 +253,13 @@ def get_app_log(
     )
     # Keep user-controlled pagination out of the subprocess argument list.
     # The query parameter is applied to the parsed entries below instead.
-    cmd = ['journalctl', '-u', _SERVICE, '-n', '1000', '-o', 'json', '--no-pager']
-    # Use literal priority arguments after validating the selector so no
-    # request-derived value reaches journalctl at all.
-    if level == 'error':
-        cmd += ['-p', '3']
-    elif level == 'warning':
-        cmd += ['-p', '4']
-    elif level == 'notice':
-        cmd += ['-p', '5']
-    elif level == 'info':
-        cmd += ['-p', '6']
-    elif level == 'debug':
-        cmd += ['-p', '7']
+    # The level filter is applied to the parsed entries, not with journalctl
+    # ``-p``: the journal records the service's output at INFO, so ``-p`` would
+    # drop the warnings and errors whose level is only known from their text.
+    # The line count is a literal, so no request-derived value reaches
+    # journalctl.
+    journal_lines = _JOURNAL_LINES_FILTERED if level in _LEVEL_FILTER_MAX_PRIORITY else _JOURNAL_LINES
+    cmd = ['journalctl', '-u', _SERVICE, '-n', str(journal_lines), '-o', 'json', '--no-pager']
     if start:
         cmd += ['--since', f'@{int(start.timestamp())}']
     if end:
@@ -202,7 +279,7 @@ def get_app_log(
                 # Skip an unparseable journal line. Deliberately not logged:
                 # the warning would land in the very journal being read.
                 continue
-            if _is_noise(entry):
+            if _is_noise(entry) or not _passes_level_filter(entry, level):
                 continue
             entries.append(entry)
         # journalctl returns the newest entries within the fixed upper bound;
