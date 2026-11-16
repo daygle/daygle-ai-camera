@@ -373,6 +373,7 @@ function renderPolicies() {
         ${motionPolicy ? '<p class="form-help muted alerts-motion-trigger-note">Motion fires when its area passes the trigger set on the Zones page (&ldquo;Trigger when X% of this area moves&rdquo;).</p>' : ''}
         ${!people && !sound && !behaviour && !motionPolicy ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
         ${aiVerifiable(rule) ? `<label><span>AI Verify Skip Above <span class="info-tip" data-tip="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" title="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" tabindex="0" aria-label="Help: With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1"></span></span><input data-field="ai_verify_skip_above" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(rule.ai_verify_skip_above ?? 1))}"></label>` : ''}
+        ${aiVerifiable(rule) && (currentCamera()?.detection?.zones || []).length > 1 ? `<div class="alerts-ai-apply"><button type="button" class="secondary" data-apply-ai-verify="${index}" title="Copy this policy's AI Verify setting and Skip Above value to the ${escapeHtml(String(rule.label || ''))} policies in every other zone on this camera">Apply AI Verify to All Zones</button></div>` : ''}
         ${alertType === 'object' || people ? '' : `<label><span>Cooldown (Seconds)</span><input data-field="cooldown_seconds" type="number" min="0" max="3600" step="5" value="${escapeHtml(String(rule.cooldown_seconds ?? 60))}"></label>`}
       </div>
       ${alertType === 'object' ? renderObjectSchedules(rule, index, schedules) : people ? '' : behaviour
@@ -467,6 +468,17 @@ function renderPolicies() {
     const expand = $('alertsList').querySelector(`[data-expand-policy="${button.dataset.removeSchedule}"]`);
     if (expand) { expand.setAttribute('aria-expanded', 'true'); expand.classList.add('is-open'); }
   }));
+  $('alertsList').querySelectorAll('[data-apply-ai-verify]').forEach((button) => button.addEventListener('click', () => {
+    const rule = rules[Number(button.dataset.applyAiVerify)];
+    const changed = applyAiVerifyToCameraZones(currentCamera(), rule);
+    const label = titleCase(String(rule.label || ''));
+    if (!changed) {
+      window.showToast?.(`No other zone on this camera has a ${label} alert. Add ${label} to a zone on the Zones page first.`, true);
+      return;
+    }
+    const state = rule.ai_verify ? `On${Number(rule.ai_verify_skip_above ?? 1) < 1 ? `, skip above ${rule.ai_verify_skip_above}` : ''}` : 'Off';
+    window.showToast?.(`AI Verify (${state}) applied to ${label} in ${changed} other zone${changed === 1 ? '' : 's'}. Click Save to keep it.`);
+  }));
   $('alertsList').querySelectorAll('[data-expand-policy]').forEach((button) => button.addEventListener('click', () => {
     const index = button.dataset.expandPolicy;
     const details = $('alertsList').querySelector(`[data-policy-details-for="${index}"]`);
@@ -523,6 +535,28 @@ function renderPolicies() {
       renderPolicies();
     });
   });
+}
+
+// "Apply AI Verify to All Zones": copy a policy's AI Verify tick and Skip
+// Above value onto the policies for the same object in the camera's other
+// zones, so a camera with many zones is set once. Zones without a policy for
+// that object are left alone (objects are assigned on the Zones page).
+// Returns how many other zones' policies changed; Save persists them.
+function applyAiVerifyToCameraZones(camera, sourceRule) {
+  const label = String(sourceRule?.label || '').trim().toLowerCase();
+  if (!label) return 0;
+  let changed = 0;
+  (camera?.detection?.zones || []).forEach((zone) => {
+    const targets = (zone.object_rules || []).filter((rule) => rule !== sourceRule
+      && String(rule.label || '').trim().toLowerCase() === label);
+    if (!targets.length || (zone.object_rules || []).includes(sourceRule)) return;
+    targets.forEach((rule) => {
+      rule.ai_verify = Boolean(sourceRule.ai_verify);
+      rule.ai_verify_skip_above = sourceRule.ai_verify_skip_above ?? 1;
+    });
+    changed += 1;
+  });
+  return changed;
 }
 
 function aiVerifyWarningText(rules, status) {

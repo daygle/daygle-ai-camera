@@ -90,6 +90,13 @@ Alerts at or above this detector confidence are sent without asking the
 model, so it only checks borderline ones. `1`, the default, checks every
 alert. For example, `0.85` checks only alerts below 85%.
 
+A camera with several zones has a separate alert for the same object in each
+zone. To set them all at once, open the alert's settings and click **Apply AI
+Verify to All Zones**: the AI Verify tick and Skip Above value are copied to
+that object's alert in every other zone on the camera. Zones without an alert
+for that object are left alone (add the object on the **Zones** page first).
+Click **Save** to keep the change.
+
 An alert from a group rule (`animal`, `pet` or one of your own groups) is
 checked against the group: the model is asked whether a real animal is
 visible, not whether the class the detector reported is. An IR-lit cat that

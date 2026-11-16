@@ -81,3 +81,27 @@ test('Alerts warns when AI Verify is on but the model is failing or not set up',
   assert.equal(warn([{ label: 'motion', ai_verify: true }], { configured: true, state: 'error' }), '');
   assert.equal(warn(on, null), '');
 });
+
+test('Apply AI Verify to All Zones copies the setting to the same object in the other zones', () => {
+  const source = read('alerts.js');
+  const start = source.indexOf('function applyAiVerifyToCameraZones');
+  const end = source.indexOf('function aiVerifyWarningText');
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(start, end), context);
+  context.camera = { detection: { zones: [
+    { name: 'Drive', object_rules: [{ label: 'person', ai_verify: true, ai_verify_skip_above: 0.85 }, { label: 'car', ai_verify: false }] },
+    { name: 'Gate', object_rules: [{ label: 'Person', ai_verify: false, ai_verify_skip_above: 1 }, { label: 'car', ai_verify: false }] },
+    { name: 'Yard', object_rules: [{ label: 'dog', ai_verify: false }] },
+    { name: 'Path', object_rules: [{ label: 'person', ai_verify: false }] },
+  ] } };
+  const changed = vm.runInContext('applyAiVerifyToCameraZones(camera, camera.detection.zones[0].object_rules[0])', context);
+  assert.equal(changed, 2);
+  const zones = context.camera.detection.zones;
+  assert.equal(zones[1].object_rules[0].ai_verify, true);
+  assert.equal(zones[1].object_rules[0].ai_verify_skip_above, 0.85);
+  assert.equal(zones[3].object_rules[0].ai_verify, true);
+  assert.equal(zones[1].object_rules[1].ai_verify, false, 'other objects are untouched');
+  assert.equal(zones[2].object_rules.length, 1, 'a zone without the object gets no new policy');
+  assert.equal(vm.runInContext('applyAiVerifyToCameraZones(camera, camera.detection.zones[2].object_rules[0])', context), 0);
+  assert.match(source, /data-apply-ai-verify="\$\{index\}"/);
+});

@@ -655,6 +655,7 @@ textarea {
 .ai-verify-stats .stat-card-value.is-error { color: #dc2626; }
 .ai-verify-stats .stat-card-value.is-unknown { color: var(--muted); }
 .alerts-ai-warning { margin: 0 0 12px; padding: 10px 12px; font-size: 14px; border-radius: 10px; border: 1px solid rgba(217,119,6,.45); background: rgba(217,119,6,.08); }
+.alerts-ai-apply { grid-column: 1 / -1; }
 .ai-backfill-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 12px; }
 .ai-backfill-hours { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .ai-backfill-hours select { width: auto; }
