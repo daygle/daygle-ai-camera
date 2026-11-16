@@ -98,4 +98,4 @@ tzdata>=2026.6
 # upgrade that drops its Pillow dependency would silently break motion
 # detection at runtime. Declared explicitly so the import surface always
 # matches the declared requirements.
-Pillow>=11.0.0,<14.0
+Pillow>=13.0.0,<14.0
