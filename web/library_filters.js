@@ -10,7 +10,7 @@
 //   [ search keywords ............................ ] [Search] [Ask AI]
 //   [Today 24h 7d 30d All Custom]  [All Object Motion Sound]  [Filters (n)]
 //   (Custom)  From [date][time]   To [date][time]
-//   (Filters) Camera | Label | Face | AI Check (Events) | Sort | [x] Alert Only
+//   (Filters) Camera | Label | Face | AI Check (Events) | False Positives | Sort | [x] Alert Only
 //   123 events · [camera: Driveway x] [label: Person x]          Clear all
 //
 // Every control applies as soon as it changes - there is no Apply button - and
@@ -86,6 +86,7 @@ function libraryDefaultState() {
     face: '',
     alerted: false,
     aiCheck: '',
+    falsePositive: '',
     sort: 'newest',
   };
 }
@@ -97,6 +98,13 @@ const LIBRARY_AI_CHECKS = [
   { value: 'filtered', label: 'AI Filtered' },
   { value: 'confirmed', label: 'AI Verified' },
   { value: 'unverified', label: 'AI Unverified' },
+];
+
+// The False Positives filter (app/false_positives.py): hide the detections
+// the AI or a user marked as false positives, or list only those.
+const LIBRARY_FALSE_POSITIVES = [
+  { value: 'hide', label: 'Hide false positives' },
+  { value: 'only', label: 'Only false positives' },
 ];
 
 // The since/until ISO window for a state. Pure, so tests and pages share it.
@@ -126,6 +134,7 @@ function libraryQueryForState(state) {
     face: state.face,
     alerted_only: state.alerted,
     ai_check: state.aiCheck,
+    false_positive: state.falsePositive,
     sort: state.sort,
     range: state.range,
   };
@@ -146,6 +155,7 @@ function libraryControls(options = {}) {
     camera: options.showCamera !== false,
     sort: options.showSort !== false,
     aiCheck: options.showAiCheck === true,
+    falsePositive: options.showFalsePositive === true,
   };
 }
 
@@ -175,6 +185,7 @@ function libraryStateFromSearch(search, types, controls = libraryControls()) {
   if (params.get('face')) state.face = params.get('face');
   if (params.get('alerted') === '1') state.alerted = true;
   if (controls.aiCheck && LIBRARY_AI_CHECKS.some((item) => item.value === params.get('ai_check'))) state.aiCheck = params.get('ai_check');
+  if (controls.falsePositive && LIBRARY_FALSE_POSITIVES.some((item) => item.value === params.get('false_positive'))) state.falsePositive = params.get('false_positive');
   if (controls.sort && params.get('sort') === 'oldest') state.sort = 'oldest';
   return state;
 }
@@ -188,6 +199,7 @@ function librarySearchFromState(state, currentSearch, controls = libraryControls
   if (controls.camera) owned.push('camera_id');
   if (controls.sort) owned.push('sort');
   if (controls.aiCheck) owned.push('ai_check');
+  if (controls.falsePositive) owned.push('false_positive');
   owned.forEach((key) => params.delete(key));
   if (state.q) params.set('q', state.q);
   if (!controls.range) {
@@ -205,6 +217,7 @@ function librarySearchFromState(state, currentSearch, controls = libraryControls
   if (state.face) params.set('face', state.face);
   if (state.alerted) params.set('alerted', '1');
   if (controls.aiCheck && state.aiCheck) params.set('ai_check', state.aiCheck);
+  if (controls.falsePositive && state.falsePositive) params.set('false_positive', state.falsePositive);
   if (controls.sort && state.sort === 'oldest') params.set('sort', 'oldest');
   const text = params.toString();
   return text ? `?${text}` : '';
@@ -241,6 +254,7 @@ function createLibraryFilters(options) {
     sort: `${kind}-filter-sort`,
     alerted: `${kind}-filter-alerted`,
     aiCheck: `${kind}-filter-ai-check`,
+    falsePositive: `${kind}-filter-false-positive`,
     dateFrom: `${kind}-filter-date-from`,
     dateTo: `${kind}-filter-date-to`,
   };
@@ -280,6 +294,7 @@ function createLibraryFilters(options) {
       <label><span>Label</span><select id="${ids.label}"><option value="">All labels</option></select></label>
       <label data-library-face-field hidden><span>Face</span><select id="${ids.face}"><option value="">All faces</option></select></label>
       <label${controls.aiCheck ? '' : ' hidden'}><span>AI Check</span><select id="${ids.aiCheck}"><option value="">Any</option>${LIBRARY_AI_CHECKS.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}</select></label>
+      <label${controls.falsePositive ? '' : ' hidden'}><span>False Positives</span><select id="${ids.falsePositive}"><option value="">Show all</option>${LIBRARY_FALSE_POSITIVES.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}</select></label>
       <label${controls.sort ? '' : ' hidden'}><span>Sort</span><select id="${ids.sort}"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
       <label class="library-check"><input id="${ids.alerted}" type="checkbox" /><span>Alert Only</span></label>
     </div>
@@ -314,6 +329,7 @@ function createLibraryFilters(options) {
     sort: q(`#${ids.sort}`),
     alerted: q(`#${ids.alerted}`),
     aiCheck: q(`#${ids.aiCheck}`),
+    falsePositive: q(`#${ids.falsePositive}`),
     count: q('[data-library-count]'),
     chips: q('[data-library-chips]'),
     clear: q('[data-library-clear]'),
@@ -339,7 +355,7 @@ function createLibraryFilters(options) {
   // Filters that live inside the collapsible panel, counted on its button so a
   // collapsed panel never hides that the list is narrowed.
   function panelFilterCount() {
-    return [state.camera, state.label, state.face, state.alerted, state.aiCheck, state.sort === 'oldest'].filter(Boolean).length;
+    return [state.camera, state.label, state.face, state.alerted, state.aiCheck, state.falsePositive, state.sort === 'oldest'].filter(Boolean).length;
   }
 
   function optionText(select, value) {
@@ -379,6 +395,7 @@ function createLibraryFilters(options) {
     if (state.face) chips.push({ key: 'face', text: `Face: ${faceText(state.face)}` });
     if (state.alerted) chips.push({ key: 'alerted', text: 'Alert Only' });
     if (state.aiCheck) chips.push({ key: 'aiCheck', text: (LIBRARY_AI_CHECKS.find((item) => item.value === state.aiCheck) || {}).label || state.aiCheck });
+    if (state.falsePositive) chips.push({ key: 'falsePositive', text: (LIBRARY_FALSE_POSITIVES.find((item) => item.value === state.falsePositive) || {}).label || state.falsePositive });
     if (state.sort === 'oldest') chips.push({ key: 'sort', text: 'Oldest first' });
     return chips;
   }
@@ -406,6 +423,7 @@ function createLibraryFilters(options) {
     els.sort.value = state.sort;
     els.alerted.checked = state.alerted;
     els.aiCheck.value = state.aiCheck;
+    els.falsePositive.value = state.falsePositive;
     const count = panelFilterCount();
     els.badge.textContent = String(count);
     els.badge.hidden = !count;
@@ -570,6 +588,7 @@ function createLibraryFilters(options) {
   els.sort.addEventListener('change', () => update({ sort: els.sort.value }, 'sort'));
   els.alerted.addEventListener('change', () => update({ alerted: els.alerted.checked }, 'filter'));
   els.aiCheck.addEventListener('change', () => update({ aiCheck: els.aiCheck.value }, 'filter'));
+  els.falsePositive.addEventListener('change', () => update({ falsePositive: els.falsePositive.value }, 'filter'));
   els.more.addEventListener('click', () => {
     const opening = els.panel.hidden;
     setPanelOpen(opening);

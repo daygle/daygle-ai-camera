@@ -64,6 +64,7 @@ def events(
     sort: str = Query('newest', pattern='^(newest|oldest)$'),
     ai_check: str | None = Query(None, pattern='^(filtered|confirmed|unverified)$',
                                  description='AI verification verdict: filtered, confirmed or unverified.'),
+    false_positive: str | None = Query(None, pattern='^(only|hide)$', description='False positives: only to list just them, hide to leave them out.'),
     db=Depends(get_database),
 ):
     user = require_user(request)
@@ -86,6 +87,7 @@ def events(
         face=face,
         sort=sort,
         ai_check=ai_check,
+        false_positive=false_positive,
     )
     scoped = [_scope_event_recordings(event, user) for event in event_list]
     return {

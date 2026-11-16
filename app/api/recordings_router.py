@@ -151,6 +151,7 @@ def recordings(
     source_type: str | None = Query(None, pattern='^(sound|object)$', description='Filter by recording type: sound or object.'),
     face: str | None = Query(None, max_length=200, description='Recognised face: any, unknown, id:<person_id> or name:<name>.'),
     q: str | None = Query(None, max_length=300, description='Keywords; every word must appear in the camera, a label, or a linked event (zone, AI tag/description, face name).'),
+    false_positive: str | None = Query(None, pattern='^(only|hide)$', description='False positives: only to list just them, hide to leave them out.'),
     db=Depends(get_database),
 ):
     # M1 fix: defence-in-depth - middleware already enforces a session
@@ -188,6 +189,7 @@ def recordings(
         owner_user_id=owner_user_id,
         query=q,
         face=face,
+        false_positive=false_positive,
     )
     return {
         'items': results,

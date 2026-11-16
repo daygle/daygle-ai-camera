@@ -6,12 +6,23 @@ import sqlite3
 from datetime import datetime, timedelta, UTC
 from typing import Any
 
+from app.db.false_positives import recording_false_positive_filter, recording_false_positive_status
 from app.db.library_filters import recording_face_condition, recording_query_condition
 from app.detection_status import GENERIC_TRIGGER_LABELS
 from app.media_utils import recording_playback_sidecar_path, safe_storage_path
 from app.utils import _normalize_iso_to_utc, parse_json_object
 
 _SQLITE_BATCH_SIZE = 400
+
+
+def _recording_false_positive(recording: dict[str, Any]) -> dict[str, Any] | None:
+    """The recording's false-positive status from its linked events (its
+    trigger event too, which carries its detections apart)."""
+    events = list(recording.get('events') or [])
+    primary = recording.get('event')
+    if primary and all(event.get('id') != primary.get('id') for event in events):
+        events.append({**primary, 'detections': recording.get('detections') or []})
+    return recording_false_positive_status(events)
 
 
 def _batched(values: list[int]) -> list[list[int]]:
@@ -274,8 +285,13 @@ class RecordingsMixin:
         owner_user_id: int | None = None,
         query: str | None = None,
         face: str | None = None,
+        false_positive: str | None = None,
     ) -> tuple[list[dict[str, Any]], tuple[str, int] | None]:
-        """Return ``(recordings, next_raw_cursor)`` with stable keyset ordering."""
+        """Return ``(recordings, next_raw_cursor)`` with stable keyset ordering.
+
+        ``false_positive``: ``'only'`` lists just false-positive recordings,
+        ``'hide'`` leaves them out (app.db.false_positives).
+        """
         started_after = _normalize_iso_to_utc(started_after) if started_after else None
         started_before = _normalize_iso_to_utc(started_before) if started_before else None
         page_size = max(1, int(limit))
@@ -320,7 +336,11 @@ class RecordingsMixin:
                 conditions.append("EXISTS (SELECT 1 FROM events e WHERE e.id = r.event_id AND e.source = 'sound')")
             elif source_type == 'object':
                 conditions.append("(r.event_id IS NULL OR NOT EXISTS (SELECT 1 FROM events e WHERE e.id = r.event_id AND e.source = 'sound'))")
-            for extra in (recording_query_condition('r', query), recording_face_condition('r', face)):
+            for extra in (
+                recording_query_condition('r', query),
+                recording_face_condition('r', face),
+                recording_false_positive_filter('r', false_positive),
+            ):
                 if extra is not None:
                     conditions.append(extra[0])
                     params.extend(extra[1])
@@ -697,6 +717,7 @@ class RecordingsMixin:
             recording["detections"] = [dict(detection) for detection in detections]
         # A recording spans many events: attach every event linked to this clip.
         recording["events"] = self._events_for_recordings(db, [int(recording["id"])]).get(int(recording["id"]), [])
+        recording["false_positive"] = _recording_false_positive(recording)
         return recording
 
     def _assemble_recordings(self, db: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
@@ -741,6 +762,7 @@ class RecordingsMixin:
                 eid = int(recording['event_id'])
                 recording['event'] = events_map.get(eid)
                 recording['detections'] = detections_map.get(eid, [])
+            recording['false_positive'] = _recording_false_positive(recording)
         return recordings
 
     @staticmethod

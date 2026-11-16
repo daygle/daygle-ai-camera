@@ -56,6 +56,9 @@ function loadPage() {
     motionFractionOf: () => null,
     aiTagPills: () => '',
     aiDescriptionTip: () => '',
+    eventFalsePositive: () => null,
+    falsePositiveBadge: () => '',
+    falsePositiveButton: () => '',
     libraryDefaultQuery: () => ({}),
     createCursorPager: (url) => {
       state.pagerUrls.push(url);

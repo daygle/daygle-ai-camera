@@ -284,6 +284,7 @@ function renderEventRow(event) {
     ? `<span class="detection detection-alert" title="${alertBadgeTitle(event)}">🔔 Alert</span>`
     : '';
   const aiBadge = aiVerificationBadge(event);
+  const falsePositive = eventFalsePositive(event);
   // AI tags join the detection pills in one row, so they read as a trailing
   // label on the event. The model's plain-English write-up for the same
   // record (app/ai_verification.py) rides along as an info-tip bubble: it is
@@ -307,10 +308,13 @@ function renderEventRow(event) {
       ? '<button class="secondary activity-item-action" disabled aria-label="Preparing recording"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="activity-action-label">Preparing...</span></button>'
       : `<a class="secondary activity-item-action activity-item-action-play" href="/recordings/${encodeURIComponent(event.recording_id)}" aria-label="Open recording for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Play</span></a>`);
   }
-  const recordingAction = actions.length ? actions.join('') : '<span class="muted">-</span>';
+  // Admins can mark an object event a false positive (or say it was real);
+  // motion and sound events have no object to judge.
+  if (kind === 'object') actions.push(falsePositiveButton('event', event.id, Boolean(falsePositive)));
+  const recordingAction = actions.filter(Boolean).length ? actions.join('') : '<span class="muted">-</span>';
   return `
     <tr class="activity-table-row ${typeClass}" data-event-row="${escapeHtml(String(event.id))}">
-      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}${aiBadge}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
+      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}${aiBadge}${falsePositiveBadge(falsePositive)}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
       <td class="activity-cell-camera">${escapeHtml(camera)}</td>
       <td class="activity-cell-detections"><div class="activity-item-badges">${eventPills(event)}${aiTags}${aiTip}</div></td>
       <td class="activity-cell-when">
@@ -528,6 +532,7 @@ function eventsQueryString(query) {
   if (query.face) params.set('face', query.face);
   if (query.alerted_only) params.set('alerted_only', 'true');
   if (query.ai_check) params.set('ai_check', query.ai_check);
+  if (query.false_positive) params.set('false_positive', query.false_positive);
   if (query.sort && query.sort !== 'newest') params.set('sort', query.sort);
   return params.toString();
 }
@@ -579,7 +584,10 @@ window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
   if (allEvents.length) renderList();
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // Await the shared /api/auth/me so the False Positive button only renders
+  // for admins (the backend enforces this either way).
+  await window.daygleAuthReady;
   if (!els.filterMount) return;
   filters = createLibraryFilters({
     mount: els.filterMount,
@@ -588,6 +596,7 @@ document.addEventListener('DOMContentLoaded', () => {
     types: ['all', 'object', 'motion', 'sound'],
     searchPlaceholder: 'Search events: person, driveway, red car, a face name…',
     showAiCheck: true,
+    showFalsePositive: true,
     onAiSearch: runEventSearch,
     onChange: (_query, reason) => {
       // The type pill only re-filters what is loaded; everything else is a
@@ -595,6 +604,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (reason === 'type' && eventsPager) renderList();
       else loadEvents();
     },
+  });
+  // A marked row is patched in place, so the list keeps its scroll and pages.
+  bindFalsePositiveButtons(els.eventFeed, (_kind, id, _value, response) => {
+    const event = allEvents.find((item) => String(item.id) === String(id));
+    if (!event) return;
+    Object.assign(event, response || {});
+    const row = els.eventFeed.querySelector(`[data-event-row="${CSS.escape(String(id))}"]`);
+    if (row) row.outerHTML = renderEventRow(event);
   });
   loadEvents();
 });
