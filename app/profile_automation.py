@@ -322,6 +322,10 @@ def poll_camera_profiles() -> None:
         profiles = normalize_camera_profiles_with_legacy(
             camera.get('detection_profiles'), camera,
         )
+        # The source as stored, before the solar migration below rewrites it:
+        # the remerge compares live state against THIS to detect a concurrent
+        # operator edit.
+        stored_source = str(profiles.get('source') or 'manual')
         solar_error = None
         solar_changed = False
         solar_enabled = False
@@ -365,6 +369,7 @@ def poll_camera_profiles() -> None:
             camera['detection_profiles']['active'] = target
             changed[camera_id] = {
                 'target': target,
+                'stored_source': stored_source,
                 'source': str(profiles.get('source') or 'manual'),
                 'day_start': profiles['day_start'],
                 'night_start': profiles['night_start'],
@@ -395,6 +400,7 @@ def poll_camera_profiles() -> None:
     # profile flip per camera, then persist atomically under the write lock.
     with _state._cameras_config_write_lock:
         live = list(_state.cameras_config or effective_cameras_config())
+        applied = 0
         for camera in live:
             decision = changed.pop(str(camera.get('id') or ''), None)
             if decision is None:
@@ -402,7 +408,7 @@ def poll_camera_profiles() -> None:
             current_profiles = normalize_camera_profiles_with_legacy(
                 camera.get('detection_profiles'), camera,
             )
-            if str(current_profiles.get('source') or 'manual') != decision['source']:
+            if str(current_profiles.get('source') or 'manual') != decision['stored_source']:
                 # A concurrent edit changed this camera's automation mode
                 # mid-poll: the operator's action wins, and the (now stale)
                 # automation decision is dropped without touching the camera.
@@ -412,12 +418,15 @@ def poll_camera_profiles() -> None:
             # concurrent edit of profile VALUES (thresholds, intervals, ...)
             # is preserved, not overwritten by the snapshot's copies.
             current_profiles['active'] = decision['target']
+            # Differs from the stored source only for the solar migration
+            # (a camera that has coordinates but predates solar mode).
+            current_profiles['source'] = decision['source']
             if decision['source'] == 'solar':
                 current_profiles['day_start'] = decision['day_start']
                 current_profiles['night_start'] = decision['night_start']
             camera['detection_profiles'] = current_profiles
             apply_active_camera_detection_profile(camera)
-        persisted = copy.deepcopy(live)
+            applied += 1
         if changed:
             # Cameras the snapshot had that live state no longer does (removed
             # by a concurrent API save): drop their automation decisions -- a
@@ -427,15 +436,16 @@ def poll_camera_profiles() -> None:
                 len(changed),
             )
         try:
-            _state.database.set_setting('cameras', persisted, utc_now())
+            _state.database.set_setting('cameras', copy.deepcopy(live), utc_now())
         except Exception as exc:  # persistence failure must not stop detection
             logger.warning('Could not persist automatic day/night profile change: %s', exc)
-        if changed:
+        if applied:
             # A profile switch can change this camera's per-label rule floors
             # (Day/Night presets carry their own confirm/tiling settings), and
             # the global rule-confidence form has no settings signature to
             # self-invalidate on. Drop the cache at the persist boundary.
             invalidate_min_rule_confidence_cache()
+
 
 def _monitor_loop() -> None:
     next_poll = 0.0

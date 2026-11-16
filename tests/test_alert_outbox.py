@@ -64,10 +64,75 @@ def test_a_due_row_is_claimed_by_only_one_drainer(db):
     assert len(db.claim_due_alert_deliveries(now + 3600)) == 1
 
 
-def test_outbox_enqueue_needs_a_recipient_or_topic(db):
+def test_outbox_enqueue_needs_an_email_recipient(db):
     outbox = _outbox()
     assert outbox.enqueue('email', 7, _alert(), recipients=[]) is False
-    assert outbox.enqueue('push', 7, _alert(), topics=[]) is False
+
+
+def test_a_shared_topic_push_is_queued_and_retried_on_the_shared_topic(db, monkeypatch):
+    """No topics means the shared Settings topic (the default setup). It used
+    to be refused by ``enqueue``, so an ntfy outage lost those alerts."""
+    outbox = _outbox()
+    assert outbox.enqueue('push', 7, _alert(), topics=[]) is True
+
+    sent: list[dict] = []
+
+    class FakePushNotificationService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def configured(self):
+            return True
+
+        def send_alert(self, alert, **kwargs):
+            sent.append(kwargs)
+
+    push = importlib.import_module('app.push_notifications')
+    facades = importlib.import_module('app.config_facades')
+    monkeypatch.setattr(push, 'PushNotificationService', FakePushNotificationService)
+    monkeypatch.setattr(facades, 'effective_push_notification_settings', lambda: {'enabled': True})
+    assert outbox.retry_due(now=time.time() + 1) == 1
+    assert len(sent) == 1 and sent[0]['topics'] == []
+    assert db.count_alert_deliveries() == 0
+
+
+def test_manual_retry_does_not_resend_a_row_the_worker_is_sending(db, monkeypatch):
+    outbox = _outbox()
+    outbox.enqueue('push', 31, _alert(), topics=['daygle-ops'])
+    row_id = db.alert_deliveries()[0]['id']
+    delivered: list[int] = []
+    manual: list[dict | None] = []
+
+    def deliver(row):
+        delivered.append(row['id'])
+        # The admin clicks Retry while the worker is mid-delivery.
+        manual.append(outbox.retry_now(row_id))
+
+    monkeypatch.setattr(outbox, '_deliver_row', deliver)
+    assert outbox.retry_due(now=time.time() + 1) == 1
+    assert delivered == [row_id]
+    assert manual[0]['status'] == 'in_progress'
+    # The worker's pass is over: the row is gone and ownership was released.
+    assert outbox.retry_now(row_id) is None
+    assert outbox._in_flight == set()
+
+
+def test_worker_skips_a_claimed_row_that_is_being_retried_manually(db, monkeypatch):
+    outbox = _outbox()
+    outbox.enqueue('push', 32, _alert(), topics=['daygle-ops'])
+    delivered: list[int] = []
+    passes: list[int] = []
+
+    def deliver(row):
+        delivered.append(row['id'])
+        # The worker's pass lands while the manual retry is still sending.
+        passes.append(outbox.retry_due(now=time.time() + 1))
+
+    monkeypatch.setattr(outbox, '_deliver_row', deliver)
+    row_id = db.alert_deliveries()[0]['id']
+    assert outbox.retry_now(row_id) == {'status': 'delivered'}
+    assert passes == [1] and delivered == [row_id]
+    assert outbox._in_flight == set()
 
 
 def test_retry_delivers_then_deletes_the_row(db, monkeypatch):
