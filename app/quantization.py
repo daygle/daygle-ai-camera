@@ -111,7 +111,7 @@ def _int8_process_lock(cache: Path):
                     else:
                         import fcntl
                         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-                except Exception as unlock_exc:  # pragma: no cover - OS-specific
+                except Exception as unlock_exc:  # noqa: BLE001  # pragma: no cover - OS-specific
                     # Never mask the conversion/deletion exception with an
                     # advisory-lock cleanup failure.
                     log_ai_diagnostic(
@@ -160,7 +160,7 @@ def onnxruntime_gpu_available() -> bool:
     try:
         import onnxruntime as ort  # type: ignore[import-untyped]
         return 'CUDAExecutionProvider' in ort.get_available_providers()
-    except Exception:
+    except Exception:  # noqa: BLE001 - no usable onnxruntime means no CUDA
         return False
 
 
@@ -212,7 +212,7 @@ def _is_valid_onnx_model(path: Path) -> bool:
         # ``onnx`` is a declared runtime dependency. If an installation is
         # incomplete, do not trust an arbitrary non-empty cache as a model.
         return False
-    except Exception:
+    except Exception:  # noqa: BLE001 - any load or check failure means "not a valid model"
         return False
 
 
@@ -276,7 +276,7 @@ def _read_shared_ingest_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | No
     try:
         from app.camera_instance import read_ingest_frame
         return read_ingest_frame(camera_id)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - calibration falls back to synthetic frames
         logger.debug('Shared ingest frame read failed for camera %s: %s', camera_id, exc)
         return None
 
@@ -297,11 +297,11 @@ def _prime_shared_ingest(configs: list[dict[str, Any]]) -> set[str]:
     try:
         from app.config_facades import effective_recording_config
         recording_config = effective_recording_config()
-    except Exception:
+    except Exception:  # noqa: BLE001 - no database yet: use the file config
         recording_config = dict(getattr(_state, 'config', {}).get('recording', {}) or {})
     try:
         from app.utils import build_stream_url
-    except Exception:
+    except ImportError:
         return set()
     primed_ids: set[str] = set()
     for config in configs:
@@ -318,7 +318,7 @@ def _prime_shared_ingest(configs: list[dict[str, Any]]) -> set[str]:
                 # services whose prime method has no explicit return value.
                 if result is not False:
                     primed_ids.add(str(config['id']))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - one camera failing to prime must not stop calibration
             logger.debug('INT8 calibration could not prime camera %s ingest: %s', config.get('id'), exc)
     return primed_ids
 
@@ -374,7 +374,7 @@ def _configured_camera_calibration_frames() -> tuple[list[Any], int]:
                     frames.append(image.copy())
                 if frame_index + 1 < _REAL_CALIBRATION_FRAMES_PER_CAMERA:
                     time.sleep(0.1)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - one camera failing to sample must not stop calibration
             logger.debug('INT8 calibration frame sampling failed for camera %s: %s', camera_id, exc)
         output.put(frames)
 
@@ -584,7 +584,7 @@ class _SyntheticCalibrationReader:
         if sample_index < self.real_frame_count:
             try:
                 return {self._input_name: self._real_frame(self._real_frames[sample_index])}
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - falls back to a synthetic calibration frame
                 logger.debug('INT8 calibration real-frame preprocessing failed: %s; using synthetic fallback.', exc)
         return {self._input_name: self._synthetic_frame(self._rng)}
 
@@ -827,7 +827,7 @@ def quantize_int8(model_path: Path) -> Path | None:
                 metadata.unlink(missing_ok=True)
                 raise RuntimeError('source model changed while publishing INT8 cache')
             return cache
-        except Exception as exc:  # pragma: no cover - quantization failure is environment-specific
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - quantization failure is environment-specific
             log_ai_diagnostic(
                 'ai_int8_quantization',
                 f'INT8 quantization failed for {source}: {exc}',

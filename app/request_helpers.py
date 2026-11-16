@@ -264,7 +264,7 @@ def write_audit_log(
             ip_address=_request_ip(request),
             status=status,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - an audit write must never fail the request
         logger.warning('Failed to write audit log: %s', exc)
 
 

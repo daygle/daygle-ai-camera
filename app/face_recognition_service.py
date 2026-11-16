@@ -116,7 +116,7 @@ class FaceRecognitionService:
             if self._database is not None:
                 try:
                     rows = self._database.load_face_embeddings(self.model_id)
-                except Exception as exc:  # pragma: no cover - defensive DB guard
+                except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive DB guard
                     log_ai_diagnostic(
                         'ai_face_service',
                         f'Face matcher refresh failed to load embeddings: {exc}',
@@ -126,7 +126,7 @@ class FaceRecognitionService:
                     rows = []
             try:
                 matcher = FaceMatcher(rows)
-            except Exception as exc:  # pragma: no cover - defensive (numpy missing)
+            except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive (numpy missing)
                 log_ai_diagnostic(
                     'ai_face_service',
                     f'Face matcher rebuild failed: {exc}',
@@ -157,7 +157,7 @@ class FaceRecognitionService:
             if recorded.get(self.model_id, INPUT_SCALING_NORMALIZED) == scaling:
                 return
             rows = self._database.stored_face_embeddings_for_refresh(self.model_id)
-        except Exception as exc:  # pragma: no cover - defensive DB guard
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive DB guard
             log_ai_diagnostic(
                 'ai_face_service',
                 f'Could not check stored face embeddings against the model input scaling: {exc}',
@@ -179,7 +179,7 @@ class FaceRecognitionService:
                     row['table'], row['id'], embedding=embedding_to_bytes(vector), dim=int(vector.shape[0]),
                 )
                 redone += 1
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - one bad stored face must not stop the re-embed
                 failed += 1
                 log_ai_diagnostic(
                     'ai_face_service',
@@ -193,7 +193,7 @@ class FaceRecognitionService:
             from app.auth import utc_now
 
             self._database.set_setting(INPUT_SCALING_SETTING, recorded, utc_now())
-        except Exception as exc:  # pragma: no cover - defensive DB guard
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive DB guard
             log_ai_diagnostic(
                 'ai_face_service',
                 f'Could not record the face embedding input scaling: {exc}',
@@ -248,7 +248,7 @@ class FaceRecognitionService:
             return None
         try:
             embedding = self.embedder.embed(face_bgr)  # type: ignore[union-attr]
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - an embedding failure means "unknown", not a failed cycle
             logger.debug('Face embedding failed; treating as unknown: %s', exc)
             return None
         return matcher.match(embedding, threshold=self.threshold)
@@ -267,7 +267,7 @@ class FaceRecognitionService:
             return None
         try:
             return self.embedder.embed(face_bgr)  # type: ignore[union-attr]
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - an embedding failure is reported to the caller as None
             logger.warning('Face enrolment embedding failed: %s', exc)
             return None
 
@@ -330,7 +330,7 @@ def reload_face_recognition_service(config: dict[str, Any] | None = None) -> tup
         config = effective_face_recognition_config()
     try:
         service = FaceRecognitionService(config, _state.database)
-    except Exception as exc:  # pragma: no cover - construction is defensive already
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - construction is defensive already
         # Keep the returned reason generic: it flows to the settings API
         # response, and raw exception text can leak internal details.
         log_ai_diagnostic(

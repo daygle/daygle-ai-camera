@@ -162,7 +162,7 @@ def _retry_row(row: dict[str, Any], now: float | None = None) -> dict[str, Any]:
             'Dropping the queued %s alert for event %s: %s', channel, event_id, exc,
         )
         return {'status': 'dropped', 'error': str(exc)}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - any transport failure reschedules the row
         if attempts >= OUTBOX_MAX_ATTEMPTS:
             db.delete_alert_delivery(row_id)
             logger.warning(

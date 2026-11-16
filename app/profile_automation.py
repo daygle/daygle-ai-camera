@@ -428,7 +428,7 @@ def poll_camera_profiles() -> None:
             )
         try:
             _state.database.set_setting('cameras', persisted, utc_now())
-        except Exception as exc:  # persistence failure must not stop detection
+        except Exception as exc:  # noqa: BLE001 - persistence failure must not stop detection
             logger.warning('Could not persist automatic day/night profile change: %s', exc)
         if changed:
             # A profile switch can change this camera's per-label rule floors

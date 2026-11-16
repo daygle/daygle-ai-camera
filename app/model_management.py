@@ -298,7 +298,7 @@ def _read_installed_models() -> dict[str, Any]:
     if p.exists():
         try:
             return json.loads(p.read_text(encoding='utf-8'))
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             # The installed-models registry is the model-install lifecycle's
             # own state: a corrupted/unreadable file belongs in the AI Log
             # next to the download/export records, not the app logger.
@@ -510,7 +510,7 @@ def model_export_info(path: Path) -> dict[str, Any] | None:
             'opset': opset,
             'ultralytics_version': meta.get('version') or None,
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - export info is optional display data
         logger.debug('Could not read export info from %s: %s', path, exc)
         info = None
     # Drop stale entries for the same path so re-exports don't accumulate.

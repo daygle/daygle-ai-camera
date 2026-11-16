@@ -409,7 +409,7 @@ def _zone_motion_pixel_box(diff_mask: Any, zone: dict[str, Any]) -> dict[str, fl
     except (TypeError, ValueError, IndexError, AttributeError) as exc:
         logger.debug('Expected error computing motion pixel box for zone %r: %s', zone_id, exc)
         return None
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - unexpected mask shapes must not fail the detection cycle
         if zone_id not in _zone_pixel_motion_errors:
             logger.warning('Unexpected error computing motion pixel box for zone %r: %s', zone_id, exc)
             _zone_pixel_motion_errors.add(zone_id)
@@ -461,7 +461,7 @@ def _zone_pixel_motion_fraction(
         # Expected malformed zone/mask inputs; fail open with zero motion.
         logger.debug('Expected error computing pixel motion for zone %r: %s', zone_id, exc)
         return 0.0
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - unexpected mask shapes must not fail the detection cycle
         if zone_id not in _zone_pixel_motion_errors:
             logger.warning('Unexpected error computing pixel motion for zone %r: %s', zone_id, exc)
             _zone_pixel_motion_errors.add(zone_id)

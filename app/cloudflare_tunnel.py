@@ -399,7 +399,7 @@ class CloudflareTunnelManager:
         try:
             self._process = self._process_factory()
             self._process.start(self._token)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - any start failure leaves the LAN service running
             # Exception text can be supplied by a child-process wrapper;
             # never trust it to be free of the token.
             self._process = None
@@ -428,7 +428,7 @@ class CloudflareTunnelManager:
         while not stop_event.wait(self._supervisor_interval):
             try:
                 self._supervise_once()
-            except Exception as exc:  # pragma: no cover - defensive
+            except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive
                 # The watchdog must never die itself; a bug here would silently
                 # disable tunnel supervision for the rest of the process life.
                 logger.warning(
@@ -523,7 +523,7 @@ class CloudflareTunnelManager:
             return
         try:
             process.stop()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - any stop failure is reported, not raised
             self._last_error = f"Unable to stop cloudflared ({type(exc).__name__})."
             logger.warning("Cloudflare Tunnel stop failed: %s", self._last_error)
 

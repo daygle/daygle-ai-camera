@@ -293,7 +293,7 @@ def overlay_box_colors(
     if settings is None:
         try:
             settings = effective_object_settings()
-        except Exception:  # pragma: no cover - defensive; DB may be mid-startup
+        except Exception:  # noqa: BLE001  # pragma: no cover - defensive; DB may be mid-startup
             return {}
     if not isinstance(settings, dict):
         return {}
@@ -303,7 +303,7 @@ def overlay_box_colors(
         if groups is None:
             try:
                 groups = cached_label_groups()
-            except Exception:  # pragma: no cover - defensive
+            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
                 groups = {}
         covering: list[tuple[int, str, str]] = []
         for group, color in group_colors.items():
@@ -345,7 +345,7 @@ def _build_effective_object_settings() -> dict[str, Any]:
     if db is not None:
         try:
             raw = db.get_setting('objects')
-        except Exception:  # pragma: no cover - defensive; DB may be mid-startup
+        except Exception:  # noqa: BLE001  # pragma: no cover - defensive; DB may be mid-startup
             raw = None
     return normalize_object_settings(raw)
 
@@ -706,7 +706,7 @@ def classify_motion_state(
             return MODE_STILL, 'mask'
         changed = int(region.sum())
         return (MODE_MOVING if changed >= _moving_pixels_required(int(region.size)) else MODE_STILL), 'mask'
-    except Exception as exc:  # pragma: no cover - unexpected mask/box shapes
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - unexpected mask/box shapes
         logger.debug('Unexpected error classifying detection motion state: %s', exc)
         return MODE_STILL, 'mask'
 

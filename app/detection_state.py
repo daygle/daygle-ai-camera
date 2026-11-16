@@ -762,7 +762,7 @@ def _mog2_available() -> bool:
     try:
         import cv2
         _MOG2_AVAILABLE = hasattr(cv2, 'createBackgroundSubtractorMOG2')
-    except Exception:
+    except Exception:  # noqa: BLE001 - a broken cv2 build means no MOG2
         _MOG2_AVAILABLE = False
     return _MOG2_AVAILABLE
 
@@ -876,7 +876,7 @@ def _resolve_shadow_suppression(value: Any, thumbnail: Any) -> bool:
         try:
             import numpy as np
             brightness = float(np.asarray(thumbnail).mean())
-        except Exception:
+        except Exception:  # noqa: BLE001 - brightness unavailable: keep rejecting shadows
             return True  # brightness unavailable -> default to rejecting shadows
         return brightness >= float(getattr(_state, '_MOTION_NIGHT_BRIGHTNESS', 50.0))
     from app.utils import normalize_bool_setting

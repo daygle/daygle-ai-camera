@@ -43,7 +43,7 @@ def log_camera_diagnostic(
             message=message,
             details=details,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - a diagnostic write must never fail its caller
         logger.debug('Failed to write camera diagnostic (%s/%s): %s', camera_id, event_type, exc)
 
 
@@ -81,5 +81,5 @@ def log_ai_diagnostic(
             message=message,
             details=details,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - a diagnostic write must never fail its caller
         logger.debug('Failed to write AI diagnostic (%s): %s', event_type, exc)
