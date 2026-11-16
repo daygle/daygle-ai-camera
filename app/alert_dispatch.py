@@ -296,7 +296,7 @@ def _event_for_channels(
         return None
     try:
         return _state.database.get_event(event_id) or {}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - each channel loads the event itself on a failed read
         logger.warning('Could not load event %s for alert delivery: %s', event_id, exc)
         return None
 
@@ -359,11 +359,11 @@ def deliver_alert_notifications(
     event = _event_for_channels(triggered, event_id, email=True, push=True)
     try:
         deliver_email_alerts(triggered, event_id, rules=rules, event=event)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - an email failure must not stop the push
         logger.warning('Email alert delivery failed for event %s: %s', event_id, exc)
     try:
         deliver_push_notifications(triggered, event_id, rules=rules, event=event)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - delivery runs on a pool thread; never raise out of it
         logger.warning('Push notification delivery failed for event %s: %s', event_id, exc)
 
 
@@ -398,7 +398,7 @@ def _email_snapshot_bytes(event: dict[str, Any], event_id: int) -> bytes | None:
                 if float(d.get('confidence') or 0) >= _email_min_conf
             ])
             return render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - the snapshot is optional: send the alert as text
         logger.debug('Failed to annotate snapshot for email alert event %s: %s', event_id, exc)
     return None
 
@@ -738,14 +738,14 @@ def deliver_sound_alert_notifications(
     if rule.get('email_enabled'):
         try:
             deliver_email_alerts(triggered, event_id, rules=[rule], event=event)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - an email failure must not stop the push
             logger.warning(
                 'Sound alert email delivery failed for event %s: %s', event_id, exc,
             )
     if rule.get('push_enabled'):
         try:
             deliver_push_notifications(triggered, event_id, rules=[rule], event=event)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - delivery runs on a pool thread; never raise out of it
             logger.warning(
                 'Sound alert push delivery failed for event %s: %s', event_id, exc,
             )

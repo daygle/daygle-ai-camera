@@ -16,5 +16,13 @@
 # syntax renamed/removed in newer Pythons).
 target-version = "py311"
 
+# "BLE001" (blind except) is also selected: a new ``except Exception`` that
+# neither re-raises nor logs the traceback has to be narrowed to the errors it
+# expects, or carry ``# noqa: BLE001 - <why a broad catch is right here>``.
+# Tests are exempt: they catch broadly to stay portable across runtimes.
+
 [lint]
-select = ["F"]
+select = ["F", "BLE001"]
+
+[lint.per-file-ignores]
+"tests/**" = ["BLE001"]

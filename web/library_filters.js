@@ -10,7 +10,7 @@
 //   [ search keywords ............................ ] [Search] [Ask AI]
 //   [Today 24h 7d 30d All Custom]  [All Object Motion Sound]  [Filters (n)]
 //   (Custom)  From [date][time]   To [date][time]
-//   (Filters) Camera | Label | Face | Sort | [x] Alert Only
+//   (Filters) Camera | Label | Face | AI Check (Events) | Sort | [x] Alert Only
 //   123 events · [camera: Driveway x] [label: Person x]          Clear all
 //
 // Every control applies as soon as it changes - there is no Apply button - and
@@ -85,9 +85,19 @@ function libraryDefaultState() {
     label: '',
     face: '',
     alerted: false,
+    aiCheck: '',
     sort: 'newest',
   };
 }
+
+// The Events page's AI Check filter: the AI alert verification verdict
+// (app/ai_verification.py). Unverified = sent without a verdict (the model
+// was unsure, unreachable or skipped), which is where a broken model shows.
+const LIBRARY_AI_CHECKS = [
+  { value: 'filtered', label: 'AI Filtered' },
+  { value: 'confirmed', label: 'AI Verified' },
+  { value: 'unverified', label: 'AI Unverified' },
+];
 
 // The since/until ISO window for a state. Pure, so tests and pages share it.
 function libraryFilterWindow(state, now = new Date()) {
@@ -115,6 +125,7 @@ function libraryQueryForState(state) {
     label: state.label,
     face: state.face,
     alerted_only: state.alerted,
+    ai_check: state.aiCheck,
     sort: state.sort,
     range: state.range,
   };
@@ -134,6 +145,7 @@ function libraryControls(options = {}) {
     range: options.showRange !== false,
     camera: options.showCamera !== false,
     sort: options.showSort !== false,
+    aiCheck: options.showAiCheck === true,
   };
 }
 
@@ -162,6 +174,7 @@ function libraryStateFromSearch(search, types, controls = libraryControls()) {
   if (params.get('label')) state.label = params.get('label').trim().toLowerCase();
   if (params.get('face')) state.face = params.get('face');
   if (params.get('alerted') === '1') state.alerted = true;
+  if (controls.aiCheck && LIBRARY_AI_CHECKS.some((item) => item.value === params.get('ai_check'))) state.aiCheck = params.get('ai_check');
   if (controls.sort && params.get('sort') === 'oldest') state.sort = 'oldest';
   return state;
 }
@@ -174,6 +187,7 @@ function librarySearchFromState(state, currentSearch, controls = libraryControls
   if (controls.range) owned.push('range', 'from', 'to');
   if (controls.camera) owned.push('camera_id');
   if (controls.sort) owned.push('sort');
+  if (controls.aiCheck) owned.push('ai_check');
   owned.forEach((key) => params.delete(key));
   if (state.q) params.set('q', state.q);
   if (!controls.range) {
@@ -190,6 +204,7 @@ function librarySearchFromState(state, currentSearch, controls = libraryControls
   if (state.label) params.set('label', state.label);
   if (state.face) params.set('face', state.face);
   if (state.alerted) params.set('alerted', '1');
+  if (controls.aiCheck && state.aiCheck) params.set('ai_check', state.aiCheck);
   if (controls.sort && state.sort === 'oldest') params.set('sort', 'oldest');
   const text = params.toString();
   return text ? `?${text}` : '';
@@ -225,6 +240,7 @@ function createLibraryFilters(options) {
     face: `${kind}-filter-face`,
     sort: `${kind}-filter-sort`,
     alerted: `${kind}-filter-alerted`,
+    aiCheck: `${kind}-filter-ai-check`,
     dateFrom: `${kind}-filter-date-from`,
     dateTo: `${kind}-filter-date-to`,
   };
@@ -263,6 +279,7 @@ function createLibraryFilters(options) {
       <label${controls.camera ? '' : ' hidden'}><span>Camera</span><select id="${ids.camera}"><option value="">All cameras</option></select></label>
       <label><span>Label</span><select id="${ids.label}"><option value="">All labels</option></select></label>
       <label data-library-face-field hidden><span>Face</span><select id="${ids.face}"><option value="">All faces</option></select></label>
+      <label${controls.aiCheck ? '' : ' hidden'}><span>AI Check</span><select id="${ids.aiCheck}"><option value="">Any</option>${LIBRARY_AI_CHECKS.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}</select></label>
       <label${controls.sort ? '' : ' hidden'}><span>Sort</span><select id="${ids.sort}"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
       <label class="library-check"><input id="${ids.alerted}" type="checkbox" /><span>Alert Only</span></label>
     </div>
@@ -296,6 +313,7 @@ function createLibraryFilters(options) {
     faceField: q('[data-library-face-field]'),
     sort: q(`#${ids.sort}`),
     alerted: q(`#${ids.alerted}`),
+    aiCheck: q(`#${ids.aiCheck}`),
     count: q('[data-library-count]'),
     chips: q('[data-library-chips]'),
     clear: q('[data-library-clear]'),
@@ -321,7 +339,7 @@ function createLibraryFilters(options) {
   // Filters that live inside the collapsible panel, counted on its button so a
   // collapsed panel never hides that the list is narrowed.
   function panelFilterCount() {
-    return [state.camera, state.label, state.face, state.alerted, state.sort === 'oldest'].filter(Boolean).length;
+    return [state.camera, state.label, state.face, state.alerted, state.aiCheck, state.sort === 'oldest'].filter(Boolean).length;
   }
 
   function optionText(select, value) {
@@ -360,6 +378,7 @@ function createLibraryFilters(options) {
     if (state.label) chips.push({ key: 'label', text: `Label: ${optionText(els.label, state.label) || titleCase(state.label)}` });
     if (state.face) chips.push({ key: 'face', text: `Face: ${faceText(state.face)}` });
     if (state.alerted) chips.push({ key: 'alerted', text: 'Alert Only' });
+    if (state.aiCheck) chips.push({ key: 'aiCheck', text: (LIBRARY_AI_CHECKS.find((item) => item.value === state.aiCheck) || {}).label || state.aiCheck });
     if (state.sort === 'oldest') chips.push({ key: 'sort', text: 'Oldest first' });
     return chips;
   }
@@ -386,6 +405,7 @@ function createLibraryFilters(options) {
     els.face.value = state.face;
     els.sort.value = state.sort;
     els.alerted.checked = state.alerted;
+    els.aiCheck.value = state.aiCheck;
     const count = panelFilterCount();
     els.badge.textContent = String(count);
     els.badge.hidden = !count;
@@ -549,6 +569,7 @@ function createLibraryFilters(options) {
   els.face.addEventListener('change', () => update({ face: els.face.value }, 'filter'));
   els.sort.addEventListener('change', () => update({ sort: els.sort.value }, 'sort'));
   els.alerted.addEventListener('change', () => update({ alerted: els.alerted.checked }, 'filter'));
+  els.aiCheck.addEventListener('change', () => update({ aiCheck: els.aiCheck.value }, 'filter'));
   els.more.addEventListener('click', () => {
     const opening = els.panel.hidden;
     setPanelOpen(opening);

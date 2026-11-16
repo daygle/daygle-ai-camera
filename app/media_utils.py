@@ -238,7 +238,7 @@ def recording_stream_path(file_path: Path, *, low_priority: bool = False) -> Pat
 def _convert_for_playback(file_path: Path, playback_path: Path, failed_marker: Path, low_priority: bool = False) -> Path:
     try:
         transcode_recording_to_mp4(file_path, playback_path, **({'low_priority': True} if low_priority else {}))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - conversion is an optimisation; the original stays playable
         logger.warning('Recording playback conversion failed for %s: %s', file_path, exc)
         # A marker is only an optimization; keep the playable fallback.
         with contextlib.suppress(OSError):

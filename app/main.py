@@ -75,7 +75,7 @@ class _DropInvalidHttpRequestNoise(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             return self._NEEDLE not in record.getMessage()
-        except Exception:
+        except Exception:  # noqa: BLE001 - a logging filter must never raise
             return True
 
 
@@ -166,7 +166,7 @@ def _startup() -> None:
     try:
         from app.profile_presets import migrate_stored_camera_profiles
         migrate_stored_camera_profiles(database)
-    except Exception as exc:  # never block start-up on a profile migration
+    except Exception as exc:  # noqa: BLE001 - never block start-up on a profile migration
         _logger.warning('Camera profile migration failed: %s', exc)
     cameras_config = effective_cameras_config()
     _state.cameras_config = cameras_config
@@ -237,7 +237,7 @@ async def app_lifespan(_app: FastAPI):
     if tunnel_manager is not None and tunnel_manager.autostart:
         try:
             tunnel_manager.start()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - the tunnel is optional; the LAN service still starts
             _logger.warning('Cloudflare Tunnel startup failed; LAN service remains available: %s', exc)
     try:
         yield

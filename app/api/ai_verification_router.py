@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from starlette.concurrency import run_in_threadpool
 
 from app.ai_verification import (
@@ -12,9 +12,11 @@ from app.ai_verification import (
     VerificationError,
     description_backfill_status,
     effective_ai_verification_settings,
+    model_health,
     run_connection_test,
     start_description_backfill,
     validate_ai_verification_settings,
+    verification_stats,
 )
 from app.auth import utc_now
 from app.auth_gates import require_admin
@@ -29,6 +31,21 @@ def get_ai_verification_settings(request: Request):
     # Admin-only: the payload carries the model server's API key.
     require_admin(request)
     return effective_ai_verification_settings()
+
+
+@router.get('/api/settings/ai-verification/status')
+def get_ai_verification_status(request: Request):
+    """Whether the model server answered lately (Alerts page AI Verify warning)."""
+    require_admin(request)
+    settings = effective_ai_verification_settings()
+    return {**model_health(settings), 'configured': bool(settings.get('server_url') and settings.get('model'))}
+
+
+@router.get('/api/settings/ai-verification/stats')
+def get_ai_verification_stats(request: Request, days: int = Query(7, ge=1, le=90)):
+    """Verified / filtered / unverified counts and model health for the AI page."""
+    require_admin(request)
+    return verification_stats(days)
 
 
 @router.put('/api/settings/ai-verification')

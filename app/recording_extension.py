@@ -841,7 +841,7 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
                 started_at_dt.timestamp(), ended_at_dt.timestamp(),
             )
             schedule_recordings_retention()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - runs on the ingest callback; a lost row is logged, not raised
             logger.warning(
                 'Failed to register continuous chunk %s for camera %s: %s',
                 file_path.name, camera_id, exc,
@@ -1085,7 +1085,7 @@ def start_rtsp_recording_capture(
             # An H.265/H.265+ clip gets its browser-playback copy now, in the
             # background, so opening it later does not wait for a conversion.
             schedule_playback_conversion(file_path)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - any capture failure falls back to a generated clip
             logger.warning(
                 'RTSP recording capture failed for event %s, writing generated fallback: %s',
                 event_id, exc,
@@ -1143,7 +1143,7 @@ def start_rtsp_recording_capture(
         # permanently unplayable recording.
         try:
             _state.database.delete_recording(recording_id)
-        except Exception as exc:  # pragma: no cover - best-effort cleanup
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - best-effort cleanup
             logger.debug('Could not remove unqueued recording %s: %s', recording_id, exc)
 
     # Bounded pool rather than a thread per render (Item 12): the render runs
@@ -1165,7 +1165,7 @@ def start_rtsp_recording_capture(
     def wait_then_render() -> None:
         try:
             deadline_holder['ts'] = wait_for_deadline()
-        except Exception as exc:  # pragma: no cover - defensive: still render
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive: still render
             logger.debug('Capture deadline wait failed for event %s: %s', event_id, exc)
         # Bounded submit with a short timeout: a clip that cannot be queued is
         # dropped rather than growing the backlog without limit - the event,

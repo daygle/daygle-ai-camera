@@ -99,7 +99,7 @@ def _equalize_password_timing(password: str) -> None:
                 390000,
             ).hex()
             hmac.compare_digest(candidate, digest)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - timing equalisation must never change the login outcome
         # Defensive: dummy equalisation must never propagate; the auth
         # path's real branch decides the user-visible outcome.
         logging.getLogger('daygle.ai').debug('Login timing equalisation failed: %s', exc)
@@ -856,7 +856,7 @@ class AuthService:
                         (username, ip_address, int(success), now),
                     )
                     db.commit()
-                except Exception as audit_write_exc:
+                except Exception as audit_write_exc:  # noqa: BLE001 - a login-attempt row is best-effort
                     # Best-effort audit-write. A missing row here is a
                     # compliance-traceability gap, not an auth failure --
                     # the surrounding flow still committed the user's
@@ -1020,7 +1020,7 @@ class AuthService:
                     'DELETE FROM login_attempts WHERE created_at < ?',
                     (cutoff_iso,),
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - cleanup must never break the maintenance tick
             # Best-effort: a transient backend hiccup (disk full, SQLite
             # locked, schema mismatch) must never break the caller's
             # maintenance tick. Logged at warning level so retention
@@ -1036,7 +1036,7 @@ class AuthService:
             purge_camera_diagnostics_by_policy()
             from app.backup import purge_ai_diagnostics_by_policy
             purge_ai_diagnostics_by_policy()
-        except Exception as diag_purge_exc:
+        except Exception as diag_purge_exc:  # noqa: BLE001 - one purge failing must not skip the others
             logging.getLogger('daygle.ai.auth').warning(
                 'cleanup_expired_sessions: camera_diagnostics purge failed: %s',
                 diag_purge_exc,
@@ -1047,7 +1047,7 @@ class AuthService:
         try:
             from app.backup import purge_face_identities_by_policy
             purge_face_identities_by_policy()
-        except Exception as face_purge_exc:
+        except Exception as face_purge_exc:  # noqa: BLE001 - one purge failing must not skip the others
             logging.getLogger('daygle.ai.auth').warning(
                 'cleanup_expired_sessions: face_identities purge failed: %s',
                 face_purge_exc,
@@ -1059,7 +1059,7 @@ class AuthService:
         try:
             from app.backup import purge_unknown_faces_by_policy
             purge_unknown_faces_by_policy()
-        except Exception as unknown_purge_exc:
+        except Exception as unknown_purge_exc:  # noqa: BLE001 - one purge failing must not skip the others
             logging.getLogger('daygle.ai.auth').warning(
                 'cleanup_expired_sessions: unknown_faces purge failed: %s',
                 unknown_purge_exc,

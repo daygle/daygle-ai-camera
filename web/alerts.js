@@ -8,6 +8,10 @@ let faceRulesPayload = { rules: [] };
 let cameraIndex = 0;
 let zoneIndex = 0;
 let alertType = 'object';
+// The AI model server's recent state (GET /api/settings/ai-verification/status),
+// so a policy with AI Verify on warns when the model is failing: verification
+// fails open, and every alert would otherwise go out unchecked in silence.
+let aiVerifyStatus = null;
 
 const $ = (id) => document.getElementById(id);
 const currentCamera = () => cameras[cameraIndex];
@@ -316,7 +320,7 @@ function renderPolicies() {
   // the object before notifying; motion and face rules have nothing to check.
   const aiColumn = alertType === 'object';
   const aiVerifiable = (rule) => aiColumn && !['motion', 'face'].includes(String(rule.label || '').toLowerCase());
-  $('alertsList').innerHTML = `<div class="cameras-table-wrap alerts-policy-table-wrap"><table class="rule-table alerts-policy-table${aiColumn ? ' has-ai-column' : ''}"><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Enabled</th><th scope="col">Email</th><th scope="col">Push</th>${aiColumn ? '<th scope="col" class="alerts-ai-verify-col" title="The AI model confirms the object is really there before notifying">AI Verify</th>' : ''}<th scope="col" aria-label="Actions"></th></tr></thead><tbody>${rules.map((rule, index) => {
+  $('alertsList').innerHTML = `${aiColumn ? '<p class="alerts-ai-warning" data-ai-warning role="status" hidden></p>' : ''}<div class="cameras-table-wrap alerts-policy-table-wrap"><table class="rule-table alerts-policy-table${aiColumn ? ' has-ai-column' : ''}"><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Enabled</th><th scope="col">Email</th><th scope="col">Push</th>${aiColumn ? '<th scope="col" class="alerts-ai-verify-col" title="The AI model confirms the object is really there before notifying">AI Verify</th>' : ''}<th scope="col" aria-label="Actions"></th></tr></thead><tbody>${rules.map((rule, index) => {
     const people = alertType === 'people';
     const sound = alertType === 'sound';
     const tripwire = alertType === 'tripwire';
@@ -369,6 +373,7 @@ function renderPolicies() {
         ${motionPolicy ? '<p class="form-help muted alerts-motion-trigger-note">Motion fires when its area passes the trigger set on the Zones page (&ldquo;Trigger when X% of this area moves&rdquo;).</p>' : ''}
         ${!people && !sound && !behaviour && !motionPolicy ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
         ${aiVerifiable(rule) ? `<label><span>AI Verify Skip Above <span class="info-tip" data-tip="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" title="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" tabindex="0" aria-label="Help: With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1"></span></span><input data-field="ai_verify_skip_above" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(rule.ai_verify_skip_above ?? 1))}"></label>` : ''}
+        ${aiVerifiable(rule) && (currentCamera()?.detection?.zones || []).length > 1 ? `<div class="alerts-ai-apply"><button type="button" class="secondary" data-apply-ai-verify="${index}" title="Copy this policy's AI Verify setting and Skip Above value to the ${escapeHtml(String(rule.label || ''))} policies in every other zone on this camera">Apply AI Verify to All Zones</button></div>` : ''}
         ${alertType === 'object' || people ? '' : `<label><span>Cooldown (Seconds)</span><input data-field="cooldown_seconds" type="number" min="0" max="3600" step="5" value="${escapeHtml(String(rule.cooldown_seconds ?? 60))}"></label>`}
       </div>
       ${alertType === 'object' ? renderObjectSchedules(rule, index, schedules) : people ? '' : behaviour
@@ -379,6 +384,7 @@ function renderPolicies() {
       <p class="muted alerts-policy-note">${policyNote}</p>
     </article></td></tr>`;
   }).join('')}</tbody></table></div>`;
+  renderAiVerifyWarning();
   $('alertsList').querySelectorAll('[data-field]').forEach((field) => field.addEventListener('change', () => {
     const policyRow = field.closest('[data-rule-index], [data-policy-details-for]');
     const index = Number(policyRow.dataset.ruleIndex ?? policyRow.dataset.policyDetailsFor);
@@ -462,6 +468,17 @@ function renderPolicies() {
     const expand = $('alertsList').querySelector(`[data-expand-policy="${button.dataset.removeSchedule}"]`);
     if (expand) { expand.setAttribute('aria-expanded', 'true'); expand.classList.add('is-open'); }
   }));
+  $('alertsList').querySelectorAll('[data-apply-ai-verify]').forEach((button) => button.addEventListener('click', () => {
+    const rule = rules[Number(button.dataset.applyAiVerify)];
+    const changed = applyAiVerifyToCameraZones(currentCamera(), rule);
+    const label = titleCase(String(rule.label || ''));
+    if (!changed) {
+      window.showToast?.(`No other zone on this camera has a ${label} alert. Add ${label} to a zone on the Zones page first.`, true);
+      return;
+    }
+    const state = rule.ai_verify ? `On${Number(rule.ai_verify_skip_above ?? 1) < 1 ? `, skip above ${rule.ai_verify_skip_above}` : ''}` : 'Off';
+    window.showToast?.(`AI Verify (${state}) applied to ${label} in ${changed} other zone${changed === 1 ? '' : 's'}. Click Save to keep it.`);
+  }));
   $('alertsList').querySelectorAll('[data-expand-policy]').forEach((button) => button.addEventListener('click', () => {
     const index = button.dataset.expandPolicy;
     const details = $('alertsList').querySelector(`[data-policy-details-for="${index}"]`);
@@ -520,7 +537,61 @@ function renderPolicies() {
   });
 }
 
+// "Apply AI Verify to All Zones": copy a policy's AI Verify tick and Skip
+// Above value onto the policies for the same object in the camera's other
+// zones, so a camera with many zones is set once. Zones without a policy for
+// that object are left alone (objects are assigned on the Zones page).
+// Returns how many other zones' policies changed; Save persists them.
+function applyAiVerifyToCameraZones(camera, sourceRule) {
+  const label = String(sourceRule?.label || '').trim().toLowerCase();
+  if (!label) return 0;
+  let changed = 0;
+  (camera?.detection?.zones || []).forEach((zone) => {
+    const targets = (zone.object_rules || []).filter((rule) => rule !== sourceRule
+      && String(rule.label || '').trim().toLowerCase() === label);
+    if (!targets.length || (zone.object_rules || []).includes(sourceRule)) return;
+    targets.forEach((rule) => {
+      rule.ai_verify = Boolean(sourceRule.ai_verify);
+      rule.ai_verify_skip_above = sourceRule.ai_verify_skip_above ?? 1;
+    });
+    changed += 1;
+  });
+  return changed;
+}
+
+function aiVerifyWarningText(rules, status) {
+  if (!status || !rules.some((rule) => rule.ai_verify && !['motion', 'face'].includes(String(rule.label || '').toLowerCase()))) return '';
+  if (status.configured === false) {
+    return 'AI Verify is on, but no AI model is set up, so these alerts are sent unverified. Set the model up under Intelligence > AI.';
+  }
+  if (status.state === 'error') {
+    return `AI Verify is on, but the AI model is failing${status.last_error ? ` (${status.last_error})` : ''}, so alerts are being sent unverified. Check Intelligence > AI.`;
+  }
+  return '';
+}
+
+function renderAiVerifyWarning() {
+  const el = $('alertsList')?.querySelector('[data-ai-warning]');
+  if (!el) return;
+  const text = alertType === 'object' && currentCamera() && currentZone() ? aiVerifyWarningText(currentRules(), aiVerifyStatus) : '';
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+function loadAiVerifyStatus() {
+  return api('/api/settings/ai-verification/status').then((status) => {
+    aiVerifyStatus = status;
+    renderAiVerifyWarning();
+  }).catch(() => {});
+}
+
+$('alertsList').addEventListener('change', (event) => {
+  if (event.target?.dataset?.field === 'ai_verify') renderAiVerifyWarning();
+});
+
 window.addEventListener('daygle:auth-state-changed', refreshPolicyStatuses);
+window.daygleAuthReady?.then(loadAiVerifyStatus);
+startPageInterval(loadAiVerifyStatus, 60_000);
 window.daygleAuthReady?.then(refreshPolicyStatuses);
 // Policy status polling stops while the tab is hidden and refreshes once on
 // refocus, so a background Alerts tab stops re-checking every rule.

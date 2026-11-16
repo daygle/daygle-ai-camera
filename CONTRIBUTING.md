@@ -106,9 +106,12 @@ The repository carries two independent suites and CI (`.github/workflows/python-
 ## Lint policy
 
 - **Python (`app/`, `scripts/`, `tests/`)**: `ruff check app/ scripts/ tests/`
-  under the Pyflakes (`F`) ruleset in `ruff.toml`. Clean is required; new
-  warnings are errors. Intentional "Pool-A" preload imports in `tests/` carry
-  an explicit `# noqa: F401` (see the comment in `ruff.toml`).
+  under the Pyflakes (`F`) ruleset plus `BLE001` (blind except) in `ruff.toml`.
+  Clean is required; new warnings are errors. Intentional "Pool-A" preload
+  imports in `tests/` carry an explicit `# noqa: F401` (see the comment in
+  `ruff.toml`). A broad `except Exception` in `app/` or `scripts/` must be
+  narrowed to the errors it expects, or carry
+  `# noqa: BLE001 - <why a broad catch is right here>`.
 - **JS (`web/` + `tests/`)**: ESLint recommended rules (`eslint.config.js`).
   `no-undef` and `no-unused-vars` are both **errors** for `web/` - there is
   no warning baseline and no `--max-warnings` pin in CI. Cross-script

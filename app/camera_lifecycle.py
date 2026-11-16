@@ -308,7 +308,7 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
         for old_cam in (old_instances or {}).values():
             try:
                 old_cam.close()
-            except Exception as unexpected_exc:
+            except Exception as unexpected_exc:  # noqa: BLE001 - teardown of a replaced camera is best-effort
                 logger.warning('Unexpected error updating camera: %s', unexpected_exc)
         if removed_ids:
             # Stop prebuffer/continuous ingest workers for cameras that were
@@ -318,7 +318,7 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
             for cam_id in removed_ids:
                 try:
                     rs.stop_camera_workers(cam_id)
-                except Exception as unexpected_exc:
+                except Exception as unexpected_exc:  # noqa: BLE001 - teardown of a deleted camera is best-effort
                     logger.warning('Unexpected error stopping workers for deleted camera %s: %s', cam_id, unexpected_exc)
             # Remove deleted cameras from the health-state dict so the
             # /api/cameras/health response no longer counts them.
@@ -391,7 +391,7 @@ def apply_storage_and_recording_settings() -> None:
             try:
                 old_service.stop_prebuffer_workers()
                 old_service.stop_all_continuous_recordings()
-            except Exception as unexpected_exc:
+            except Exception as unexpected_exc:  # noqa: BLE001 - teardown of the old recording service is best-effort
                 logger.warning(
                     'Unexpected error tearing down old recording service workers: %s',
                     unexpected_exc,
@@ -421,7 +421,7 @@ def _rebuild_face_detector(ai_settings: dict[str, Any]) -> None:
         gc.collect()
     try:
         candidate = create_face_detector(ai_settings)
-    except Exception as exc:  # pragma: no cover - defensive: never break the primary reload
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive: never break the primary reload
         logger.warning('Secondary face detector build failed: %s', exc)
         _state.face_detector = None
         _state.last_face_detector_error = str(exc)
@@ -478,7 +478,7 @@ def _reload_detector_locked(ai_settings: dict[str, Any]) -> tuple[bool, str | No
         gc.collect()
     try:
         candidate = create_detector(ai_settings)
-    except Exception as exc:  # pragma: no cover - defensive: publish the error, not a stale sentinel
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive: publish the error, not a stale sentinel
         # ``create_detector`` returned-construction is the norm, but the
         # constructor itself can raise (bad settings that slipped past
         # validation, OSError while staging a model). The OLD session is

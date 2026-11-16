@@ -89,10 +89,73 @@ function describeAiTest(result) {
   if (!verification) return `The model answered${seconds}. ${result?.message || ''}${listed}`.trim();
   const answers = Object.entries(verification.labels || {}).map(([label, value]) => {
     if (value.error) return `${label}: error (${value.error})`;
-    return `${label}: ${value.present ? 'confirmed' : 'NOT present'}${value.reason ? ` - ${value.reason}` : ''}`;
+    const verdict = value.unsure ? 'unsure (alert would be sent)' : value.present ? 'confirmed' : 'NOT present';
+    return `${label}: ${verdict}${value.reason ? ` - ${value.reason}` : ''}`;
   });
   const summary = String(answers.join('; ') || verification.reason || verification.status).replace(/[.\s]+$/, '');
   return `Event #${result.event_id}${seconds}: ${summary}.${listed}`;
+}
+
+// The overview cards: last 7 days of AI alert verification and whether the
+// model server answered lately. Unverified alerts were sent without a
+// verdict (the model was unsure, failed or skipped); a rising count there,
+// or a red Model card, means the filter is not doing its job.
+function aiTimeAgo(iso) {
+  const when = Date.parse(iso || '');
+  if (!Number.isFinite(when)) return '';
+  const seconds = Math.max(0, Math.round((Date.now() - when) / 1000));
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min ago`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)} h ago`;
+  return `${Math.round(seconds / 86400)} d ago`;
+}
+
+function aiModelHealthText(health) {
+  const state = health?.state || 'unknown';
+  if (state === 'ok') return { value: 'Online', className: 'is-ok', sub: `Last answer ${aiTimeAgo(health.last_success_at)}` };
+  if (state === 'error') {
+    const when = aiTimeAgo(health.last_error_at);
+    return { value: 'Failing', className: 'is-error', sub: `${health.last_error || 'Last request failed'}${when ? ` (${when})` : ''}` };
+  }
+  return { value: 'No requests yet', className: 'is-unknown', sub: 'Since the app started. Use Test on Latest Event below.' };
+}
+
+function renderAiStats(stats) {
+  if (!stats) return;
+  const set = (id, value, sub, className) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = value;
+      el.classList.remove('is-ok', 'is-error', 'is-unknown');
+      if (className) el.classList.add(className);
+    }
+    const subEl = document.getElementById(`${id}Sub`);
+    if (subEl && sub) subEl.textContent = sub;
+  };
+  const days = stats.days || 7;
+  set('aiStatVerified', String(stats.confirmed ?? 0), `Alerts the model confirmed, last ${days} days`);
+  const stopped = Number(stats.stopped || 0);
+  set('aiStatFiltered', String(stats.filtered ?? 0), `${stopped} notification${stopped === 1 ? '' : 's'} stopped, last ${days} days`);
+  const unsure = Number(stats.unsure || 0);
+  set('aiStatUnverified', String(stats.unverified ?? 0),
+    `Sent without a verdict${unsure ? ` (${unsure} unsure)` : ''}, last ${days} days`);
+  const health = aiModelHealthText(stats.health);
+  const latency = typeof stats.avg_latency_ms === 'number' ? ` · avg ${(stats.avg_latency_ms / 1000).toFixed(1)}s per check` : '';
+  set('aiStatModel', health.value, `${health.sub}${latency}`, health.className);
+}
+
+function loadAiStats() {
+  return api('/api/settings/ai-verification/stats?days=7').then(renderAiStats).catch(() => {});
+}
+
+function renderAiTestPreview(image) {
+  const figure = document.getElementById('aiTestPreview');
+  const img = document.getElementById('aiTestImage');
+  if (!figure || !img) return;
+  const valid = typeof image === 'string' && image.startsWith('data:image/jpeg;base64,');
+  if (valid) img.src = image;
+  else img.removeAttribute('src');
+  figure.hidden = !valid;
 }
 
 // "Describe Past Events": starts the server-side backfill, then polls its
@@ -136,6 +199,7 @@ async function loadAiPage() {
   renderAiCameras(cameraPayload?.cameras || []);
   fillAiForm(settings);
   api('/api/settings/ai-verification/describe-backfill').then(renderAiBackfill).catch(() => {});
+  loadAiStats();
 }
 
 aiForm?.addEventListener('submit', aiGuard(async (event) => {
@@ -151,18 +215,21 @@ aiTestBtn?.addEventListener('click', aiGuard(async () => {
   const resultEl = document.getElementById('aiTestResult');
   aiTestBtn.disabled = true;
   if (resultEl) resultEl.textContent = 'Asking the model about the latest object event…';
+  renderAiTestPreview(null);
   try {
     const result = await api('/api/settings/ai-verification/test', {
       method: 'POST',
       body: JSON.stringify({ settings: aiPayload() }),
     });
     if (resultEl) resultEl.textContent = describeAiTest(result);
+    renderAiTestPreview(result?.image);
     aiMessage('AI test finished.');
   } catch (error) {
     if (resultEl) resultEl.textContent = error.message;
     throw error;
   } finally {
     aiTestBtn.disabled = false;
+    loadAiStats();
   }
 }));
 

@@ -68,6 +68,7 @@ const EVENT_TYPE_LABELS = {
   // Verification
   ai_verification_filtered: 'AI Verification Filtered',
   ai_verification_recheck: 'AI Verification Recheck',
+  ai_verification_unsure: 'AI Verification Unsure',
   ai_verification_unavailable: 'AI Verification Unavailable',
   ai_verification_queue_full: 'AI Verification Queue Full',
   ai_verification_store_failed: 'AI Verification Store Failed',

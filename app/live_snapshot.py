@@ -124,7 +124,7 @@ def _default_box_colors() -> dict[str, str]:
     try:
         from app.object_settings import overlay_box_colors
         return overlay_box_colors()
-    except Exception:  # pragma: no cover - settings unavailable mid-startup
+    except Exception:  # noqa: BLE001  # pragma: no cover - settings unavailable mid-startup
         return {}
 
 

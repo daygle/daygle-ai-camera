@@ -330,7 +330,7 @@ def _web_dir_or_none(request: Request) -> Path | None:
     """Resolve ``web/`` once per response instead of once per asset."""
     try:
         return get_web_dir(request)
-    except Exception:  # pragma: no cover -- defensive: never break HTML over a version
+    except Exception:  # noqa: BLE001  # pragma: no cover -- defensive: never break HTML over a version
         return None
 
 

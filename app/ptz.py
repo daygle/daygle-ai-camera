@@ -124,7 +124,7 @@ def _safe_url_for_error(url: str) -> str:
         # transport's repr). Run the regex scrub on the result so logs are
         # never trusted to flag leaks.
         sanitized = _USERINFO_RE.sub(r'\1***@', sanitized)
-    except Exception:
+    except Exception:  # noqa: BLE001 - any parse failure falls back to the regex scrub, never the raw URL
         # If urlparse itself fails (extremely malformed URLs), fall back to a
         # pure-regex scrub instead of leaking the original.
         sanitized = _USERINFO_RE.sub(r'\1***@', url)

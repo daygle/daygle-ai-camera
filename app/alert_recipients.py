@@ -28,7 +28,7 @@ def _users_by_id(
         auth = getattr(_state, 'auth', None)
         try:
             users = auth.list_users() if auth is not None else []
-        except Exception as exc:  # the auth store is down: still send to literal addresses
+        except Exception as exc:  # noqa: BLE001 - the auth store is down: still send to literal addresses
             logger.warning('Could not load users to resolve alert recipients: %s', exc)
             users = []
     return {int(user['id']): user for user in users or [] if user.get('id') is not None}

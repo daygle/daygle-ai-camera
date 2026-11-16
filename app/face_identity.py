@@ -171,7 +171,7 @@ def _store_enriched_embedding(
         from app.face_recognition_service import refresh_face_recognition_matcher
         refresh_face_recognition_matcher()
         logger.debug('Enriched person %s with new face embedding from track %s', person_id, track_id)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - enrichment is optional and runs off the detection path
         logger.debug('Failed to enrich face for person %s: %s', person_id, exc)
 
 
@@ -245,7 +245,7 @@ def _maybe_capture_unknown(
             count = _state.database.count_unknown_faces(status='pending')
             if count >= _MAX_PENDING_CAPTURES:
                 return
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - skip this capture; a later sighting retries
         # The cap cannot be checked and the store would fail the same way:
         # skip this capture, but forget the track so a later sighting retries.
         logger.debug('Unknown-face capture skipped for %s: database unavailable (%s)', camera_id, exc)
@@ -315,7 +315,7 @@ def _store_unknown_face(
             box_height=float(box.get('height', 0)),
         )
         logger.debug('Captured unknown face track %s on camera %s', track_id, camera_id)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - runs off the detection path; the failure is recorded in the AI Log
         # Warning, not debug: a failing capture is why Review stays empty, and
         # it must show in the AI Log.
         log_ai_diagnostic(

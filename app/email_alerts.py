@@ -454,7 +454,7 @@ class EmailAlertService:
         finally:
             try:
                 smtp.quit()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - closing a finished SMTP session is best-effort
                 logger.debug(
                     'SMTP session close failed (resource already gone?): %s: %s',
                     type(exc).__name__, exc,
@@ -504,7 +504,7 @@ class EmailAlertService:
             # file descriptor while we open a fresh session below.
             try:
                 smtp.quit()
-            except Exception as quit_exc:
+            except Exception as quit_exc:  # noqa: BLE001 - closing a dead SMTP socket is best-effort
                 logger.debug(
                     'SMTP dead-socket close failed: %s: %s',
                     type(quit_exc).__name__, quit_exc,

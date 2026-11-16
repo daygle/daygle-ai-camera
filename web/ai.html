@@ -31,6 +31,43 @@
       </div>
     </header>
 
+    <!-- AI alert verification over the last 7 days (GET
+         /api/settings/ai-verification/stats), filled by ai.js. -->
+    <section class="grid stats-grid ai-verify-stats" aria-label="AI alert verification, last 7 days">
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Verified</span>
+          <span class="stat-card-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </div>
+        <strong id="aiStatVerified" class="stat-card-value">-</strong>
+        <small id="aiStatVerifiedSub" class="muted stat-card-sub">Alerts the model confirmed, last 7 days</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Filtered</span>
+          <span class="stat-card-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></span>
+        </div>
+        <strong id="aiStatFiltered" class="stat-card-value">-</strong>
+        <small id="aiStatFilteredSub" class="muted stat-card-sub">False alarms caught, last 7 days</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Unverified</span>
+          <span class="stat-card-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>
+        </div>
+        <strong id="aiStatUnverified" class="stat-card-value">-</strong>
+        <small id="aiStatUnverifiedSub" class="muted stat-card-sub">Sent without a verdict, last 7 days</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Model</span>
+          <span class="stat-card-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg></span>
+        </div>
+        <strong id="aiStatModel" class="stat-card-value">-</strong>
+        <small id="aiStatModelSub" class="muted stat-card-sub">Checking…</small>
+      </article>
+    </section>
+
     <form id="aiSettingsForm" class="page-stack ai-settings-form" autocomplete="off">
 
     <section class="card">
@@ -52,10 +89,14 @@
           <span>API Key <span class="info-tip" data-tip="Only needed if the model server requires one. Ollama does not. Default: (none)" title="Only needed if the model server requires one. Ollama does not. Default: (none)" tabindex="0" aria-label="Help: Only needed if the model server requires one. Ollama does not. Default: (none)"></span></span>
           <input name="api_key" type="password" placeholder="Optional" autocomplete="new-password" /></label>
         <label>
-          <span>Timeout (seconds) <span class="info-tip" data-tip="How long to wait for the model per question. On timeout the alert is sent without the AI step. Default: 20" title="How long to wait for the model per question. On timeout the alert is sent without the AI step. Default: 20" tabindex="0" aria-label="Help: How long to wait for the model per question. On timeout the alert is sent without the AI step. Default: 20"></span></span>
+          <span>Timeout (seconds) <span class="info-tip" data-tip="How long an alert waits for the model, including waiting for another request to finish. On timeout the alert is sent without the AI step. Default: 20" title="How long an alert waits for the model, including waiting for another request to finish. On timeout the alert is sent without the AI step. Default: 20" tabindex="0" aria-label="Help: How long an alert waits for the model, including waiting for another request to finish. On timeout the alert is sent without the AI step. Default: 20"></span></span>
           <input name="timeout_seconds" type="number" min="3" max="120" step="1" placeholder="20" /></label>
       </div>
       <p id="aiTestResult" class="muted" aria-live="polite"></p>
+      <figure id="aiTestPreview" class="ai-test-preview" hidden>
+        <img id="aiTestImage" alt="The image the model was shown" />
+        <figcaption class="muted">What the model was shown (the close-up, when one was used).</figcaption>
+      </figure>
       <div class="button-row">
         <button id="aiTestBtn" class="btn-info" type="button">Test on Latest Event</button>
       </div>

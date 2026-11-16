@@ -111,7 +111,7 @@ def _configure_ffmpeg_log_level() -> None:
                         _pkg_dir = os.path.dirname(_spec.origin)
                         for _d in [_pkg_dir, os.path.join(_pkg_dir, '.libs')]:
                             lib_paths.extend(sorted(_glob.glob(os.path.join(_d, 'libavutil*.so*'))))
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - quietening FFmpeg logs is optional
                     logger.debug("Could not search cv2 package for libavutil: %s", exc)
 
                 # Scan /proc/self/maps for any libavutil already mapped into this
@@ -123,7 +123,7 @@ def _configure_ffmpeg_log_level() -> None:
                                 _parts = _line.rstrip().split()
                                 if _parts and _parts[-1].startswith('/') and _parts[-1] not in lib_paths:
                                     lib_paths.append(_parts[-1])
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - quietening FFmpeg logs is optional
                     logger.debug("Could not scan /proc/self/maps for libavutil: %s", exc)
 
                 # Fall back to the system-installed library.
@@ -137,7 +137,7 @@ def _configure_ffmpeg_log_level() -> None:
                         avutil.av_log_set_level.argtypes = [ctypes.c_int]
                         avutil.av_log_set_level.restype = None
                         _avutil_libs.append(avutil)
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 - quietening FFmpeg logs is optional
                         logger.debug('Unable to load avutil %s: %s', lib_name, exc)
 
                 # Set the flag last so other threads never see a partially
@@ -147,7 +147,7 @@ def _configure_ffmpeg_log_level() -> None:
     for avutil in _avutil_libs:
         try:
             avutil.av_log_set_level(level)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - quietening FFmpeg logs is optional
             logger.debug('Unable to set FFmpeg log level: %s', exc)
 
 
@@ -370,7 +370,7 @@ class OpenCvStreamCamera:
                 self.detected_fps = cap_fps
                 if self.configured_fps is None:
                     self.fps = cap_fps
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - cv2 raises its own error types; FPS detection is optional
             logger.debug('Could not read stream FPS from the capture: %s', exc)
         return self._capture
 
@@ -454,7 +454,7 @@ class OpenCvStreamCamera:
             try:
                 capture = self._open_capture()
                 ok, image, capture_ts = self._read_latest_frame(capture, stale_grabs, self.fps)
-            except Exception as exc:  # cv2 can raise during decoder teardown
+            except Exception as exc:  # noqa: BLE001 - cv2 can raise during decoder teardown
                 ok, image, capture_ts = False, None, time.time()
                 last_failure = type(exc).__name__
 

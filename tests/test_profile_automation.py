@@ -569,3 +569,59 @@ def test_poll_does_not_resurrect_camera_removed_during_poll(monkeypatch):
         state.database = original_database
         state._camera_profile_status.pop('doomed-cam', None)
         state._camera_profile_status.pop('other-cam', None)
+
+
+def test_poll_invalidates_rule_confidence_cache_when_a_profile_switches(monkeypatch):
+    """The cache drop used to be gated on the cameras REMOVED during the poll,
+    so an ordinary day/night switch never invalidated the rule floors."""
+    camera = _schedule_camera('cache-cam')
+    original_configs = state.cameras_config
+    original_database = state.database
+    state.cameras_config = [camera]
+    state.database = _CaptureDatabase()
+    monkeypatch.setattr(pa, 'scheduled_profile', lambda profiles, now=None, timezone_name=None: 'night')
+    invalidations = []
+    monkeypatch.setattr(pa, 'invalidate_min_rule_confidence_cache', lambda: invalidations.append(True))
+    try:
+        pa.poll_camera_profiles()
+        assert camera['detection_profiles']['active'] == 'night'
+        assert invalidations == [True]
+        # Already on the scheduled profile: nothing switches, nothing to drop.
+        pa.poll_camera_profiles()
+        assert invalidations == [True]
+    finally:
+        state.cameras_config = original_configs
+        state.database = original_database
+        state._camera_profile_status.pop('cache-cam', None)
+
+
+def test_poll_migrates_a_located_camera_to_solar_once(monkeypatch):
+    """A stored camera with coordinates but a non-solar source is moved to
+    solar mode. The remerge used to compare the live source with the migrated
+    one, read its own migration as a concurrent edit and drop it - then retried
+    (and rewrote the cameras setting) on every poll."""
+    camera = _schedule_camera('legacy-solar-cam')
+    camera['detection_profiles']['source'] = 'manual'
+    camera.update({'latitude': -33.8688, 'longitude': 151.2093, 'timezone': 'Australia/Sydney'})
+    original_configs = state.cameras_config
+    original_database = state.database
+    state.cameras_config = [camera]
+
+    class CountingDatabase:
+        writes = 0
+
+        def set_setting(self, key, value, timestamp):
+            self.writes += 1
+
+    database = CountingDatabase()
+    state.database = database
+    try:
+        pa.poll_camera_profiles()
+        assert camera['detection_profiles']['source'] == 'solar'
+        assert database.writes == 1
+        pa.poll_camera_profiles()
+        assert database.writes == 1
+    finally:
+        state.cameras_config = original_configs
+        state.database = original_database
+        state._camera_profile_status.pop('legacy-solar-cam', None)

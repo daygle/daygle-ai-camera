@@ -201,7 +201,7 @@ class _YamnetBackend:
         try:
             from ai_edge_litert.interpreter import Interpreter  # type: ignore[import]
             return Interpreter
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a broken LiteRT install falls back to the next runtime
             logger.debug('ai_edge_litert interpreter unavailable (%s); trying the fallback runtime.', exc)
         try:
             from tflite_runtime.interpreter import Interpreter  # type: ignore[import]
@@ -292,7 +292,7 @@ class _YamnetBackend:
             urlretrieve(_YAMNET_TFLITE_URL, tmp_path)
             new_sha = self._sha256_file(tmp_path)
             new_size = tmp_path.stat().st_size
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - the update check is best-effort and reported in the AI Log
             log_ai_diagnostic(
                 'ai_yamnet_model',
                 f'YAMNet update check failed ({type(exc).__name__}): {exc}',
@@ -428,7 +428,7 @@ class _YamnetBackend:
                     details={'step': 'reload'},
                 )
                 return True
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - any reload failure rolls back and is reported
                 failure_reason = f'YAMNet TFLite reload failed: {exc}'
                 log_ai_diagnostic(
                     'ai_yamnet_model',
@@ -535,7 +535,7 @@ class _YamnetBackend:
                     f'YAMNet TFLite ready - classifying against {len(class_names)} AudioSet classes',
                     details={'step': 'ready', 'classes': len(class_names)},
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - any load failure leaves sound detection unavailable, not crashed
                 self._unavailable_reason = f'YAMNet TFLite unavailable: {exc}'
                 log_ai_diagnostic(
                     'ai_yamnet_model',
@@ -562,7 +562,7 @@ class _YamnetBackend:
             waveform: np.ndarray = audio.astype(np.float32)
             if waveform.ndim > 1:
                 waveform = waveform.mean(axis=1)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a bad chunk yields no scores
             logger.debug('YAMNet audio preprocessing error: %s', exc)
             return {}
 
@@ -613,7 +613,7 @@ class _YamnetBackend:
                     mean_scores: np.ndarray = scores_array.copy()
                 else:
                     mean_scores = scores_array.reshape(-1, scores_array.shape[-1]).mean(axis=0)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - the TFLite runtime raises its own error types
                 logger.debug('YAMNet TFLite inference error: %s', exc)
                 return {}
 
@@ -848,7 +848,7 @@ class SoundDetector:
                         'backend': _yamnet.backend_name,
                     },
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - a callback failure must not stop the monitor
                 logger.error('Sound detection callback failed for %s: %s', class_id, exc)
         if new_confidences:
             with self._status_lock:
@@ -924,7 +924,7 @@ class SoundDetector:
                     with buffer_lock:
                         chunk = buffer.copy()
                     self._handle_chunk(chunk)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - the monitor thread reports the error as its status
             logger.error('Sound monitor microphone error: %s', exc)
             self._set_status(f'error: {exc}')
 
@@ -1009,7 +1009,7 @@ class SoundDetector:
                         )
                         del raw_buf[:advance_bytes]
                         self._handle_chunk(audio)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - the monitor thread reports the error as its status
                 logger.error('Sound monitor RTSP error: %s', exc)
                 self._set_status(f'error: {exc}')
             finally:
@@ -1101,7 +1101,7 @@ class SoundDetector:
                     continue
                 logger.error('Sound monitor ingest provider error: %s', exc)
                 segments = []
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - a provider failure means no audio this poll
                 logger.error('Sound monitor ingest provider error: %s', exc)
                 segments = []
             # The provider's contract documents that it MAY return ``None`` to
@@ -1119,7 +1119,7 @@ class SoundDetector:
                 try:
                     with wave.open(str(path), 'rb') as wav:
                         frames = wav.readframes(wav.getnframes())
-                except Exception as exc:
+                except (OSError, EOFError, wave.Error) as exc:
                     # Don't advance last_ts: the tail segment may still be mid-write
                     # by the ingest, so retry it next poll instead of dropping the
                     # second of audio permanently.

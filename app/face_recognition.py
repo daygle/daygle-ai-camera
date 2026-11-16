@@ -130,7 +130,7 @@ def encode_face_thumbnail(image_bgr: Any, *, max_size: int = 160, quality: int =
         if not ok:
             return None
         return bytes(buffer.tobytes())
-    except Exception as exc:  # pragma: no cover - defensive: never fail enrolment on the thumbnail
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive: never fail enrolment on the thumbnail
         logger.debug('Face thumbnail encode failed; enrolling without a thumbnail: %s', exc)
         return None
 
@@ -391,7 +391,7 @@ class FaceEmbedder:
             # statically (ArcFace exports usually do: [1, 512]).
             if output_shape and isinstance(output_shape[-1], int):
                 self._embedding_dim = int(output_shape[-1])
-        except Exception as exc:  # pragma: no cover - onnxruntime load failure path
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - onnxruntime load failure path
             # Log the underlying error for operators but keep the surfaced
             # reason generic: it flows to the settings API response, and raw
             # exception text can leak internal paths / stack details.
@@ -457,7 +457,7 @@ class FaceEmbedder:
                 for scaling in (INPUT_SCALING_NORMALIZED, INPUT_SCALING_RAW)
             }
             scaling, similarity = choose_input_scaling(embeddings)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - ONNX Runtime raises its own error types; fall back to [-1, 1]
             log_ai_diagnostic(
                 'ai_face_embedder',
                 f'Could not check the face embedding model input scaling; using [-1, 1]: {exc}',

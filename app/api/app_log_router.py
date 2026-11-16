@@ -211,7 +211,7 @@ def _parse_entry(raw: dict) -> dict:
     if isinstance(message, list):
         try:
             message = bytes(message).decode('utf-8', errors='replace')
-        except Exception:
+        except (TypeError, ValueError):
             message = repr(message)
     message = str(message)
     # Strip redundant syslog level prefix - the ``level`` field already
@@ -275,7 +275,7 @@ def get_app_log(
                 continue
             try:
                 entry = _parse_entry(json.loads(line))
-            except Exception:
+            except (ValueError, TypeError, AttributeError):
                 # Skip an unparseable journal line. Deliberately not logged:
                 # the warning would land in the very journal being read.
                 continue
@@ -330,7 +330,7 @@ async def stream_app_log(request: Request):
                     continue
                 try:
                     entry = _parse_entry(json.loads(line_str))
-                except Exception:
+                except (ValueError, TypeError, AttributeError):
                     # Skip it; logging here would feed back into this stream.
                     continue
                 if _is_noise(entry):

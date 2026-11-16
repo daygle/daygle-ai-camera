@@ -381,7 +381,7 @@ def _scheduler_max_workers() -> int:
     """
     try:
         configured = int(effective_ai_config().get('max_concurrent_inferences') or 1)
-    except Exception:
+    except Exception:  # noqa: BLE001 - unreadable setting: one inference at a time
         configured = 1
     return max(1, min(16, configured))
 
@@ -423,7 +423,7 @@ def _scheduler_report_timing(camera_id: str, timing: dict[str, Any]) -> None:
             inference_ms=int(round(float(timing.get('run_seconds') or 0.0) * 1000)),
             inference_queue_depth=int(timing.get('queue_depth') or 0),
         )
-    except Exception as exc:  # pragma: no cover - defensive: status must never break a cycle
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive: status must never break a cycle
         logger.debug('Scheduler timing report failed for %s: %s', camera_id, exc)
 
 
@@ -506,7 +506,7 @@ def _read_live_detection_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | N
             if img is not None:
                 h, w = img.shape[:2]
                 return img, {'frame_number': 0, 'timestamp': time.time(), 'width': w, 'height': h}
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - the direct-frame fallback is optional
             logger.debug('Direct frame fallback failed for camera %s: %s', camera_id, exc)
     if not _state.recording_service.ingest_has_produced_frame(camera_id):
         return None
@@ -520,7 +520,7 @@ def _run_scheduled_detection(image: Any, frame: dict[str, Any], camera_cfg: dict
     try:
         clear_live_camera_backoff(camera_id)
         process_live_stream_alerts(image, frame, camera_cfg, enforce_interval=False)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - one camera's failure must only back that camera off
         logger.warning('Background live alert check failed for camera %s: %s', camera_id, exc)
         schedule_live_camera_backoff(camera_id, str(exc))
 
@@ -530,7 +530,7 @@ def _run_foreground_live_detection(image: Any, frame: dict[str, Any], camera_cfg
     camera_id = str(camera_cfg.get('id') or 'camera')
     try:
         process_live_stream_alerts(image, frame, camera_cfg, enforce_interval=False)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - one camera's failure must only fail its own cycle
         logger.warning('Live detection failed for camera %s: %s', camera_id, exc)
         update_live_detection_status(camera_id, state='error', reason=str(exc), detections=[])
 
@@ -675,7 +675,7 @@ def live_alert_monitor_loop() -> None:
                 for camera in _state.cameras_config
             ]
             interval = max(0.1, min(configured_intervals or [float(live_settings.get('detection_interval_seconds', 0.5))]))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - the monitor thread must survive any transient failure
             # The monitor thread is the single background source for detection,
             # camera-health tracking, and offline/recovery alerts. A transient
             # failure (e.g. SQLite briefly locked by a settings write while
@@ -850,7 +850,7 @@ def camera_uses_face_detections(camera_id: str, settings: dict[str, Any]) -> boo
         return True
     try:
         rules = (effective_face_detection_rules().get('rules') or []) if camera_id else []
-    except Exception as exc:  # pragma: no cover - defensive: never fail a cycle on a settings read
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive: never fail a cycle on a settings read
         logger.debug('Face rule lookup failed for camera %s: %s', camera_id, exc)
         return True
     for rule in rules:
@@ -866,7 +866,7 @@ def camera_uses_face_detections(camera_id: str, settings: dict[str, Any]) -> boo
             get_face_recognition_service(), 'available', False
         ):
             return True
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive
         logger.debug('Face recognition lookup failed for camera %s: %s', camera_id, exc)
         return True
     return False
@@ -1399,7 +1399,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             _cycle_timer.add(STAGE_INFERENCE, (time.perf_counter() - _inference_started) * 1000.0)
         else:
             detections = []
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - a provider/runtime failure must only fail this camera cycle
         # A provider/runtime failure must only fail this camera cycle. In
         # particular, CUDA/ORT can raise RuntimeError or TypeError after the
         # detector was reported healthy; letting either escape kills the worker
@@ -1655,7 +1655,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             import cv2
             import numpy as np
             recognition_frame = cv2.imdecode(np.frombuffer(image, dtype=np.uint8), cv2.IMREAD_COLOR)
-        except Exception as exc:  # pragma: no cover - defensive: never fail the cycle on a decode
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive: never fail the cycle on a decode
             logger.debug('Face recognition frame decode failed for camera %s: %s', camera_id, exc)
             recognition_frame = None
     else:

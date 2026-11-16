@@ -255,7 +255,7 @@ def _confirm_terms(event: dict[str, Any], terms: list[str], camera_name: str,
                         settings.get('focus_crop', True) and (zone is None or _full_frame(zone))
                     ) else image
                     present, reason = verifier.ask(focused, term, camera_name, source='An automatic caption')
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - the AI check is optional: alert unchecked rather than drop the alert
                     log_ai_diagnostic(
                         'ai_tag_check_unavailable',
                         f'AI tag check unavailable for event #{event.get("id")} ({term}): {exc}; alerting unchecked.',
