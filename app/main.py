@@ -31,6 +31,7 @@ from app.camera_instance import create_camera_instances
 from app.config_facades import effective_auth_config, effective_ai_config, effective_cameras_config, effective_recording_config, effective_storage_config
 from app.diagnostics import log_camera_diagnostic
 from app.alert_outbox import start_worker as start_alert_outbox_worker, stop_worker as stop_alert_outbox_worker
+from app.false_positives import start_checker as start_false_positive_checker, stop_checker as stop_false_positive_checker
 from app.live_monitor import start_live_alert_monitor, stop_live_alert_monitor
 from app.profile_automation import start_profile_monitor, stop_profile_monitor
 from app.postprocess_pool import shutdown_pools
@@ -219,13 +220,21 @@ async def app_lifespan(_app: FastAPI):
     # Re-sends alert deliveries the transports could not hand over in an
     # earlier session (mail relay or ntfy unreachable).
     start_alert_outbox_worker()
+    # Checks new object events for false positives while the AI is idle
+    # (does nothing unless the AI false-positive check is turned on).
+    start_false_positive_checker()
 
     def _run_periodic_retention() -> None:
         from app.backup import purge_recordings_by_policy
+        from app.false_positives import purge_false_positives_by_policy
         try:
             purge_recordings_by_policy()
         except Exception:
             _logger.warning('Periodic recording retention failed', exc_info=True)
+        try:
+            purge_false_positives_by_policy()
+        except Exception:
+            _logger.warning('Periodic false-positive purge failed', exc_info=True)
         # Expired sessions, old login attempts, camera-log rows and the
         # face-recognition retention purges. Each step is best effort.
         if _state.auth is not None:
@@ -243,6 +252,7 @@ async def app_lifespan(_app: FastAPI):
         yield
     finally:
         stop_alert_outbox_worker()
+        stop_false_positive_checker()
         stop_live_alert_monitor()
         stop_profile_monitor()
         stop_sound_monitor()
@@ -314,6 +324,8 @@ from app.api.ai_verification_router import router as ai_verification_router
 app.include_router(ai_verification_router)
 from app.api.ollama_router import router as ollama_router
 app.include_router(ollama_router)
+from app.api.false_positives_router import router as false_positives_router
+app.include_router(false_positives_router)
 from app.api.camera_offline_router import router as camera_offline_router
 app.include_router(camera_offline_router)
 from app.api.status_router import router as status_router

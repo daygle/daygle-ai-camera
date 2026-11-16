@@ -857,6 +857,68 @@ function aiDescriptionTip(text) {
   return `<span class="info-tip" data-tip="${safe}" title="${safe}" tabindex="0" aria-label="AI description: ${safe}"></span>`;
 }
 
+// False positives (app/false_positives.py): a detection the local AI model
+// or a user judged not really there. Events and snapshots carry the decision
+// as event.false_positive (1 = false positive, 0 = real, null = undecided);
+// a recording reports { by, reason } when it counts as one.
+function eventFalsePositive(event) {
+  if (!event || Number(event.false_positive) !== 1) return null;
+  return { by: event.false_positive_by || 'user', reason: event.false_positive_reason || '' };
+}
+
+function falsePositiveBadge(record) {
+  if (!record) return '';
+  const who = record.by === 'ai' ? 'AI' : record.by === 'mixed' ? 'AI + user' : 'User';
+  const summary = record.by === 'ai'
+    ? 'The AI model judged this a false positive.'
+    : record.by === 'mixed'
+      ? 'The AI model and a user marked these detections as false positives.'
+      : 'Marked as a false positive by a user.';
+  const reason = String(record.reason || '').trim();
+  const tip = escapeHtml(`${summary}${reason ? ` ${reason}` : ''}`);
+  return `<span class="detection detection-false-positive" title="${tip}">🚫 False Positive · ${who}</span>`
+    + (reason ? `<span class="info-tip" data-tip="${tip}" title="${tip}" tabindex="0" role="note" aria-label="False positive: ${tip}"></span>` : '');
+}
+
+// The admin toggle on an event, snapshot or recording row. ``marked`` is
+// whether it is a false positive now; the button offers the other choice
+// ("Not False Positive" records it as real, so the AI leaves it alone).
+function falsePositiveButton(kind, id, marked) {
+  if (window.daygleAuth?.user?.role !== 'admin') return '';
+  const label = marked ? 'Not False Positive' : 'False Positive';
+  const icon = marked
+    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>';
+  const safeId = escapeHtml(String(id));
+  return `<button type="button" class="secondary activity-item-action activity-item-action-false-positive" data-false-positive-kind="${escapeHtml(kind)}" data-false-positive-id="${safeId}" data-false-positive-value="${marked ? 'false' : 'true'}" title="${marked ? 'This detection was real' : 'Nothing real was detected here'}" aria-label="${label}: ${escapeHtml(kind)} ${safeId}">${icon}<span class="activity-action-label">${label}</span></button>`;
+}
+
+// Delegated click handling for falsePositiveButton(). ``onChanged(kind, id,
+// value, response)`` lets the page patch its row with the new state.
+function bindFalsePositiveButtons(root, onChanged) {
+  if (!root || root.dataset.falsePositiveBound) return;
+  root.dataset.falsePositiveBound = '1';
+  root.addEventListener('click', async (clickEvent) => {
+    const button = clickEvent.target.closest('[data-false-positive-kind]');
+    if (!button || !root.contains(button)) return;
+    clickEvent.preventDefault();
+    const kind = button.dataset.falsePositiveKind;
+    const id = button.dataset.falsePositiveId;
+    const value = button.dataset.falsePositiveValue === 'true';
+    const path = kind === 'recording' ? `/api/recordings/${encodeURIComponent(id)}/false-positive`
+      : `/api/events/${encodeURIComponent(id)}/false-positive`;
+    button.disabled = true;
+    try {
+      const response = await api(path, { method: 'POST', body: JSON.stringify({ false_positive: value }) });
+      showToast(value ? 'Marked as a false positive.' : 'Marked as a real detection.');
+      if (typeof onChanged === 'function') onChanged(kind, id, value, response);
+    } catch (error) {
+      showToast(`Could not update: ${error.message}`, true);
+      button.disabled = false;
+    }
+  });
+}
+
 function detectionPill(label, confidence, isSound = false, count = 1) {
   const labelIsSound = isSound || isSoundLabel(label);
   const display = labelIsSound
@@ -2256,7 +2318,7 @@ window.daygleUi = {
   // UI helpers
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
   detectionPill, motionPill, formatMotionFraction, motionFractionOf, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON,
-  aiDescriptionTip,
+  aiDescriptionTip, eventFalsePositive, falsePositiveBadge, falsePositiveButton, bindFalsePositiveButtons,
   // Face-identity pills + filters (recordings + snapshots)
   DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,

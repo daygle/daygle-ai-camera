@@ -43,6 +43,7 @@ def snapshots(
     alerted_only: bool = False,
     face: str | None = Query(None, max_length=200, description='Recognised face: any, unknown, id:<person_id> or name:<name>.'),
     sort: str = Query('newest', pattern='^(newest|oldest)$'),
+    false_positive: str | None = Query(None, pattern='^(only|hide)$', description='False positives: only to list just them, hide to leave them out.'),
     db=Depends(get_database),
 ):
     """List a cursor page (newest first by default) of events that saved a frame.
@@ -68,6 +69,7 @@ def snapshots(
         alerted_only=alerted_only,
         face=face,
         sort=sort,
+        false_positive=false_positive,
     )
     scoped = [_scope_event_recordings(event, user) for event in snapshot_list]
     return {

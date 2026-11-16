@@ -38,6 +38,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 - `docs/sound-detection.md` - sound detection, audio rules, and runtime setup
 - `docs/ptz.md` - PTZ control, responsiveness, and auto-tracking
 - `docs/ai-verification.md` - local vision model: alert verification, plain-English event descriptions and footage search
+- `docs/false-positives.md` - AI-checked and user-marked false positives, and purging them
 - `docs/operations.md` - health, logs, backups, and service operation
 
 ## Requirements

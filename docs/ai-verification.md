@@ -29,6 +29,10 @@ person (car, dog, ...) here, or is it a shadow, reflection, bush or poster?"*
   typically 1-3 seconds on a GPU.
 - **Snapshots stay local** when the model runs on your own server.
 
+The same model can also check **every** object event, not just alerts, and
+mark the false positives so they can be purged. See
+[false-positives.md](false-positives.md).
+
 ## Model server
 
 The app talks to the model over the OpenAI-compatible `/v1/chat/completions`

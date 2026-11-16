@@ -120,7 +120,9 @@ function snapshotRow(event) {
   // annotating and shipping a full-resolution frame per row is what made this
   // page slow to fill. The Open action still links the full-size image.
   const snapshotThumbUrl = `${snapshotUrl}?thumb=1`;
+  const falsePositive = eventFalsePositive(event);
   const actions = [];
+  if (kind === 'object') actions.push(falsePositiveButton('event', event.id, Boolean(falsePositive)));
   // Deleting a snapshot is an admin action (the backend requires admin).
   if (window.daygleAuth?.user?.role === 'admin') {
     actions.push(`<button class="secondary activity-item-action activity-item-action-delete" data-delete-snapshot="${escapeHtml(String(event.id))}" type="button" aria-label="Delete snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg><span class="activity-action-label">Delete</span></button>`);
@@ -148,7 +150,7 @@ function snapshotRow(event) {
             </span>
           </span>
         </div>
-        <div class="activity-item-badges snapshot-row-badges">${snapshotPills(event)}${faceIdentityPills(eventFaceIdentities(event))}${alertBadge}${aiTags}${aiTip}</div>
+        <div class="activity-item-badges snapshot-row-badges">${snapshotPills(event)}${faceIdentityPills(eventFaceIdentities(event))}${alertBadge}${falsePositiveBadge(falsePositive)}${aiTags}${aiTip}</div>
       </div>
       <div class="snapshot-row-actions">${actions.join('')}</div>
     </article>
@@ -329,6 +331,7 @@ function snapshotsQueryString(query) {
   if (query.label) params.set('label', query.label);
   if (query.face) params.set('face', query.face);
   if (query.alerted_only) params.set('alerted_only', 'true');
+  if (query.false_positive) params.set('false_positive', query.false_positive);
   if (query.sort && query.sort !== 'newest') params.set('sort', query.sort);
   return params.toString();
 }
@@ -373,10 +376,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Sound events carry no frame, so snapshots are only ever object or motion.
     types: ['all', 'object', 'motion'],
     searchPlaceholder: 'Search snapshots: person, driveway, red car, a face name…',
+    showFalsePositive: true,
     onChange: (_query, reason) => {
       if (reason === 'type' && snapshotsPager) renderGallery();
       else loadSnapshots();
     },
+  });
+  bindFalsePositiveButtons(els.gallery, (_kind, id, _value, response) => {
+    const event = allSnapshots.find((item) => String(item.id) === String(id));
+    if (!event) return;
+    Object.assign(event, response || {});
+    const row = els.gallery.querySelector(`[data-snapshot-row="${CSS.escape(String(id))}"]`);
+    if (row) row.outerHTML = snapshotRow(event);
   });
   loadSnapshots();
 });

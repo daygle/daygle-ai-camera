@@ -237,6 +237,7 @@
 :root.light .detection.detection-ai-tag { background: transparent; color: var(--muted); border: 1px dashed var(--border); font-weight: 600; }
 :root.light .detection.detection-ai-verified { background: rgba(22,163,74,.10); color: #15803d; border-color: rgba(22,163,74,.35); }
 :root.light .detection.detection-ai-unverified { background: rgba(217,119,6,.08); color: #92400e; border: 1px dashed rgba(217,119,6,.45); }
+:root.light .detection.detection-false-positive { background: rgba(190,24,93,.08); color: #9d174d; border: 1px dashed rgba(190,24,93,.45); }
 :root.light .detection.detection-face { background: rgba(217,119,6,.14); color: #b45309; border-color: rgba(217,119,6,.35); font-weight: 800; }
 :root.light .detection.detection-face-unknown { background: rgba(219,39,119,.12); color: #be185d; border-color: rgba(219,39,119,.35); font-weight: 800; }
 :root.light .status-panel div { background: rgba(255,255,255,.6); }
@@ -539,6 +540,7 @@ textarea {
 .detection.detection-ai-filtered { background: rgba(148, 163, 184, 0.14); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.4); }
 .detection.detection-ai-verified { background: rgba(34, 197, 94, 0.12); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.35); }
 .detection.detection-ai-unverified { background: rgba(251, 191, 36, 0.08); color: #fcd34d; border: 1px dashed rgba(251, 191, 36, 0.45); }
+.detection.detection-false-positive { background: rgba(244, 114, 182, 0.10); color: #f9a8d4; border: 1px dashed rgba(244, 114, 182, 0.5); }
 .activity-item-type-row .ai-verdict-tip { align-self: center; }
 .detection.detection-face { background: rgba(251, 191, 36, 0.14); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4); }
 .detection.detection-face-unknown { background: rgba(244, 114, 182, 0.16); color: #f472b6; border: 1px solid rgba(244, 114, 182, 0.4); }
@@ -3606,6 +3608,25 @@ button.activity-item-action.activity-item-action-delete:hover {
 :root.light button.activity-item-action.activity-item-action-delete:hover {
   background: rgba(220, 38, 38, 0.18);
   border-color: #dc2626;
+}
+/* False positive (amber): mark or un-mark a detection (app/false_positives.py). */
+button.activity-item-action.activity-item-action-false-positive {
+  background: rgba(251, 191, 36, 0.08);
+  color: #fcd34d;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+button.activity-item-action.activity-item-action-false-positive:hover {
+  background: rgba(251, 191, 36, 0.16);
+  border-color: #fcd34d;
+}
+:root.light button.activity-item-action.activity-item-action-false-positive {
+  background: rgba(217, 119, 6, 0.08);
+  color: #92400e;
+  border-color: rgba(217, 119, 6, 0.4);
+}
+:root.light button.activity-item-action.activity-item-action-false-positive:hover {
+  background: rgba(217, 119, 6, 0.16);
+  border-color: #b45309;
 }
 
 /* ─── Snapshots library (snapshots.html) ──────────────────────────────────

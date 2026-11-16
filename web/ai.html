@@ -203,10 +203,57 @@
       <button type="submit">Save AI Settings</button>
     </div>
     </form>
+    <!-- False positives (app/false_positives.py): its own settings key and
+         Save button, filled by false_positives.js. -->
+    <form id="fpSettingsForm" class="page-stack ai-settings-form" autocomplete="off">
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🚫</div>
+        <div>
+          <h2>False Positives</h2>
+          <p class="settings-section-subtitle">A false positive is a detection of something that was not really there, such as a shadow read as a person. The model above can check every object event and mark the false ones, and admins can mark (or un-mark) any event, snapshot or recording from the <a href="/events">Events</a>, <a href="/snapshots">Snapshots</a> and <a href="/recordings">Recordings</a> pages. False positives can then be purged automatically to save space.</p>
+        </div>
+      </div>
+      <p id="fpStats" class="muted" aria-live="polite"></p>
+      <div class="form-grid">
+        <label>
+          <span>AI Check All Object Events <span class="info-tip" data-tip="Ask the model about every live object event, in the background while it is idle, and mark the ones where nothing it was asked about is really there. Reuses alert verification answers, never delays alerts and never overrides a user. Events from the last 24 hours are checked. Default: Off" title="Ask the model about every live object event, in the background while it is idle, and mark the ones where nothing it was asked about is really there. Reuses alert verification answers, never delays alerts and never overrides a user. Events from the last 24 hours are checked. Default: Off" tabindex="0" aria-label="Help: Ask the model about every live object event, in the background while it is idle, and mark the ones where nothing it was asked about is really there. Reuses alert verification answers, never delays alerts and never overrides a user. Events from the last 24 hours are checked. Default: Off"></span></span>
+          <select name="ai_check">
+            <option value="false">Off</option>
+            <option value="true">On</option>
+          </select></label>
+        <label>
+          <span>Purge False Positives <span class="info-tip" data-tip="Delete false-positive recordings and snapshots once they are older than Purge After. Runs with the periodic retention sweep. Uploaded clips are never purged. Default: Off" title="Delete false-positive recordings and snapshots once they are older than Purge After. Runs with the periodic retention sweep. Uploaded clips are never purged. Default: Off" tabindex="0" aria-label="Help: Delete false-positive recordings and snapshots once they are older than Purge After. Runs with the periodic retention sweep. Uploaded clips are never purged. Default: Off"></span></span>
+          <select name="purge_enabled">
+            <option value="false">Off</option>
+            <option value="true">On</option>
+          </select></label>
+        <label>
+          <span>Purge After (hours) <span class="info-tip" data-tip="How long a false positive is kept before the purge deletes it, so you can review and un-mark it first. 1 to 720. Default: 24" title="How long a false positive is kept before the purge deletes it, so you can review and un-mark it first. 1 to 720. Default: 24" tabindex="0" aria-label="Help: How long a false positive is kept before the purge deletes it, so you can review and un-mark it first. 1 to 720. Default: 24"></span></span>
+          <input name="purge_after_hours" type="number" min="1" max="720" step="1" placeholder="24" /></label>
+        <label>
+          <span>Purge AI-Marked <span class="info-tip" data-tip="Whether the purge deletes false positives the AI marked, or only those a user marked. Default: Yes" title="Whether the purge deletes false positives the AI marked, or only those a user marked. Default: Yes" tabindex="0" aria-label="Help: Whether the purge deletes false positives the AI marked, or only those a user marked. Default: Yes"></span></span>
+          <select name="purge_include_ai">
+            <option value="true">Yes, AI and user marked</option>
+            <option value="false">No, only user marked</option>
+          </select></label>
+        <fieldset class="ai-verification-cameras">
+          <legend>AI Check Cameras <span class="info-tip" data-tip="Cameras whose events the AI checks. None ticked = all cameras." title="Cameras whose events the AI checks. None ticked = all cameras." tabindex="0" aria-label="Help: Cameras whose events the AI checks. None ticked = all cameras."></span></legend>
+          <div id="fpCameras" class="ai-verification-camera-list"><span class="muted">Loading cameras…</span></div>
+        </fieldset>
+      </div>
+      <p class="muted ai-page-note">A recording counts as a false positive when at least one of its events is one and none of its other events is a real detection. Purged recordings and snapshots cannot be recovered.</p>
+      <div class="button-row">
+        <button type="submit">Save False Positive Settings</button>
+        <button id="fpPurgeBtn" class="secondary" type="button">Purge Now</button>
+      </div>
+    </section>
+    </form>
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
   <script src="/static/ai.js"></script>
   <script src="/static/ai-ollama.js"></script>
+  <script src="/static/false_positives.js"></script>
 </body>
 </html>
