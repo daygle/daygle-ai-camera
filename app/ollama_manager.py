@@ -375,7 +375,8 @@ class OllamaManager:
             try:
                 models = self.list_models()
             except (OSError, ValueError, urllib.error.URLError) as exc:
-                models_error = f'Could not list models: {exc}'
+                logger.warning('Could not list Ollama models: %s', exc)
+                models_error = f'Could not list models ({type(exc).__name__}). See the application log.'
         with self._lock:
             install = dict(self._install)
             install['log'] = list(self._install_log)
@@ -544,7 +545,8 @@ class OllamaManager:
                 if not ok:
                     error = self._install_failure_message(returncode)
         except Exception as exc:  # noqa: BLE001 - reported to the UI, never raised on the worker thread
-            error = f'Install failed: {exc}'
+            logger.warning('Ollama install could not run: %s', exc)
+            error = f'The install could not run ({type(exc).__name__}). See the application log.'
         if ok:
             logger.info('Ollama installed.')
         else:
@@ -576,7 +578,8 @@ class OllamaManager:
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f'systemctl {action} {SERVICE_NAME} timed out.') from exc
         except OSError as exc:
-            raise RuntimeError(f'Could not run systemctl: {exc}') from exc
+            logger.warning('systemctl %s %s failed to run: %s', action, SERVICE_NAME, exc)
+            raise RuntimeError(f'Could not run systemctl ({type(exc).__name__}). See the application log.') from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or '').strip().splitlines()
             raise RuntimeError(detail[-1] if detail else f'systemctl {action} {SERVICE_NAME} failed.')
@@ -682,7 +685,8 @@ class OllamaManager:
             except (ValueError, AttributeError, OSError):
                 pass
         except Exception as exc:  # noqa: BLE001 - reported to the UI
-            error = f'Download failed: {exc}'
+            logger.warning('Ollama model %s download error: %s', name, exc)
+            error = f'The download failed ({type(exc).__name__}). See the application log.'
         if not ok and error is None:
             error = 'The download ended before it finished.'
         if ok:
@@ -703,7 +707,8 @@ class OllamaManager:
                 raise LookupError(f'Model {name} is not installed.') from exc
             raise RuntimeError(f'Ollama could not delete {name} (HTTP {exc.code}).') from exc
         except (OSError, urllib.error.URLError) as exc:
-            raise RuntimeError(f'Could not reach Ollama: {exc}') from exc
+            logger.warning('Could not reach Ollama to delete %s: %s', name, exc)
+            raise RuntimeError(f'Could not reach Ollama ({type(exc).__name__}).') from exc
         logger.info('Deleted Ollama model %s', name)
         return self.status()
 

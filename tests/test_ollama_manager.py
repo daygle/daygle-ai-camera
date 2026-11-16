@@ -475,3 +475,24 @@ def test_update_routes(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_raw_exception_text_is_not_returned(tmp_path):
+    class BrokenHttp(FakeHttp):
+        def post_json(self, path, body, method='POST', timeout=5.0):
+            if path == '/api/delete':
+                raise urllib.error.URLError('/secret/path refused')
+            return super().post_json(path, body, method, timeout)
+
+        def stream_json(self, path, body, timeout=300.0):
+            raise OSError('/secret/path read failed')
+            yield  # pragma: no cover
+
+    manager = _manager(tmp_path, BrokenHttp())
+    with pytest.raises(RuntimeError) as excinfo:
+        manager.delete_model('gemma3:4b')
+    assert '/secret/path' not in str(excinfo.value)
+    manager.start_pull('gemma3:4b')
+    _wait(lambda: not manager.status()['pull']['running'])
+    error = manager.status()['pull']['error']
+    assert 'OSError' in error and '/secret/path' not in error
