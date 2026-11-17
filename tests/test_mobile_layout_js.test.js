@@ -176,12 +176,13 @@ test('cameras: the widest secondary column is dropped on phones, the sort keys s
   assert.deepEqual(sortKeys, ['camera', 'connection', 'video', 'status', 'ptz']);
 });
 
-test('cameras: row actions unstick from the name gutter and become phone-sized', () => {
-  const { html } = pages.cameras;
-  // The actions were absolutely positioned in the name cell's 88px right
-  // gutter, which is what forced the column to be so wide.
-  assert.match(html, /\.cell-camera \{ min-width: 160px; padding-right: 10px; \}/);
-  assert.match(html, /\.cell-actions \{\s*position: static;\s*transform: none;\s*margin-top: 8px;\s*flex-wrap: wrap;/);
+test('cameras: row actions have their own last column and become phone-sized', () => {
+  const { html, js } = pages.cameras;
+  // Edit / power / remove used to sit absolutely positioned in the name cell's
+  // right gutter; like Recordings they now have their own Actions column.
+  assert.match(html, /\.cell-camera \{ min-width: 160px; \}/);
+  assert.match(js, /renderCameraSortHeader\('PTZ', 'ptz'\) \+\s*'<th class="cell-center" scope="col">Actions<\/th>'/);
+  assert.match(js, /<td class="cell-row-actions stack-actions">/);
   assert.match(html, /\.cell-actions button \{ min-width: 40px; min-height: 40px; padding: 8px; \}/);
   assert.match(html, /#cameraGrid \.cameras-table \{ min-width: 520px; \}/);
 });

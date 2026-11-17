@@ -326,7 +326,7 @@ function buildEditFormHtml(camera, index) {
       : runtimeSource === 'schedule'
         ? 'Scheduled times use this camera\'s timezone.'
         : 'Manual profile selection is active.';
-  return '<tr class="camera-edit-row" id="' + htmlAttr(rowId) + '"><td colspan="6"><div class="camera-edit-panel">' +
+  return '<tr class="camera-edit-row" id="' + htmlAttr(rowId) + '"><td colspan="7"><div class="camera-edit-panel">' +
     '<div class="cam-edit-head">' +
       '<span class="cam-edit-head-title">Editing <strong>' + escapeHtml(camera.name || camera.id || ('Camera ' + (index + 1))) + '</strong></span>' +
       (camera.id ? '<span class="cam-edit-head-id">ID · ' + escapeHtml(camera.id) + '</span>' : '') +
@@ -797,13 +797,16 @@ function renderCameraRow(camera, index) {
   var rowHtml = '<tr data-camera-index="' + index + '" class="' + (isEnabled ? '' : 'camera-row-disabled') + '">';
   rowHtml += '<td class="cell-camera">';
   rowHtml += '<div class="cam-info"><span class="cam-name">' + name + '</span>' + (id ? '<span class="cam-id">ID · ' + id + '</span>' : '') + '</div>';
-  rowHtml += '<div class="cell-actions"><button class="secondary cam-edit-btn" data-index="' + index + '" type="button" title="Edit camera" aria-label="Edit ' + name + '">' + ICONS.edit + '</button><button class="secondary cam-toggle-btn' + (isEnabled ? ' is-enabled' : ' is-disabled') + '" data-index="' + index + '" type="button" title="' + (isEnabled ? 'Disable camera' : 'Enable camera') + '" aria-label="' + (isEnabled ? 'Disable ' : 'Enable ') + name + '">' + ICONS.power + '</button><button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera" aria-label="Remove ' + name + '">' + ICONS.remove + '</button></div>';
   rowHtml += '</td>';
   rowHtml += '<td class="cell-connection" data-label="Connection"><span class="chip camera-backend-chip">' + backend + '</span><span class="camera-endpoint">' + endpoint + '</span></td>';
   rowHtml += '<td class="cell-video" data-label="Video"><strong>' + resolution + '</strong><span>' + escapeHtml(fpsText) + '</span></td>';
   rowHtml += '<td class="cell-state" data-label="Status">' + healthHtml + '<span class="camera-enabled-label">' + (isEnabled ? 'Enabled' : 'Configuration paused') + '</span></td>';
   rowHtml += '<td class="cell-profiles" data-label="Profiles">' + profilesHtml + '</td>';
   rowHtml += '<td class="cell-ptz" data-label="PTZ"><span class="camera-feature-pill ' + (ptzEnabled ? 'is-ready' : '') + '">' + (ptzEnabled ? 'PTZ Enabled' : 'Fixed') + '</span></td>';
+  // Edit / power / remove sit in their own last column, as on Recordings.
+  rowHtml += '<td class="cell-row-actions stack-actions">';
+  rowHtml += '<div class="cell-actions"><button class="secondary cam-edit-btn" data-index="' + index + '" type="button" title="Edit camera" aria-label="Edit ' + name + '">' + ICONS.edit + '</button><button class="secondary cam-toggle-btn' + (isEnabled ? ' is-enabled' : ' is-disabled') + '" data-index="' + index + '" type="button" title="' + (isEnabled ? 'Disable camera' : 'Enable camera') + '" aria-label="' + (isEnabled ? 'Disable ' : 'Enable ') + name + '">' + ICONS.power + '</button><button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera" aria-label="Remove ' + name + '">' + ICONS.remove + '</button></div>';
+  rowHtml += '</td>';
   rowHtml += '</tr>';
   return rowHtml;
 }
@@ -943,6 +946,7 @@ function renderGrid() {
     renderCameraSortHeader('Status', 'status') +
     '<th scope="col">Profiles</th>' +
     renderCameraSortHeader('PTZ', 'ptz') +
+    '<th class="cell-center" scope="col">Actions</th>' +
     '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
   gridEl.innerHTML = tableHtml;
   updateFilterHint(filtered.length);

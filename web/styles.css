@@ -2470,10 +2470,8 @@ input[type="file"] { padding: 10px; }
 }
 
 .cameras-table .cell-camera {
-  min-width: 220px;
+  min-width: 180px;
   display: table-cell;
-  position: relative;
-  padding-right: 88px;
 }
 .cameras-table .cell-camera .cam-info {
   flex: 1;
@@ -2497,11 +2495,11 @@ input[type="file"] { padding: 10px; }
   font-size: 10px;
   letter-spacing: .02em;
 }
-.cameras-table .cell-connection { min-width: 230px; }
-.cameras-table .cell-video { min-width: 160px; }
-.cameras-table .cell-state { min-width: 150px; }
-.cameras-table .cell-profiles { min-width: 150px; }
-.cameras-table .cell-ptz { min-width: 110px; }
+.cameras-table .cell-connection { min-width: 165px; }
+.cameras-table .cell-video { min-width: 140px; }
+.cameras-table .cell-state { min-width: 140px; }
+.cameras-table .cell-profiles { min-width: 140px; }
+.cameras-table .cell-ptz { min-width: 100px; }
 .cameras-table .cell-connection,
 .cameras-table .cell-video,
 .cameras-table .cell-state { display: table-cell; }
@@ -2572,15 +2570,16 @@ input[type="file"] { padding: 10px; }
 .cameras-table .cell-center {
   text-align: center;
 }
+/* Edit / power / remove have their own last column, as on Recordings. */
+.cameras-table .cell-row-actions {
+  width: 1%;
+  white-space: nowrap;
+}
 .cameras-table .cell-actions {
-  position: absolute;
-  top: 50%;
-  right: 16px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  transform: translateY(-50%);
-  flex-shrink: 0;
 }
 .cameras-table .cell-actions button,
 .cameras-table .cell-actions a {
@@ -3737,9 +3736,8 @@ button.activity-item-action.activity-item-action-false-positive:hover {
     aspect-ratio: 16 / 9;
   }
   .snapshot-row-actions {
-    align-items: stretch;
+    justify-content: flex-end;
   }
-  .snapshot-row-actions .activity-item-action { flex: 1; min-width: 120px; }
 }
 
 /* Empty state (mirrors recordings-empty-state) */
@@ -7746,12 +7744,10 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
   }
 }
 @media (max-width: 600px) {
-  /* Camera card header: name on the left, edit/power/remove on the right. */
+  /* Camera card header: the name, ruled off from the fields below. The
+     edit/power/remove buttons close the card as its button bar. */
   .cameras-table.stack-table td.cell-camera {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
+    display: block;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--border);
   }
@@ -7761,12 +7757,9 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
   .cameras-table.stack-table .cam-edit-head-id { display: none; }
   .cameras-table.stack-table .cam-edit-head-title { min-width: 0; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
   .cameras-table.stack-table td.cell-camera .cam-name { white-space: normal; overflow-wrap: anywhere; }
-  .cameras-table.stack-table td.cell-camera .cell-actions {
-    position: static;
-    transform: none;
-    flex: none;
-  }
-  .cameras-table.stack-table td.cell-camera .cell-actions button { min-width: 40px; min-height: 40px; }
+  .cameras-table.stack-table td.cell-row-actions { width: auto; }
+  .cameras-table.stack-table td.cell-row-actions .cell-actions { justify-content: flex-end; }
+  .cameras-table.stack-table td.cell-row-actions .cell-actions button { min-width: 40px; min-height: 40px; }
   .cameras-table.stack-table :is(.cell-connection, .cell-video, .cell-state) > * { margin-right: 6px; }
 }
 
@@ -8057,10 +8050,15 @@ main:has(#liveCameraEmpty:not([hidden])) .live-controls-card { display: none; }
    the labelled buttons. The name is in title / aria-label. */
 /* Icon-only row actions (Events, Recordings): one square size whether the
    action is a <button> or an <a> link. The table's own button rule above
-   (width: auto, side padding) only reaches buttons, so it is overridden here. */
+   (width: auto, side padding) only reaches buttons, so it is overridden here.
+   Links and buttons also share the 8px corner the table gives its buttons,
+   so Snapshot / Play links match Delete / False Positive. */
 .activity-item-action.activity-item-action-icon,
+a.activity-item-action.activity-item-action-icon,
+button.activity-item-action.activity-item-action-icon,
 .cameras-table-wrap .rule-table.activity-table .activity-cell-actions .cell-actions .activity-item-action-icon {
   box-sizing: border-box;
+  border-radius: 8px;
   width: 36px;
   min-width: 36px;
   height: 36px;

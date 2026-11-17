@@ -112,9 +112,8 @@
     /* ── Narrow tablets / large phones (601-760px) ───────────────────────────
        The camera table keeps its columns here because every column header is
        a sort control. The widest secondary column is dropped, the row actions
-       move out of the name cell's reserved right gutter so the name column can
-       shrink, and the whole thing scrolls inside the card rather than
-       stretching the page. At 600px and below the table stacks into one card
+       get phone-sized tap targets, the name column can shrink, and the whole
+       thing scrolls inside the card rather than stretching the page. At 600px and below the table stacks into one card
        per camera instead (.stack-table in styles.css): sideways scrolling
        there left only the camera name on screen, and a camera list is short
        enough that seeing every camera's status beats column sorting. */
@@ -123,15 +122,8 @@
          cell and is also fully visible in the camera's own edit panel. */
       #cameraGrid .cameras-table th:nth-child(5),
       #cameraGrid .cameras-table td.cell-profiles { display: none; }
-      /* The actions were absolutely positioned in the name cell's 88px right
-         gutter; unstacking them under the name frees that width. */
-      #cameraGrid .cameras-table .cell-camera { min-width: 160px; padding-right: 10px; }
-      #cameraGrid .cameras-table .cell-actions {
-        position: static;
-        transform: none;
-        margin-top: 8px;
-        flex-wrap: wrap;
-      }
+      /* Narrower name column; the actions have their own column. */
+      #cameraGrid .cameras-table .cell-camera { min-width: 160px; }
       /* Phone-sized tap targets for the per-row edit / power / remove buttons. */
       #cameraGrid .cameras-table .cell-actions button { min-width: 40px; min-height: 40px; padding: 8px; }
       #cameraGrid .cameras-table { min-width: 520px; }
