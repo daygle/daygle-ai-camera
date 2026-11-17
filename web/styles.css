@@ -8055,7 +8055,19 @@ main:has(#liveCameraEmpty:not([hidden])) .live-controls-card { display: none; }
 
 /* Icon-only row actions (Recordings: Delete, Play): square, same height as
    the labelled buttons. The name is in title / aria-label. */
-.activity-item-action.activity-item-action-icon { padding-left: 0; padding-right: 0; width: 34px; justify-content: center; }
+/* Icon-only row actions (Events, Recordings): one square size whether the
+   action is a <button> or an <a> link. The table's own button rule above
+   (width: auto, side padding) only reaches buttons, so it is overridden here. */
+.activity-item-action.activity-item-action-icon,
+.cameras-table-wrap .rule-table.activity-table .activity-cell-actions .cell-actions .activity-item-action-icon {
+  box-sizing: border-box;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  justify-content: center;
+}
 .ai-area-preview { position: relative; flex: 0 0 160px; width: 160px; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #111; }
 .ai-area-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .ai-area-box { position: absolute; border: 2px solid #f87171; background: rgba(248, 113, 113, 0.18); border-radius: 3px; }
