@@ -267,6 +267,9 @@ test('a reclassified object keeps its original label visible, and never on a fal
   const recording = { events: [event, { metadata: {} }] };
   assert.equal(run(sandbox, `recordingReclassified(${JSON.stringify(recording)})`).dog, 'cat');
   assert.equal(run(sandbox, 'reclassifiedBadge({})'), '');
+  // A detection already marked 🔄 for the new label says the same: no badge.
+  assert.equal(run(sandbox, `reclassifiedBadge(${JSON.stringify(found)}, [{ label: 'cat', ai_status: 'reclassified' }])`), '');
+  assert.match(run(sandbox, `reclassifiedBadge(${JSON.stringify(found)}, [{ label: 'cat', ai_status: 'confirmed' }])`), /Reclassified from Dog/);
 });
 
 test('each detection shows the AI verdict, and a clip shows its strongest one per label', () => {

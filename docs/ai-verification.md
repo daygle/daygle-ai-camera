@@ -8,7 +8,8 @@ person (car, dog, ...) here, or is it a shadow, reflection, bush or poster?"*
 - **Rejected alerts are not notified**, but nothing is deleted. The event, its
   recording and its alert rows are kept, and the Events list marks the event
   **🤖 Filtered**. Hover or tap the ⓘ beside the badge to see the model's
-  reason. Confirmed alerts show **🤖 Verified**. Alerts sent without a verdict
+  reason. Confirmed alerts show **🤖 Verified**, unless every object on the
+  event already shows the model's ✓ (or 🔄), which says the same. Alerts sent without a verdict
   (the model was unsure, failed or was skipped) show **🤖 Unverified**, so a
   model that has stopped answering is visible in the list. The **AI Check**
   filter on the Events page lists just the Filtered, Verified or Unverified

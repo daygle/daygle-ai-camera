@@ -465,6 +465,10 @@ function renderRecordings(recordings) {
 function recordingRowHtml(recording) {
   const mediaReady = recording.media_ready !== false;
   const isSound = isSoundRecording(recording);
+  // The per-label marks this row draws; a 🔄 among them replaces the
+  // Reclassified badge.
+  const shownVerdicts = isSound ? []
+    : recordingDetectionSummary(recording).map((d) => recordingLabelVerdict(recording, d.label)).filter(Boolean);
   const isMotion = isMotionOnlyRecording(recording);
   // Always-on capture segments carry no triggering detection, so they must
   // not fall through to the "Object Recording" default (which reads as a
@@ -531,7 +535,7 @@ function recordingRowHtml(recording) {
   ];
   return `
     <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
-      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${typeLabel}</span>${falsePositiveBadge(falsePositive)}${falsePositive ? '' : reclassifiedBadge(recordingReclassified(recording))}</div><span class="activity-cell-ref">Recording #${recording.id}</span></td>
+      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${typeLabel}</span>${falsePositiveBadge(falsePositive)}${falsePositive ? '' : reclassifiedBadge(recordingReclassified(recording), shownVerdicts)}</div><span class="activity-cell-ref">Recording #${recording.id}</span></td>
       <td class="activity-cell-camera">${escapeHtml(recordingCameraName(recording))}</td>
       <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}${aiTagPills(recording.ai_labels)}${recordingDescriptionTip(recording)}</div></td>
       <td class="activity-cell-zone">${zoneCell}</td>

@@ -43,7 +43,9 @@ verification: *is a real one actually visible?*
   dog): the event is **reclassified**. Its detection becomes `cat`, its
   recording gains the `cat` label (and loses `dog` unless another event in
   the clip saw a dog), and a recording triggered by the dog now says cat.
-  A **🔄 Reclassified from Dog** badge keeps the original visible. It is
+  The 🔄 mark after the Cat pill keeps the original visible (hover or tap it
+  for "detected as Dog"); events from before per-detection verdicts show a
+  **🔄 Reclassified from Dog** badge instead. It is
   recorded as real and **never purged**.
 - **A real animal or vehicle the detector has no class for**: recorded as
   real, with the label left as it is.

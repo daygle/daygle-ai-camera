@@ -22,6 +22,7 @@ function badgeContext() {
   const end = source.indexOf('// An alert row is written when a rule matches');
   const context = vm.createContext({
     escapeHtml: (value) => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'),
+    GENERIC_TRIGGER_LABELS: new Set(['motion']),
   });
   vm.runInContext(source.slice(start, end), context);
   return context;
@@ -54,6 +55,23 @@ test('verified, filtered and unverified verdicts each get a badge with a tappabl
   assert.match(badge(context, { status: 'unsure', labels: { person: { unsure: true, reason: 'too dark' } } }), /person: unsure - too dark/);
   assert.equal(badge(context, undefined), '');
   assert.equal(badge(context, { status: 'something-new' }), '');
+});
+
+test('a plain Verified badge is left out when every object already shows the AI tick', () => {
+  const context = badgeContext();
+  const record = { status: 'confirmed', labels: { person: { present: true } } };
+  const html = (detections) => vm.runInContext(
+    `aiVerificationBadge(${JSON.stringify({ detections, metadata: { ai_verification: record } })})`, context);
+  assert.equal(html([{ label: 'person', ai_status: 'confirmed' }, { label: 'motion' }]), '');
+  assert.equal(html([{ label: 'cat', ai_status: 'reclassified' }]), '');
+  // An object without a verdict (an older event) keeps the badge.
+  assert.match(html([{ label: 'person', ai_status: 'confirmed' }, { label: 'car' }]), /🤖 Verified/);
+  assert.match(html([]), /🤖 Verified/);
+  // Filtered always shows: it explains the notification.
+  const filtered = vm.runInContext(`aiVerificationBadge(${JSON.stringify({
+    detections: [{ label: 'person', ai_status: 'rejected' }],
+    metadata: { ai_verification: { status: 'filtered', delivered: false } } })})`, context);
+  assert.match(filtered, /🤖 Filtered/);
 });
 
 test('the unverified badge has a style in both themes', () => {

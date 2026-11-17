@@ -897,8 +897,14 @@ function recordingReclassified(recording) {
   return Object.assign({}, ...events.map(eventReclassified));
 }
 
-function reclassifiedBadge(found) {
-  return Object.entries(found || {}).map(([label, name]) => {
+// A reclassification already shown by a detection's 🔄 mark (the corrected
+// label with ai_status "reclassified") needs no badge; the badge stays for
+// events from before per-detection verdicts, which have no such mark.
+function reclassifiedBadge(found, detections = []) {
+  const marked = new Set((detections || [])
+    .filter((d) => d && d.ai_status === 'reclassified')
+    .map((d) => String(d.label || '').trim().toLowerCase()));
+  return Object.entries(found || {}).filter(([, name]) => !marked.has(String(name || '').trim().toLowerCase())).map(([label, name]) => {
     const detected = titleCase(String(label).replace(/_/g, ' '));
     const real = titleCase(String(name || '').replace(/_/g, ' '));
     const tip = escapeHtml(`The detector reported ${detected}; the AI model saw ${real} and reclassified it. Something real was there, so this is not a false positive.`);

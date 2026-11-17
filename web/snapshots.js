@@ -150,7 +150,7 @@ function snapshotRow(event) {
             </span>
           </span>
         </div>
-        <div class="activity-item-badges snapshot-row-badges">${snapshotPills(event)}${faceIdentityPills(eventFaceIdentities(event))}${alertBadge}${falsePositiveBadge(falsePositive)}${reclassifiedBadge(eventReclassified(event))}${aiTags}${aiTip}</div>
+        <div class="activity-item-badges snapshot-row-badges">${snapshotPills(event)}${faceIdentityPills(eventFaceIdentities(event))}${alertBadge}${falsePositiveBadge(falsePositive)}${reclassifiedBadge(eventReclassified(event), event.detections)}${aiTags}${aiTip}</div>
       </div>
       <div class="snapshot-row-actions">${actions.join('')}</div>
     </article>
