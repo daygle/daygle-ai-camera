@@ -117,9 +117,11 @@ test('a failed page-load auth check keeps retrying instead of leaving "Sign in"'
   const start = navSource.indexOf('function retryFailedAuthCheck(');
   assert.ok(start !== -1, 'retryFailedAuthCheck should exist');
   const body = navSource.slice(start, navSource.indexOf('\n  }\n', start));
-  // Stops once signed in or when a real session loss is redirecting.
-  assert.match(body, /if \(window\.daygleAuth\?\.user\?\.username \|\| window\.daygleAuth\?\.redirecting\) return;/);
-  // Re-verifies through the shared path (repaint on 200, /login on a 401).
+  // Stops once signed in (or on a public page).
+  assert.match(body, /if \(window\.daygleAuth\?\.user\?\.username \|\| PUBLIC_AUTH_PATHS\.has\(window\.location\?\.pathname\)\) \{\s*authRecoveryActive = false;\s*return;/);
+  // Re-verifies through the shared path (repaint on 200, /login on a 401),
+  // but not while a session-loss redirect is leaving the page.
+  assert.match(body, /const leaving = window\.daygleAuth\?\.redirecting \|\| lossAge < AUTH_RETRY_AFTER_LOSS_MS;/);
   assert.match(body, /await window\.refreshDaygleAuth\(\)/);
   assert.match(body, /retryFailedAuthCheck\(attempt \+ 1\)/);
   assert.match(navSource, /const AUTH_RETRY_DELAYS_MS = \[1000, 2000, 4000, 8000, 15000\];/);
@@ -134,4 +136,18 @@ test('a restored session clears the signed-out "go to Sign in" click', () => {
   const body = navSource.slice(start);
   const signedIn = body.slice(body.indexOf('if (navUser) navUser.textContent = user.username;'));
   assert.match(signedIn, /if \(accountTrigger\) accountTrigger\.onclick = null;/);
+});
+
+test('any "Sign in" paint on an app page keeps re-verifying until the session answers', () => {
+  // Regression: the nav could sit at "Sign in" with every admin group hidden
+  // while the session was still valid, until a click focused the window. Every
+  // signed-out paint now starts the same backoff re-verify as a failed first
+  // check, guarded so only one loop runs at a time.
+  const render = navSource.slice(navSource.indexOf('function renderNavAccount(user)'));
+  const signedOut = render.slice(0, render.indexOf('if (navUser) navUser.textContent = user.username;'));
+  assert.match(signedOut, /window\.daygleUi\?\.recoverSignedOutNav\?\.\(\);\s*return;/);
+  assert.match(navSource, /recoverSignedOutNav: \(\) => retryFailedAuthCheck\(\),/);
+  assert.match(navSource, /if \(attempt === 0\) \{\s*if \(authRecoveryActive\) return;\s*authRecoveryActive = true;/);
+  const utilsSource = readFileSync(path.resolve(here, '../web/utils.js'), 'utf8');
+  assert.match(utilsSource, /window\.daygleAuth\.redirecting = true;[\s\S]{0,200}window\.daygleAuth\.sessionLossAt = Date\.now\(\);/);
 });
