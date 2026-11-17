@@ -43,4 +43,5 @@ test('camera row actions use the Recordings button style, with Edit last', () =>
   const css = read('styles.css');
   assert.match(css, /:root\.light button\.activity-item-action\.activity-item-action-edit \{\s*background:/);
   assert.doesNotMatch(css, /\.cameras-table \.cell-actions button,\s*\.cameras-table \.cell-actions a \{/);
+  assert.match(css, /\.cameras-table \.cell-actions \{\s*display: flex;\s*align-items: center;\s*justify-content: flex-end;\s*gap: 4px;/);
 });

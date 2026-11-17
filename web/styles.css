@@ -2575,11 +2575,12 @@ input[type="file"] { padding: 10px; }
   width: 1%;
   white-space: nowrap;
 }
+/* Same 4px gap and right alignment as the Recordings / Events actions. */
 .cameras-table .cell-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  justify-content: flex-end;
+  gap: 4px;
 }
 /* The row buttons use the shared icon-only action style (styles below,
    ``.activity-item-action``) so they match Recordings and Events. */
