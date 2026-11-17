@@ -110,8 +110,8 @@ const event = (recordingId, mediaReady) => ({
 
 test('an event whose clip is still being written offers no playable link', () => {
   const html = renderRow(event(21425, false));
-  assert.match(html, /disabled aria-label="Preparing recording"/);
-  assert.match(html, />Preparing\.\.\.</);
+  assert.match(html, /disabled[^>]*aria-label="Preparing recording"/);
+  assert.match(html, /title="Preparing\.\.\."/);
   assert.doesNotMatch(html, /href="\/recordings\/21425"/);
   // The snapshot action is independent of the clip and stays available.
   assert.match(html, /href="\/api\/events\/575\/snapshot"/);

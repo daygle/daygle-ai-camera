@@ -260,6 +260,12 @@ test('false-positive badge and button render for the right users and states', ()
   assert.match(unmark, /data-false-positive-kind="recording"/);
   assert.match(unmark, /data-false-positive-value="false"/);
   assert.match(unmark, />Not False Positive</);
+  // Icon-only (Events and Recordings tables): no text, the label in the tooltip.
+  const iconOnly = run(sandbox, "falsePositiveButton('event', 5, false, { iconOnly: true })");
+  assert.doesNotMatch(iconOnly, /activity-action-label/);
+  assert.match(iconOnly, /activity-item-action-icon/);
+  assert.match(iconOnly, /title="False Positive: nothing real was detected here"/);
+  assert.match(iconOnly, /aria-label="False Positive: event 5"/);
 });
 
 test('each detection shows the AI verdict, and a clip shows its strongest one per label', () => {

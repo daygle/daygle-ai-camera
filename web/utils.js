@@ -922,14 +922,20 @@ function recordingLabelVerdict(recording, label) {
 // The toggle on an event, snapshot or recording row, for any signed-in user. ``marked`` is
 // whether it is a false positive now; the button offers the other choice
 // ("Not False Positive" records it as real, so the AI leaves it alone).
-function falsePositiveButton(kind, id, marked) {
+// ``iconOnly`` drops the text label (the Events and Recordings tables); the
+// label then rides in the tooltip and aria-label.
+function falsePositiveButton(kind, id, marked, { iconOnly = false } = {}) {
   if (!window.daygleAuth?.user) return '';
   const label = marked ? 'Not False Positive' : 'False Positive';
   const icon = marked
     ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
     : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>';
   const safeId = escapeHtml(String(id));
-  return `<button type="button" class="secondary activity-item-action activity-item-action-false-positive" data-false-positive-kind="${escapeHtml(kind)}" data-false-positive-id="${safeId}" data-false-positive-value="${marked ? 'false' : 'true'}" title="${marked ? 'This detection was real' : 'Nothing real was detected here'}" aria-label="${label}: ${escapeHtml(kind)} ${safeId}">${icon}<span class="activity-action-label">${label}</span></button>`;
+  const hint = marked ? 'This detection was real' : 'Nothing real was detected here';
+  const title = iconOnly ? `${label}: ${hint.charAt(0).toLowerCase()}${hint.slice(1)}` : hint;
+  const iconClass = iconOnly ? ' activity-item-action-icon' : '';
+  const text = iconOnly ? '' : `<span class="activity-action-label">${label}</span>`;
+  return `<button type="button" class="secondary activity-item-action${iconClass} activity-item-action-false-positive" data-false-positive-kind="${escapeHtml(kind)}" data-false-positive-id="${safeId}" data-false-positive-value="${marked ? 'false' : 'true'}" title="${title}" aria-label="${label}: ${escapeHtml(kind)} ${safeId}">${icon}${text}</button>`;
 }
 
 // Delegated click handling for falsePositiveButton(). ``onChanged(kind, id,
