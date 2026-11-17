@@ -86,8 +86,13 @@ different kinds in one picture (a dog and a car) contradict nothing.
   outlined. **Ignore Area** stops that label matching inside the area in the
   zones that contain it; other labels, and the rest of the zone, are
   unaffected. A real object of that label there is missed too, so check the
-  picture first. Areas in force are listed under the suggestions with
-  **Stop Ignoring**; they are kept when the zone is edited on the Zones page.
+  picture first (when the snapshot is gone, the camera's current view is
+  shown instead). Areas in force are listed under the suggestions with
+  **Stop Ignoring**. On the Zones page the selected zone shows its ignored
+  spots as red dashed boxes, listed under the zone with a × to remove one;
+  they are kept when the zone is edited. A spot left outside the zone after
+  it is redrawn has no effect and is marked "outside area". Admins can also
+  review and apply these from the phone app (Settings → AI Insights).
 - **Frequent AI Tags.** Objects the AI named on at least 3 events in the
   last 7 days that the detector has no class for and no AI tag alert on that
   camera watches yet, with a link to set one up on the Zones page.

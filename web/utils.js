@@ -880,38 +880,6 @@ function falsePositiveBadge(record) {
     + (reason ? `<span class="info-tip" data-tip="${tip}" title="${tip}" tabindex="0" role="note" aria-label="False positive: ${tip}"></span>` : '');
 }
 
-// Labels the AI reclassified (app/false_positives.py), detected label to
-// the real one, e.g. { dog: 'cat' } for a cat the detector called a dog.
-// The event's detections already carry the corrected label; this keeps the
-// original visible. Such footage held something real, so it is never a
-// false positive. Empty once a user has marked the event one anyway.
-function eventReclassified(event) {
-  if (!event || Number(event.false_positive) === 1) return {};
-  const found = ((event.metadata || {}).ai_false_positive_check || {}).reclassified;
-  return found && typeof found === 'object' ? found : {};
-}
-
-// The same for a recording, across every event in the clip.
-function recordingReclassified(recording) {
-  const events = [...(recording?.events || []), ...(recording?.event ? [recording.event] : [])];
-  return Object.assign({}, ...events.map(eventReclassified));
-}
-
-// A reclassification already shown by a detection's 🔄 mark (the corrected
-// label with ai_status "reclassified") needs no badge; the badge stays for
-// events from before per-detection verdicts, which have no such mark.
-function reclassifiedBadge(found, detections = []) {
-  const marked = new Set((detections || [])
-    .filter((d) => d && d.ai_status === 'reclassified')
-    .map((d) => String(d.label || '').trim().toLowerCase()));
-  return Object.entries(found || {}).filter(([, name]) => !marked.has(String(name || '').trim().toLowerCase())).map(([label, name]) => {
-    const detected = titleCase(String(label).replace(/_/g, ' '));
-    const real = titleCase(String(name || '').replace(/_/g, ' '));
-    const tip = escapeHtml(`The detector reported ${detected}; the AI model saw ${real} and reclassified it. Something real was there, so this is not a false positive.`);
-    return `<span class="detection detection-reclassified" title="${tip}" aria-label="${tip}">🔄 Reclassified from ${escapeHtml(detected)}</span>`;
-  }).join('');
-}
-
 // The AI's verdict on one detection (detections.ai_status, written by alert
 // verification and the false-positive check), drawn as a small mark after
 // its pill: ✓ confirmed, 🔄 reclassified, ✗ rejected, ? unsure.
@@ -2385,7 +2353,7 @@ window.daygleUi = {
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
   detectionPill, motionPill, formatMotionFraction, motionFractionOf, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON,
   aiDescriptionTip, eventFalsePositive, falsePositiveBadge, falsePositiveButton, bindFalsePositiveButtons,
-  eventReclassified, recordingReclassified, reclassifiedBadge, aiDetectionMark, recordingLabelVerdict,
+  aiDetectionMark, recordingLabelVerdict,
   // Face-identity pills + filters (recordings + snapshots)
   DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,

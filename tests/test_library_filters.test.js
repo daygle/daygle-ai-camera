@@ -257,23 +257,6 @@ test('false-positive badge and button render for the right users and states', ()
   assert.match(unmark, />Not False Positive</);
 });
 
-test('a reclassified object keeps its original label visible, and never on a false positive', () => {
-  const sandbox = createSandbox();
-  const event = { false_positive: 0, metadata: { ai_false_positive_check: { reclassified: { dog: 'cat' } } } };
-  const found = run(sandbox, `eventReclassified(${JSON.stringify(event)})`);
-  assert.equal(found.dog, 'cat');
-  const badge = run(sandbox, `reclassifiedBadge(${JSON.stringify(found)})`);
-  assert.match(badge, /Reclassified from Dog/);
-  assert.match(badge, /saw Cat and reclassified it/);
-  assert.equal(Object.keys(run(sandbox, `eventReclassified(${JSON.stringify({ ...event, false_positive: 1 })})`)).length, 0);
-  const recording = { events: [event, { metadata: {} }] };
-  assert.equal(run(sandbox, `recordingReclassified(${JSON.stringify(recording)})`).dog, 'cat');
-  assert.equal(run(sandbox, 'reclassifiedBadge({})'), '');
-  // A detection already marked 🔄 for the new label says the same: no badge.
-  assert.equal(run(sandbox, `reclassifiedBadge(${JSON.stringify(found)}, [{ label: 'cat', ai_status: 'reclassified' }])`), '');
-  assert.match(run(sandbox, `reclassifiedBadge(${JSON.stringify(found)}, [{ label: 'cat', ai_status: 'confirmed' }])`), /Reclassified from Dog/);
-});
-
 test('each detection shows the AI verdict, and a clip shows its strongest one per label', () => {
   const sandbox = createSandbox();
   assert.equal(run(sandbox, 'aiDetectionMark({ label: "person" })'), '');

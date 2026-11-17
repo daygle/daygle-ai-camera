@@ -297,11 +297,14 @@ def ignore_area_suggestions(days: int = TUNING_WINDOW_DAYS) -> list[dict[str, An
 
 
 def ignored_areas() -> list[dict[str, Any]]:
-    """Every ignore area in force, for listing (and removing) on the AI page."""
+    """Every ignore area in force, for listing (and removing) on the AI page.
+    ``in_zone`` is False for an area whose centre the zone no longer covers
+    (the zone was redrawn), which has no effect."""
     return [
         {'camera_id': str(camera.get('id') or ''), 'camera_name': str(camera.get('name') or camera.get('id') or ''),
          'zone_id': str(zone.get('id') or ''), 'zone_name': str(zone.get('name') or zone.get('id') or ''),
-         'index': index, **area}
+         'index': index, **area,
+         'in_zone': _zone_contains(zone, (area['x'] + area['width'] / 2, area['y'] + area['height'] / 2))}
         for camera in _cameras()
         for zone, index, area in _ignore_areas(camera)
     ]
@@ -379,7 +382,7 @@ def apply_ignore_area(camera_id: str, label: str, area: Any, apply_cameras_setti
             if not any(str(rule.get('label') or '').strip().lower() == label
                        for rule in zone.get('object_rules') or []):
                 continue
-            zone.setdefault('ignore_areas', []).append({'label': label, **values, 'source': 'ai'})
+            zone.setdefault('ignore_areas', []).append({'label': label, **values})
             changed += 1
         return changed
 

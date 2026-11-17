@@ -8,12 +8,30 @@ const aiTuningList = document.getElementById('aiTuning');
 const aiFrequentTagsList = document.getElementById('aiFrequentTags');
 const aiIgnoreAreasList = document.getElementById('aiIgnoreAreas');
 
-// The suggested area drawn over the latest snapshot the AI rejected there.
+function aiCameraFrameUrl(cameraId) {
+  return cameraId ? `/api/live/snapshot?camera_id=${encodeURIComponent(cameraId)}&width=320` : '';
+}
+
+// A preview whose event snapshot is gone (purged, or retention) falls back
+// to the camera's current frame, then to the bare outline.
+function aiPreviewFallback(img) {
+  const fallback = img.dataset.fallback;
+  if (fallback && img.getAttribute('src') !== fallback) {
+    img.src = fallback;
+  } else {
+    img.remove();
+  }
+}
+
+// The area drawn over the latest snapshot the AI rejected there, or over
+// the camera's current frame when there is none.
 function aiAreaPreview(item) {
   const area = item.area || {};
   const box = `left:${area.x * 100}%;top:${area.y * 100}%;width:${area.width * 100}%;height:${area.height * 100}%`;
-  const src = item.sample_event_id != null ? `/api/events/${encodeURIComponent(item.sample_event_id)}/snapshot?thumb=1` : '';
-  return `<div class="ai-area-preview">${src ? `<img src="${src}" alt="Latest snapshot the AI rejected there" loading="lazy" onerror="this.remove()" />` : ''}<span class="ai-area-box" style="${box}"></span></div>`;
+  const live = aiCameraFrameUrl(item.camera_id);
+  const src = item.sample_event_id != null ? `/api/events/${encodeURIComponent(item.sample_event_id)}/snapshot?thumb=1` : live;
+  const alt = item.sample_event_id != null ? 'Latest snapshot the AI rejected there' : 'Current camera view';
+  return `<div class="ai-area-preview">${src ? `<img src="${escapeHtml(src)}" data-fallback="${escapeHtml(live)}" alt="${alt}" loading="lazy" />` : ''}<span class="ai-area-box" style="${box}"></span></div>`;
 }
 
 function aiIgnoreAreaRow(item) {
@@ -35,10 +53,12 @@ function aiIgnoredRow(item) {
   const body = JSON.stringify({ camera_id: item.camera_id, zone_id: item.zone_id, index: item.index });
   return `
     <div class="ai-insight-row">
-      ${aiAreaPreview({ area: item })}
+      ${aiAreaPreview({ area: item, camera_id: item.camera_id })}
       <div class="ai-insight-text">
         <strong>${escapeHtml(item.camera_name)} (${escapeHtml(item.zone_name)}): ${escapeHtml(label)} ignored</strong>
-        <p class="muted">${item.source === 'ai' ? 'Added from an AI suggestion.' : 'Added by hand.'}</p>
+        <p class="muted">${item.in_zone === false
+          ? `This spot is now outside the ${escapeHtml(item.zone_name)} area, so it has no effect.`
+          : `${escapeHtml(label)} is not detected inside the outlined spot.`} Also shown on the <a href="/zones">Zones</a> page.</p>
       </div>
       <button type="button" class="secondary" data-ai-unignore="${escapeHtml(body)}">Stop Ignoring</button>
     </div>`;
@@ -125,6 +145,11 @@ aiTuningList?.addEventListener('click', async (clickEvent) => {
     button.disabled = false;
   }
 });
+
+// Image errors do not bubble, so listen in the capture phase.
+aiIgnoreAreasList?.addEventListener('error', (errorEvent) => {
+  if (errorEvent.target instanceof HTMLImageElement) aiPreviewFallback(errorEvent.target);
+}, true);
 
 aiIgnoreAreasList?.addEventListener('click', async (clickEvent) => {
   const ignore = clickEvent.target.closest('[data-ai-ignore]');

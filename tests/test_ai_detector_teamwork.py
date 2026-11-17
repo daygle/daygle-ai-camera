@@ -414,10 +414,10 @@ def test_an_ignore_area_stops_only_that_label_matching_only_inside_it():
     zone = schema.normalize_monitoring_zones([{
         'id': 'yard', 'name': 'Yard', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
         'object_rules': [{'label': 'dog'}, {'label': 'person'}],
-        'ignore_areas': [{'label': 'Dog', 'x': 0.1, 'y': 0.6, 'width': 0.1, 'height': 0.2, 'source': 'ai'},
+        'ignore_areas': [{'label': 'Dog', 'x': 0.1, 'y': 0.6, 'width': 0.1, 'height': 0.2, 'source': 'ai'},  # an old key: dropped
                          {'label': 'cat', 'x': 'bad'}],
     }])[0]
-    assert zone['ignore_areas'] == [{'label': 'dog', 'x': 0.1, 'y': 0.6, 'width': 0.1, 'height': 0.2, 'source': 'ai'}]
+    assert zone['ignore_areas'] == [{'label': 'dog', 'x': 0.1, 'y': 0.6, 'width': 0.1, 'height': 0.2}]
     in_bush = {'label': 'dog', 'box': {'x': 0.12, 'y': 0.65, 'width': 0.04, 'height': 0.04}}
     assert not zd.detection_matches_zone(in_bush, zone)
     assert zd.detection_matches_zone({**in_bush, 'label': 'person'}, zone)
@@ -435,9 +435,15 @@ def test_applying_and_removing_an_ignore_area(monkeypatch):
     area = {'x': 0.1, 'y': 0.6, 'width': 0.1, 'height': 0.2}
     assert insights.apply_ignore_area('cam-1', 'dog', area, None) == 1
     yard = saved[-1][0]['detection']['zones'][0]
-    assert yard['ignore_areas'] == [{'label': 'dog', **area, 'source': 'ai'}]
+    assert yard['ignore_areas'] == [{'label': 'dog', **area}]
     assert 'ignore_areas' not in saved[-1][0]['detection']['zones'][1]  # the area is not in Road
     assert 'ignore_areas' not in saved[-1][0]['detection']['zones'][2]  # Porch has no dog rule
+    listed = insights.ignored_areas()
+    assert [(a['zone_id'], a['index'], a['in_zone']) for a in listed] == [('yard', 0, True)]
+    # Yard redrawn away from the spot: still listed, flagged as having no effect.
+    camera_now = saved[-1][0]
+    camera_now['detection']['zones'][0].update({'x': 0.6, 'width': 0.3})
+    assert insights.ignored_areas()[0]['in_zone'] is False
     assert insights.remove_ignore_area('cam-1', 'yard', 0, None)
     assert saved[-1][0]['detection']['zones'][0]['ignore_areas'] == []
     from fastapi import HTTPException

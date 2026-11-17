@@ -904,7 +904,7 @@ MAX_IGNORE_AREAS_PER_ZONE = 20
 
 
 def normalize_zone_ignore_areas(zone: dict[str, Any]) -> list[dict[str, Any]]:
-    """``[{label, x, y, width, height, source}]`` from ``zone.ignore_areas``:
+    """``[{label, x, y, width, height}]`` from ``zone.ignore_areas``:
     a label (lowercase) and a normalized rectangle clipped to the frame.
     Malformed entries are dropped."""
     raw = zone.get('ignore_areas')
@@ -924,9 +924,8 @@ def normalize_zone_ignore_areas(zone: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         if not label or not all(math.isfinite(v) for v in (x, y, width, height)):
             continue
-        source = 'ai' if str(item.get('source') or '') == 'ai' else 'user'
         areas.append({'label': label, 'x': round(x, 4), 'y': round(y, 4),
-                      'width': round(width, 4), 'height': round(height, 4), 'source': source})
+                      'width': round(width, 4), 'height': round(height, 4)})
         if len(areas) >= MAX_IGNORE_AREAS_PER_ZONE:
             break
     return areas

@@ -321,7 +321,7 @@ function renderEventRow(event) {
   const recordingAction = actions.filter(Boolean).length ? actions.join('') : '<span class="muted">-</span>';
   return `
     <tr class="activity-table-row ${typeClass}" data-event-row="${escapeHtml(String(event.id))}">
-      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}${aiBadge}${falsePositiveBadge(falsePositive)}${reclassifiedBadge(eventReclassified(event), event.detections)}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
+      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}${aiBadge}${falsePositiveBadge(falsePositive)}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
       <td class="activity-cell-camera">${escapeHtml(camera)}</td>
       <td class="activity-cell-detections"><div class="activity-item-badges">${eventPills(event)}${aiTags}${aiTip}</div></td>
       <td class="activity-cell-when">
