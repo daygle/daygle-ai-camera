@@ -403,6 +403,20 @@ def test_persistent_immature_track_that_stepped_across_the_frame_uses_mask():
     assert os.detection_motion_state(jitter, _mask_all_changed(), None) == 'still'
 
 
+def test_slow_age_two_step_uses_the_mask():
+    """A cat walking 2% of the frame per cycle steps past detector jitter but
+    under the one-cycle step threshold. Its second sighting must not be held
+    still regardless of the mask (it blinked off the live view under Moving
+    Only): the mask decides, as on the first sighting. Below the jitter floor
+    the parked-car still bias is unchanged."""
+    slow_cat = {**_det('cat'), 'track_id': 9, 'track_age': 2,
+                'track_prev_center': (0.40, 0.40), 'track_center': (0.42, 0.40)}
+    assert os.classify_motion_state(slow_cat, _mask_changed_inside_box(), None) == ('moving', 'mask')
+    assert os.classify_motion_state(slow_cat, _mask_none_changed(), None) == ('still', 'mask')
+    jitter = {**slow_cat, 'track_center': (0.405, 0.40)}
+    assert os.classify_motion_state(jitter, _mask_all_changed(), None) == ('still', 'track_step')
+
+
 def test_step_without_changed_pixels_is_still():
     """Event 47935: an id swapped between two adjacent parked cars steps across
     the frame too, but nothing in its box changed. The step alone must not

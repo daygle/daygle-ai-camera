@@ -225,6 +225,7 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
             {'state': 'waiting', 'reason': 'No live detection has run yet.'},
         )
     return {
+        'watched_labels': _watched_status_labels(selected_config, status),
         'camera_id': camera_key,
         'camera_name': selected_config.get('name'),
         'ai_backend': ai_state['active_backend'],
@@ -239,6 +240,32 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
         'face_model_loaded': ai_state.get('face_model_loaded', False),
         **status,
     }
+
+
+def _watched_status_labels(settings: dict[str, Any], status: dict[str, Any]) -> list[str]:
+    """The labels in ``status`` this camera watches, for the live page.
+
+    The live overlay and its Vision chips hide objects no rule on the camera
+    cares about (the detector also reports every bench and potted plant). The
+    browser used to rebuild that allow-list itself from the raw rule labels,
+    which missed group rules (a ``pet`` rule never showed the cat it alerted
+    on) and alert-only rules (Record off, delivery on a schedule). The server
+    already answers this question for the detection log with the same matcher
+    the alert engine uses, so the answer is sent with the status instead.
+    """
+    from app.zone_detection import camera_watches_label
+
+    labels: set[str] = set()
+    for detection in status.get('detections') or []:
+        if isinstance(detection, dict):
+            labels.add(str(detection.get('label') or '').strip().lower())
+    labels.update(str(label or '').strip().lower() for label in status.get('detected_labels') or [])
+    labels.discard('')
+    try:
+        return sorted(label for label in labels if camera_watches_label(settings, label))
+    except Exception:  # noqa: BLE001 - a status read must never fail on a malformed camera config
+        logger.debug('Could not resolve watched labels for the live status', exc_info=True)
+        return sorted(labels)
 
 
 def _camera_has_live_alert_stream(settings: dict[str, Any]) -> bool:

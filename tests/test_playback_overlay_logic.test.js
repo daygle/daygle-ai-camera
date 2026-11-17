@@ -357,3 +357,18 @@ test('per-label box colours override the object colour; motion uses its own entr
     sandbox.setOverlayBoxColors({});
   }
 });
+
+
+test('a target between two samples interpolates back along the pair', () => {
+  // The live snapshot on screen can be older than the newest detection
+  // sample; its box belongs where the object was when that frame was taken.
+  const previous = { label: 'cat', box: box(0.2), track_id: 4 };
+  const current = { label: 'cat', box: box(0.4), track_id: 4 };
+  const halfway = sandbox.projectDetections([previous], [current], 1000, 2000, 1500, 2500);
+  assert.ok(Math.abs(halfway[0].box.x - 0.3) < 1e-9);
+  // Exactly on the newest sample, or before both samples: the newest box.
+  assert.equal(sandbox.projectDetections([previous], [current], 1000, 2000, 2000, 2500)[0].box.x, 0.4);
+  assert.equal(sandbox.projectDetections([previous], [current], 1000, 2000, 500, 2500)[0].box.x, 0.4);
+  // Forward projection is unchanged.
+  assert.ok(Math.abs(sandbox.projectDetections([previous], [current], 1000, 2000, 2500, 2500)[0].box.x - 0.5) < 1e-9);
+});

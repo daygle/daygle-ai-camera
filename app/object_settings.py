@@ -144,6 +144,11 @@ _TRACK_DISPLACEMENT_STILL = 0.01
 # available.
 _TRACK_STEP_MOVING = 0.03
 _TRACK_DISPLACEMENT_MIN_AGE = 3
+# A young track's one-cycle step below this is detector jitter on a
+# stationary box (that wobble is well under 1% of the frame, see
+# ``_TRACK_STEP_MOVING``); at or above it the box really moved, and the mask
+# says whether the subject did.
+_TRACK_STEP_MIN_MOVE = _TRACK_DISPLACEMENT_STILL
 # Detector box-size jitter as a fraction of the box's own larger side. Edge
 # jitter grows with the box, so a fixed threshold on an absolute size change is
 # size-dependent: a large parked box (a car close to the lens) crosses it while
@@ -663,8 +668,17 @@ def classify_motion_state(
             # previous one, so without this the second sighting of every walker
             # would be dropped under Moving Only.
             components = _step_components(detection)
-            if components is None or max(components) < _TRACK_STEP_MOVING:
+            # Below the jitter floor the box has not moved: still, whatever
+            # the mask says (the parked-car flap). Between the floor and the
+            # step threshold it has plainly moved, just slowly - a cat walking
+            # at 2% of the frame per cycle - so the mask decides, as it did on
+            # the first sighting. Holding it still dropped a slow subject on
+            # its second sighting under Moving Only: its box blinked off the
+            # live view and a confirmation window had to wait for age 3.
+            if components is None or max(components) < _TRACK_STEP_MIN_MOVE:
                 return MODE_STILL, 'track_step'
+            if max(components) < _TRACK_STEP_MOVING:
+                return _mask_motion_state(detection, diff_mask)
             # A box that GREW or shrank (a subject approaching or receding) is
             # moving, whether or not it also translated. A box that only
             # TRANSLATED is not proof on its own: an id swapped between two
@@ -673,6 +687,12 @@ def classify_motion_state(
             # of changed pixels, a parked car's is not.
             if components[1] >= _TRACK_STEP_MOVING:
                 return MODE_MOVING, 'track_step'
+    return _mask_motion_state(detection, diff_mask)
+
+
+def _mask_motion_state(detection: dict[str, Any], diff_mask: Any) -> tuple[str, str]:
+    """Moving or still from the changed pixels inside the box (see
+    ``classify_motion_state``); ``no_mask`` when no change was measured."""
     if diff_mask is None:
         return MODE_STILL, 'no_mask'
     box = detection.get('box')
@@ -709,6 +729,7 @@ def classify_motion_state(
     except Exception as exc:  # noqa: BLE001  # pragma: no cover - unexpected mask/box shapes
         logger.debug('Unexpected error classifying detection motion state: %s', exc)
         return MODE_STILL, 'mask'
+
 
 def detection_motion_state(
     detection: dict[str, Any],

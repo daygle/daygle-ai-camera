@@ -83,6 +83,13 @@ let selectedCameraHasMotionZones = false;
 const cameraRuntimeFps = {};
 
 let configuredLabels = null;
+// Labels the server says the selected camera watches, from the latest status
+// payload (``watched_labels``). The server resolves them with the matcher the
+// alert engine uses, so umbrella group rules (a ``pet`` rule watches ``cat``),
+// label aliases, alert-only rules and camera allow-lists all agree with what
+// actually alerts and records. ``configuredLabels`` is only the fallback for an
+// older server that does not send the list.
+let serverWatchedLabels = null;
 
 // On by default; users can opt out per-browser via the toggle. The overlay only
 // replays the background monitor's detections (already computed server-side
@@ -99,10 +106,9 @@ let liveAiTrackPrevDetections = null;
 let liveAiTrackCaptureMs = 0;
 let liveAiTrackPrevCaptureMs = 0;
 let liveAiTrackUsesFrameTimestamp = false;
-// Timestamp of the image currently displayed and the performance-clock reading
-// when it loaded. Together they form the source clock for the RAF loop.
+// Capture timestamp (seconds) of the image currently displayed: the source
+// clock the RAF loop places boxes at.
 let liveAiTrackFrameTimestamp = 0;
-let liveAiTrackFramePerformanceMs = 0;
 // updated_at of the last ingested monitor sample, so polling faster than the
 // monitor's detection interval does not re-ingest the same cycle (which would
 // zero out the projection velocity).
@@ -139,13 +145,25 @@ function rebuildConfiguredLabels() {
   };
   for (const zone of (selectedCamera?.detection?.zones || [])) {
     for (const rule of (zone?.object_rules || [])) {
-      if (rule.enabled !== false && (rule.email_enabled === true || rule.push_enabled === true || rule.record_on_detect !== false)) {
+      // Delivery lives on the rule's alert schedules; the rule-level flags are
+      // the legacy shape, still honoured for older saved configs.
+      const delivers = rule.email_enabled === true || rule.push_enabled === true
+        || (rule.alert_schedules || []).some((s) => s?.email_enabled === true || s?.push_enabled === true);
+      if (rule.enabled !== false && (delivers || rule.record_on_detect !== false)) {
         const label = String(rule.label || '').trim().toLowerCase();
         setMin(label, Number(rule.min_confidence ?? 0.5));
       }
     }
   }
   configuredLabels = labels;
+}
+
+// Whether a detected label belongs on the live view (boxes and Vision chips).
+function liveLabelWatched(label) {
+  const key = String(label || '').trim().toLowerCase();
+  if (key === 'motion') return true;
+  if (serverWatchedLabels) return serverWatchedLabels.has(key);
+  return !configuredLabels || configuredLabels.has(key);
 }
 
 function clearLiveOverlay() {
@@ -166,10 +184,15 @@ function drawLiveOverlay() {
   if (!liveAiTrackEnabled || !liveAiTrackDetections?.length) return;
 
   // The image response includes the exact ingest-file capture timestamp. Use
-  // that source clock for both staleness and projection. Falling back to the
-  // browser monotonic clock preserves behaviour against older servers.
-  const sourceNowMs = liveAiTrackFrameTimestamp > 0 && liveAiTrackFramePerformanceMs > 0
-    ? liveAiTrackFrameTimestamp * 1000 + (performance.now() - liveAiTrackFramePerformanceMs)
+  // that source clock for both staleness and projection. The picture is a
+  // still JPEG replaced every snapshot refresh, so boxes are placed at the
+  // moment THAT frame was captured: advancing the clock while the same frame
+  // stays on screen slid every moving box ahead of the frozen picture, then
+  // snapped it back when the next frame loaded. Falling back to the browser
+  // monotonic clock preserves behaviour against older servers (and never
+  // compares an epoch timestamp with performance.now()).
+  const sourceNowMs = liveAiTrackUsesFrameTimestamp && liveAiTrackFrameTimestamp > 0
+    ? liveAiTrackFrameTimestamp * 1000
     : performance.now();
 
   // Drop boxes whose source sample has gone stale (slow/stalled inference) so the
@@ -192,9 +215,7 @@ function drawLiveOverlay() {
     );
   }
 
-  if (configuredLabels) {
-    detections = detections.filter((d) => configuredLabels.has(String(d.label || '').trim().toLowerCase()));
-  }
+  detections = detections.filter((d) => liveLabelWatched(d.label));
   drawDetectionBoxesOnCanvas(liveEls.liveAiTrackCanvas, detections, liveEls.frame);
 }
 
@@ -521,7 +542,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     const label = String(d.label || '').trim().toLowerCase();
     const conf = confidenceFor(d.confidence) ?? confidenceFor(confidenceHints[label]);
     if (!label) continue;
-    if (configuredLabels && !configuredLabels.has(label)) continue;
+    if (!liveLabelWatched(label)) continue;
     if (!confMap.has(label) || (conf != null && (confMap.get(label) == null || conf > confMap.get(label)))) {
       confMap.set(label, conf);
     }
@@ -529,7 +550,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
   for (const label of (payload.detected_labels || [])) {
     const l = String(label || '').trim().toLowerCase();
     const hinted = confidenceFor(confidenceHints[l]);
-    if (l && (!configuredLabels || configuredLabels.has(l))
+    if (l && liveLabelWatched(l)
       && (!confMap.has(l) || (hinted != null && (confMap.get(l) == null || hinted > confMap.get(l))))) {
       confMap.set(l, hinted);
     }
@@ -904,6 +925,9 @@ async function refreshDetectionStatus() {
       api(`/api/status?camera_id=${cameraId}`).catch(() => null),
     ]);
     if (selectedCamera?.id !== requestedCamera?.id || isAllCameraMode()) return;
+    serverWatchedLabels = Array.isArray(payload?.watched_labels)
+      ? new Set(payload.watched_labels.map((label) => String(label || '').trim().toLowerCase()))
+      : null;
     if (streamStatus?.fps) {
       cameraRuntimeFps[requestedCamera.id] = streamStatus.fps;
       updateFrameHeader(requestedCamera);
@@ -1015,6 +1039,7 @@ function setSelectedCamera(cameraId) {
   if (!selectedCamera) return;
   selectedCameraHasMotionZones = cameraHasMotionZones(selectedCamera);
   rebuildConfiguredLabels();
+  serverWatchedLabels = null;
   liveAiTrackDetections = null;
   liveAiTrackPrevDetections = null;
   liveAiTrackCaptureMs = 0;
@@ -1059,7 +1084,6 @@ liveEls.frame.addEventListener('load', () => {
     liveEls.frame.style.setProperty('--live-aspect', `${naturalWidth} / ${naturalHeight}`);
   }
   liveAiTrackFrameTimestamp = Number(liveEls.frame.dataset.frameTimestamp) || 0;
-  liveAiTrackFramePerformanceMs = performance.now();
   revokePreviousLiveFrameUrl();
   if (isZonesPage) syncZoneOverlayToImage(); // syncZoneOverlayToImage defined in zones.js
   liveEls.status.textContent = selectedCamera?.name || 'Camera';
