@@ -879,24 +879,42 @@ window.daygleAuthReady = (async () => {
   // A phone that drops and regains its connection fires no focus event.
   window.addEventListener('online', onReturnToForeground);
 
-  /* ── Retry a failed first check ─────────────────────────────────────
-   * When the page-load /api/auth/me failed (not a 401: that redirects to
-   * /login), keep re-verifying with a backoff until the server answers.
-   * refreshDaygleAuth repaints the nav on success and redirects on a real
-   * 401; a transient failure leaves the state alone for the next attempt. */
+  /* ── Recover a "Sign in" nav that the session doesn't back up ────────
+   * Whenever the nav shows the signed-out state on an app page - the
+   * page-load /api/auth/me failed (a 502 while the app restarts, a dropped
+   * connection), or a session-loss redirect never completed (an
+   * unsaved-changes prompt cancelled it) - keep re-verifying with a backoff
+   * until the server answers. Without this the nav sat at "Sign in" with
+   * every admin group hidden until the window regained focus, which a page
+   * left open on a second screen never does: the first click brought the
+   * menu back, because the click focused the window.
+   * refreshDaygleAuth repaints the nav on a 200 and redirects to /login on a
+   * real 401; a transient failure leaves the state alone for the next try. */
   const AUTH_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
   const AUTH_RETRY_STEADY_MS = 30000;
+  // A redirect to /login normally leaves the page well inside this window;
+  // re-verifying sooner would only repeat the session-loss toast.
+  const AUTH_RETRY_AFTER_LOSS_MS = 5000;
+  let authRecoveryActive = false;
   function retryFailedAuthCheck(attempt = 0) {
-    if (window.daygleAuth?.user?.username || window.daygleAuth?.redirecting) return;
-    if (PUBLIC_AUTH_PATHS.has(window.location?.pathname)) return;
+    if (window.daygleAuth?.user?.username || PUBLIC_AUTH_PATHS.has(window.location?.pathname)) {
+      authRecoveryActive = false;
+      return;
+    }
+    if (attempt === 0) {
+      if (authRecoveryActive) return;
+      authRecoveryActive = true;
+    }
     const delay = AUTH_RETRY_DELAYS_MS[attempt] ?? AUTH_RETRY_STEADY_MS;
     setTimeout(async () => {
-      if (window.daygleAuth?.user?.username || window.daygleAuth?.redirecting) return;
-      if (typeof window.refreshDaygleAuth === 'function') {
+      const lossAge = Date.now() - (window.daygleAuth?.sessionLossAt || 0);
+      const leaving = window.daygleAuth?.redirecting || lossAge < AUTH_RETRY_AFTER_LOSS_MS;
+      if (!window.daygleAuth?.user?.username && !leaving && typeof window.refreshDaygleAuth === 'function') {
         try { await window.refreshDaygleAuth(); } catch { /* retried below */ }
       }
       const user = window.daygleAuth?.user;
       if (user?.username) {
+        authRecoveryActive = false;
         // The first paint applied the default theme for want of a profile.
         const theme = user.theme || 'light';
         if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref(theme);
@@ -906,6 +924,10 @@ window.daygleAuthReady = (async () => {
       retryFailedAuthCheck(attempt + 1);
     }, delay);
   }
+  // renderNavAccount (top level) starts this whenever it paints signed out.
+  window.daygleUi = Object.assign(window.daygleUi || {}, {
+    recoverSignedOutNav: () => retryFailedAuthCheck(),
+  });
   if (daygleInitialAuthFailed && !window.daygleAuth?.user?.username) retryFailedAuthCheck();
 })();
 
@@ -946,6 +968,9 @@ function renderNavAccount(user) {
     }
     if (logoutBtn) logoutBtn.hidden = true;
     if (nav) nav.querySelectorAll('[data-admin="true"]').forEach((el) => { el.hidden = true; });
+    // Signed out is only real if the server agrees: keep re-verifying so a
+    // still-valid session repaints the menu without waiting for a click.
+    window.daygleUi?.recoverSignedOutNav?.();
     return;
   }
   if (navUser) navUser.textContent = user.username;

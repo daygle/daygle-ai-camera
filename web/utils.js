@@ -447,6 +447,9 @@ function handleSessionLoss(reason, returnTo) {
   if (!window.daygleAuth) return;
   if (window.daygleAuth.redirecting) return;
   window.daygleAuth.redirecting = true;
+  // nav.js waits a few seconds after this before re-verifying a "Sign in"
+  // nav, so a normal redirect to /login is not chased by a second one.
+  window.daygleAuth.sessionLossAt = Date.now();
   clearTimeout(window.daygleAuth._refreshTimer);
   if (typeof setApiAuth === 'function') setApiAuth(null, null, null);
   // Broadcast session loss to other open tabs so they don't stay stuck with
