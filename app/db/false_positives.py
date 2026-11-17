@@ -7,7 +7,10 @@ shadow read as a person, a bush read as a dog). Each event row carries:
 * ``false_positive_by``: who decided, ``'ai'`` (the background check in
   app.false_positives) or ``'user'`` (marked on the Events, Snapshots or
   Recordings page);
-* ``false_positive_at`` and ``false_positive_reason``.
+* ``false_positive_at`` and ``false_positive_reason``;
+* ``false_positive_user`` and ``false_positive_role``: for a mark by hand,
+  the username and their role then (``admin`` or ``viewer``). Marks from
+  before roles were stored count as an admin's (only admins could mark).
 
 A user's decision always wins: the AI only ever writes rows that are still
 unjudged, so un-marking an AI false positive sticks.
@@ -48,11 +51,13 @@ def _batched(values: list[int]) -> list[list[int]]:
     return [values[index:index + _SQLITE_BATCH_SIZE] for index in range(0, len(values), _SQLITE_BATCH_SIZE)]
 
 
-def _counts_sql(alias: str, include_ai: bool) -> str:
+def _counts_sql(alias: str, include_ai: bool, include_viewers: bool = True) -> str:
     """SQL true when event ``alias`` counts as a false positive."""
     sql = f'COALESCE({alias}.false_positive, 0) = 1'
     if not include_ai:
         sql += f" AND {alias}.false_positive_by = 'user'"
+    if not include_viewers:
+        sql += f" AND NOT ({alias}.false_positive_by = 'user' AND COALESCE({alias}.false_positive_role, '') = 'viewer')"
     return f'({sql})'
 
 
@@ -75,15 +80,16 @@ def event_false_positive_condition(alias: str, mode: str | None) -> tuple[str, l
     return None
 
 
-def recording_false_positive_condition(alias: str, *, include_ai: bool = True) -> str:
+def recording_false_positive_condition(alias: str, *, include_ai: bool = True, include_viewers: bool = True) -> str:
     """SQL true when recording ``alias`` is a false positive.
 
     At least one linked event counts as a false positive, and no linked
-    event is real, an AI false positive that does not count (``include_ai``
-    off), or unjudged but needing a judgement.
+    event is real, a false positive that does not count (an AI's with
+    ``include_ai`` off, a viewer's with ``include_viewers`` off), or unjudged
+    but needing a judgement.
     """
     link = _LINK.format(r=alias)
-    counts = _counts_sql('e', include_ai)
+    counts = _counts_sql('e', include_ai, include_viewers)
     blocking = f'(e.false_positive IS NOT NULL OR {_needs_judging_sql("e")})'
     return (
         f'(EXISTS (SELECT 1 FROM events e WHERE {link} AND {counts}) '
@@ -109,10 +115,15 @@ def _event_needs_judging(event: dict[str, Any], detections: list[dict[str, Any]]
     )
 
 
+def _viewer_mark(event: dict[str, Any]) -> bool:
+    return event.get('false_positive_by') == 'user' and event.get('false_positive_role') == 'viewer'
+
+
 def recording_false_positive_status(
-    events: list[dict[str, Any]], *, include_ai: bool = True,
+    events: list[dict[str, Any]], *, include_ai: bool = True, include_viewers: bool = True,
 ) -> dict[str, Any] | None:
-    """``{'by': 'user'|'ai'|'mixed', 'reason': ...}`` when the recording whose
+    """``{'by': 'user'|'ai'|'mixed', 'reason': ..., 'users': [...]}`` (who marked
+    it by hand) when the recording whose
     linked ``events`` (each with its ``detections``) these are is a false
     positive, else None. Python twin of recording_false_positive_condition."""
     counted: list[dict[str, Any]] = []
@@ -123,7 +134,8 @@ def recording_false_positive_status(
             continue
         seen.add(key)
         value = event.get('false_positive')
-        counts = value == 1 and (include_ai or event.get('false_positive_by') == 'user')
+        counts = (value == 1 and (include_ai or event.get('false_positive_by') == 'user')
+                  and (include_viewers or not _viewer_mark(event)))
         if counts:
             counted.append(event)
         elif value is not None or _event_needs_judging(event, event.get('detections')):
@@ -134,12 +146,29 @@ def recording_false_positive_status(
     by = sources.pop() if len(sources) == 1 else 'mixed'
     reason = next((str(event.get('false_positive_reason')) for event in counted
                    if event.get('false_positive_reason')), '')
-    return {'by': by, 'reason': reason}
+    users = sorted({str(event['false_positive_user']) for event in counted
+                    if event.get('false_positive_by') == 'user' and event.get('false_positive_user')})
+    return {'by': by, 'reason': reason, 'users': users}
 
 
 def _clean_reason(reason: str | None) -> str | None:
     text = ' '.join(str(reason or '').split())[:MAX_REASON_CHARS]
     return text or None
+
+
+_DECISION_COLUMNS = ('false_positive = ?, false_positive_by = ?, false_positive_at = ?, '
+                     'false_positive_reason = ?, false_positive_user = ?, false_positive_role = ?')
+
+
+def _decision_params(value: bool | None, by: str, at: str | None, reason: str | None,
+                     user: str | None, role: str | None) -> list[Any]:
+    """Values for _DECISION_COLUMNS; who marked it is kept for marks by hand only."""
+    if value is None:
+        return [None] * 6
+    by_hand = by == 'user'
+    return [int(bool(value)), by, _normalize_iso_to_utc(at) if at else None, _clean_reason(reason),
+            (str(user)[:150] or None) if by_hand and user else None,
+            str(role) if by_hand and role in ('admin', 'viewer') else None]
 
 
 def _rows_to_events(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
@@ -183,6 +212,7 @@ class FalsePositivesMixin:
         with self.connect() as db:
             rows = db.execute(
                 """SELECT d.label, d.confidence, d.zone_name, d.ai_status,
+                          d.x, d.y, d.width, d.height, e.id AS event_id, e.created_at,
                           CASE WHEN json_valid(e.metadata)
                                THEN CAST(json_extract(e.metadata, '$.camera_id') AS TEXT) END AS camera_id
                    FROM detections d JOIN events e ON e.id = d.event_id
@@ -307,23 +337,22 @@ class FalsePositivesMixin:
         at: str | None = None,
         reason: str | None = None,
         only_if_unjudged: bool = False,
+        user: str | None = None,
+        role: str | None = None,
     ) -> bool:
         """Mark (True), un-mark (False) or clear (None) one event.
 
         ``only_if_unjudged`` is how the AI writes: it never overrides a
-        decision already made (in particular, a user's).
+        decision already made (in particular, a user's). ``user`` and
+        ``role`` say who marked it by hand.
         """
         if by not in FALSE_POSITIVE_SOURCES:
             raise ValueError(f'by must be one of {FALSE_POSITIVE_SOURCES}')
         condition = 'id = ?' + (' AND false_positive IS NULL' if only_if_unjudged else '')
-        if value is None:
-            params: list[Any] = [None, None, None, None]
-        else:
-            params = [int(bool(value)), by, _normalize_iso_to_utc(at) if at else None, _clean_reason(reason)]
+        params = _decision_params(value, by, at, reason, user, role)
         with self.write_slot(), self.connect() as db:
             cursor = db.execute(
-                'UPDATE events SET false_positive = ?, false_positive_by = ?, false_positive_at = ?, '
-                f'false_positive_reason = ? WHERE {condition}',
+                f'UPDATE events SET {_DECISION_COLUMNS} WHERE {condition}',
                 [*params, int(event_id)],
             )
             return cursor.rowcount > 0
@@ -336,6 +365,8 @@ class FalsePositivesMixin:
         by: str,
         at: str | None = None,
         reason: str | None = None,
+        user: str | None = None,
+        role: str | None = None,
     ) -> int:
         """Apply one decision to every event linked to a recording.
 
@@ -344,14 +375,10 @@ class FalsePositivesMixin:
         """
         if by not in FALSE_POSITIVE_SOURCES:
             raise ValueError(f'by must be one of {FALSE_POSITIVE_SOURCES}')
-        if value is None:
-            params: list[Any] = [None, None, None, None]
-        else:
-            params = [int(bool(value)), by, _normalize_iso_to_utc(at) if at else None, _clean_reason(reason)]
+        params = _decision_params(value, by, at, reason, user, role)
         with self.write_slot(), self.connect() as db:
             cursor = db.execute(
-                'UPDATE events SET false_positive = ?, false_positive_by = ?, false_positive_at = ?, '
-                'false_positive_reason = ? WHERE recording_id = ? '
+                f'UPDATE events SET {_DECISION_COLUMNS} WHERE recording_id = ? '
                 'OR id = (SELECT event_id FROM recordings WHERE id = ?)',
                 [*params, int(recording_id), int(recording_id)],
             )
@@ -406,7 +433,7 @@ class FalsePositivesMixin:
             ).fetchall()
             return self._events_with_detections(db, rows)
 
-    def false_positive_stats(self, since: str, *, include_ai: bool = True,
+    def false_positive_stats(self, since: str, *, include_ai: bool = True, include_viewers: bool = True,
                              older_than: str | None = None) -> dict[str, Any]:
         """Counts for the AI page: false positives by source since ``since``,
         events judged real, and what a purge with ``older_than`` would remove."""
@@ -427,7 +454,8 @@ class FalsePositivesMixin:
                     stats['real'] += int(row['total'])
             if older_than is not None:
                 recordings, events = self._purgeable_false_positive_ids(
-                    db, _normalize_iso_to_utc(older_than) or older_than, include_ai=include_ai, limit=None,
+                    db, _normalize_iso_to_utc(older_than) or older_than, include_ai=include_ai,
+                    include_viewers=include_viewers, limit=None,
                 )
                 stats['purgeable_recordings'] = len(recordings)
                 stats['purgeable_events'] = len(events)
@@ -436,19 +464,20 @@ class FalsePositivesMixin:
     @staticmethod
     def _purgeable_false_positive_ids(
         db: sqlite3.Connection, older_than: str, *, include_ai: bool, limit: int | None,
+        include_viewers: bool = True,
     ) -> tuple[list[int], list[int]]:
         """``(recording_ids, standalone_event_ids)`` a purge would remove."""
         limit_sql = '' if limit is None else f' LIMIT {max(1, int(limit))}'
         recording_ids = [int(row['id']) for row in db.execute(
             f"""SELECT r.id FROM recordings r
                 WHERE r.ended_at < ? AND r.source != 'upload'
-                  AND {recording_false_positive_condition('r', include_ai=include_ai)}
+                  AND {recording_false_positive_condition('r', include_ai=include_ai, include_viewers=include_viewers)}
                 ORDER BY r.started_at ASC, r.id ASC{limit_sql}""",
             [older_than],
         ).fetchall()]
         event_ids = [int(row['id']) for row in db.execute(
             f"""SELECT e.id FROM events e
-                WHERE e.created_at < ? AND {_counts_sql('e', include_ai)}
+                WHERE e.created_at < ? AND {_counts_sql('e', include_ai, include_viewers)}
                   AND NOT EXISTS (SELECT 1 FROM recordings r WHERE {_LINK.format(r='r')})
                 ORDER BY e.created_at ASC, e.id ASC{limit_sql}""",
             [older_than],
@@ -456,7 +485,7 @@ class FalsePositivesMixin:
         return recording_ids, event_ids
 
     def purge_false_positives(
-        self, *, older_than: str, include_ai: bool = True, limit: int = 500,
+        self, *, older_than: str, include_ai: bool = True, include_viewers: bool = True, limit: int = 500,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Delete false-positive recordings and events older than ``older_than``.
 
@@ -470,7 +499,7 @@ class FalsePositivesMixin:
         older_than = _normalize_iso_to_utc(older_than) or older_than
         with self.write_slot(), self.connect() as db:
             recording_ids, standalone_ids = self._purgeable_false_positive_ids(
-                db, older_than, include_ai=include_ai, limit=limit,
+                db, older_than, include_ai=include_ai, include_viewers=include_viewers, limit=limit,
             )
             recordings: list[dict[str, Any]] = []
             event_ids: list[int] = list(standalone_ids)

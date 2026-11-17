@@ -243,8 +243,15 @@ test('false-positive badge and button render for the right users and states', ()
   assert.match(badge, /False Positive · AI/);
   assert.match(badge, /person: a coat/);
   assert.equal(run(sandbox, 'falsePositiveBadge(null)'), '');
+  // A mark by hand names who made it (escaped); older marks read "User".
+  const byViewer = run(sandbox, "eventFalsePositive({ false_positive: 1, false_positive_by: 'user', false_positive_user: 'sam<b>' })");
+  assert.match(run(sandbox, `falsePositiveBadge(${JSON.stringify(byViewer)})`), /False Positive · sam&lt;b&gt;/);
+  assert.match(run(sandbox, "falsePositiveBadge({ by: 'user', reason: '' })"), /False Positive · User/);
+  assert.match(run(sandbox, "falsePositiveBadge({ by: 'mixed', reason: '', users: ['alex'] })"), /False Positive · AI \+ alex/);
+  run(sandbox, 'window.daygleAuth = {}');
+  assert.equal(run(sandbox, "falsePositiveButton('event', 5, false)"), '', 'no button before sign-in');
   run(sandbox, "window.daygleAuth = { user: { role: 'viewer' } }");
-  assert.equal(run(sandbox, "falsePositiveButton('event', 5, false)"), '', 'viewers get no button');
+  assert.match(run(sandbox, "falsePositiveButton('event', 5, false)"), /data-false-positive-value="true"/, 'viewers can mark');
   run(sandbox, "window.daygleAuth = { user: { role: 'admin' } }");
   const mark = run(sandbox, "falsePositiveButton('event', 5, false)");
   assert.match(mark, /data-false-positive-value="true"/);
@@ -253,20 +260,6 @@ test('false-positive badge and button render for the right users and states', ()
   assert.match(unmark, /data-false-positive-kind="recording"/);
   assert.match(unmark, /data-false-positive-value="false"/);
   assert.match(unmark, />Not False Positive</);
-});
-
-test('a reclassified object keeps its original label visible, and never on a false positive', () => {
-  const sandbox = createSandbox();
-  const event = { false_positive: 0, metadata: { ai_false_positive_check: { reclassified: { dog: 'cat' } } } };
-  const found = run(sandbox, `eventReclassified(${JSON.stringify(event)})`);
-  assert.equal(found.dog, 'cat');
-  const badge = run(sandbox, `reclassifiedBadge(${JSON.stringify(found)})`);
-  assert.match(badge, /Reclassified from Dog/);
-  assert.match(badge, /saw Cat and reclassified it/);
-  assert.equal(Object.keys(run(sandbox, `eventReclassified(${JSON.stringify({ ...event, false_positive: 1 })})`)).length, 0);
-  const recording = { events: [event, { metadata: {} }] };
-  assert.equal(run(sandbox, `recordingReclassified(${JSON.stringify(recording)})`).dog, 'cat');
-  assert.equal(run(sandbox, 'reclassifiedBadge({})'), '');
 });
 
 test('each detection shows the AI verdict, and a clip shows its strongest one per label', () => {

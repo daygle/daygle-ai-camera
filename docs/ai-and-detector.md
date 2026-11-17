@@ -50,6 +50,13 @@ gets its check in the same model request. The image is the slow part of a
 request, so this roughly halves the model time per event and the verdict
 arrives with the description instead of later.
 
+Alert events are covered too: with the false-positive check on, alert
+verification asks what a rejected object is from every detector class (after
+the zone's own rule labels), so its answer settles the false-positive check
+and the event is not sent to the model again. Only labels with an alert rule
+in the zone ever raise a relabelled alert; the other classes only label the
+detection.
+
 ## AI tags as evidence
 
 When an event's tags name a class of the same kind as a detection but not
@@ -71,6 +78,21 @@ different kinds in one picture (a dog and a car) contradict nothing.
   needs at least 12 judged detections in the last 14 days, at least 5 below
   the new value, 75% of those rejected, and at most 20% of the confirmed
   ones lost; it picks the lowest value that drops the most rejections.
+- **Ignore Areas.** Places in a camera's view where the AI keeps rejecting
+  one label (a bush the detector reads as a dog). A suggestion needs at
+  least 6 rejections clustered in one part of the frame, with at most one
+  confirmation there (or 10% of the rejections), inside a zone that has a
+  rule for that label. It shows the latest rejected snapshot with the area
+  outlined. **Ignore Area** stops that label matching inside the area in the
+  zones that contain it; other labels, and the rest of the zone, are
+  unaffected. A real object of that label there is missed too, so check the
+  picture first (when the snapshot is gone, the camera's current view is
+  shown instead). Areas in force are listed under the suggestions with
+  **Stop Ignoring**. On the Zones page the selected zone shows its ignored
+  spots as red dashed boxes, listed under the zone with a × to remove one;
+  they are kept when the zone is edited. A spot left outside the zone after
+  it is redrawn has no effect and is marked "outside area". Admins can also
+  review and apply these from the phone app (Settings → AI Insights).
 - **Frequent AI Tags.** Objects the AI named on at least 3 events in the
   last 7 days that the detector has no class for and no AI tag alert on that
   camera watches yet, with a link to set one up on the Zones page.
@@ -78,7 +100,9 @@ different kinds in one picture (a dog and a car) contradict nothing.
 ## AI near-miss check
 
 **Settings → Detection → AI Near-Miss Check** (off by default; needs
-**Second Look** and the AI model server). When Second Look still rejects a
+**Second Look** and the AI model server). A camera's **day or night
+profile** can turn it on or off for that camera alone, e.g. only on the
+dark cameras where the detector misses people at night. When Second Look still rejects a
 near-miss (a real person at night that the detector scores at 40% even
 zoomed in), the crop is shown to the AI model in the background:
 

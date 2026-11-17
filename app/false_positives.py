@@ -49,6 +49,9 @@ DEFAULT_FALSE_POSITIVE_SETTINGS: dict[str, Any] = {
     # Whether the purge deletes AI-marked false positives too, or only the
     # ones a user marked.
     'purge_include_ai': True,
+    # Whether the purge deletes false positives a viewer marked, or only
+    # those an admin (or the AI) marked.
+    'purge_include_viewers': True,
 }
 MIN_PURGE_AFTER_HOURS = 1
 MAX_PURGE_AFTER_HOURS = 24 * 30
@@ -127,7 +130,7 @@ def validate_false_positive_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise _bad(f'Unknown false-positive setting: {", ".join(unknown)}.')
     settings = {**effective_false_positive_settings(), **payload}
     settings = {key: settings[key] for key in DEFAULT_FALSE_POSITIVE_SETTINGS}
-    for key in ('ai_check', 'purge_enabled', 'purge_include_ai'):
+    for key in ('ai_check', 'purge_enabled', 'purge_include_ai', 'purge_include_viewers'):
         settings[key] = _as_bool(settings[key], key)
     hours = settings['purge_after_hours']
     if isinstance(hours, bool) or not isinstance(hours, int) or not (
@@ -175,23 +178,51 @@ def _reused_verdicts(event: dict[str, Any], labels: list[str]) -> dict[str, dict
     """Answers alert verification already got for these labels that settle them.
 
     A confirmation, or a rejection that named what the object is instead,
-    is reused. A bare rejection is asked again: alert verification may have
-    offered no relabel choices (a zone with no other rules), so its "no"
-    cannot tell a misread animal from an empty scene.
+    is reused. A bare rejection is reused only when alert verification
+    offered every detector class (``asked_instead``, see
+    widen_relabel_candidates); otherwise it may have offered no choices (a
+    zone with no other rules), so its "no" cannot tell a misread animal from
+    an empty scene and is asked again.
     """
     verification = (event.get('metadata') or {}).get('ai_verification') or {}
     answers = verification.get('labels') if isinstance(verification, dict) else None
+    asked_instead = isinstance(verification, dict) and verification.get('asked_instead') is True
     reused: dict[str, dict[str, Any]] = {}
     for label in labels:
         answer = (answers or {}).get(label) if isinstance(answers, dict) else None
         if not isinstance(answer, dict) or not isinstance(answer.get('present'), bool):
             continue
         instead = str(answer.get('instead') or '').strip().lower()
-        if answer['present'] is False and not instead:
+        if answer['present'] is False and not instead and not asked_instead:
             continue
         reused[label] = {'present': answer['present'], 'reason': str(answer.get('reason') or ''),
                          'reused': True, **({'instead': instead} if instead else {})}
     return reused
+
+
+def widen_relabel_candidates(
+    candidates: dict[str, list[str]], labels: list[str],
+) -> tuple[dict[str, list[str]], bool]:
+    """Alert verification's relabel choices (the zone's rule labels) plus
+    every detector class, when the AI false-positive check is on.
+
+    Returns ``(candidates, widened)``. The rule labels stay first; a class a
+    verified group already covers (``cat`` for an ``animal`` rule) is not
+    offered. With the check off the candidates are returned unchanged.
+    """
+    from app.zone_schema import label_matches
+
+    if not effective_false_positive_settings().get('ai_check'):
+        return candidates, False
+    widened: dict[str, list[str]] = {}
+    for label in labels:
+        names = list((candidates or {}).get(label) or [])
+        for name in REAL_OBJECT_CANDIDATES:
+            if name in names or name == label or label_matches(name, label) or label_matches(label, name):
+                continue
+            names.append(name)
+        widened[label] = names
+    return widened, True
 
 
 def _relabel_candidates(labels: list[str], hints: dict[str, str] | None = None) -> dict[str, list[str]]:
@@ -621,9 +652,10 @@ def purge_false_positives_by_policy(*, force: bool = False) -> dict[str, Any]:
 
     cutoff = _purge_cutoff(settings)
     include_ai = bool(settings.get('purge_include_ai', True))
+    include_viewers = bool(settings.get('purge_include_viewers', True))
     while True:
         recordings, events = database.purge_false_positives(
-            older_than=cutoff, include_ai=include_ai, limit=PURGE_BATCH,
+            older_than=cutoff, include_ai=include_ai, include_viewers=include_viewers, limit=PURGE_BATCH,
         )
         for recording in recordings:
             path = safe_storage_path(recording.get('file_path'), roots=('recordings_dir',))
@@ -648,6 +680,7 @@ def false_positive_stats(days: int = 7) -> dict[str, Any]:
     settings = effective_false_positive_settings()
     since = (datetime.now(UTC) - timedelta(days=max(1, int(days)))).isoformat()
     stats = _state.database.false_positive_stats(
-        since, include_ai=bool(settings.get('purge_include_ai', True)), older_than=_purge_cutoff(settings),
+        since, include_ai=bool(settings.get('purge_include_ai', True)),
+        include_viewers=bool(settings.get('purge_include_viewers', True)), older_than=_purge_cutoff(settings),
     )
     return {'days': int(days), **stats}

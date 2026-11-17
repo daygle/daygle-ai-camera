@@ -18,7 +18,7 @@ from app.ai_verification import (
     validate_ai_verification_settings,
     verification_stats,
 )
-from app.ai_insights import apply_min_confidence, insights
+from app.ai_insights import apply_ignore_area, apply_min_confidence, insights, remove_ignore_area
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.deps import get_apply_cameras_settings, get_database
@@ -128,4 +128,44 @@ def apply_ai_insight(
         'rules': changed, 'via': 'ai_insights',
     })
     return {'rules_changed': changed}
+
+
+@router.post('/api/settings/ai-insights/ignore-area')
+def apply_ai_ignore_area(
+    request: Request,
+    db=Depends(get_database),
+    apply_cameras_settings=Depends(get_apply_cameras_settings),
+    payload: dict[str, Any] = Depends(admin_json_object),
+):
+    """Ignore one label in an area of a camera's zones (an AI Insights suggestion)."""
+    require_admin(request)
+    camera_id, label = payload.get('camera_id'), payload.get('label')
+    if not isinstance(camera_id, str) or not isinstance(label, str):
+        raise HTTPException(status_code=400, detail='camera_id and label must be strings.')
+    changed = apply_ignore_area(camera_id, label, payload.get('area'), apply_cameras_settings)
+    write_audit_log(request, db, 'update', 'settings.cameras', details={
+        'camera_id': camera_id, 'label': label, 'area': payload.get('area'), 'zones': changed,
+        'via': 'ai_insights.ignore_area',
+    })
+    return {'zones_changed': changed}
+
+
+@router.post('/api/settings/ai-insights/ignore-area/remove')
+def remove_ai_ignore_area(
+    request: Request,
+    db=Depends(get_database),
+    apply_cameras_settings=Depends(get_apply_cameras_settings),
+    payload: dict[str, Any] = Depends(admin_json_object),
+):
+    """Stop ignoring an area (by camera, zone and the area's position in the zone)."""
+    require_admin(request)
+    camera_id, zone_id = payload.get('camera_id'), payload.get('zone_id')
+    if not isinstance(camera_id, str) or not isinstance(zone_id, str):
+        raise HTTPException(status_code=400, detail='camera_id and zone_id must be strings.')
+    remove_ignore_area(camera_id, zone_id, payload.get('index'), apply_cameras_settings)
+    write_audit_log(request, db, 'update', 'settings.cameras', details={
+        'camera_id': camera_id, 'zone_id': zone_id, 'index': payload.get('index'),
+        'via': 'ai_insights.ignore_area_remove',
+    })
+    return {'ok': True}
 

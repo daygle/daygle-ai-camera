@@ -236,9 +236,16 @@ function aiVerificationInfo(record) {
   return null;
 }
 
+// A plain "Verified" repeats what the ✓ after each object already says, so
+// it is left out when every object carries the AI's ✓ (or 🔄). Filtered and
+// Unverified always show: they explain what happened to the notification.
 function aiVerificationBadge(event) {
   const info = aiVerificationInfo((event.metadata || {}).ai_verification);
   if (!info) return '';
+  if (info.kind === 'verified') {
+    const objects = (event.detections || []).filter((d) => d && d.label && d.label !== 'motion');
+    if (objects.length && objects.every((d) => d.ai_status === 'confirmed' || d.ai_status === 'reclassified')) return '';
+  }
   const tip = escapeHtml(`${info.summary}${info.details ? ` ${info.details}.` : ''}`.replace(/\.\.$/, '.'));
   return `<span class="detection detection-ai-${info.kind}">🤖 ${info.text}</span>`
     + `<span class="info-tip ai-verdict-tip" data-tip="${tip}" title="${tip}" tabindex="0" role="note" aria-label="AI verification: ${tip}"></span>`;
@@ -314,7 +321,7 @@ function renderEventRow(event) {
   const recordingAction = actions.filter(Boolean).length ? actions.join('') : '<span class="muted">-</span>';
   return `
     <tr class="activity-table-row ${typeClass}" data-event-row="${escapeHtml(String(event.id))}">
-      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}${aiBadge}${falsePositiveBadge(falsePositive)}${reclassifiedBadge(eventReclassified(event))}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
+      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}${aiBadge}${falsePositiveBadge(falsePositive)}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
       <td class="activity-cell-camera">${escapeHtml(camera)}</td>
       <td class="activity-cell-detections"><div class="activity-item-badges">${eventPills(event)}${aiTags}${aiTip}</div></td>
       <td class="activity-cell-when">

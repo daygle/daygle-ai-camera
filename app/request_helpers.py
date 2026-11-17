@@ -19,7 +19,7 @@ from urllib.parse import parse_qs
 from fastapi import HTTPException, Path, Request
 
 from app.auth import utc_now
-from app.auth_gates import _request_ip, require_admin
+from app.auth_gates import _request_ip, require_admin, require_user
 from app.database import EventDatabase
 
 # Pre-auth form cap (see ``form_data``): generous ceiling for a login/setup
@@ -193,6 +193,15 @@ async def read_json_object(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Request body must be a JSON object.')
     return payload
+
+
+async def user_json_object(request: Request) -> dict[str, Any]:
+    """FastAPI dependency: any signed-in user, then the JSON-object body.
+
+    The :func:`admin_json_object` counterpart for write routes viewers may use.
+    """
+    require_user(request)
+    return await read_json_object(request)
 
 
 async def admin_json_object(request: Request) -> dict[str, Any]:

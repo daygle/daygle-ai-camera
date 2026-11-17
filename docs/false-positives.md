@@ -15,12 +15,18 @@ False Positives**.
 
 ## Marking by hand
 
-Admins see a **False Positive** button on each object event (Events page),
-each object snapshot (Snapshots page) and each recording with detections
-(Recordings page).
+Every signed-in user (admins and viewers) sees a **False Positive** button on
+each object event (Events page), each object snapshot (Snapshots page) and
+each recording with detections (Recordings page). In the phone app, long-press
+an Events row. Every mark is stored with who made it (their username and
+whether they were an admin or a viewer) and written to the audit log. A
+viewer's mark can lead to deletion, so **Purge Viewer-Marked** (below) can
+leave viewers' marks alone; the purge settings and **Purge Now** stay
+admin-only.
 
-- **False Positive** marks it. The row shows a **🚫 False Positive · User**
-  badge.
+- **False Positive** marks it. The row shows a **🚫 False Positive · sam**
+  badge naming who marked it (marks from before names were stored read
+  **User**).
 - On a marked row the button reads **Not False Positive**. It records the
   detection as real, so the AI check leaves it alone from then on.
 - Marking a **recording** marks every event in that clip.
@@ -43,7 +49,9 @@ verification: *is a real one actually visible?*
   dog): the event is **reclassified**. Its detection becomes `cat`, its
   recording gains the `cat` label (and loses `dog` unless another event in
   the clip saw a dog), and a recording triggered by the dog now says cat.
-  A **🔄 Reclassified from Dog** badge keeps the original visible. It is
+  The 🔄 mark after the Cat pill keeps the original visible (hover or tap it
+  for "detected as Dog"); events from before per-detection verdicts show a
+  **🔄 Reclassified from Dog** badge instead. It is
   recorded as real and **never purged**.
 - **A real animal or vehicle the detector has no class for**: recorded as
   real, with the label left as it is.
@@ -111,6 +119,10 @@ ones first.
   deleted with its snapshot.
 - **Purge AI-Marked** chooses whether AI-marked false positives are purged
   too, or only those a user marked.
+- **Purge Viewer-Marked** chooses whether false positives a viewer marked are
+  purged too, or only those an admin (or the AI) marked. A clip a viewer
+  marked is then kept until an admin marks it too. Marks from before roles
+  were stored count as an admin's.
 - Uploaded clips are never purged.
 - **Purge Now** runs the purge at once, even with purging off. The Purge
   After delay still applies.
@@ -133,8 +145,8 @@ Use **Only** to review what the purge will delete.
 | `GET` / `PUT` | `/api/settings/false-positives` | Settings (admin). |
 | `GET` | `/api/settings/false-positives/stats?days=7` | Counts (admin). |
 | `POST` | `/api/settings/false-positives/purge` | Purge now (admin). |
-| `POST` | `/api/events/{id}/false-positive` | Body `{"false_positive": true \| false \| null}` (admin). `null` clears the decision. |
-| `POST` | `/api/recordings/{id}/false-positive` | Same body; applies to every event in the clip (admin). |
+| `POST` | `/api/events/{id}/false-positive` | Body `{"false_positive": true \| false \| null}`. `null` clears the decision. Any signed-in user. |
+| `POST` | `/api/recordings/{id}/false-positive` | Same body; applies to every event in the clip. Any signed-in user. |
 
 `/api/events`, `/api/snapshots` and `/api/recordings` take
 `false_positive=only` or `false_positive=hide`. Events carry

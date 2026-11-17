@@ -898,6 +898,39 @@ def _strict_hhmm(value: Any) -> str | None:
     return text if text and re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', text) else None
 
 
+# Areas inside a zone where one label is ignored (app.ai_insights suggests
+# them where the AI keeps rejecting that label, e.g. a bush read as a dog).
+MAX_IGNORE_AREAS_PER_ZONE = 20
+
+
+def normalize_zone_ignore_areas(zone: dict[str, Any]) -> list[dict[str, Any]]:
+    """``[{label, x, y, width, height}]`` from ``zone.ignore_areas``:
+    a label (lowercase) and a normalized rectangle clipped to the frame.
+    Malformed entries are dropped."""
+    raw = zone.get('ignore_areas')
+    if not isinstance(raw, list):
+        return []
+    areas: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get('label') or '').strip().lower()
+        try:
+            x = max(0.0, min(1.0, float(item.get('x'))))
+            y = max(0.0, min(1.0, float(item.get('y'))))
+            width = max(0.01, min(1.0 - x, float(item.get('width'))))
+            height = max(0.01, min(1.0 - y, float(item.get('height'))))
+        except (TypeError, ValueError):
+            continue
+        if not label or not all(math.isfinite(v) for v in (x, y, width, height)):
+            continue
+        areas.append({'label': label, 'x': round(x, 4), 'y': round(y, 4),
+                      'width': round(width, 4), 'height': round(height, 4)})
+        if len(areas) >= MAX_IGNORE_AREAS_PER_ZONE:
+            break
+    return areas
+
+
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     if not isinstance(zones, list):
@@ -995,5 +1028,9 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
         ai_tags = normalize_zone_ai_tags(zone)
         if ai_tags is not None:
             entry['ai_tags'] = ai_tags
+        # Optional areas where one label is ignored (app.ai_insights).
+        ignore_areas = normalize_zone_ignore_areas(zone)
+        if ignore_areas:
+            entry['ignore_areas'] = ignore_areas
         normalized.append(entry)
     return normalized

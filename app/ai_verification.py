@@ -1577,11 +1577,22 @@ def _verify_and_forward(
         # Relabels raise alerts through the camera's presence gate, which a
         # job without a camera cannot reach.
         candidates = relabel_candidates(triggered, labels, rules) if camera_id is not None else {}
+        # With the false-positive check on, also ask what a rejected object
+        # is from every detector class, so this answer settles that check
+        # too and the event needs no second request. Only rule labels ever
+        # raise a relabelled alert (relabel_alerts matches the zone's rules).
+        from app.false_positives import widen_relabel_candidates
+
+        asked_instead = False
+        if camera_id is not None:
+            candidates, asked_instead = widen_relabel_candidates(candidates, labels)
         record, described = verify_and_describe_event(
             event, labels, settings, camera_name=camera_name,
             content=alert_content if alert_content != 'off' else None, camera_id=camera_id,
             candidates=candidates or None,
         )
+        if asked_instead:
+            record['asked_instead'] = True
         model_unavailable = bool(record.pop('_model_unavailable', False))
         rejected = {label for label, result in record['labels'].items() if result.get('present') is False}
         kept = [

@@ -1,7 +1,9 @@
 """False Positives APIRouter (app.false_positives).
 
-Marking changes what the purge may delete, so it is admin-only, like
-deleting an event or recording. A body of ``{"false_positive": true}``
+Any signed-in user (admins and viewers) may mark an event or recording;
+every mark is audit-logged and stored with who made it (username and role),
+so the purge can leave viewers' marks alone (``purge_include_viewers``). The settings, stats and
+purge stay admin-only. A body of ``{"false_positive": true}``
 marks, ``false`` says the detection was real (the AI check then leaves it
 alone), and ``null`` clears the decision.
 """
@@ -13,7 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.auth import utc_now
-from app.auth_gates import require_admin
+from app.auth_gates import require_admin, require_user
 from app.deps import get_database
 from app.false_positives import (
     SETTINGS_KEY,
@@ -22,7 +24,7 @@ from app.false_positives import (
     purge_false_positives_by_policy,
     validate_false_positive_settings,
 )
-from app.request_helpers import DbRowId, admin_json_object, write_audit_log
+from app.request_helpers import DbRowId, admin_json_object, user_json_object, write_audit_log
 
 router = APIRouter()
 
@@ -42,6 +44,7 @@ def _decision(payload: dict[str, Any]) -> tuple[bool | None, str | None]:
 def _event_payload(event: dict[str, Any]) -> dict[str, Any]:
     return {key: event.get(key) for key in (
         'id', 'false_positive', 'false_positive_by', 'false_positive_at', 'false_positive_reason',
+        'false_positive_user', 'false_positive_role',
     )}
 
 
@@ -80,11 +83,12 @@ def purge_false_positives_now(request: Request, db=Depends(get_database)):
 
 @router.post('/api/events/{event_id}/false-positive')
 def mark_event_false_positive(event_id: DbRowId, request: Request, db=Depends(get_database),
-                              payload: dict[str, Any] = Depends(admin_json_object)):
+                              payload: dict[str, Any] = Depends(user_json_object)):
     """Mark an event (or its snapshot) as a false positive, real, or undecided."""
-    require_admin(request)
+    user = require_user(request)
     value, reason = _decision(payload)
-    if not db.set_event_false_positive(event_id, value, by='user', at=utc_now(), reason=reason):
+    if not db.set_event_false_positive(event_id, value, by='user', at=utc_now(), reason=reason,
+                                       user=user.get('username'), role=user.get('role')):
         raise HTTPException(status_code=404, detail='Event not found')
     write_audit_log(request, db, 'false_positive', 'event', event_id, details={'false_positive': value})
     return _event_payload(db.get_event(event_id) or {'id': event_id})
@@ -92,14 +96,15 @@ def mark_event_false_positive(event_id: DbRowId, request: Request, db=Depends(ge
 
 @router.post('/api/recordings/{recording_id}/false-positive')
 def mark_recording_false_positive(recording_id: DbRowId, request: Request, db=Depends(get_database),
-                                  payload: dict[str, Any] = Depends(admin_json_object)):
+                                  payload: dict[str, Any] = Depends(user_json_object)):
     """Apply one decision to every event in a recording."""
-    require_admin(request)
+    user = require_user(request)
     value, reason = _decision(payload)
     recording = db.get_recording(recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail='Recording not found')
-    changed = db.set_recording_false_positive(recording_id, value, by='user', at=utc_now(), reason=reason)
+    changed = db.set_recording_false_positive(recording_id, value, by='user', at=utc_now(), reason=reason,
+                                              user=user.get('username'), role=user.get('role'))
     if not changed:
         raise HTTPException(status_code=409, detail='This recording has no detections to mark.')
     write_audit_log(request, db, 'false_positive', 'recording', recording_id,

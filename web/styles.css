@@ -246,7 +246,6 @@
 :root.light .detection-ai-mark-reclassified { background: rgba(14,116,144,.10); color: #0e7490; }
 :root.light .detection-ai-mark-rejected { background: rgba(220,38,38,.10); color: #b91c1c; }
 :root.light .detection-ai-mark-unsure { background: rgba(217,119,6,.10); color: #92400e; }
-.detection.detection-reclassified { background: rgba(14,116,144,.08); color: #0e7490; border: 1px dashed rgba(14,116,144,.45); }
 :root.light .detection.detection-false-positive { background: rgba(190,24,93,.08); color: #9d174d; border: 1px dashed rgba(190,24,93,.45); }
 :root.light .detection.detection-face { background: rgba(217,119,6,.14); color: #b45309; border-color: rgba(217,119,6,.35); font-weight: 800; }
 :root.light .detection.detection-face-unknown { background: rgba(219,39,119,.12); color: #be185d; border-color: rgba(219,39,119,.35); font-weight: 800; }
@@ -550,7 +549,6 @@ textarea {
 .detection.detection-ai-filtered { background: rgba(148, 163, 184, 0.14); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.4); }
 .detection.detection-ai-verified { background: rgba(34, 197, 94, 0.12); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.35); }
 .detection.detection-ai-unverified { background: rgba(251, 191, 36, 0.08); color: #fcd34d; border: 1px dashed rgba(251, 191, 36, 0.45); }
-.detection.detection-reclassified { background: rgba(34, 211, 238, 0.08); color: #67e8f9; border: 1px dashed rgba(34, 211, 238, 0.45); }
 .detection.detection-false-positive { background: rgba(244, 114, 182, 0.10); color: #f9a8d4; border: 1px dashed rgba(244, 114, 182, 0.5); }
 .activity-item-type-row .ai-verdict-tip { align-self: center; }
 .detection.detection-face { background: rgba(251, 191, 36, 0.14); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4); }
@@ -8054,3 +8052,40 @@ main:has(#liveCameraEmpty:not([hidden])) .live-controls-card { display: none; }
 .ai-insight-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
 .ai-insight-row p { margin: 4px 0 0; }
 .ai-insight-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+/* Icon-only row actions (Recordings: Delete, Play): square, same height as
+   the labelled buttons. The name is in title / aria-label. */
+.activity-item-action.activity-item-action-icon { padding-left: 0; padding-right: 0; width: 34px; justify-content: center; }
+.ai-area-preview { position: relative; flex: 0 0 160px; width: 160px; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #111; }
+.ai-area-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ai-area-box { position: absolute; border: 2px solid #f87171; background: rgba(248, 113, 113, 0.18); border-radius: 3px; }
+.ai-insight-text { flex: 1 1 240px; min-width: 0; }
+
+/* Ignore areas (AI Insights) on the selected zone in the Zones editor. */
+.zone-ignore-area {
+  position: absolute;
+  display: none;
+  border: 1.5px dashed var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-radius: 4px;
+  pointer-events: none;
+}
+.zone-ignore-area.selected { display: block; }
+.zone-ignore-area.is-stale { border-color: var(--muted); background: transparent; }
+.zone-ignore-area > span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(7,11,19,.72);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.zone-ignore-areas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.zone-ignore-title { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.zone-ignore-chip { display: inline-flex; align-items: center; gap: 4px; }
+.zone-ignore-chip.is-stale { opacity: .7; }
+.zone-ignore-chip button { border: 0; background: transparent; color: inherit; padding: 0 2px; min-height: 0; cursor: pointer; font-size: 14px; line-height: 1; }

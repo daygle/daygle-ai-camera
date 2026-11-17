@@ -863,47 +863,26 @@ function aiDescriptionTip(text) {
 // a recording reports { by, reason } when it counts as one.
 function eventFalsePositive(event) {
   if (!event || Number(event.false_positive) !== 1) return null;
-  return { by: event.false_positive_by || 'user', reason: event.false_positive_reason || '' };
+  const by = event.false_positive_by || 'user';
+  const users = by === 'user' && event.false_positive_user ? [String(event.false_positive_user)] : [];
+  return { by, reason: event.false_positive_reason || '', users };
 }
 
 function falsePositiveBadge(record) {
   if (!record) return '';
-  const who = record.by === 'ai' ? 'AI' : record.by === 'mixed' ? 'AI + user' : 'User';
+  // Marks by hand name who made them (servers that store it); older marks read "User".
+  const users = Array.isArray(record.users) ? record.users.filter(Boolean).map(String) : [];
+  const people = users.length ? users.join(', ') : 'User';
+  const who = record.by === 'ai' ? 'AI' : record.by === 'mixed' ? `AI + ${users.length ? people : 'user'}` : people;
   const summary = record.by === 'ai'
     ? 'The AI model judged this a false positive.'
     : record.by === 'mixed'
       ? 'The AI model and a user marked these detections as false positives.'
-      : 'Marked as a false positive by a user.';
+      : `Marked as a false positive by ${users.length ? people : 'a user'}.`;
   const reason = String(record.reason || '').trim();
   const tip = escapeHtml(`${summary}${reason ? ` ${reason}` : ''}`);
-  return `<span class="detection detection-false-positive" title="${tip}">🚫 False Positive · ${who}</span>`
+  return `<span class="detection detection-false-positive" title="${tip}">🚫 False Positive · ${escapeHtml(who)}</span>`
     + (reason ? `<span class="info-tip" data-tip="${tip}" title="${tip}" tabindex="0" role="note" aria-label="False positive: ${tip}"></span>` : '');
-}
-
-// Labels the AI reclassified (app/false_positives.py), detected label to
-// the real one, e.g. { dog: 'cat' } for a cat the detector called a dog.
-// The event's detections already carry the corrected label; this keeps the
-// original visible. Such footage held something real, so it is never a
-// false positive. Empty once a user has marked the event one anyway.
-function eventReclassified(event) {
-  if (!event || Number(event.false_positive) === 1) return {};
-  const found = ((event.metadata || {}).ai_false_positive_check || {}).reclassified;
-  return found && typeof found === 'object' ? found : {};
-}
-
-// The same for a recording, across every event in the clip.
-function recordingReclassified(recording) {
-  const events = [...(recording?.events || []), ...(recording?.event ? [recording.event] : [])];
-  return Object.assign({}, ...events.map(eventReclassified));
-}
-
-function reclassifiedBadge(found) {
-  return Object.entries(found || {}).map(([label, name]) => {
-    const detected = titleCase(String(label).replace(/_/g, ' '));
-    const real = titleCase(String(name || '').replace(/_/g, ' '));
-    const tip = escapeHtml(`The detector reported ${detected}; the AI model saw ${real} and reclassified it. Something real was there, so this is not a false positive.`);
-    return `<span class="detection detection-reclassified" title="${tip}" aria-label="${tip}">🔄 Reclassified from ${escapeHtml(detected)}</span>`;
-  }).join('');
 }
 
 // The AI's verdict on one detection (detections.ai_status, written by alert
@@ -940,11 +919,11 @@ function recordingLabelVerdict(recording, label) {
   return found[0] || null;
 }
 
-// The admin toggle on an event, snapshot or recording row. ``marked`` is
+// The toggle on an event, snapshot or recording row, for any signed-in user. ``marked`` is
 // whether it is a false positive now; the button offers the other choice
 // ("Not False Positive" records it as real, so the AI leaves it alone).
 function falsePositiveButton(kind, id, marked) {
-  if (window.daygleAuth?.user?.role !== 'admin') return '';
+  if (!window.daygleAuth?.user) return '';
   const label = marked ? 'Not False Positive' : 'False Positive';
   const icon = marked
     ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
@@ -2379,7 +2358,7 @@ window.daygleUi = {
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
   detectionPill, motionPill, formatMotionFraction, motionFractionOf, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON,
   aiDescriptionTip, eventFalsePositive, falsePositiveBadge, falsePositiveButton, bindFalsePositiveButtons,
-  eventReclassified, recordingReclassified, reclassifiedBadge, aiDetectionMark, recordingLabelVerdict,
+  aiDetectionMark, recordingLabelVerdict,
   // Face-identity pills + filters (recordings + snapshots)
   DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,

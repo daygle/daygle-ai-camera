@@ -522,14 +522,16 @@ function recordingRowHtml(recording) {
   const markable = Boolean(recording.event_id != null || (recording.events || []).length);
   const actions = [
     markable ? falsePositiveButton('recording', recording.id, Boolean(falsePositive)) : '',
-    `<button class="secondary activity-item-action activity-item-action-delete" data-delete-recording="${recording.id}" type="button" aria-label="Delete recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg><span class="activity-action-label">Delete</span></button>`,
+    // Delete and Play are icon-only (their names are in the title and
+    // aria-label) so the actions column fits the table at desktop width.
+    `<button class="secondary activity-item-action activity-item-action-icon activity-item-action-delete" data-delete-recording="${recording.id}" type="button" title="Delete" aria-label="Delete recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg></button>`,
     mediaReady
-      ? `<button class="secondary activity-item-action activity-item-action-play" data-play-recording="${recording.id}" type="button" aria-label="Play recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Play</span></button>`
-      : '<button class="secondary activity-item-action" disabled aria-label="Preparing recording"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="activity-action-label">Preparing...</span></button>',
+      ? `<button class="secondary activity-item-action activity-item-action-icon activity-item-action-play" data-play-recording="${recording.id}" type="button" title="Play" aria-label="Play recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg></button>`
+      : '<button class="secondary activity-item-action activity-item-action-icon" disabled title="Preparing..." aria-label="Preparing recording"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>',
   ];
   return `
     <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
-      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${typeLabel}</span>${falsePositiveBadge(falsePositive)}${falsePositive ? '' : reclassifiedBadge(recordingReclassified(recording))}</div><span class="activity-cell-ref">Recording #${recording.id}</span></td>
+      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${typeLabel}</span>${falsePositiveBadge(falsePositive)}</div><span class="activity-cell-ref">Recording #${recording.id}</span></td>
       <td class="activity-cell-camera">${escapeHtml(recordingCameraName(recording))}</td>
       <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}${aiTagPills(recording.ai_labels)}${recordingDescriptionTip(recording)}</div></td>
       <td class="activity-cell-zone">${zoneCell}</td>

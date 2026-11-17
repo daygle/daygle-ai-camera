@@ -210,11 +210,14 @@
         <div class="settings-section-icon" aria-hidden="true">💡</div>
         <div>
           <h2>AI Insights</h2>
-          <p class="settings-section-subtitle">Suggestions from what the AI model said about your detections. A minimum confidence the model keeps disagreeing with can be raised here; objects the model keeps naming can become an AI tag alert on the <a href="/zones">Zones</a> page.</p>
+          <p class="settings-section-subtitle">Suggestions from what the AI model said about your detections. A minimum confidence the model keeps disagreeing with can be raised here, a spot where it keeps saying an object is not there can be ignored, and objects the model keeps naming can become an AI tag alert on the <a href="/zones">Zones</a> page.</p>
         </div>
       </div>
       <h3 class="ai-insights-heading">Minimum Confidence</h3>
       <div id="aiTuning" class="ai-insights-list"><span class="muted">Loading…</span></div>
+      <h3 class="ai-insights-heading">Ignore Areas</h3>
+      <p class="muted ai-page-note">Places where the AI keeps saying an object is not there (a bush read as a dog). Ignoring one stops that label being detected inside the area, in that zone only; other labels are unaffected. Check the picture first: a real object there would be missed too.</p>
+      <div id="aiIgnoreAreas" class="ai-insights-list"><span class="muted">Loading…</span></div>
       <h3 class="ai-insights-heading">Frequent AI Tags</h3>
       <div id="aiFrequentTags" class="ai-insights-list"><span class="muted">Loading…</span></div>
     </section>
@@ -227,7 +230,7 @@
         <div class="settings-section-icon" aria-hidden="true">🚫</div>
         <div>
           <h2>False Positives</h2>
-          <p class="settings-section-subtitle">A false positive is a detection of something that was not really there, such as a shadow read as a person. The model above can check every object event and mark the false ones, and admins can mark (or un-mark) any event, snapshot or recording from the <a href="/events">Events</a>, <a href="/snapshots">Snapshots</a> and <a href="/recordings">Recordings</a> pages. False positives can then be purged automatically to save space.</p>
+          <p class="settings-section-subtitle">A false positive is a detection of something that was not really there, such as a shadow read as a person. The model above can check every object event and mark the false ones, and any signed-in user can mark (or un-mark) any event, snapshot or recording from the <a href="/events">Events</a>, <a href="/snapshots">Snapshots</a> and <a href="/recordings">Recordings</a> pages. False positives can then be purged automatically to save space.</p>
         </div>
       </div>
       <p id="fpStats" class="muted" aria-live="polite"></p>
@@ -252,6 +255,12 @@
           <select name="purge_include_ai">
             <option value="true">Yes, AI and user marked</option>
             <option value="false">No, only user marked</option>
+          </select></label>
+        <label>
+          <span>Purge Viewer-Marked <span class="info-tip" data-tip="Whether the purge deletes false positives a viewer account marked, or only those an admin (or the AI) marked. Each mark shows who made it. Default: Yes" title="Whether the purge deletes false positives a viewer account marked, or only those an admin (or the AI) marked. Default: Yes" tabindex="0" aria-label="Help: Whether the purge deletes false positives a viewer account marked, or only those an admin (or the AI) marked. Default: Yes"></span></span>
+          <select name="purge_include_viewers">
+            <option value="true">Yes, viewer marks too</option>
+            <option value="false">No, only admin marked</option>
           </select></label>
         <fieldset class="ai-verification-cameras">
           <legend>AI Check Cameras <span class="info-tip" data-tip="Cameras whose events the AI checks. None ticked = all cameras." title="Cameras whose events the AI checks. None ticked = all cameras." tabindex="0" aria-label="Help: Cameras whose events the AI checks. None ticked = all cameras."></span></legend>

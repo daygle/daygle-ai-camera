@@ -714,6 +714,54 @@ function renderTripwireOverlay(zone, index) {
   `;
 }
 
+// Ignore areas (added from AI Insights, app/ai_insights.py): inside one, the
+// zone does not match its label. The server keeps them on every save; here
+// they are drawn on the selected zone and can be removed. An area whose
+// centre fell outside the zone after the zone was redrawn has no effect.
+function zoneIgnoreAreas(zone) {
+  return Array.isArray(zone.ignore_areas) ? zone.ignore_areas : [];
+}
+
+function pointInZone(zone, x, y) {
+  const points = zone.points || [];
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const a = points[i];
+    const b = points[j];
+    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+function ignoreAreaInZone(zone, area) {
+  return pointInZone(zone, Number(area.x) + Number(area.width) / 2, Number(area.y) + Number(area.height) / 2);
+}
+
+function ignoreAreaName(area) {
+  return titleCase(String(area.label || '').replace(/_/g, ' '));
+}
+
+// Drawn for every zone, shown only for the selected one (updateSelectionStyles).
+function renderIgnoreAreaBoxes(zone, index) {
+  const selected = index === selectedZoneIndex ? ' selected' : '';
+  return zoneIgnoreAreas(zone).map((area) => {
+    const stale = !ignoreAreaInZone(zone, area);
+    const box = `left:${area.x * 100}%;top:${area.y * 100}%;width:${area.width * 100}%;height:${area.height * 100}%`;
+    return `<span class="zone-ignore-area${stale ? ' is-stale' : ''}${selected}" data-zone-index="${index}" style="${box}" title="${escapeHtml(`${ignoreAreaName(area)} ignored here${stale ? ' (outside this area: no effect)' : ''}`)}"><span>${escapeHtml(ignoreAreaName(area))}</span></span>`;
+  }).join('');
+}
+
+function renderIgnoreAreaList(zone, index) {
+  const areas = zoneIgnoreAreas(zone);
+  if (!areas.length) return '';
+  const chips = areas.map((area, areaIndex) => {
+    const stale = !ignoreAreaInZone(zone, area);
+    const name = escapeHtml(ignoreAreaName(area));
+    return `<span class="chip zone-ignore-chip${stale ? ' is-stale' : ''}" title="${stale ? 'This spot is now outside the area, so it has no effect' : `${name} is not detected inside this spot`}">${name}${stale ? ' · outside area' : ''}<button type="button" data-remove-ignore-area="${index}:${areaIndex}" aria-label="Stop ignoring ${name} in this spot" title="Stop ignoring">×</button></span>`;
+  }).join('');
+  return `<div class="zone-ignore-areas"><span class="zone-ignore-title">Ignored spots</span>${chips}</div>`;
+}
+
 function renderZoneBox(zone, index) {
   const selected = index === selectedZoneIndex ? ' selected' : '';
   const points = zone.points.map((point) => `${point.x * 100},${point.y * 100}`).join(' ');
@@ -747,12 +795,13 @@ function renderZoneBox(zone, index) {
     </span>
     ${handles}
     ${addPointHandles}
+    ${renderIgnoreAreaBoxes(zone, index)}
     ${renderTripwireOverlay(zone, index)}
   `;
 }
 
 function updateSelectionStyles() {
-  liveEls.zoneOverlay?.querySelectorAll('.monitor-zone-polygon, .zone-label').forEach((element) => {
+  liveEls.zoneOverlay?.querySelectorAll('.monitor-zone-polygon, .zone-label, .zone-ignore-area').forEach((element) => {
     element.classList.toggle('selected', Number(element.dataset.zoneIndex) === selectedZoneIndex);
   });
   liveEls.zoneList?.querySelectorAll('[data-select-zone]').forEach((row) => {
@@ -1257,6 +1306,7 @@ function renderZones() {
           </button>
         </div>
       </div>
+      ${renderIgnoreAreaList(zone, index)}
     </div>
   `;
   }).join('');
@@ -1936,6 +1986,18 @@ function bindZoneControls(zones) {
       zones[index].enabled = checkbox.checked;
       renderZones();
       refreshFrame();
+      markZoneUnsaved();
+    });
+  });
+  document.querySelectorAll('[data-remove-ignore-area]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const [zoneIndex, areaIndex] = button.dataset.removeIgnoreArea.split(':').map(Number);
+      const areas = zoneIgnoreAreas(zones[zoneIndex]);
+      areas.splice(areaIndex, 1);
+      if (!areas.length) delete zones[zoneIndex].ignore_areas;
+      selectedZoneIndex = zoneIndex;
+      renderZones();
       markZoneUnsaved();
     });
   });

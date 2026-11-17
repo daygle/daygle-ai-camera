@@ -93,7 +93,7 @@ def test_recording_is_a_false_positive_when_its_object_events_are(db):
     _event(db, [MOTION], recording_id=recording_id)
     assert db.get_recording(recording_id)['false_positive'] is None
     db.set_event_false_positive(person, True, by='ai', reason='person: a coat on a hook')
-    assert db.get_recording(recording_id)['false_positive'] == {'by': 'ai', 'reason': 'person: a coat on a hook'}
+    assert db.get_recording(recording_id)['false_positive'] == {'by': 'ai', 'reason': 'person: a coat on a hook', 'users': []}
 
 
 @pytest.mark.parametrize('blocker', ['unjudged_object', 'real', 'alerted_motion'])
@@ -479,6 +479,27 @@ def test_api_marks_lists_and_purges(tmp_path, monkeypatch):
         status, _h, body = client.request('/api/settings/false-positives/purge', method='POST', headers=headers)
         assert status == 200 and body['recordings_purged'] == 1 and body['events_purged'] == 1
         assert database.get_recording(recording_id) is None and database.get_event(event_id) is None
+
+        # Viewers may mark (audit-logged as them) but not change the
+        # settings, read the stats or purge.
+        status, _h, _body = client.request('/api/users', method='POST', headers=headers,
+                                           json_body={'username': 'viewer1', 'password': 'Viewer123!', 'role': 'viewer'})
+        assert status == 200
+        viewer = LocalClient(base_url)
+        viewer_headers = {'X-CSRF-Token': _login(viewer, 'viewer1', 'Viewer123!')}
+        other_event = _event(database, [PERSON], snapshot=None)
+        status, _h, body = viewer.request(f'/api/events/{other_event}/false-positive', method='POST',
+                                          headers=viewer_headers, json_body={'false_positive': True})
+        assert status == 200 and body['false_positive'] == 1 and body['false_positive_by'] == 'user'
+        assert (body['false_positive_user'], body['false_positive_role']) == ('viewer1', 'viewer')
+        logged = database.list_audit_logs(username='viewer1', action='false_positive')
+        assert [entry['resource_id'] for entry in logged] == [str(other_event)]
+        for path, method in (('/api/settings/false-positives', 'PUT'),
+                             ('/api/settings/false-positives/stats', 'GET'),
+                             ('/api/settings/false-positives/purge', 'POST')):
+            status, _h, _body = viewer.request(path, method=method, headers=viewer_headers,
+                                               json_body={} if method != 'GET' else None)
+            assert status == 403, path
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -493,3 +514,47 @@ def test_periodic_purge_only_runs_when_enabled(fp, db, monkeypatch):
     settings['purge_enabled'] = True
     assert fp.purge_false_positives_by_policy()['recordings_purged'] == 1
     assert db.get_recording(recording_id) is None
+
+
+def test_marks_by_hand_name_who_made_them_and_viewer_marks_can_be_kept(fp, db, monkeypatch):
+    viewer_clip = _recording(db)
+    viewer_event = _event(db, [PERSON], recording_id=viewer_clip)
+    admin_clip = _recording(db)
+    _event(db, [PERSON], recording_id=admin_clip)
+    old_clip = _recording(db)
+    old_event = _event(db, [PERSON], recording_id=old_clip)
+    lone_event = _event(db, [PERSON])
+    db.set_event_false_positive(viewer_event, True, by='user', user='sam', role='viewer')
+    db.set_recording_false_positive(admin_clip, True, by='user', user='alex', role='admin')
+    db.set_event_false_positive(old_event, True, by='user')  # a mark from before roles were stored
+    db.set_event_false_positive(lone_event, True, by='user', user='sam', role='viewer')
+    event = db.get_event(viewer_event)
+    assert (event['false_positive_user'], event['false_positive_role']) == ('sam', 'viewer')
+    assert db.get_recording(admin_clip)['false_positive']['users'] == ['alex']
+    assert db.get_recording(old_clip)['false_positive']['users'] == []
+    # The AI never records a person, and clearing a mark forgets who made it.
+    db.set_event_false_positive(viewer_event, None, by='user', user='sam', role='viewer')
+    assert db.get_event(viewer_event)['false_positive_user'] is None
+    db.set_event_false_positive(viewer_event, True, by='ai', user='sam', role='viewer')
+    assert db.get_event(viewer_event)['false_positive_user'] is None
+    db.set_event_false_positive(viewer_event, True, by='user', user='sam', role='viewer')
+
+    settings = {**fp.DEFAULT_FALSE_POSITIVE_SETTINGS, 'purge_enabled': True, 'purge_include_viewers': False}
+    monkeypatch.setattr(fp, 'effective_false_positive_settings', lambda: dict(settings))
+    stats = fp.false_positive_stats()
+    assert (stats['purgeable_recordings'], stats['purgeable_events']) == (2, 0)
+    result = fp.purge_false_positives_by_policy()
+    assert (result['recordings_purged'], result['events_purged']) == (2, 2)
+    assert db.get_recording(viewer_clip) is not None and db.get_event(lone_event) is not None
+    assert db.get_recording(admin_clip) is None and db.get_recording(old_clip) is None
+    settings['purge_include_viewers'] = True
+    result = fp.purge_false_positives_by_policy()
+    assert (result['recordings_purged'], result['events_purged']) == (1, 2)
+
+
+def test_viewer_purge_setting_is_validated(fp):
+    from fastapi import HTTPException
+
+    assert fp.validate_false_positive_settings({'purge_include_viewers': 'false'})['purge_include_viewers'] is False
+    with pytest.raises(HTTPException):
+        fp.validate_false_positive_settings({'purge_include_viewers': 'maybe'})
