@@ -6960,11 +6960,32 @@ button.secondary:disabled, a.secondary:disabled {
    A fixed left sidebar (brand, primary pages, collapsible groups, account at
    the bottom) with the page using the full remaining width, in the style of
    an admin console. On phones the sidebar becomes a slide-in drawer behind a
-   slim top bar. nav.js adds body.has-sidebar, so pages without the nav
-   (login, setup) keep their centred layout. */
+   slim top bar. App pages carry body.has-sidebar (in their HTML, and nav.js
+   adds it too), so pages without the nav (login, setup) keep their centred
+   layout. */
 :root { --sidebar-w: 220px; --topbar-h: 56px; }
 
 body.has-sidebar { padding-left: var(--sidebar-w); background: var(--bg); }
+
+/* No flash of the old layout: every page's <body> already carries
+   has-sidebar, so the first paint uses this layout. Until nav.js has built
+   the sidebar (and the section tabs and breadcrumb), draw its empty frame
+   and hold the page content back; nav.js then adds .nav-ready. The 1s
+   animation shows the content anyway if nav.js never gets there. */
+body.has-sidebar:not(.nav-ready)::before {
+  content: '';
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 60;
+  width: var(--sidebar-w);
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+body.has-sidebar:not(.nav-ready) > main {
+  visibility: hidden;
+  animation: daygle-nav-reveal 0s linear 1s forwards;
+}
+@keyframes daygle-nav-reveal { to { visibility: visible; } }
 
 .app-nav {
   position: fixed;
@@ -7236,6 +7257,16 @@ body.has-sidebar .stats-grid .card strong { font-size: 26px; margin-top: 6px; }
 /* Phones and narrow tablets: slim top bar + slide-in drawer. */
 @media (max-width: 900px) {
   body.has-sidebar { padding-left: 0; }
+  /* The pending frame is the top bar here, in flow like the real one. */
+  body.has-sidebar:not(.nav-ready)::before {
+    position: sticky;
+    top: 0;
+    display: block;
+    width: auto;
+    height: var(--topbar-h);
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
   .app-nav { position: sticky; inset: auto; top: 0; width: auto; height: var(--topbar-h); border-right: 0; border-bottom: 1px solid var(--border); }
   .app-topbar { display: flex; align-items: center; gap: 10px; height: var(--topbar-h); padding: 0 12px; }
   .app-nav-toggle {

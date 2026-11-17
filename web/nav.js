@@ -230,7 +230,10 @@ window.daygleAuthReady = (async () => {
 })();
 
 (async function () {
-  if (document.querySelector('.app-nav')) return;
+  if (document.querySelector('.app-nav')) {
+    document.body.classList.add('nav-ready');
+    return;
+  }
   const currentPath = window.location.pathname;
   const nav = document.createElement('nav');
   nav.className = 'app-nav';
@@ -469,6 +472,9 @@ window.daygleAuthReady = (async () => {
     eyebrow.textContent = ownerGroup ? `${ownerGroup.label} › ${ownerLink.label}` : '';
     eyebrow.hidden = !ownerGroup;
   }
+  // Sidebar, tabs and breadcrumb are in place: show the page (styles.css
+  // holds <main> back until now so the layout never visibly rebuilds).
+  document.body.classList.add('nav-ready');
 
   /* ── Group collapse ── */
   nav.querySelectorAll('.nav-group-trigger').forEach((trigger) => {

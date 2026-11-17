@@ -3,7 +3,7 @@
 // page still reachable.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -65,4 +65,16 @@ test('every section tab shows an icon beside its text', () => {
   assert.ok(sectionTabs.length >= 15);
   for (const match of sectionTabs) assert.ok(match[2], `${match[1]} has no icon`);
   assert.match(nav, /<span class="page-tab-icon" aria-hidden="true">\$\{tab\.icon\}<\/span>/);
+});
+
+test('pages paint in the sidebar layout before nav.js runs (no old-layout flash)', () => {
+  const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');
+  for (const file of readdirSync(webDir).filter((name) => name.endsWith('.html'))) {
+    assert.match(readFileSync(path.join(webDir, file), 'utf8'), /<body class="has-sidebar">/, file);
+  }
+  const navSource = readFileSync(path.join(webDir, 'nav.js'), 'utf8');
+  assert.match(navSource, /document\.body\.classList\.add\('nav-ready'\)/);
+  const styles = readFileSync(path.join(webDir, 'styles.css'), 'utf8');
+  assert.match(styles, /body\.has-sidebar:not\(\.nav-ready\) > main \{\s*visibility: hidden;\s*animation: daygle-nav-reveal 0s linear 1s forwards;/);
+  assert.match(styles, /@keyframes daygle-nav-reveal \{ to \{ visibility: visible; \} \}/);
 });
