@@ -152,6 +152,28 @@ def _rows_to_events(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
 class FalsePositivesMixin:
     """Mark, find and purge false positives (see the module docstring)."""
 
+    @staticmethod
+    def reopen_unasked_ai_false_positives(db: sqlite3.Connection) -> int:
+        """Return AI false positives judged without the relabel question to undecided.
+
+        Early AI checks only asked "is it really a <label>?", so a cat the
+        detector read as a dog was marked a false positive and could be
+        purged. Those verdicts (no ``asked_instead`` on their check record)
+        are cleared: an undecided object event is never purged, and recent
+        ones are checked again with the question. Users' marks are kept.
+        Idempotent; runs on every ``init()``.
+        """
+        cursor = db.execute(
+            """UPDATE events
+               SET false_positive = NULL, false_positive_by = NULL,
+                   false_positive_at = NULL, false_positive_reason = NULL
+               WHERE false_positive = 1 AND false_positive_by = 'ai'
+                 AND (CASE WHEN json_valid(metadata)
+                      THEN json_extract(metadata, '$.ai_false_positive_check.asked_instead')
+                      ELSE NULL END) IS NULL"""
+        )
+        return int(cursor.rowcount)
+
     def set_event_false_positive(
         self,
         event_id: int,

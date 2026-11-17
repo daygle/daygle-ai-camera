@@ -32,8 +32,17 @@ With **AI Check All Object Events** on, the vision model from the
 background. For each detected object it is asked the same question as alert
 verification: *is a real one actually visible?*
 
-- **Every object rejected**: the event is marked **🚫 False Positive · AI**.
+- **Nothing real there** (every object rejected, and the model names no
+  real thing instead): the event is marked **🚫 False Positive · AI**.
   Hover or tap the ⓘ beside the badge to see the model's reasons.
+- **Something real, under the wrong label** (a cat the detector read as a
+  dog): the event is marked **🔄 Looks like a cat**. Something real was
+  there, so it is recorded as real and **never purged**. The real name
+  (`cat`) is added to the recording as an AI tag, so the Recordings label
+  filter and search find it. For each rejected object the model is asked
+  what it is instead: a person, a cat, dog, bird, horse, sheep, cow, bear,
+  deer or fox, a car, truck, bus, motorcycle or bicycle, or "another
+  animal" / "another vehicle".
 - **Any object confirmed**: the event is recorded as real.
 - **Unsure** (too dark, blurry or small to tell): recorded as real, so it is
   never purged. An event with more objects than one check covers (three) is
@@ -45,8 +54,10 @@ How it runs:
 - **It never delays alerts.** It only starts while the AI queue is idle. It
   gives the model up to alerts, searches and tests, the same way background
   descriptions do.
-- **It reuses alert verification.** When an alert was already verified, the
-  answers for those objects are reused and not asked again.
+- **It reuses alert verification.** When an alert was already verified, a
+  confirmation, or a rejection that said what the object really is, is reused
+  and not asked again. A bare "no" from alert verification is asked again with
+  the "what is it instead" question.
 - **A user decision always wins.** The AI only marks events nobody has marked.
 - **What is checked:** live camera events with a snapshot and at least one
   object, from the last 24 hours, newest first. Motion, face and sound events
@@ -56,8 +67,12 @@ How it runs:
 - **When the model is down,** checking stops and starts again on its next
   15-second round. Events are not lost; they wait.
 - The verdict is stored in the event metadata as `ai_false_positive_check`
-  (status, each object's answer and reason, model, time). Every AI false
-  positive is logged on the **AI Log** page.
+  (status, each object's answer and reason, `misidentified` for a misread
+  object, model, time). Every AI false positive and misidentified object is
+  logged on the **AI Log** page.
+- **Upgrading:** AI false positives recorded before the check asked what an
+  object really is are returned to undecided on start-up, so they are not
+  purged. Ones from the last 24 hours are checked again.
 
 ## Recordings
 

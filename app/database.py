@@ -552,6 +552,10 @@ class EventDatabase(
             db.executescript('\n'.join(AUDIT_LOG_IMMUTABLE_TRIGGERS.values()))
             # Full-text index over AI event descriptions (app.db.descriptions).
             self.ensure_event_description_index(db)
+            # AI false positives from before the check asked what a rejected
+            # object really is may be misread animals: make them undecided
+            # (never purged) again. Resolved through MRO (FalsePositivesMixin).
+            self.reopen_unasked_ai_false_positives(db)
 
         # Run checkpoint/optimize on a fresh autocommit connection. Doing this
         # inside the schema/backfill transaction can make a passive checkpoint

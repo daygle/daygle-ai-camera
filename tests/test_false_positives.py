@@ -214,13 +214,16 @@ class FakeVerifier:
     def __init__(self, answers):
         self.answers = answers
         self.asked = []
+        self.candidates = {}
 
-    def ask(self, _image, label, _camera='', **_kw):
+    def ask(self, _image, label, _camera='', candidates=None, **_kw):
         self.asked.append(label)
+        self.candidates[label] = candidates
         return self.answers[label]
 
-    def check(self, _image, labels, _camera='', **_kw):
+    def check(self, _image, labels, _camera='', candidates=None, **_kw):
         self.asked.extend(labels)
+        self.candidates.update(candidates or {})
         return {label: self.answers[label] for label in labels}, None
 
 
@@ -253,13 +256,80 @@ def test_check_keeps_events_with_a_real_or_unclear_object(fp, db, answers, statu
     assert db.get_event(event['id'])['false_positive'] == value
 
 
-def test_check_reuses_alert_verification_answers(fp, db):
-    metadata = {'camera_id': 'cam-1', 'ai_verification': {'labels': {'person': {'present': False, 'reason': 'a coat'}}}}
+def test_check_reuses_settled_alert_verification_answers(fp, db):
+    # A confirmation, or a rejection that named what it is, settles a label;
+    # a bare "no" is asked again with the "what is it instead" question.
+    metadata = {'camera_id': 'cam-1', 'ai_verification': {'labels': {
+        'person': {'present': True, 'reason': 'a person'},
+        'car': {'present': False, 'reason': 'a shed'},
+    }}}
     event = db.get_event(_event(db, [PERSON, CAR], hours_ago=1, metadata=metadata))
-    verifier = FakeVerifier({'car': (False, 'a shed')})
+    verifier = FakeVerifier({'car': (False, 'a shed', None)})
     record = fp.check_event(event, _settings(), verifier=verifier)
     assert verifier.asked == ['car']
-    assert record['status'] == 'false_positive' and record['labels']['person']['reused']
+    assert record['status'] == 'real' and record['labels']['person']['reused']
+
+
+def test_alert_verifications_relabel_is_reused_as_misidentified(fp, db):
+    metadata = {'camera_id': 'cam-1', 'ai_verification': {'labels': {
+        'dog': {'present': False, 'reason': 'a cat', 'instead': 'cat'},
+    }}}
+    dog = {**PERSON, 'label': 'dog'}
+    event = db.get_event(_event(db, [dog], hours_ago=1, metadata=metadata))
+    verifier = FakeVerifier({})
+    record = fp.check_event(event, _settings(), verifier=verifier)
+    assert verifier.asked == []
+    assert record['status'] == 'misidentified' and record['misidentified'] == {'dog': 'cat'}
+
+
+def test_a_cat_detected_as_a_dog_is_misidentified_never_a_false_positive(fp, db):
+    recording_id = _recording(db)
+    dog = {**PERSON, 'label': 'dog'}
+    event_id = _event(db, [dog], hours_ago=1, recording_id=recording_id)
+    event = db.get_event(event_id)
+    verifier = FakeVerifier({'dog': (False, 'it is a cat', 'cat')})
+    record = fp.check_event(event, _settings(), verifier=verifier)
+    # The model is offered what it might be instead, never the label itself.
+    assert 'cat' in verifier.candidates['dog'] and 'dog' not in verifier.candidates['dog']
+    assert record['status'] == 'misidentified'
+    assert record['reason'] == 'Looks like a cat, not a dog.'
+    assert fp.store_check(event_id, record, event=event)
+    stored = db.get_event(event_id)
+    assert (stored['false_positive'], stored['false_positive_by']) == (0, 'ai')
+    assert stored['false_positive_reason'] == 'Misidentified: Looks like a cat, not a dog.'
+    assert stored['metadata']['ai_false_positive_check']['misidentified'] == {'dog': 'cat'}
+    # The real name is searchable on the recording, and nothing is purged.
+    assert 'cat' in db.get_recording(recording_id)['ai_labels']
+    assert db.get_recording(recording_id)['false_positive'] is None
+    assert db.purge_false_positives(older_than=_iso(0)) == ([], [])
+
+
+def test_misidentified_wins_over_another_rejected_label(fp, db):
+    dog = {**PERSON, 'label': 'dog'}
+    event = db.get_event(_event(db, [dog, CAR], hours_ago=1))
+    verifier = FakeVerifier({'dog': (False, 'a fox', 'fox'), 'car': (False, 'a shed', None)})
+    record = fp.check_event(event, _settings(), verifier=verifier)
+    assert record['status'] == 'misidentified' and record['misidentified'] == {'dog': 'fox'}
+
+
+def test_misidentified_reason_reads_naturally(fp):
+    assert fp.misidentified_reason({'dog': 'cat'}) == 'Looks like a cat, not a dog.'
+    assert fp.misidentified_reason({'person': 'another animal'}) == 'Looks like another animal, not a person.'
+    assert fp.misidentified_reason({'cat': 'owl'}) == 'Looks like an owl, not a cat.'
+
+
+def test_upgrade_reopens_ai_false_positives_judged_without_the_relabel_question(db):
+    old_ai = _event(db, [PERSON], metadata={'ai_false_positive_check': {'status': 'false_positive'}})
+    db.set_event_false_positive(old_ai, True, by='ai', reason='person: a coat')
+    new_ai = _event(db, [PERSON], metadata={'ai_false_positive_check': {'status': 'false_positive',
+                                                                       'asked_instead': True}})
+    db.set_event_false_positive(new_ai, True, by='ai')
+    user = _event(db, [PERSON])
+    db.set_event_false_positive(user, True, by='user')
+    db.init()
+    assert db.get_event(old_ai)['false_positive'] is None
+    assert db.get_event(new_ai)['false_positive'] == 1
+    assert db.get_event(user)['false_positive'] == 1
 
 
 def test_check_never_calls_more_objects_than_it_can_ask_a_false_positive(fp, db, monkeypatch):

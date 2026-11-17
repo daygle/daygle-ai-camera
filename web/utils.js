@@ -880,6 +880,32 @@ function falsePositiveBadge(record) {
     + (reason ? `<span class="info-tip" data-tip="${tip}" title="${tip}" tabindex="0" role="note" aria-label="False positive: ${tip}"></span>` : '');
 }
 
+// What the AI found a misread object really is (app/false_positives.py), e.g.
+// { dog: 'cat' } for a cat the detector called a dog. Such footage held
+// something real, so it is never a false positive. Empty once a user has
+// marked the event a false positive anyway.
+function eventMisidentified(event) {
+  if (!event || Number(event.false_positive) === 1) return {};
+  const found = ((event.metadata || {}).ai_false_positive_check || {}).misidentified;
+  return found && typeof found === 'object' ? found : {};
+}
+
+// The same for a recording, across every event in the clip.
+function recordingMisidentified(recording) {
+  const events = [...(recording?.events || []), ...(recording?.event ? [recording.event] : [])];
+  return Object.assign({}, ...events.map(eventMisidentified));
+}
+
+function misidentifiedBadge(found) {
+  return Object.entries(found || {}).map(([label, instead]) => {
+    const name = String(instead || '');
+    const detected = titleCase(String(label).replace(/_/g, ' '));
+    const shown = name.startsWith('another ') ? titleCase(name) : `Looks like ${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${titleCase(name)}`;
+    const tip = escapeHtml(`Detected as ${detected}, but the AI model saw ${name.startsWith('another ') ? name : `${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${name}`}. Something real was there, so this is not a false positive.`);
+    return `<span class="detection detection-misidentified" title="${tip}" aria-label="${tip}">🔄 ${escapeHtml(shown)}</span>`;
+  }).join('');
+}
+
 // The admin toggle on an event, snapshot or recording row. ``marked`` is
 // whether it is a false positive now; the button offers the other choice
 // ("Not False Positive" records it as real, so the AI leaves it alone).
@@ -2319,6 +2345,7 @@ window.daygleUi = {
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
   detectionPill, motionPill, formatMotionFraction, motionFractionOf, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON,
   aiDescriptionTip, eventFalsePositive, falsePositiveBadge, falsePositiveButton, bindFalsePositiveButtons,
+  eventMisidentified, recordingMisidentified, misidentifiedBadge,
   // Face-identity pills + filters (recordings + snapshots)
   DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
