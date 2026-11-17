@@ -953,3 +953,19 @@ def test_prediction_leaves_stationary_tracks_on_their_last_box():
     moving = {**track, 'velocity': (0.05, -0.02), 'misses': 1}
     predicted = ot._predicted_box(moving)
     assert predicted['x'] == pytest.approx(0.5) and predicted['y'] == pytest.approx(0.36)
+
+
+def test_ai_answer_stays_with_its_track_until_the_track_ends():
+    cam = 'cam-ai-label'
+    _reset(cam)
+    first = ot.update_object_tracks(cam, [_det('person', 0.40, 0.40)])
+    track_id = first[0]['track_id']
+    ot.note_ai_label(cam, [track_id, 999], 'cat')  # an unknown id is ignored
+    shown = ot.apply_ai_labels(cam, ot.update_object_tracks(cam, [_det('person', 0.41, 0.40)]))
+    assert shown[0]['label'] == 'cat' and shown[0]['detector_label'] == 'person' and shown[0]['ai_checked']
+    ot.note_ai_label(cam, [track_id], '')
+    rejected = ot.apply_ai_labels(cam, ot.update_object_tracks(cam, [_det('person', 0.42, 0.40)]))
+    assert rejected[0]['label'] == 'person' and rejected[0]['ai_rejected']
+    for _ in range(7):
+        ot.update_object_tracks(cam, [])
+    assert ot.apply_ai_labels(cam, [_det('person', 0.42, 0.40)])[0].get('ai_checked') is None

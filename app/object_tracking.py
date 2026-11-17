@@ -804,3 +804,59 @@ def recent_track_boxes(camera_id: str, label: str, *, max_misses: int = 2) -> li
             for track in state.get("tracks", [])
             if track.get("label") == key and track.get("misses", 0) <= max_misses and isinstance(track.get("box"), dict)
         ]
+
+
+def note_ai_label(camera_id: str, track_ids: Any, label: str) -> None:
+    """Remember what the vision model said a tracked object is.
+
+    AI verification answers on an event's snapshot, a cycle or two after the
+    detector boxed the object, and the detector keeps reporting its own label
+    for the rest of the visit: a "person" the model called a cat kept being
+    drawn "Person" on the live view and in the recording track. The answer is
+    kept on the track (``label``; an empty label records that the model
+    rejected what the object was checked as) and ``apply_ai_labels`` shows it
+    from then on. It goes with the track when the track ends.
+    """
+    key = str(label or "").strip().lower()
+    with _state._object_tracks_lock:
+        state = _state._object_tracks.get(str(camera_id))
+        if not state:
+            return
+        live = {track["id"] for track in state.get("tracks", [])}
+        labels = state.setdefault("ai_labels", {})
+        for track_id in track_ids or ():
+            if isinstance(track_id, int) and track_id in live:
+                labels[track_id] = key
+
+
+def apply_ai_labels(camera_id: str, detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Show the model's answer (see ``note_ai_label``) on its tracked objects.
+
+    A detection whose track the model named gets that label, keeping the
+    detector's as ``detector_label``; one whose check the model rejected is
+    marked ``ai_rejected``; every answered one is marked ``ai_checked``.
+    Answers for tracks that ended are dropped here.
+    """
+    with _state._object_tracks_lock:
+        state = _state._object_tracks.get(str(camera_id))
+        labels = (state or {}).get("ai_labels")
+        if not labels:
+            return detections
+        live = {track["id"] for track in state.get("tracks", [])}
+        for track_id in [track_id for track_id in labels if track_id not in live]:
+            del labels[track_id]
+        answers = dict(labels)
+    if not answers:
+        return detections
+    out = []
+    for detection in detections:
+        answer = answers.get(detection.get("track_id"))
+        if answer is None:
+            out.append(detection)
+        elif not answer:
+            out.append({**detection, "ai_checked": True, "ai_rejected": True})
+        elif answer != str(detection.get("label") or "").strip().lower():
+            out.append({**detection, "label": answer, "detector_label": detection.get("label"), "ai_checked": True})
+        else:
+            out.append({**detection, "ai_checked": True})
+    return out

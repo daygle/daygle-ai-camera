@@ -949,3 +949,36 @@ def test_overlay_box_colors_group_ties_break_alphabetically():
     groups = {'alpha': frozenset({'cat', 'dog'}), 'beta': frozenset({'cat', 'bird'})}
     settings = {'group_box_colors': {'alpha': '#aaaaaa', 'beta': '#bbbbbb'}}
     assert os.overlay_box_colors(settings, groups=groups)['cat'] == '#aaaaaa'
+
+
+def _emerging_det(age, displacement=None):
+    # Grew from a sliver at the bush edge (x=0.50) to a whole cat.
+    return {'label': 'cat', 'confidence': 0.8, 'box': {'x': 0.50, 'y': 0.50, 'width': 0.09, 'height': 0.10},
+            'track_id': 4, 'track_age': age, 'track_displacement': displacement,
+            'track_prev_center': (0.515, 0.55), 'track_center': (0.545, 0.55),
+            'track_prev_box': (0.50, 0.50, 0.03, 0.10), 'track_box': (0.50, 0.50, 0.09, 0.10)}
+
+
+def _mask_in(x1, x2, y1=0.50, y2=0.60):
+    mask = np.zeros((240, 320), dtype=bool)
+    mask[int(y1 * 240):int(y2 * 240), int(x1 * 320):int(x2 * 320)] = True
+    return mask
+
+
+def test_subject_stepping_out_from_cover_is_moving():
+    """A box growing out of its last outline into changed pixels is a subject
+    stepping out from behind something, not a redrawn parked car: it reads
+    moving even when the step and the windowed displacement read still."""
+    uncovered = _mask_in(0.53, 0.59)
+    assert os.classify_motion_state(_emerging_det(2), uncovered, None) == ('moving', 'emerging')
+    assert os.classify_motion_state(_emerging_det(5, 0.0), uncovered, 0.0) == ('moving', 'emerging')
+
+
+def test_redrawn_parked_box_is_not_emerging():
+    """The same grown box over an unchanged area (a parked car redrawn roof
+    then whole), or with change only inside the old outline (a passing
+    car's pixels), stays still."""
+    assert os.classify_motion_state(_emerging_det(5, 0.0), _mask_none_changed(), 0.0) == ('still', 'displacement')
+    assert os.classify_motion_state(_emerging_det(5, 0.0), _mask_in(0.50, 0.53), 0.0) == ('still', 'displacement')
+    shrunk = {**_emerging_det(5, 0.0), 'track_prev_box': (0.50, 0.50, 0.09, 0.10), 'track_box': (0.50, 0.50, 0.03, 0.10)}
+    assert os.classify_motion_state(shrunk, _mask_all_changed(), 0.0) == ('still', 'displacement')

@@ -81,7 +81,7 @@ from app.object_settings import (
     still_dwell_candidates,
     update_still_dwell_alerts,
 )
-from app.object_tracking import rebase_object_tracks, recent_track_boxes, update_object_tracks
+from app.object_tracking import apply_ai_labels, rebase_object_tracks, recent_track_boxes, update_object_tracks
 from app.behaviour_monitor import (
     clear_behavioural_state,
     emit_activity_spike_anomalies,
@@ -139,6 +139,7 @@ from app.motion_object_priority import (
 )
 from app.motion_levels import forget_camera as forget_motion_levels, motion_zone_levels
 from app.zone_detection import (
+    ai_check_rule_label,
     detection_matches_zone,
     filter_detections_for_camera,
     filter_motion_detections_by_objects,
@@ -1474,6 +1475,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         camera_id, detections,
         hold_labels=frozenset() if _face_pass_ran else frozenset({'face'}),
     )
+    # What the vision model already said a tracked object is (a "person" it
+    # called a cat) holds for the rest of the visit (see note_ai_label).
+    detections = apply_ai_labels(camera_id, detections)
     # Tag each detection so the checks below can record which ones they drop
     # and why (``_``-prefixed: internal, stripped from every serialised copy).
     _dropped: dict[int, dict[str, Any]] = {}
@@ -1571,10 +1575,29 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         + f"; {det.get('label')} is set to {motion_mode_label(motion_mode_for_label(det.get('label'), object_settings))}"
     ))
     _telemetry_candidates['after_motion_mode'] = len(detections)
+    # Watched objects the still/moving filter dropped (a cat sitting down under
+    # Moving Only) stay on the live view, tagged still: they are still there,
+    # and a box vanishing the moment the cat sat down read as the overlay
+    # losing it. Display only - they never reach a rule, event or recording.
+    _kept_moving_ids = {det.get('_diag_id') for det in detections}
+    _still_in_view = filter_detections_for_camera([
+        det for det in _before_motion_mode
+        if det.get('_diag_id') not in _kept_moving_ids and det.get('motion_state') == 'still'
+    ], settings)
     _telemetry_rejected[REJECT_MOTION_MODE] = max(
         0, _detected_count - len(detections),
     )
     _cycle_timer.add(STAGE_FILTERING, (time.perf_counter() - _filtering_started) * 1000.0)
+    # A cat the detector keeps calling a dog, on a camera whose cat rule asks
+    # the vision model: checked as a cat, alerting only once the model
+    # confirms it (see ai_check_rule_label). Not again for a track the model
+    # already answered.
+    detections = [
+        {**det, 'label': _checked_as, 'detector_label': det.get('label'), 'ai_required': True}
+        if not det.get('ai_checked') and (_checked_as := ai_check_rule_label(settings, det))
+        else det
+        for det in detections
+    ]
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     _camera_scope_input = len(detections)
     object_detections = filter_detections_for_camera(detections, settings)
@@ -1911,13 +1934,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         # An object held back by confirmation or a moving camera is named with
         # that reason: the generic explanation below would say no rule
         # matched it, sending the operator to rules that are fine.
+        _still_ids = {det.get('_diag_id') for det in _still_in_view}
         _held_reason = next((
             f"{str(det.get('label') or 'Object').capitalize()}: {det['reason']}"
             for det in _dropped.values()
             if det.get('reason') in (_confirm_reason, _camera_moving_reason)
+            or det.get('_diag_id') in _still_ids
         ), None)
         reason = _motion_hold_reason or _held_reason or _no_object_match_reason(detections, raw_labels, _monitored_zones)
-        update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+        update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections) + _still_in_view, frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         _telemetry_finish(_telemetry_mode)
         return None
     _alerts_started = time.perf_counter()
@@ -2089,7 +2114,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
                 if extended_recording_id is not None
                 else 'Ongoing detection; nothing new in view.'
             )
-            update_live_detection_status(camera_id, state='checked', reason=_suppressed_reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+            update_live_detection_status(camera_id, state='checked', reason=_suppressed_reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections + _still_in_view, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
             _telemetry_finish(_telemetry_mode)
             return None
     event_time = frame_capture_time
@@ -2152,7 +2177,16 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Alert rows were written in the same transaction as the event above. The
     # recording link is applied afterwards because clip creation is asynchronous
     # with respect to event persistence.
-    notifying = [alert for alert in triggered if _alert_notifies_now(alert)]
+    # Each alert names the tracked objects it is about, so what AI
+    # verification says they are can stay with them (see note_ai_label).
+    _track_ids_by_label: dict[str, set[int]] = {}
+    for _det in recording_detections:
+        if isinstance(_det.get('track_id'), int):
+            _track_ids_by_label.setdefault(str(_det.get('label') or '').strip().lower(), set()).add(_det['track_id'])
+    notifying = [
+        {**alert, 'track_ids': sorted(_track_ids_by_label.get(str(alert.get('label') or '').strip().lower(), ()))}
+        for alert in triggered if _alert_notifies_now(alert)
+    ]
     if notifying:
         # Routed through AI verification when enabled for this camera; that
         # path fails open to the direct delivery below. Only alerts that will
@@ -2176,6 +2210,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         and _rule_notify_active_now(rule.get('schedule') or rule)
     ]
     email_recipients = sorted(resolve_email_recipients([recipient for rule in email_rules for recipient in rule.get('email_recipients', [])])) if email_rules else []
-    update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Event recorded without an alert: no alert rule notifies for what is new in view.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, _state.camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+    update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Event recorded without an alert: no alert rule notifies for what is new in view.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections + _still_in_view, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, _state.camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
     _telemetry_finish(_telemetry_mode, event_created=event_id is not None)
     return event_id

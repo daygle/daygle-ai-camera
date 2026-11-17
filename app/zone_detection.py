@@ -158,6 +158,7 @@ from app.camera_policy import camera_policy
 # Tracks zones that have already logged an unexpected pixel-motion error so we
 # don't flood logs on every frame. Cleared on success to allow self-healing.
 _zone_pixel_motion_errors: set[str] = set()
+from app.label_groups import cached_label_groups
 from app.utils import normalize_email_recipients, normalize_push_recipients
 from app.zone_schema import (
     BOX_LIMIT_KEYS,
@@ -847,6 +848,42 @@ def camera_watches_label(settings: dict[str, Any], label: Any) -> bool:
     if allowed:
         return detection_label_in_allowed(label, allowed)
     return not rule_labels
+
+
+def ai_check_rule_label(settings: dict[str, Any], detection: dict[str, Any]) -> str | None:
+    """The rule label an unwatched detection should be AI-checked as, or None.
+
+    The detector can read one animal as another every cycle - a cat it calls
+    ``dog`` - and a camera with only a ``cat`` rule then never alerted, nor
+    asked the vision model. When no rule or allow-list watches the detection's
+    label, and a zone containing it has an enabled, delivering ``cat`` rule
+    with AI verification on whose label shares a label group with it, the
+    detection is checked as that label: it alerts only if the model confirms
+    one is there (see ``ai_required``). A ``pet``/``animal`` rule needs none of
+    this - it already watches every member.
+    """
+    label = canonical_label(detection.get('label'))
+    if not label or label == 'face' or camera_watches_label(settings, label):
+        return None
+    mates = {
+        member for members in cached_label_groups().values() if label in members for member in members
+    } - {label}
+    if not mates:
+        return None
+    for compiled_zone in camera_policy(settings).zones:
+        if not compiled_zone.zone.get('monitor_objects', True) or not _detection_matches_compiled_zone(detection, compiled_zone):
+            continue
+        for rule in compiled_zone.rules:
+            rule_label = canonical_label(rule.get('label'))
+            if (
+                rule_label in mates
+                and rule.get('enabled', True)
+                and bool(rule.get('ai_verify'))
+                and any(_schedule_delivers(schedule) for schedule in _rule_schedules(rule))
+                and AlertEngine._is_active_now(rule)
+            ):
+                return rule_label
+    return None
 
 
 def rule_rejection_reason(settings: dict[str, Any], detection: dict[str, Any]) -> str:

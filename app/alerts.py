@@ -119,6 +119,10 @@ class AlertEngine:
                 # rule (``cat``) continues to match only its own label.
                 if not label_matches(label_key, rule.get('object')):
                     continue
+                # A detection checked as this label only on the model's word
+                # (``ai_required``) cannot alert through a rule that never asks.
+                if detection.get('ai_required') and not rule.get('ai_verify'):
+                    continue
 
                 rule_zone_id = str(rule.get('zone_id') or '').strip()
                 detection_zone_id = str(detection.get('zone_id') or '').strip()
@@ -162,6 +166,18 @@ class AlertEngine:
                 if rule.get('ai_verify'):
                     alert_entry['ai_verify'] = True
                     alert_entry['ai_verify_skip_above'] = float(rule.get('ai_verify_skip_above', 1.0))
+                    if detection.get('ai_required'):
+                        # Checked as this label only because the detector
+                        # read it as another (see ai_check_rule_label): it
+                        # alerts only on the model's confirmation, never on
+                        # a high score or when the model cannot answer.
+                        alert_entry['ai_required'] = True
+                        alert_entry['ai_verify_skip_above'] = 1.0
+                        alert_entry['detector_label'] = detection.get('detector_label')
+                        alert_entry['message'] = (
+                            f'Alert triggered: {label} detected ({confidence:.2%}, '
+                            f"the detector reported {detection.get('detector_label')})"
+                        )
                     # A group rule (``animal``) asks the model about the group,
                     # not the detector's label: an IR-lit cat read as ``bird``
                     # is a real animal but not a real bird, and must not be

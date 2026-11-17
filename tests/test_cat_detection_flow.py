@@ -258,3 +258,93 @@ def test_distant_cat_the_detector_catches_every_other_cycle(tmp_path, monkeypatc
     assert [index for index, result in enumerate(results) if result['event_id'] is not None] == [2]
     assert len(routed) == 1
     assert {result['cats'][0]['track_id'] for result in results if result['cats']} == {1}
+
+
+def _model_replies(monkeypatch, reply, delivered, calls):
+    """Run AI verification in-line with the real verifier; only the model's
+    raw reply is faked (``reply``: text, or an exception to raise)."""
+    import json as _json
+
+    def setup(lm):
+        import app.ai_verification as av
+
+        def chat(_self, messages, max_tokens=80):
+            calls.append(messages[-1]['content'][0]['text'])
+            if isinstance(reply, Exception):
+                raise reply
+            return _json.dumps(reply)
+
+        monkeypatch.setattr(av.VisionVerifier, 'chat', chat)
+        monkeypatch.setattr(av, '_forward', lambda alerts, _event, _rules: delivered.append(
+            [(alert['label'], alert.get('detector_label')) for alert in alerts]))
+        monkeypatch.setattr(lm, 'submit_alert_notification_with_verification', lambda alerts, event_id, rules, **kw: (
+            av._verify_and_forward(alerts, event_id, rules, 'Garden', None, kw.get('camera_id'))))
+    return setup
+
+
+def _dog_reading(count: int) -> list:
+    return [[_seen('dog', 0.10 + 0.03 * index)] for index in range(count)]
+
+
+def test_cat_the_detector_calls_a_dog_alerts_on_the_models_yes(tmp_path, monkeypatch):
+    delivered, calls = [], []
+    _main, _settings, results, _routed = _drive(
+        tmp_path, monkeypatch, _dog_reading(5), rules=[_rule('cat')],
+        setup=_model_replies(monkeypatch, {'reason': 'a cat', 'present': True}, delivered, calls),
+    )
+    assert [index for index, result in enumerate(results) if result['event_id'] is not None] == [0]
+    assert len(calls) == 1 and delivered == [[('cat', 'dog')]]
+    assert all(result['cats'] for result in results), 'drawn as the cat the model confirmed'
+
+
+def test_dog_reading_the_model_rejects_or_cannot_check_never_alerts(tmp_path, monkeypatch):
+    from app.ai_verification import VerificationError
+
+    for reply in ({'reason': 'a dog', 'present': False}, VerificationError('timed out')):
+        delivered, calls = [], []
+        _main, _settings, _results, _routed = _drive(
+            tmp_path, monkeypatch, _dog_reading(4), rules=[_rule('cat')],
+            setup=_model_replies(monkeypatch, reply, delivered, calls),
+        )
+        assert delivered == [[]] and len(calls) == 1
+
+
+def test_dog_reading_is_left_alone_without_ai_check(tmp_path, monkeypatch):
+    _main, _settings, results, routed = _drive(
+        tmp_path, monkeypatch, _dog_reading(3), rules=[_rule('cat', verify=False)],
+    )
+    assert routed == [] and all(result['event_id'] is None for result in results)
+
+
+def test_animal_rule_alerts_as_the_kind_the_model_names(tmp_path, monkeypatch):
+    delivered, calls = [], []
+    frames = [[_seen('bird', 0.10 + 0.03 * index)] for index in range(4)]
+    _main, _settings, results, _routed = _drive(
+        tmp_path, monkeypatch, frames, rules=[_rule('animal')],
+        setup=_model_replies(monkeypatch, {'reason': 'a cat', 'present': True, 'kind': 'cat'}, delivered, calls),
+    )
+    assert delivered == [[('cat', 'bird')]]
+    assert all(result['cats'] for result in results[1:]), 'drawn as the cat from then on'
+    assert [index for index, result in enumerate(results) if result['event_id'] is not None] == [0]
+
+
+def test_cat_stepping_out_from_cover_is_followed_and_alerts_on_time(tmp_path, monkeypatch):
+    def at(x, width):
+        seen = _seen('cat', x)
+        seen['box']['width'] = width
+        return [seen]
+
+    frames = [at(0.50, 0.03), at(0.50, 0.06), at(0.50, 0.09), at(0.51, 0.10), at(0.54, 0.10)]
+    live = {'detection_confirm_frames': 2, 'detection_confirm_window': 3}
+    _main, _settings, results, _routed = _drive(tmp_path, monkeypatch, frames, live=live)
+    assert [index for index, result in enumerate(results) if result['event_id'] is not None] == [1]
+    assert all(result['cats'] and result['cats'][0]['motion_state'] == 'moving' for result in results)
+
+
+def test_sitting_cat_stays_on_the_live_view_without_alerting(tmp_path, monkeypatch):
+    positions = [0.10, 0.14, 0.18] + [0.20] * 12
+    _main, _settings, results, routed = _drive(tmp_path, monkeypatch, positions)
+    assert len(routed) == 1
+    assert all(result['cats'] for result in results), 'never vanishes from the live view'
+    assert results[-1]['cats'][0]['motion_state'] == 'still'
+    assert 'Moving Only' in results[-1]['reason']
