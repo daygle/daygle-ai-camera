@@ -66,16 +66,19 @@ PURGE_BATCH = 500
 # app.ai_verification._ModelGate).
 CHECK_TIMEOUT_SECONDS = 90.0
 
-# What a rejected object may really be. A detector that reads a cat as a dog
-# found something real: asking "is it really a dog?" alone gets "no", which
-# must not make the footage a false positive (and purge it). So every check
-# also asks what it is instead, from these, and an answer marks the event
-# misidentified (real) rather than a false positive. The two catch-alls cover
-# a real animal or vehicle that is none of the named ones.
+# A false positive is a detection with nothing real there. A detector that
+# reads a cat as a dog found something real under the wrong label: that is a
+# reclassification, never a false positive (and never purged). So every
+# check also asks what a rejected object is instead. A named class
+# reclassifies the event's detections to it; the two catch-alls (a real
+# animal or vehicle the detector has no class for) keep the label but still
+# count as real. The named classes are the detector's own (COCO) classes, so
+# a reclassified label is one zones and alert rules can match.
 OTHER_ANIMAL = 'another animal'
 OTHER_VEHICLE = 'another vehicle'
+CATCH_ALL_CANDIDATES = frozenset({OTHER_ANIMAL, OTHER_VEHICLE})
 REAL_OBJECT_CANDIDATES: tuple[str, ...] = (
-    'person', 'cat', 'dog', 'bird', 'horse', 'sheep', 'cow', 'bear', 'deer', 'fox',
+    'person', 'cat', 'dog', 'bird', 'horse', 'sheep', 'cow', 'bear',
     'car', 'truck', 'bus', 'motorcycle', 'bicycle',
     OTHER_ANIMAL, OTHER_VEHICLE,
 )
@@ -196,7 +199,7 @@ def _relabel_candidates(labels: list[str]) -> dict[str, list[str]]:
     return {label: [name for name in REAL_OBJECT_CANDIDATES if name != label] for label in labels}
 
 
-def _misidentified(labels: list[str], answers: list[dict[str, Any]]) -> dict[str, str]:
+def _relabels(labels: list[str], answers: list[dict[str, Any]]) -> dict[str, str]:
     """``{detected label: what the model says it really is}`` for rejected labels."""
     return {
         label: str(answer['instead'])
@@ -210,12 +213,12 @@ def check_event(event: dict[str, Any], ai_settings: dict[str, Any], *, verifier:
 
     Returns the ``ai_false_positive_check`` record; its ``status`` is
     ``false_positive`` (nothing real: the model rejected every object and
-    named no real thing instead), ``real`` (it confirmed at least one),
-    ``misidentified`` (something real was there under the wrong label, e.g.
-    a cat detected as a dog; ``misidentified`` maps each label to what it
-    is), ``unsure`` or ``error`` (left unjudged). Only ``false_positive``
-    can be purged. Raises _ModelUnavailable when the model could not be
-    asked at all.
+    named no real thing instead), ``reclassified`` (a real object under the
+    wrong label, e.g. a cat detected as a dog; ``reclassified`` maps each
+    label to its class), ``real`` (it confirmed an object, or saw a real
+    animal or vehicle the detector has no class for), ``unsure`` or
+    ``error`` (left unjudged). Only ``false_positive`` can be purged.
+    Raises _ModelUnavailable when the model could not be asked at all.
     """
     from app.ai_verification import VisionVerifier, verify_and_describe_event
 
@@ -253,16 +256,20 @@ def check_event(event: dict[str, Any], ai_settings: dict[str, Any], *, verifier:
                                        if key in ('present', 'reason', 'unsure', 'error', 'instead')}
     record['latency_ms'] = int((time.monotonic() - started) * 1000)
     answers = [record['labels'].get(label) or {} for label in labels]
-    misidentified = _misidentified(labels, answers)
-    if misidentified:
-        record['misidentified'] = misidentified
-    if any(answer.get('present') is True for answer in answers):
+    relabels = _relabels(labels, answers)
+    reclassified = {label: name for label, name in relabels.items() if name not in CATCH_ALL_CANDIDATES}
+    if reclassified:
+        # Something real was there, just not what the detector said: the
+        # labels are corrected, and it is never a false positive.
+        record['reclassified'] = reclassified
+        record['status'] = 'reclassified'
+        record['reason'] = reclassified_reason(reclassified)
+    elif any(answer.get('present') is True for answer in answers) or relabels:
         record['status'] = 'real'
-    elif misidentified:
-        # Something real was there, just not what the detector said: never
-        # a false positive, whatever the other labels' answers.
-        record['status'] = 'misidentified'
-        record['reason'] = misidentified_reason(misidentified)
+        if relabels:
+            record['reason'] = '; '.join(
+                f"AI saw {name}, not {_article(label)} {label.replace('_', ' ')}" for label, name in relabels.items()
+            )
     elif total <= len(labels) and all(answer.get('present') is False for answer in answers):
         record['status'] = 'false_positive'
         record['reason'] = '; '.join(
@@ -278,42 +285,25 @@ def check_event(event: dict[str, Any], ai_settings: dict[str, Any], *, verifier:
     return record
 
 
-def misidentified_reason(misidentified: dict[str, str]) -> str:
-    """"Looks like a cat, not a dog." for each misread label."""
-    parts = []
-    for label, instead in misidentified.items():
-        article = 'an' if instead[:1] in 'aeiou' else 'a'
-        name = instead if instead.startswith('another ') else f'{article} {instead}'
-        parts.append(f"looks like {name}, not {_article(label)} {label.replace('_', ' ')}")
-    text = '; '.join(parts)
-    return text[:1].upper() + text[1:] + '.'
+def reclassified_reason(reclassified: dict[str, str]) -> str:
+    """"Reclassified dog as cat." for each corrected label."""
+    return 'Reclassified ' + '; '.join(
+        f"{label.replace('_', ' ')} as {name}" for label, name in reclassified.items()
+    ) + '.'
 
 
 def _article(label: str) -> str:
     return 'an' if label[:1].lower() in 'aeiou' else 'a'
 
 
-def _tag_recording(event: dict[str, Any] | None, misidentified: dict[str, str]) -> None:
-    """Add what the object really is to the event's recording as an AI tag, so
-    the Recordings label filter and search find the cat under "cat"."""
-    recording_id = (event or {}).get('recording_id')
-    names = sorted({name for name in misidentified.values() if name not in (OTHER_ANIMAL, OTHER_VEHICLE)})
-    if recording_id is None or not names:
-        return
-    try:
-        _state.database.add_recording_labels(int(recording_id), names, source='ai')
-    except Exception:  # noqa: BLE001 - the tag is a convenience; the verdict is already stored
-        logger.warning('Could not tag recording %s with %s', recording_id, names, exc_info=True)
-
-
-def store_check(event_id: int, record: dict[str, Any], *, camera_id: Any = None, camera_name: Any = None,
-                event: dict[str, Any] | None = None) -> bool:
+def store_check(event_id: int, record: dict[str, Any], *, camera_id: Any = None, camera_name: Any = None) -> bool:
     """Save the check on the event and mark it, unless a user got there first.
 
-    ``unsure`` and ``misidentified`` are stored as "not a false positive"
-    so they are never purged and not asked about again; ``error`` leaves
-    the event unjudged. A misidentified object's real name is added to the
-    event's recording (``event``) as an AI tag.
+    ``real``, ``reclassified`` and ``unsure`` are stored as "not a false
+    positive" so they are never purged and not asked about again; ``error``
+    leaves the event unjudged. A reclassified event's detections (and its
+    recording's labels) are relabelled to what the object really is; the
+    original labels stay in the check record (``reclassified``).
     """
     database = _state.database
     try:
@@ -321,26 +311,33 @@ def store_check(event_id: int, record: dict[str, Any], *, camera_id: Any = None,
     except Exception:  # noqa: BLE001 - the verdict below is what matters; metadata is a detail
         logger.warning('Could not store the AI false-positive check for event %s', event_id, exc_info=True)
     status = record.get('status')
-    if status not in ('false_positive', 'real', 'unsure', 'misidentified'):
+    if status not in ('false_positive', 'real', 'unsure', 'reclassified'):
         return False
     reason = {
         'false_positive': record.get('reason'),
-        'misidentified': f"Misidentified: {record.get('reason')}",
+        'reclassified': record.get('reason'),
         'unsure': 'AI could not tell.',
-    }.get(status, 'AI confirmed the detection.')
+    }.get(status) or record.get('reason') or 'AI confirmed the detection.'
+
     marked = database.set_event_false_positive(
         event_id, status == 'false_positive', by='ai', at=record.get('checked_at'), reason=reason,
         only_if_unjudged=True,
     )
-    if marked and status == 'misidentified':
-        _tag_recording(event, record.get('misidentified') or {})
+    if marked and status == 'reclassified':
+        # Only an event the AI could still judge is relabelled: a user who
+        # already called it a false positive (or real) has the last word.
+        try:
+            database.reclassify_event_detections(event_id, record.get('reclassified') or {})
+        except Exception:  # noqa: BLE001 - a failed relabel must not undo the verdict already stored
+            logger.warning('Could not reclassify event %s', event_id, exc_info=True)
         from app.diagnostics import log_ai_diagnostic
 
+        logger.info('AI reclassified event %s: %s', event_id, reason)
         log_ai_diagnostic(
-            'ai_misidentified',
-            f'AI found event #{event_id} misidentified ({record.get("reason")})'[:500],
+            'ai_reclassified',
+            f'AI reclassified event #{event_id} ({reason})'[:500],
             camera_id=camera_id, camera_name=camera_name,
-            details={'event_id': event_id, 'misidentified': record.get('misidentified')},
+            details={'event_id': event_id, 'reclassified': record.get('reclassified')},
         )
     if marked and status == 'false_positive':
         from app.diagnostics import log_ai_diagnostic
@@ -429,8 +426,7 @@ def run_checks_once(*, max_events: int = 50, verifier: Any = None, ignore_busy: 
             logger.exception('AI false-positive check failed for event %s', event_id)
             continue
         metadata = event.get('metadata') or {}
-        store_check(event_id, record, camera_id=metadata.get('camera_id'), camera_name=metadata.get('camera_name'),
-                    event=event)
+        store_check(event_id, record, camera_id=metadata.get('camera_id'), camera_name=metadata.get('camera_name'))
         checked += 1
     return checked
 

@@ -174,6 +174,68 @@ class FalsePositivesMixin:
         )
         return int(cursor.rowcount)
 
+    def reclassify_event_detections(self, event_id: int, mapping: dict[str, str]) -> int:
+        """Relabel an event's detections, e.g. ``{'dog': 'cat'}`` for a cat the
+        detector called a dog, and keep its recordings' labels in step.
+
+        Each recording linked to the event gains the new label (as a detection,
+        with the best confidence the event had for the old one). The old label
+        is dropped from a recording only when no other event in it still has
+        it, and a trigger label naming it is rewritten. Returns how many
+        detection rows changed.
+        """
+        pairs = {
+            str(old).strip().lower(): str(new).strip().lower()
+            for old, new in (mapping or {}).items()
+            if str(old).strip() and str(new).strip() and str(old).strip().lower() != str(new).strip().lower()
+        }
+        if not pairs:
+            return 0
+        with self.write_slot(), self.connect() as db:
+            changed = 0
+            confidences: dict[str, float] = {}
+            for old, new in pairs.items():
+                best = db.execute(
+                    'SELECT MAX(confidence) AS best FROM detections WHERE event_id = ? AND lower(label) = ?',
+                    (int(event_id), old),
+                ).fetchone()['best']
+                cursor = db.execute(
+                    'UPDATE detections SET label = ? WHERE event_id = ? AND lower(label) = ?',
+                    (new, int(event_id), old),
+                )
+                if cursor.rowcount:
+                    changed += cursor.rowcount
+                    if best is not None:
+                        confidences[new] = max(float(best), confidences.get(new, 0.0))
+            if not changed:
+                return 0
+            recording_ids = [int(row['id']) for row in db.execute(
+                'SELECT r.id FROM recordings r JOIN events e ON e.id = ? WHERE r.id = e.recording_id OR r.event_id = e.id',
+                (int(event_id),),
+            ).fetchall()]
+            for recording_id in recording_ids:
+                for old, new in pairs.items():
+                    still_there = db.execute(
+                        """SELECT 1 FROM detections d JOIN events e ON e.id = d.event_id
+                           WHERE (e.recording_id = ? OR e.id = (SELECT event_id FROM recordings WHERE id = ?))
+                             AND lower(d.label) = ? LIMIT 1""",
+                        (recording_id, recording_id, old),
+                    ).fetchone()
+                    if not still_there:
+                        db.execute(
+                            "DELETE FROM recording_labels WHERE recording_id = ? AND label = ? AND source != 'ai'",
+                            (recording_id, old),
+                        )
+                    db.execute(
+                        'UPDATE recordings SET trigger_label = ? WHERE id = ? AND lower(trigger_label) = ?'
+                        ' AND NOT EXISTS (SELECT 1 FROM detections d JOIN events e ON e.id = d.event_id'
+                        ' WHERE (e.recording_id = ? OR e.id = recordings.event_id) AND lower(d.label) = ?)',
+                        (new, recording_id, old, recording_id, old),
+                    )
+                self._insert_recording_labels(db, recording_id, sorted(set(pairs.values())),
+                                              source='detection', confidences=confidences)
+            return changed
+
     def set_event_false_positive(
         self,
         event_id: int,

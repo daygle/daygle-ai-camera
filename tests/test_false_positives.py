@@ -270,7 +270,7 @@ def test_check_reuses_settled_alert_verification_answers(fp, db):
     assert record['status'] == 'real' and record['labels']['person']['reused']
 
 
-def test_alert_verifications_relabel_is_reused_as_misidentified(fp, db):
+def test_alert_verifications_relabel_is_reused(fp, db):
     metadata = {'camera_id': 'cam-1', 'ai_verification': {'labels': {
         'dog': {'present': False, 'reason': 'a cat', 'instead': 'cat'},
     }}}
@@ -279,43 +279,81 @@ def test_alert_verifications_relabel_is_reused_as_misidentified(fp, db):
     verifier = FakeVerifier({})
     record = fp.check_event(event, _settings(), verifier=verifier)
     assert verifier.asked == []
-    assert record['status'] == 'misidentified' and record['misidentified'] == {'dog': 'cat'}
+    assert record['status'] == 'reclassified' and record['reclassified'] == {'dog': 'cat'}
 
 
-def test_a_cat_detected_as_a_dog_is_misidentified_never_a_false_positive(fp, db):
+def test_a_cat_detected_as_a_dog_is_reclassified_never_a_false_positive(fp, db):
+    dog = {**PERSON, 'label': 'dog', 'confidence': 0.62}
+    # The clip was started by the dog event; another event in it saw a person.
     recording_id = _recording(db)
-    dog = {**PERSON, 'label': 'dog'}
-    event_id = _event(db, [dog], hours_ago=1, recording_id=recording_id)
+    event_id = _event(db, [dog, MOTION], hours_ago=1, recording_id=recording_id)
+    _event(db, [PERSON], hours_ago=1, recording_id=recording_id)
+    db.add_recording_labels(recording_id, ['dog'], confidences={'dog': 0.62})
+    db.update_recording_trigger(recording_id, trigger_type='object', trigger_label='dog')
     event = db.get_event(event_id)
     verifier = FakeVerifier({'dog': (False, 'it is a cat', 'cat')})
     record = fp.check_event(event, _settings(), verifier=verifier)
     # The model is offered what it might be instead, never the label itself.
     assert 'cat' in verifier.candidates['dog'] and 'dog' not in verifier.candidates['dog']
-    assert record['status'] == 'misidentified'
-    assert record['reason'] == 'Looks like a cat, not a dog.'
-    assert fp.store_check(event_id, record, event=event)
+    assert record['status'] == 'reclassified'
+    assert record['reason'] == 'Reclassified dog as cat.'
+    assert fp.store_check(event_id, record)
     stored = db.get_event(event_id)
     assert (stored['false_positive'], stored['false_positive_by']) == (0, 'ai')
-    assert stored['false_positive_reason'] == 'Misidentified: Looks like a cat, not a dog.'
-    assert stored['metadata']['ai_false_positive_check']['misidentified'] == {'dog': 'cat'}
-    # The real name is searchable on the recording, and nothing is purged.
-    assert 'cat' in db.get_recording(recording_id)['ai_labels']
-    assert db.get_recording(recording_id)['false_positive'] is None
+    assert sorted(d['label'] for d in stored['detections']) == ['cat', 'motion']
+    assert stored['metadata']['ai_false_positive_check']['reclassified'] == {'dog': 'cat'}
+    recording = db.get_recording(recording_id)
+    assert 'cat' in recording['labels'] and 'dog' not in recording['labels']
+    assert recording['label_confidences']['cat'] == pytest.approx(0.62)
+    assert recording['trigger_label'] == 'cat'
+    assert recording['false_positive'] is None
     assert db.purge_false_positives(older_than=_iso(0)) == ([], [])
 
 
-def test_misidentified_wins_over_another_rejected_label(fp, db):
+def test_reclassifying_keeps_a_label_another_event_in_the_clip_still_has(fp, db):
+    dog = {**PERSON, 'label': 'dog'}
+    recording_id = _recording(db)
+    event_id = _event(db, [dog], hours_ago=1, recording_id=recording_id)
+    _event(db, [dog], hours_ago=1, recording_id=recording_id)
+    db.add_recording_labels(recording_id, ['dog'])
+    assert db.reclassify_event_detections(event_id, {'dog': 'cat'}) == 1
+    labels = db.get_recording(recording_id)['labels']
+    assert 'dog' in labels and 'cat' in labels
+
+
+def test_a_real_animal_without_a_class_is_real_and_keeps_its_label(fp, db):
+    dog = {**PERSON, 'label': 'dog'}
+    event_id = _event(db, [dog], hours_ago=1)
+    record = fp.check_event(db.get_event(event_id), _settings(),
+                            verifier=FakeVerifier({'dog': (False, 'a fox', 'another animal')}))
+    assert record['status'] == 'real' and 'reclassified' not in record
+    fp.store_check(event_id, record)
+    stored = db.get_event(event_id)
+    assert stored['false_positive'] == 0 and stored['detections'][0]['label'] == 'dog'
+
+
+def test_reclassification_wins_over_another_rejected_label(fp, db):
     dog = {**PERSON, 'label': 'dog'}
     event = db.get_event(_event(db, [dog, CAR], hours_ago=1))
-    verifier = FakeVerifier({'dog': (False, 'a fox', 'fox'), 'car': (False, 'a shed', None)})
+    verifier = FakeVerifier({'dog': (False, 'a cat', 'cat'), 'car': (False, 'a shed', None)})
     record = fp.check_event(event, _settings(), verifier=verifier)
-    assert record['status'] == 'misidentified' and record['misidentified'] == {'dog': 'fox'}
+    assert record['status'] == 'reclassified' and record['reclassified'] == {'dog': 'cat'}
 
 
-def test_misidentified_reason_reads_naturally(fp):
-    assert fp.misidentified_reason({'dog': 'cat'}) == 'Looks like a cat, not a dog.'
-    assert fp.misidentified_reason({'person': 'another animal'}) == 'Looks like another animal, not a person.'
-    assert fp.misidentified_reason({'cat': 'owl'}) == 'Looks like an owl, not a cat.'
+def test_a_users_decision_is_never_relabelled(fp, db):
+    dog = {**PERSON, 'label': 'dog'}
+    event_id = _event(db, [dog], hours_ago=1)
+    db.set_event_false_positive(event_id, True, by='user')
+    record = fp.check_event(db.get_event(event_id), _settings(),
+                            verifier=FakeVerifier({'dog': (False, 'a cat', 'cat')}))
+    assert not fp.store_check(event_id, record)
+    assert db.get_event(event_id)['detections'][0]['label'] == 'dog'
+
+
+def test_reclassified_reason_reads_naturally(fp):
+    assert fp.reclassified_reason({'dog': 'cat'}) == 'Reclassified dog as cat.'
+    assert fp.reclassified_reason({'fire_hydrant': 'person'}) == 'Reclassified fire hydrant as person.'
+    assert 'deer' not in fp.REAL_OBJECT_CANDIDATES
 
 
 def test_upgrade_reopens_ai_false_positives_judged_without_the_relabel_question(db):

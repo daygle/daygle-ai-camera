@@ -255,17 +255,16 @@ test('false-positive badge and button render for the right users and states', ()
   assert.match(unmark, />Not False Positive</);
 });
 
-test('a misidentified object shows what it really is, and never on a false positive', () => {
+test('a reclassified object keeps its original label visible, and never on a false positive', () => {
   const sandbox = createSandbox();
-  const event = { false_positive: 0, metadata: { ai_false_positive_check: { misidentified: { dog: 'cat' } } } };
-  const found = run(sandbox, `eventMisidentified(${JSON.stringify(event)})`);
+  const event = { false_positive: 0, metadata: { ai_false_positive_check: { reclassified: { dog: 'cat' } } } };
+  const found = run(sandbox, `eventReclassified(${JSON.stringify(event)})`);
   assert.equal(found.dog, 'cat');
-  const badge = run(sandbox, `misidentifiedBadge(${JSON.stringify(found)})`);
-  assert.match(badge, /Looks like a Cat/);
-  assert.match(badge, /Detected as Dog/);
-  assert.match(run(sandbox, `misidentifiedBadge({ person: 'another animal' })`), /Another Animal/);
-  assert.equal(Object.keys(run(sandbox, `eventMisidentified(${JSON.stringify({ ...event, false_positive: 1 })})`)).length, 0);
+  const badge = run(sandbox, `reclassifiedBadge(${JSON.stringify(found)})`);
+  assert.match(badge, /Reclassified from Dog/);
+  assert.match(badge, /saw Cat and reclassified it/);
+  assert.equal(Object.keys(run(sandbox, `eventReclassified(${JSON.stringify({ ...event, false_positive: 1 })})`)).length, 0);
   const recording = { events: [event, { metadata: {} }] };
-  assert.equal(run(sandbox, `recordingMisidentified(${JSON.stringify(recording)})`).dog, 'cat');
-  assert.equal(run(sandbox, 'misidentifiedBadge({})'), '');
+  assert.equal(run(sandbox, `recordingReclassified(${JSON.stringify(recording)})`).dog, 'cat');
+  assert.equal(run(sandbox, 'reclassifiedBadge({})'), '');
 });

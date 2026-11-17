@@ -59,8 +59,8 @@ function loadPage() {
     eventFalsePositive: () => null,
     falsePositiveBadge: () => '',
     falsePositiveButton: () => '',
-    eventMisidentified: () => ({}),
-    misidentifiedBadge: () => '',
+    eventReclassified: () => ({}),
+    reclassifiedBadge: () => '',
     libraryDefaultQuery: () => ({}),
     createCursorPager: (url) => {
       state.pagerUrls.push(url);

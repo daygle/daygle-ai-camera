@@ -528,7 +528,7 @@ function recordingRowHtml(recording) {
   ];
   return `
     <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
-      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${typeLabel}</span>${falsePositiveBadge(falsePositive)}${falsePositive ? '' : misidentifiedBadge(recordingMisidentified(recording))}</div><span class="activity-cell-ref">Recording #${recording.id}</span></td>
+      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${typeLabel}</span>${falsePositiveBadge(falsePositive)}${falsePositive ? '' : reclassifiedBadge(recordingReclassified(recording))}</div><span class="activity-cell-ref">Recording #${recording.id}</span></td>
       <td class="activity-cell-camera">${escapeHtml(recordingCameraName(recording))}</td>
       <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}${aiTagPills(recording.ai_labels)}${recordingDescriptionTip(recording)}</div></td>
       <td class="activity-cell-zone">${zoneCell}</td>

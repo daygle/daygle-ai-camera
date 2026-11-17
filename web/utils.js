@@ -880,29 +880,29 @@ function falsePositiveBadge(record) {
     + (reason ? `<span class="info-tip" data-tip="${tip}" title="${tip}" tabindex="0" role="note" aria-label="False positive: ${tip}"></span>` : '');
 }
 
-// What the AI found a misread object really is (app/false_positives.py), e.g.
-// { dog: 'cat' } for a cat the detector called a dog. Such footage held
-// something real, so it is never a false positive. Empty once a user has
-// marked the event a false positive anyway.
-function eventMisidentified(event) {
+// Labels the AI reclassified (app/false_positives.py), detected label to
+// the real one, e.g. { dog: 'cat' } for a cat the detector called a dog.
+// The event's detections already carry the corrected label; this keeps the
+// original visible. Such footage held something real, so it is never a
+// false positive. Empty once a user has marked the event one anyway.
+function eventReclassified(event) {
   if (!event || Number(event.false_positive) === 1) return {};
-  const found = ((event.metadata || {}).ai_false_positive_check || {}).misidentified;
+  const found = ((event.metadata || {}).ai_false_positive_check || {}).reclassified;
   return found && typeof found === 'object' ? found : {};
 }
 
 // The same for a recording, across every event in the clip.
-function recordingMisidentified(recording) {
+function recordingReclassified(recording) {
   const events = [...(recording?.events || []), ...(recording?.event ? [recording.event] : [])];
-  return Object.assign({}, ...events.map(eventMisidentified));
+  return Object.assign({}, ...events.map(eventReclassified));
 }
 
-function misidentifiedBadge(found) {
-  return Object.entries(found || {}).map(([label, instead]) => {
-    const name = String(instead || '');
+function reclassifiedBadge(found) {
+  return Object.entries(found || {}).map(([label, name]) => {
     const detected = titleCase(String(label).replace(/_/g, ' '));
-    const shown = name.startsWith('another ') ? titleCase(name) : `Looks like ${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${titleCase(name)}`;
-    const tip = escapeHtml(`Detected as ${detected}, but the AI model saw ${name.startsWith('another ') ? name : `${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${name}`}. Something real was there, so this is not a false positive.`);
-    return `<span class="detection detection-misidentified" title="${tip}" aria-label="${tip}">🔄 ${escapeHtml(shown)}</span>`;
+    const real = titleCase(String(name || '').replace(/_/g, ' '));
+    const tip = escapeHtml(`The detector reported ${detected}; the AI model saw ${real} and reclassified it. Something real was there, so this is not a false positive.`);
+    return `<span class="detection detection-reclassified" title="${tip}" aria-label="${tip}">🔄 Reclassified from ${escapeHtml(detected)}</span>`;
   }).join('');
 }
 
@@ -2345,7 +2345,7 @@ window.daygleUi = {
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
   detectionPill, motionPill, formatMotionFraction, motionFractionOf, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON,
   aiDescriptionTip, eventFalsePositive, falsePositiveBadge, falsePositiveButton, bindFalsePositiveButtons,
-  eventMisidentified, recordingMisidentified, misidentifiedBadge,
+  eventReclassified, recordingReclassified, reclassifiedBadge,
   // Face-identity pills + filters (recordings + snapshots)
   DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,

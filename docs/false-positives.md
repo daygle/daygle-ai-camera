@@ -1,7 +1,11 @@
 # False positives
 
-A false positive is a detection of something that was not really there: a
-shadow read as a person, a bush read as a dog, a reflection read as a car.
+A false positive is a detection with no real object there at all: a shadow
+read as a person, a bush read as a dog, a reflection read as a car.
+
+A real object under the wrong label (a cat the detector read as a dog) is
+not a false positive. The AI check **reclassifies** it instead (see below),
+and it is never purged.
 False positives fill the Events, Snapshots and Recordings lists and use disk
 space. This feature finds and marks them, lets you mark them yourself, and can
 purge them automatically.
@@ -36,13 +40,21 @@ verification: *is a real one actually visible?*
   real thing instead): the event is marked **🚫 False Positive · AI**.
   Hover or tap the ⓘ beside the badge to see the model's reasons.
 - **Something real, under the wrong label** (a cat the detector read as a
-  dog): the event is marked **🔄 Looks like a cat**. Something real was
-  there, so it is recorded as real and **never purged**. The real name
-  (`cat`) is added to the recording as an AI tag, so the Recordings label
-  filter and search find it. For each rejected object the model is asked
-  what it is instead: a person, a cat, dog, bird, horse, sheep, cow, bear,
-  deer or fox, a car, truck, bus, motorcycle or bicycle, or "another
-  animal" / "another vehicle".
+  dog): the event is **reclassified**. Its detection becomes `cat`, its
+  recording gains the `cat` label (and loses `dog` unless another event in
+  the clip saw a dog), and a recording triggered by the dog now says cat.
+  A **🔄 Reclassified from Dog** badge keeps the original visible. It is
+  recorded as real and **never purged**.
+- **A real animal or vehicle the detector has no class for**: recorded as
+  real, with the label left as it is.
+
+  For each rejected object the model is asked what it is instead: a
+  person, cat, dog, bird, horse, sheep, cow or bear, a car, truck, bus,
+  motorcycle or bicycle (the detector's own classes, so zones and alert
+  rules can match the new label), or "another animal" / "another vehicle".
+  Reclassifying a past event does not send its alerts again; live alerts
+  are relabelled by alert verification (see
+  [ai-verification.md](ai-verification.md#relabelling-a-rejected-alert)).
 - **Any object confirmed**: the event is recorded as real.
 - **Unsure** (too dark, blurry or small to tell): recorded as real, so it is
   never purged. An event with more objects than one check covers (three) is
@@ -67,9 +79,11 @@ How it runs:
 - **When the model is down,** checking stops and starts again on its next
   15-second round. Events are not lost; they wait.
 - The verdict is stored in the event metadata as `ai_false_positive_check`
-  (status, each object's answer and reason, `misidentified` for a misread
-  object, model, time). Every AI false positive and misidentified object is
-  logged on the **AI Log** page.
+  (status, each object's answer and reason, `reclassified` mapping each
+  corrected label to its new one, model, time). Every AI false positive and
+  reclassification is logged on the **AI Log** page.
+- **A user's decision always wins**: an event a user already marked is
+  never reclassified.
 - **Upgrading:** AI false positives recorded before the check asked what an
   object really is are returned to undecided on start-up, so they are not
   purged. Ones from the last 24 hours are checked again.
