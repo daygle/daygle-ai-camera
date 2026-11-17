@@ -75,7 +75,7 @@ function renderUserRow(user) {
       <td class="user-account-cell" data-label="Account"><strong>${username}</strong><span>${name}</span>${user.email ? `<small>${escapeHtml(user.email)}</small>` : ''}</td>
       <td data-label="Role"><span class="user-role-pill ${roleClass}">${roleLabel(user.role)}</span></td>
       <td data-label="Status"><span class="user-status-pill ${active ? 'user-status-active' : 'user-status-disabled'}"><span class="user-status-dot"></span>${active ? 'Active' : 'Disabled'}</span></td>
-      <td class="user-last-login" data-label="Last login">${escapeHtml(formatLastLogin(user.last_login_at))}</td>
+      <td class="user-last-login" data-label="Last Login">${escapeHtml(formatLastLogin(user.last_login_at))}</td>
       <td class="user-actions-cell" data-label="Actions"><div class="user-actions">
         <button class="secondary user-edit-btn" type="button" data-id="${escapeHtml(user.id)}" title="Edit user" aria-label="Edit ${username}">${ICONS.edit}</button>
         <button class="secondary user-toggle-btn" type="button" data-id="${escapeHtml(user.id)}" title="${active ? 'Disable user' : 'Enable user'}" aria-label="${active ? 'Disable' : 'Enable'} ${username}">${ICONS.power}</button>

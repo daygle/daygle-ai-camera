@@ -558,7 +558,6 @@ textarea {
 /* Per-object overlay box colour (Objects page): swatch + optional Reset. */
 .box-color-cell { display: inline-flex; align-items: center; gap: 8px; }
 .box-color-input { width: 44px; height: 32px; padding: 2px; border-radius: 6px; cursor: pointer; }
-.box-color-reset { padding: 4px 10px; font-size: 0.85rem; }
 /* Motion box colour (Objects page, Detection Behavior card): laid out like a form-stack label. */
 .motion-color-field { display: grid; gap: 8px; justify-items: start; color: var(--muted); font-weight: 800; }
 @media (pointer: coarse), (max-width: 600px) { .box-color-input { height: 40px; } }
@@ -6907,7 +6906,6 @@ button.secondary:disabled, a.secondary:disabled {
   text-align: right;
   white-space: nowrap;
 }
-.zone-rule-remove { padding: 7px 10px; }
 .zone-rule-advanced-toggle {
   display: inline-flex;
   align-items: center;
@@ -8074,6 +8072,7 @@ main:has(#liveCameraEmpty:not([hidden])) .live-controls-card { display: none; }
 .activity-item-action.activity-item-action-icon,
 a.activity-item-action.activity-item-action-icon,
 button.activity-item-action.activity-item-action-icon,
+.cameras-table-wrap .rule-table .cell-actions .activity-item-action-icon,
 .cameras-table-wrap .rule-table.activity-table .activity-cell-actions .cell-actions .activity-item-action-icon {
   box-sizing: border-box;
   border-radius: 8px;

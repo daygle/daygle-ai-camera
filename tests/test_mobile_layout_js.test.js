@@ -61,7 +61,7 @@ test('the camera-models assignment table is marked up for the card grid', () => 
 // ── 2. Stacked tables ────────────────────────────────────────────────────────
 
 const stacked = [
-  { page: 'users', table: '.users-table', labels: ['Account', 'Role', 'Status', 'Last login', 'Actions'] },
+  { page: 'users', table: '.users-table', labels: ['Account', 'Role', 'Status', 'Last Login', 'Actions'] },
   { page: 'camera-models', table: '#cameraModelsTable', labels: ['Camera', 'Model', 'Status'] },
   { page: 'alerts', table: '.alerts-policy-table', labels: ['Policy', 'Scope', 'Enabled', 'Email', 'Push', 'Actions'] },
 ];

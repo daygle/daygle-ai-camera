@@ -60,3 +60,25 @@ test('alert policy actions use the Recordings button style, with Edit last', () 
   assert.match(css, /\.alerts-policy-table \.alerts-table-actions button \+ button \{ margin-left: 4px; \}/);
   assert.doesNotMatch(css, /\.alerts-policy-table \.alerts-table-actions button \{\s*display: inline-flex;/);
 });
+
+test('zone and sound rule remove buttons use the shared delete button', () => {
+  for (const file of ['zones.js', 'sounds.js']) {
+    const js = read(file);
+    assert.match(js, /class="secondary activity-item-action activity-item-action-icon activity-item-action-delete zone-rule-remove"/, file);
+    assert.doesNotMatch(js, /delete-btn secondary zone-action-btn zone-rule-remove/, file);
+  }
+  // The sound table's generic 32px cell button rule must not shrink it.
+  assert.match(read('styles.css'), /\.cameras-table-wrap \.rule-table \.cell-actions \.activity-item-action-icon,/);
+});
+
+test('object groups use icon-only Remove then Edit, and box colour resets are icon-only', () => {
+  const js = read('objects.js');
+  const remove = js.indexOf('activity-item-action-icon activity-item-action-delete" data-group-remove=');
+  const edit = js.indexOf('activity-item-action-icon activity-item-action-edit" data-group-edit=');
+  assert.ok(remove > -1 && edit > -1 && remove < edit, 'remove then edit, both icon-only');
+  assert.doesNotMatch(js, />Edit<\/button>|>Remove<\/button>|>Reset<\/button>/);
+  assert.equal((js.match(/activity-item-action-icon box-color-reset"/g) || []).length, 2);
+  const html = read('objects.html');
+  assert.match(html, /id="motionBoxColorReset"[^>]*aria-label="Reset motion box colour"/);
+  assert.match(html, /<th class="group-actions-cell cell-center">Actions<\/th>/);
+});
