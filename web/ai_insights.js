@@ -6,6 +6,43 @@
 
 const aiTuningList = document.getElementById('aiTuning');
 const aiFrequentTagsList = document.getElementById('aiFrequentTags');
+const aiIgnoreAreasList = document.getElementById('aiIgnoreAreas');
+
+// The suggested area drawn over the latest snapshot the AI rejected there.
+function aiAreaPreview(item) {
+  const area = item.area || {};
+  const box = `left:${area.x * 100}%;top:${area.y * 100}%;width:${area.width * 100}%;height:${area.height * 100}%`;
+  const src = item.sample_event_id != null ? `/api/events/${encodeURIComponent(item.sample_event_id)}/snapshot?thumb=1` : '';
+  return `<div class="ai-area-preview">${src ? `<img src="${src}" alt="Latest snapshot the AI rejected there" loading="lazy" onerror="this.remove()" />` : ''}<span class="ai-area-box" style="${box}"></span></div>`;
+}
+
+function aiIgnoreAreaRow(item) {
+  const label = titleCase(String(item.label || '').replace(/_/g, ' '));
+  const body = JSON.stringify({ camera_id: item.camera_id, label: item.label, area: item.area });
+  return `
+    <div class="ai-insight-row">
+      ${aiAreaPreview(item)}
+      <div class="ai-insight-text">
+        <strong>${escapeHtml(item.camera_name || item.camera_id)} (${(item.zones || []).map(escapeHtml).join(', ')}): ${escapeHtml(label)}</strong>
+        <p class="muted">The AI rejected ${Number(item.rejected)} ${escapeHtml(label)} detections in the outlined area${item.confirmed ? ` and confirmed ${Number(item.confirmed)}` : ''}. Ignore ${escapeHtml(label)} there?</p>
+      </div>
+      <button type="button" class="secondary" data-ai-ignore="${escapeHtml(body)}">Ignore Area</button>
+    </div>`;
+}
+
+function aiIgnoredRow(item) {
+  const label = titleCase(String(item.label || '').replace(/_/g, ' '));
+  const body = JSON.stringify({ camera_id: item.camera_id, zone_id: item.zone_id, index: item.index });
+  return `
+    <div class="ai-insight-row">
+      ${aiAreaPreview({ area: item })}
+      <div class="ai-insight-text">
+        <strong>${escapeHtml(item.camera_name)} (${escapeHtml(item.zone_name)}): ${escapeHtml(label)} ignored</strong>
+        <p class="muted">${item.source === 'ai' ? 'Added from an AI suggestion.' : 'Added by hand.'}</p>
+      </div>
+      <button type="button" class="secondary" data-ai-unignore="${escapeHtml(body)}">Stop Ignoring</button>
+    </div>`;
+}
 
 function aiPercent(value) {
   return `${Math.round(Number(value) * 100)}%`;
@@ -46,6 +83,12 @@ function renderAiInsights(data) {
       ? tuning.map(aiTuningRow).join('')
       : `<span class="muted">No changes suggested. Suggestions appear once the AI has judged enough detections (last ${Number(data?.tuning_window_days || 14)} days).</span>`;
   }
+  if (aiIgnoreAreasList) {
+    const suggested = data?.ignore_areas || [];
+    const active = data?.ignored_areas || [];
+    aiIgnoreAreasList.innerHTML = (suggested.map(aiIgnoreAreaRow).join('') + active.map(aiIgnoredRow).join(''))
+      || '<span class="muted">No areas suggested and none ignored.</span>';
+  }
   if (aiFrequentTagsList) {
     const tags = data?.frequent_tags || [];
     aiFrequentTagsList.innerHTML = tags.length
@@ -55,10 +98,11 @@ function renderAiInsights(data) {
 }
 
 function loadAiInsights() {
-  if (!aiTuningList && !aiFrequentTagsList) return Promise.resolve();
+  if (!aiTuningList && !aiFrequentTagsList && !aiIgnoreAreasList) return Promise.resolve();
   return api('/api/settings/ai-insights').then(renderAiInsights).catch(() => {
     if (aiTuningList) aiTuningList.innerHTML = '<span class="muted">Could not load AI insights.</span>';
     if (aiFrequentTagsList) aiFrequentTagsList.innerHTML = '';
+    if (aiIgnoreAreasList) aiIgnoreAreasList.innerHTML = '';
   });
 }
 
@@ -78,6 +122,33 @@ aiTuningList?.addEventListener('click', async (clickEvent) => {
   } catch (error) {
     if (window.daygleAuth?.redirecting) return;
     window.showToast?.(`Could not apply: ${error.message}`, true);
+    button.disabled = false;
+  }
+});
+
+aiIgnoreAreasList?.addEventListener('click', async (clickEvent) => {
+  const ignore = clickEvent.target.closest('[data-ai-ignore]');
+  const unignore = clickEvent.target.closest('[data-ai-unignore]');
+  const button = ignore || unignore;
+  if (!button) return;
+  let body;
+  try { body = JSON.parse(ignore ? button.dataset.aiIgnore : button.dataset.aiUnignore); } catch (_err) { return; }
+  const label = titleCase(String(body.label || '').replace(/_/g, ' '));
+  if (ignore && !confirm(`Ignore ${label} detections inside the outlined area? A real ${label} there will not be detected.`)) return;
+  button.disabled = true;
+  try {
+    if (ignore) {
+      const result = await api('/api/settings/ai-insights/ignore-area', { method: 'POST', body: JSON.stringify(body) });
+      const zones = Number(result?.zones_changed || 0);
+      window.showToast?.(zones ? `Ignoring ${label} there in ${zones} zone${zones === 1 ? '' : 's'}.` : 'No zone with that rule covers the area.');
+    } else {
+      await api('/api/settings/ai-insights/ignore-area/remove', { method: 'POST', body: JSON.stringify(body) });
+      window.showToast?.('Area no longer ignored.');
+    }
+    await loadAiInsights();
+  } catch (error) {
+    if (window.daygleAuth?.redirecting) return;
+    window.showToast?.(`Could not update: ${error.message}`, true);
     button.disabled = false;
   }
 });

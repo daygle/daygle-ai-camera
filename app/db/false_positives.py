@@ -183,6 +183,7 @@ class FalsePositivesMixin:
         with self.connect() as db:
             rows = db.execute(
                 """SELECT d.label, d.confidence, d.zone_name, d.ai_status,
+                          d.x, d.y, d.width, d.height, e.id AS event_id, e.created_at,
                           CASE WHEN json_valid(e.metadata)
                                THEN CAST(json_extract(e.metadata, '$.camera_id') AS TEXT) END AS camera_id
                    FROM detections d JOIN events e ON e.id = d.event_id

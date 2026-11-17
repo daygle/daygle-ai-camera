@@ -44,6 +44,7 @@ const PROFILE_FIELD_GROUPS = [
         { value: 'off', label: 'Off' }, { value: 'auto', label: 'Automatic (Dark Frames)' }, { value: 'on', label: 'Always' },
       ] },
       { key: 'object_detection_second_look', label: 'Second Look', kind: 'select', options: PROFILE_BOOL_OPTIONS, tip: 'Re-check a watched object that scores just under its threshold on a zoomed, full-resolution crop.' },
+      { key: 'object_detection_ai_near_miss', label: 'AI Near-Miss Check', kind: 'select', options: PROFILE_BOOL_OPTIONS, tip: 'When Second Look still rejects a near-miss, ask the AI model in the background; a confirmed object is detected while it stays in view. Needs Second Look and the AI model server.' },
     ],
   },
   {
@@ -93,12 +94,14 @@ function profileSummary(settings) {
   add('object_detection_tiling', (v) => `Tiling ${v === 'off' ? 'Off' : v.replace('x', ' × ')}`);
   add('object_detection_low_light', (v) => `Low-Light ${titleCase(v)}`);
   add('object_detection_second_look', (v) => `Second Look ${on(v)}`);
+  add('object_detection_ai_near_miss', (v) => `AI Near-Miss ${on(v)}`);
   add('motion_pixel_threshold', (v) => `Pixel Change ${v}`);
   add('motion_shadow_suppression', (v) => `Shadows ${titleCase(v)}`);
   const shown = new Set([
     'detection_interval_seconds', 'ingest_frame_fps', 'adaptive_detection_enabled', 'detection_confirm_frames',
     'always_run_object_detection', 'object_detection_region_boost', 'object_detection_tiling',
-    'object_detection_low_light', 'object_detection_second_look', 'motion_pixel_threshold', 'motion_shadow_suppression',
+    'object_detection_low_light', 'object_detection_second_look', 'object_detection_ai_near_miss',
+    'motion_pixel_threshold', 'motion_shadow_suppression',
   ]);
   const others = Object.keys(values).filter((key) => !shown.has(key) && values[key] != null).length;
   if (others) parts.push(`+${others} more`);

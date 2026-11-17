@@ -229,19 +229,42 @@ def test_insights_report_raises_and_frequent_untracked_tags(db, monkeypatch):
     assert tags == [{'camera_id': 'cam-1', 'camera_name': 'Driveway', 'tags': [{'tag': 'parcel', 'count': 10}]}]
 
 
+def _fake_camera_store(monkeypatch, insights, cameras):
+    """Back ``insights._update_camera`` with an in-memory camera list; returns
+    the list of saved snapshots."""
+    import copy as _copy
+
+    store = {'cameras': cameras}
+    saved = []
+
+    class _Db:
+        def get_setting(self, _key):
+            return None
+
+        def set_setting(self, key, value, _now):
+            assert key == 'cameras'
+            store['cameras'] = value
+            saved.append(value)
+
+    monkeypatch.setattr(insights, '_cameras', lambda: _copy.deepcopy(store['cameras']))
+    monkeypatch.setattr('app.payload_validators.validate_camera_settings',
+                        lambda edited, current=None, index=None: edited)
+    monkeypatch.setattr('app.profile_presets.link_camera_profiles', lambda cams, _presets: (cams, False))
+    monkeypatch.setattr(insights._state, 'database', _Db())
+    return saved
+
+
 def test_applying_a_suggestion_raises_only_lower_rules(monkeypatch):
     insights = importlib.import_module('app.ai_insights')
     camera = {'id': 'cam-1', 'detection': {'zones': [
         {'name': 'A', 'object_rules': [{'label': 'person', 'min_confidence': 0.4}]},
         {'name': 'B', 'object_rules': [{'label': 'person', 'min_confidence': 0.7}, {'label': 'car', 'min_confidence': 0.3}]},
     ]}}
-    saved = {}
-    monkeypatch.setattr(insights, '_cameras', lambda: [camera])
-    monkeypatch.setattr('app.payload_validators.validate_cameras_settings', lambda payload: payload['cameras'])
-    monkeypatch.setattr('app.api.cameras_router._persist_and_apply_cameras',
-                        lambda settings, _db, _apply: saved.setdefault('cameras', settings))
+    saved = _fake_camera_store(monkeypatch, insights, [camera])
     assert insights.apply_min_confidence('cam-1', 'person', 0.55, lambda *_: None) == 1
-    rules = [rule for zone in saved['cameras'][0]['detection']['zones'] for rule in zone['object_rules']]
+    assert insights.apply_min_confidence('cam-1', 'person', 0.55, lambda *_: None) == 0
+    assert len(saved) == 1  # nothing to raise: nothing written
+    rules = [rule for zone in saved[-1][0]['detection']['zones'] for rule in zone['object_rules']]
     assert [r['min_confidence'] for r in rules] == [0.55, 0.7, 0.3]
     from fastapi import HTTPException
 
@@ -310,3 +333,117 @@ def test_near_miss_check_needs_second_look_and_its_own_switch():
     assert not near.enabled({'object_detection_ai_near_miss': True})
     assert not near.enabled({'object_detection_second_look': True})
     assert near.enabled({'object_detection_second_look': True, 'object_detection_ai_near_miss': True})
+
+
+# ---------------------------------------------------------------------------
+# Per-camera near-miss check; one request for alert events
+# ---------------------------------------------------------------------------
+
+def test_camera_profiles_can_turn_the_near_miss_check_on_or_off():
+    settings = importlib.import_module('app.recording_settings')
+    assert 'object_detection_ai_near_miss' in settings.CAMERA_MOTION_PROFILE_FIELDS
+    assert settings._normalize_profile_value('object_detection_ai_near_miss', 'false') is False
+    assert settings._normalize_profile_value('object_detection_ai_near_miss', 'true') is True
+
+
+def test_alert_verification_offers_every_class_only_with_the_check_on(fp, monkeypatch):
+    rules = {'dog': ['cat']}
+    widened, asked = fp.widen_relabel_candidates(rules, ['dog', 'animal'])
+    assert asked
+    # The zone's own rule labels stay first; the label itself and a group's
+    # members are never offered.
+    assert widened['dog'][0] == 'cat' and 'dog' not in widened['dog'] and 'person' in widened['dog']
+    assert 'cat' not in widened['animal'] and 'person' in widened['animal']
+    monkeypatch.setattr(fp, 'effective_false_positive_settings', lambda: dict(fp.DEFAULT_FALSE_POSITIVE_SETTINGS))
+    assert fp.widen_relabel_candidates(rules, ['dog']) == (rules, False)
+
+
+def test_a_bare_no_from_a_full_alert_check_is_reused_not_asked_again(fp, db):
+    av = importlib.import_module('app.ai_verification')
+    metadata = {'camera_id': 'cam-1', 'ai_verification': {'asked_instead': True, 'labels': {
+        'person': {'present': False, 'reason': 'a coat on a hook'},
+    }}}
+    event = db.get_event(_event(db, [_det('person')], metadata=metadata))
+    verifier = CombinedVerifier({})
+    record = fp.check_event(event, av.DEFAULT_AI_VERIFICATION_SETTINGS, verifier=verifier)
+    assert verifier.requests == 0
+    assert record['status'] == 'false_positive'
+    # Without the full list, the same "no" is asked again.
+    metadata['ai_verification'].pop('asked_instead')
+    event = db.get_event(_event(db, [_det('person')], metadata=metadata))
+    verifier = CombinedVerifier({'person': (False, 'a coat', None)})
+    fp.check_event(event, av.DEFAULT_AI_VERIFICATION_SETTINGS, verifier=verifier)
+    assert verifier.requests == 1
+
+
+def test_a_relabel_to_a_class_without_a_rule_raises_no_alert(monkeypatch):
+    relabel = importlib.import_module('app.ai_relabel')
+    monkeypatch.setattr('app.event_presence.claim_presence', lambda *_a, **_k: True)
+    triggered = [{'label': 'dog', 'rule_name': 'Dog rule', 'confidence': 0.6}]
+    rules = [{'name': 'Dog rule', 'object': 'dog', 'zone_id': 'z1', 'email_enabled': True}]
+    record = {'labels': {'dog': {'present': False, 'instead': 'horse'}}}
+    assert relabel.relabel_alerts(triggered, record, rules, {'detections': [_det('dog')]}, 1, 'cam-1') == []
+
+
+# ---------------------------------------------------------------------------
+# Ignore areas
+# ---------------------------------------------------------------------------
+
+def _row(status, cx, cy, event_id=1):
+    return {'ai_status': status, 'x': cx - 0.02, 'y': cy - 0.02, 'width': 0.04, 'height': 0.04,
+            'event_id': event_id, 'created_at': f'2030-01-0{event_id % 9 + 1}'}
+
+
+def test_areas_are_suggested_where_rejections_cluster_without_confirmations():
+    insights = importlib.import_module('app.ai_insights')
+    bush = [_row('rejected', 0.12 + i * 0.005, 0.70, event_id=i) for i in range(8)]
+    elsewhere = [_row('confirmed', 0.6, 0.4) for _ in range(5)]
+    found = insights.suggest_areas(bush + elsewhere)
+    assert len(found) == 1
+    area = found[0]['area']
+    assert area['x'] < 0.12 < area['x'] + area['width'] and area['y'] < 0.70 < area['y'] + area['height']
+    assert (found[0]['rejected'], found[0]['confirmed']) == (8, 0)
+    # A real dog that often walks there too: not suggested.
+    assert insights.suggest_areas(bush + [_row('confirmed', 0.13, 0.70) for _ in range(3)]) == []
+    assert insights.suggest_areas(bush[:4]) == []  # too few rejections
+
+
+def test_an_ignore_area_stops_only_that_label_matching_only_inside_it():
+    schema = importlib.import_module('app.zone_schema')
+    zd = importlib.import_module('app.zone_detection')
+    zone = schema.normalize_monitoring_zones([{
+        'id': 'yard', 'name': 'Yard', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
+        'object_rules': [{'label': 'dog'}, {'label': 'person'}],
+        'ignore_areas': [{'label': 'Dog', 'x': 0.1, 'y': 0.6, 'width': 0.1, 'height': 0.2, 'source': 'ai'},
+                         {'label': 'cat', 'x': 'bad'}],
+    }])[0]
+    assert zone['ignore_areas'] == [{'label': 'dog', 'x': 0.1, 'y': 0.6, 'width': 0.1, 'height': 0.2, 'source': 'ai'}]
+    in_bush = {'label': 'dog', 'box': {'x': 0.12, 'y': 0.65, 'width': 0.04, 'height': 0.04}}
+    assert not zd.detection_matches_zone(in_bush, zone)
+    assert zd.detection_matches_zone({**in_bush, 'label': 'person'}, zone)
+    assert zd.detection_matches_zone({**in_bush, 'box': {'x': 0.5, 'y': 0.2, 'width': 0.04, 'height': 0.04}}, zone)
+
+
+def test_applying_and_removing_an_ignore_area(monkeypatch):
+    insights = importlib.import_module('app.ai_insights')
+    camera = {'id': 'cam-1', 'detection': {'zones': [
+        {'id': 'yard', 'name': 'Yard', 'x': 0, 'y': 0, 'width': 0.5, 'height': 1, 'object_rules': [{'label': 'dog'}]},
+        {'id': 'road', 'name': 'Road', 'x': 0.5, 'y': 0, 'width': 0.5, 'height': 1, 'object_rules': [{'label': 'dog'}]},
+        {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 0.5, 'height': 1, 'object_rules': [{'label': 'person'}]},
+    ]}}
+    saved = _fake_camera_store(monkeypatch, insights, [camera])
+    area = {'x': 0.1, 'y': 0.6, 'width': 0.1, 'height': 0.2}
+    assert insights.apply_ignore_area('cam-1', 'dog', area, None) == 1
+    yard = saved[-1][0]['detection']['zones'][0]
+    assert yard['ignore_areas'] == [{'label': 'dog', **area, 'source': 'ai'}]
+    assert 'ignore_areas' not in saved[-1][0]['detection']['zones'][1]  # the area is not in Road
+    assert 'ignore_areas' not in saved[-1][0]['detection']['zones'][2]  # Porch has no dog rule
+    assert insights.remove_ignore_area('cam-1', 'yard', 0, None)
+    assert saved[-1][0]['detection']['zones'][0]['ignore_areas'] == []
+    from fastapi import HTTPException
+
+    for bad in ({'x': 2, 'y': 0, 'width': 0.1, 'height': 0.1}, {'x': 0.1}, 'nope'):
+        with pytest.raises(HTTPException):
+            insights.apply_ignore_area('cam-1', 'dog', bad, None)
+    with pytest.raises(HTTPException):
+        insights.remove_ignore_area('cam-1', 'yard', 5, None)

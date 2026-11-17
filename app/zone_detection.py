@@ -244,7 +244,35 @@ def _detection_matches_compiled_zone(detection: dict[str, Any], compiled_zone: A
 
 
 def _detection_matches_zone_uncached(detection: dict[str, Any], zone: dict[str, Any]) -> bool:
-    return detection_center_in_zone(detection, zone)
+    return detection_center_in_zone(detection, zone) and not _in_ignore_area(detection, zone)
+
+
+def _in_ignore_area(detection: dict[str, Any], zone: dict[str, Any]) -> bool:
+    """Whether the detection's centre is in one of the zone's ignore areas
+    for its label (``zone.ignore_areas``, see app.zone_schema): that label is
+    not watched there, e.g. a bush the detector keeps reading as a dog."""
+    areas = zone.get('ignore_areas')
+    if not areas:
+        return False
+    label = str(detection.get('label') or '').strip().lower()
+    box = detection.get('box') if isinstance(detection, dict) else None
+    if not label or not isinstance(box, dict):
+        return False
+    try:
+        cx = float(box['x']) + float(box['width']) / 2
+        cy = float(box['y']) + float(box['height']) / 2
+    except (KeyError, TypeError, ValueError):
+        return False
+    for area in areas:
+        if str(area.get('label') or '') != label:
+            continue
+        try:
+            x, y = float(area['x']), float(area['y'])
+            if x <= cx <= x + float(area['width']) and y <= cy <= y + float(area['height']):
+                return True
+        except (KeyError, TypeError, ValueError):
+            continue
+    return False
 
 
 # Key under which a memo records the object it was computed for. A string key
@@ -278,7 +306,9 @@ def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any]) -> b
     box = detection.get('box')
     if zone_id is None or not isinstance(detection, dict) or not isinstance(box, dict):
         return _detection_matches_zone_uncached(detection, zone)
-    key = (zone_id, box.get('x'), box.get('y'), box.get('width'), box.get('height'))
+    # The label is part of the key: a zone's ignore areas apply to one label,
+    # and a relabelled copy of a detection keeps its box (and this memo).
+    key = (zone_id, detection.get('label'), box.get('x'), box.get('y'), box.get('width'), box.get('height'))
     # Anchored to the zone object itself: a zone edited under the same id has
     # new geometry, and an ``id()`` could be reused after the old zone is freed.
     memo = _memo_for(detection, '_zone_match_memo', zone)
