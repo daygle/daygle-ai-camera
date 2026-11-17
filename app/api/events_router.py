@@ -62,8 +62,9 @@ def events(
     q: str | None = Query(None, max_length=300, description='Keywords; every word must appear in a label, zone, camera, AI tag/description or face name.'),
     face: str | None = Query(None, max_length=200, description='Recognised face: any, unknown, id:<person_id> or name:<name>.'),
     sort: str = Query('newest', pattern='^(newest|oldest)$'),
-    ai_check: str | None = Query(None, pattern='^(filtered|confirmed|unverified)$',
-                                 description='AI verification verdict: filtered, confirmed or unverified.'),
+    ai_check: str | None = Query(None, pattern='^(filtered|confirmed|unverified|object_confirmed|object_rejected)$',
+                                 description='AI verification verdict: filtered, confirmed or unverified; or the '
+                                             'per-detection verdict: object_confirmed or object_rejected.'),
     false_positive: str | None = Query(None, pattern='^(only|hide)$', description='False positives: only to list just them, hide to leave them out.'),
     db=Depends(get_database),
 ):

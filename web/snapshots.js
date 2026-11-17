@@ -85,7 +85,7 @@ function snapshotPills(event) {
     null,
   );
   const motionBadge = motionDetections.length ? motionPill(strongestMotion?.confidence ?? null, motionFractionOf(motionDetections)) : '';
-  return `${motionBadge}${objectDetections.map((d) => detectionPill(d.label, d.confidence)).join('')}`
+  return `${motionBadge}${objectDetections.map((d) => detectionPill(d.label, d.confidence) + aiDetectionMark(d)).join('')}`
     || '<span class="muted">No detections</span>';
 }
 

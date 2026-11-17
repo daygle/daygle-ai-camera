@@ -146,6 +146,10 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     # crop and a mirrored crop before dropping them. Off by default: it adds up
     # to four inferences on a cycle with borderline detections.
     'object_detection_second_look': False,
+    # AI near-miss check (app.ai_near_miss): what Second Look still rejects is
+    # shown to the vision model in the background; a confirmed object passes
+    # on the next cycles. Needs Second Look and the AI model server.
+    'object_detection_ai_near_miss': False,
     'detection_history_minutes': 10,
     # Background-subtraction engine: 'mog2' (default, Gaussian-mixture with
     # shadow rejection) or 'diff' (legacy single-frame adaptive diff / automatic

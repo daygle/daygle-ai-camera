@@ -906,6 +906,40 @@ function reclassifiedBadge(found) {
   }).join('');
 }
 
+// The AI's verdict on one detection (detections.ai_status, written by alert
+// verification and the false-positive check), drawn as a small mark after
+// its pill: ✓ confirmed, 🔄 reclassified, ✗ rejected, ? unsure.
+const AI_DETECTION_MARKS = {
+  confirmed: { mark: '✓', text: 'AI confirmed' },
+  reclassified: { mark: '🔄', text: 'AI reclassified' },
+  rejected: { mark: '✗', text: 'AI says not there' },
+  unsure: { mark: '?', text: 'AI could not tell' },
+};
+
+function aiDetectionMark(detection) {
+  const status = String(detection?.ai_status || '');
+  const info = AI_DETECTION_MARKS[status];
+  if (!info) return '';
+  const original = status === 'reclassified' && detection.original_label
+    ? ` (detected as ${titleCase(String(detection.original_label).replace(/_/g, ' '))})` : '';
+  const reason = String(detection.ai_reason || '').trim();
+  const tip = escapeHtml(`${info.text}${original}${reason ? `: ${reason}` : ''}`);
+  return `<span class="detection-ai-mark detection-ai-mark-${status}" title="${tip}" aria-label="${tip}">${info.mark}</span>`;
+}
+
+// The strongest verdict for one label across a clip's events: a label the
+// AI confirmed anywhere in the clip reads as confirmed.
+function recordingLabelVerdict(recording, label) {
+  const wanted = String(label || '').trim().toLowerCase();
+  const order = ['confirmed', 'reclassified', 'unsure', 'rejected'];
+  const events = [...(recording?.events || []), ...(recording?.event ? [recording.event] : [])];
+  const found = events.flatMap((event) => event?.detections || [])
+    .concat(recording?.detections || [])
+    .filter((d) => String(d?.label || '').trim().toLowerCase() === wanted && order.includes(d.ai_status));
+  found.sort((a, b) => order.indexOf(a.ai_status) - order.indexOf(b.ai_status));
+  return found[0] || null;
+}
+
 // The admin toggle on an event, snapshot or recording row. ``marked`` is
 // whether it is a false positive now; the button offers the other choice
 // ("Not False Positive" records it as real, so the AI leaves it alone).
@@ -2345,7 +2379,7 @@ window.daygleUi = {
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
   detectionPill, motionPill, formatMotionFraction, motionFractionOf, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON,
   aiDescriptionTip, eventFalsePositive, falsePositiveBadge, falsePositiveButton, bindFalsePositiveButtons,
-  eventReclassified, recordingReclassified, reclassifiedBadge,
+  eventReclassified, recordingReclassified, reclassifiedBadge, aiDetectionMark, recordingLabelVerdict,
   // Face-identity pills + filters (recordings + snapshots)
   DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,

@@ -126,7 +126,25 @@ AI_CHECK_STATUSES = {
 }
 
 
+# AI Check values over the per-detection verdict (detections.ai_status, see
+# app.db.false_positives) rather than the alert verification record: an event
+# whose object the AI confirmed (or reclassified to what it really is), or
+# one where it rejected a detected object.
+DETECTION_AI_CHECKS: dict[str, tuple[str, ...]] = {
+    'object_confirmed': ('confirmed', 'reclassified'),
+    'object_rejected': ('rejected',),
+}
+
+
 def event_ai_check_condition(alias: str, ai_check: str | None) -> tuple[str, list[Any]] | None:
+    detection_statuses = DETECTION_AI_CHECKS.get(str(ai_check or '').strip().lower())
+    if detection_statuses:
+        placeholders = ', '.join('?' for _ in detection_statuses)
+        return (
+            f'EXISTS (SELECT 1 FROM detections dai WHERE dai.event_id = {alias}.id '
+            f'AND dai.ai_status IN ({placeholders}))',
+            list(detection_statuses),
+        )
     statuses = AI_CHECK_STATUSES.get(str(ai_check or '').strip().lower())
     if not statuses:
         return None

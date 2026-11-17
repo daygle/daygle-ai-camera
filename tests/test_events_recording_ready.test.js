@@ -61,6 +61,7 @@ function loadPage() {
     falsePositiveButton: () => '',
     eventReclassified: () => ({}),
     reclassifiedBadge: () => '',
+    aiDetectionMark: () => '',
     libraryDefaultQuery: () => ({}),
     createCursorPager: (url) => {
       state.pagerUrls.push(url);

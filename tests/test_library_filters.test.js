@@ -268,3 +268,18 @@ test('a reclassified object keeps its original label visible, and never on a fal
   assert.equal(run(sandbox, `recordingReclassified(${JSON.stringify(recording)})`).dog, 'cat');
   assert.equal(run(sandbox, 'reclassifiedBadge({})'), '');
 });
+
+test('each detection shows the AI verdict, and a clip shows its strongest one per label', () => {
+  const sandbox = createSandbox();
+  assert.equal(run(sandbox, 'aiDetectionMark({ label: "person" })'), '');
+  assert.match(run(sandbox, 'aiDetectionMark({ ai_status: "confirmed", ai_reason: "a person" })'), /✓[\s\S]*|AI confirmed: a person/);
+  assert.match(run(sandbox, 'aiDetectionMark({ ai_status: "rejected" })'), /AI says not there/);
+  assert.match(run(sandbox, 'aiDetectionMark({ ai_status: "reclassified", original_label: "dog" })'), /detected as Dog/);
+  const recording = { events: [
+    { detections: [{ label: 'person', ai_status: 'rejected' }] },
+    { detections: [{ label: 'person', ai_status: 'confirmed' }, { label: 'car' }] },
+  ] };
+  assert.equal(run(sandbox, `recordingLabelVerdict(${JSON.stringify(recording)}, 'person')`).ai_status, 'confirmed');
+  assert.equal(run(sandbox, `recordingLabelVerdict(${JSON.stringify(recording)}, 'car')`), null);
+  assert.match(run(sandbox, 'JSON.stringify(LIBRARY_AI_CHECKS)'), /object_confirmed/);
+});

@@ -501,7 +501,8 @@ function recordingRowHtml(recording) {
     badges = `${continuousPill()}${motionBadge}`;
   } else {
     const summaryBadges = recordingDetectionSummary(recording)
-      .map((d) => detectionPill(d.label, d.confidence, isSound, d.count)).join('');
+      .map((d) => detectionPill(d.label, d.confidence, isSound, d.count)
+        + (isSound ? '' : aiDetectionMark(recordingLabelVerdict(recording, d.label)))).join('');
     // A clip can contain both frame motion and a recognised object. Keep it
     // as an Object Recording, but show the motion intensity separately so
     // the list does not lose one of the event types.

@@ -18,9 +18,10 @@ from app.ai_verification import (
     validate_ai_verification_settings,
     verification_stats,
 )
+from app.ai_insights import apply_min_confidence, insights
 from app.auth import utc_now
 from app.auth_gates import require_admin
-from app.deps import get_database
+from app.deps import get_apply_cameras_settings, get_database
 from app.request_helpers import admin_json_object, read_json_object, write_audit_log
 
 router = APIRouter()
@@ -99,3 +100,32 @@ async def start_description_backfill_route(request: Request, db=Depends(get_data
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     write_audit_log(request, db, 'start', 'settings.ai_verification.describe_backfill')
     return status
+
+
+@router.get('/api/settings/ai-insights')
+def get_ai_insights(request: Request):
+    """Tuning suggestions and frequent AI tags for the AI page (app.ai_insights)."""
+    require_admin(request)
+    return insights()
+
+
+@router.post('/api/settings/ai-insights/apply')
+def apply_ai_insight(
+    request: Request,
+    db=Depends(get_database),
+    apply_cameras_settings=Depends(get_apply_cameras_settings),
+    payload: dict[str, Any] = Depends(admin_json_object),
+):
+    """Raise a camera's minimum confidence for one label to a suggested value."""
+    require_admin(request)
+    camera_id = payload.get('camera_id')
+    label = payload.get('label')
+    if not isinstance(camera_id, str) or not isinstance(label, str):
+        raise HTTPException(status_code=400, detail='camera_id and label must be strings.')
+    changed = apply_min_confidence(camera_id, label, payload.get('min_confidence'), apply_cameras_settings)
+    write_audit_log(request, db, 'update', 'settings.cameras', details={
+        'camera_id': camera_id, 'label': label, 'min_confidence': payload.get('min_confidence'),
+        'rules': changed, 'via': 'ai_insights',
+    })
+    return {'rules_changed': changed}
+

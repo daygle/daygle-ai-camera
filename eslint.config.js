@@ -83,6 +83,8 @@ const WEB_SHARED_GLOBALS = {
   eventReclassified: 'readonly',
   recordingReclassified: 'readonly',
   reclassifiedBadge: 'readonly',
+  aiDetectionMark: 'readonly',
+  recordingLabelVerdict: 'readonly',
   escapeHtml: 'readonly',
   eventFaceIdentities: 'readonly',
   faceIdentityPills: 'readonly',

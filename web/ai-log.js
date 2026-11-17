@@ -74,6 +74,7 @@ const EVENT_TYPE_LABELS = {
   ai_verification_store_failed: 'AI Verification Store Failed',
   ai_false_positive: 'AI False Positive',
   ai_reclassified: 'AI Reclassified',
+  ai_near_miss_confirmed: 'AI Near-Miss Confirmed',
   // Descriptions
   ai_description_unavailable: 'AI Description Unavailable',
   ai_description_store_failed: 'AI Description Store Failed',

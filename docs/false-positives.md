@@ -141,3 +141,6 @@ Use **Only** to review what the purge will delete.
 `false_positive` (`1`, `0` or `null`), `false_positive_by` (`ai` or `user`),
 `false_positive_at` and `false_positive_reason`. Recordings carry
 `false_positive`: `null`, or `{"by": "ai" | "user" | "mixed", "reason": "..."}`.
+
+See also [the detector and the AI model, together](ai-and-detector.md) for
+per-detection verdicts, tag evidence and the one-request check.
