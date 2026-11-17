@@ -256,6 +256,12 @@
             <option value="true">Yes, AI and user marked</option>
             <option value="false">No, only user marked</option>
           </select></label>
+        <label>
+          <span>Purge Viewer-Marked <span class="info-tip" data-tip="Whether the purge deletes false positives a viewer account marked, or only those an admin (or the AI) marked. Each mark shows who made it. Default: Yes" title="Whether the purge deletes false positives a viewer account marked, or only those an admin (or the AI) marked. Default: Yes" tabindex="0" aria-label="Help: Whether the purge deletes false positives a viewer account marked, or only those an admin (or the AI) marked. Default: Yes"></span></span>
+          <select name="purge_include_viewers">
+            <option value="true">Yes, viewer marks too</option>
+            <option value="false">No, only admin marked</option>
+          </select></label>
         <fieldset class="ai-verification-cameras">
           <legend>AI Check Cameras <span class="info-tip" data-tip="Cameras whose events the AI checks. None ticked = all cameras." title="Cameras whose events the AI checks. None ticked = all cameras." tabindex="0" aria-label="Help: Cameras whose events the AI checks. None ticked = all cameras."></span></legend>
           <div id="fpCameras" class="ai-verification-camera-list"><span class="muted">Loading cameras…</span></div>

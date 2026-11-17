@@ -18,12 +18,15 @@ False Positives**.
 Every signed-in user (admins and viewers) sees a **False Positive** button on
 each object event (Events page), each object snapshot (Snapshots page) and
 each recording with detections (Recordings page). In the phone app, long-press
-an Events row. Every mark is written to the audit log under the user who made
-it. Because a marked clip can be purged, give viewer accounts only to people
-you trust with that; the purge settings and **Purge Now** stay admin-only.
+an Events row. Every mark is stored with who made it (their username and
+whether they were an admin or a viewer) and written to the audit log. A
+viewer's mark can lead to deletion, so **Purge Viewer-Marked** (below) can
+leave viewers' marks alone; the purge settings and **Purge Now** stay
+admin-only.
 
-- **False Positive** marks it. The row shows a **🚫 False Positive · User**
-  badge.
+- **False Positive** marks it. The row shows a **🚫 False Positive · sam**
+  badge naming who marked it (marks from before names were stored read
+  **User**).
 - On a marked row the button reads **Not False Positive**. It records the
   detection as real, so the AI check leaves it alone from then on.
 - Marking a **recording** marks every event in that clip.
@@ -116,6 +119,10 @@ ones first.
   deleted with its snapshot.
 - **Purge AI-Marked** chooses whether AI-marked false positives are purged
   too, or only those a user marked.
+- **Purge Viewer-Marked** chooses whether false positives a viewer marked are
+  purged too, or only those an admin (or the AI) marked. A clip a viewer
+  marked is then kept until an admin marks it too. Marks from before roles
+  were stored count as an admin's.
 - Uploaded clips are never purged.
 - **Purge Now** runs the purge at once, even with purging off. The Purge
   After delay still applies.

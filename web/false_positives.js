@@ -12,8 +12,9 @@ const FP_FORM_DEFAULTS = {
   purge_enabled: false,
   purge_after_hours: 24,
   purge_include_ai: true,
+  purge_include_viewers: true,
 };
-const FP_BOOLEAN_FIELDS = new Set(['ai_check', 'purge_enabled', 'purge_include_ai']);
+const FP_BOOLEAN_FIELDS = new Set(['ai_check', 'purge_enabled', 'purge_include_ai', 'purge_include_viewers']);
 
 function fpToast(text, isError = false) {
   if (text) window.showToast?.(text, isError);

@@ -256,6 +256,10 @@ class EventDatabase(
                 "ALTER TABLE events ADD COLUMN false_positive_by TEXT",
                 "ALTER TABLE events ADD COLUMN false_positive_at TEXT",
                 "ALTER TABLE events ADD COLUMN false_positive_reason TEXT",
+                # Who marked it by hand (username, and their role then), so a
+                # viewer's mark can be told apart and left out of the purge.
+                "ALTER TABLE events ADD COLUMN false_positive_user TEXT",
+                "ALTER TABLE events ADD COLUMN false_positive_role TEXT",
             ):
                 # Column already exists (or the table is created below).
                 with contextlib.suppress(sqlite3.OperationalError):
@@ -276,6 +280,8 @@ class EventDatabase(
                     false_positive_by TEXT,
                     false_positive_at TEXT,
                     false_positive_reason TEXT,
+                    false_positive_user TEXT,
+                    false_positive_role TEXT,
                     FOREIGN KEY(recording_id) REFERENCES recordings(id) ON DELETE SET NULL
                 );
 

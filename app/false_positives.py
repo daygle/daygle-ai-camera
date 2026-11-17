@@ -49,6 +49,9 @@ DEFAULT_FALSE_POSITIVE_SETTINGS: dict[str, Any] = {
     # Whether the purge deletes AI-marked false positives too, or only the
     # ones a user marked.
     'purge_include_ai': True,
+    # Whether the purge deletes false positives a viewer marked, or only
+    # those an admin (or the AI) marked.
+    'purge_include_viewers': True,
 }
 MIN_PURGE_AFTER_HOURS = 1
 MAX_PURGE_AFTER_HOURS = 24 * 30
@@ -127,7 +130,7 @@ def validate_false_positive_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise _bad(f'Unknown false-positive setting: {", ".join(unknown)}.')
     settings = {**effective_false_positive_settings(), **payload}
     settings = {key: settings[key] for key in DEFAULT_FALSE_POSITIVE_SETTINGS}
-    for key in ('ai_check', 'purge_enabled', 'purge_include_ai'):
+    for key in ('ai_check', 'purge_enabled', 'purge_include_ai', 'purge_include_viewers'):
         settings[key] = _as_bool(settings[key], key)
     hours = settings['purge_after_hours']
     if isinstance(hours, bool) or not isinstance(hours, int) or not (
@@ -649,9 +652,10 @@ def purge_false_positives_by_policy(*, force: bool = False) -> dict[str, Any]:
 
     cutoff = _purge_cutoff(settings)
     include_ai = bool(settings.get('purge_include_ai', True))
+    include_viewers = bool(settings.get('purge_include_viewers', True))
     while True:
         recordings, events = database.purge_false_positives(
-            older_than=cutoff, include_ai=include_ai, limit=PURGE_BATCH,
+            older_than=cutoff, include_ai=include_ai, include_viewers=include_viewers, limit=PURGE_BATCH,
         )
         for recording in recordings:
             path = safe_storage_path(recording.get('file_path'), roots=('recordings_dir',))
@@ -676,6 +680,7 @@ def false_positive_stats(days: int = 7) -> dict[str, Any]:
     settings = effective_false_positive_settings()
     since = (datetime.now(UTC) - timedelta(days=max(1, int(days)))).isoformat()
     stats = _state.database.false_positive_stats(
-        since, include_ai=bool(settings.get('purge_include_ai', True)), older_than=_purge_cutoff(settings),
+        since, include_ai=bool(settings.get('purge_include_ai', True)),
+        include_viewers=bool(settings.get('purge_include_viewers', True)), older_than=_purge_cutoff(settings),
     )
     return {'days': int(days), **stats}

@@ -863,20 +863,25 @@ function aiDescriptionTip(text) {
 // a recording reports { by, reason } when it counts as one.
 function eventFalsePositive(event) {
   if (!event || Number(event.false_positive) !== 1) return null;
-  return { by: event.false_positive_by || 'user', reason: event.false_positive_reason || '' };
+  const by = event.false_positive_by || 'user';
+  const users = by === 'user' && event.false_positive_user ? [String(event.false_positive_user)] : [];
+  return { by, reason: event.false_positive_reason || '', users };
 }
 
 function falsePositiveBadge(record) {
   if (!record) return '';
-  const who = record.by === 'ai' ? 'AI' : record.by === 'mixed' ? 'AI + user' : 'User';
+  // Marks by hand name who made them (servers that store it); older marks read "User".
+  const users = Array.isArray(record.users) ? record.users.filter(Boolean).map(String) : [];
+  const people = users.length ? users.join(', ') : 'User';
+  const who = record.by === 'ai' ? 'AI' : record.by === 'mixed' ? `AI + ${users.length ? people : 'user'}` : people;
   const summary = record.by === 'ai'
     ? 'The AI model judged this a false positive.'
     : record.by === 'mixed'
       ? 'The AI model and a user marked these detections as false positives.'
-      : 'Marked as a false positive by a user.';
+      : `Marked as a false positive by ${users.length ? people : 'a user'}.`;
   const reason = String(record.reason || '').trim();
   const tip = escapeHtml(`${summary}${reason ? ` ${reason}` : ''}`);
-  return `<span class="detection detection-false-positive" title="${tip}">🚫 False Positive · ${who}</span>`
+  return `<span class="detection detection-false-positive" title="${tip}">🚫 False Positive · ${escapeHtml(who)}</span>`
     + (reason ? `<span class="info-tip" data-tip="${tip}" title="${tip}" tabindex="0" role="note" aria-label="False positive: ${tip}"></span>` : '');
 }
 
