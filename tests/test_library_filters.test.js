@@ -243,8 +243,10 @@ test('false-positive badge and button render for the right users and states', ()
   assert.match(badge, /False Positive · AI/);
   assert.match(badge, /person: a coat/);
   assert.equal(run(sandbox, 'falsePositiveBadge(null)'), '');
+  run(sandbox, 'window.daygleAuth = {}');
+  assert.equal(run(sandbox, "falsePositiveButton('event', 5, false)"), '', 'no button before sign-in');
   run(sandbox, "window.daygleAuth = { user: { role: 'viewer' } }");
-  assert.equal(run(sandbox, "falsePositiveButton('event', 5, false)"), '', 'viewers get no button');
+  assert.match(run(sandbox, "falsePositiveButton('event', 5, false)"), /data-false-positive-value="true"/, 'viewers can mark');
   run(sandbox, "window.daygleAuth = { user: { role: 'admin' } }");
   const mark = run(sandbox, "falsePositiveButton('event', 5, false)");
   assert.match(mark, /data-false-positive-value="true"/);

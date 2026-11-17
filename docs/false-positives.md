@@ -15,9 +15,12 @@ False Positives**.
 
 ## Marking by hand
 
-Admins see a **False Positive** button on each object event (Events page),
-each object snapshot (Snapshots page) and each recording with detections
-(Recordings page).
+Every signed-in user (admins and viewers) sees a **False Positive** button on
+each object event (Events page), each object snapshot (Snapshots page) and
+each recording with detections (Recordings page). In the phone app, long-press
+an Events row. Every mark is written to the audit log under the user who made
+it. Because a marked clip can be purged, give viewer accounts only to people
+you trust with that; the purge settings and **Purge Now** stay admin-only.
 
 - **False Positive** marks it. The row shows a **🚫 False Positive · User**
   badge.
@@ -135,8 +138,8 @@ Use **Only** to review what the purge will delete.
 | `GET` / `PUT` | `/api/settings/false-positives` | Settings (admin). |
 | `GET` | `/api/settings/false-positives/stats?days=7` | Counts (admin). |
 | `POST` | `/api/settings/false-positives/purge` | Purge now (admin). |
-| `POST` | `/api/events/{id}/false-positive` | Body `{"false_positive": true \| false \| null}` (admin). `null` clears the decision. |
-| `POST` | `/api/recordings/{id}/false-positive` | Same body; applies to every event in the clip (admin). |
+| `POST` | `/api/events/{id}/false-positive` | Body `{"false_positive": true \| false \| null}`. `null` clears the decision. Any signed-in user. |
+| `POST` | `/api/recordings/{id}/false-positive` | Same body; applies to every event in the clip. Any signed-in user. |
 
 `/api/events`, `/api/snapshots` and `/api/recordings` take
 `false_positive=only` or `false_positive=hide`. Events carry

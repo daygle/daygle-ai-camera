@@ -479,6 +479,26 @@ def test_api_marks_lists_and_purges(tmp_path, monkeypatch):
         status, _h, body = client.request('/api/settings/false-positives/purge', method='POST', headers=headers)
         assert status == 200 and body['recordings_purged'] == 1 and body['events_purged'] == 1
         assert database.get_recording(recording_id) is None and database.get_event(event_id) is None
+
+        # Viewers may mark (audit-logged as them) but not change the
+        # settings, read the stats or purge.
+        status, _h, _body = client.request('/api/users', method='POST', headers=headers,
+                                           json_body={'username': 'viewer1', 'password': 'Viewer123!', 'role': 'viewer'})
+        assert status == 200
+        viewer = LocalClient(base_url)
+        viewer_headers = {'X-CSRF-Token': _login(viewer, 'viewer1', 'Viewer123!')}
+        other_event = _event(database, [PERSON], snapshot=None)
+        status, _h, body = viewer.request(f'/api/events/{other_event}/false-positive', method='POST',
+                                          headers=viewer_headers, json_body={'false_positive': True})
+        assert status == 200 and body['false_positive'] == 1 and body['false_positive_by'] == 'user'
+        logged = database.list_audit_logs(username='viewer1', action='false_positive')
+        assert [entry['resource_id'] for entry in logged] == [str(other_event)]
+        for path, method in (('/api/settings/false-positives', 'PUT'),
+                             ('/api/settings/false-positives/stats', 'GET'),
+                             ('/api/settings/false-positives/purge', 'POST')):
+            status, _h, _body = viewer.request(path, method=method, headers=viewer_headers,
+                                               json_body={} if method != 'GET' else None)
+            assert status == 403, path
     finally:
         server.should_exit = True
         thread.join(timeout=5)

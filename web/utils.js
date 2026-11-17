@@ -946,11 +946,11 @@ function recordingLabelVerdict(recording, label) {
   return found[0] || null;
 }
 
-// The admin toggle on an event, snapshot or recording row. ``marked`` is
+// The toggle on an event, snapshot or recording row, for any signed-in user. ``marked`` is
 // whether it is a false positive now; the button offers the other choice
 // ("Not False Positive" records it as real, so the AI leaves it alone).
 function falsePositiveButton(kind, id, marked) {
-  if (window.daygleAuth?.user?.role !== 'admin') return '';
+  if (!window.daygleAuth?.user) return '';
   const label = marked ? 'Not False Positive' : 'False Positive';
   const icon = marked
     ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
