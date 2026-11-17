@@ -72,20 +72,11 @@
 .alerts-policy-row.is-disabled .alerts-policy-state { color: var(--muted); }
 .alerts-policy-table .alerts-policy-row td { border-bottom: 1px solid var(--border); }
 .alerts-policy-table .alerts-policy-row td.alerts-table-actions { display: table-cell; text-align: right; white-space: nowrap; }
-.alerts-policy-table .alerts-table-actions button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border-radius: 8px;
-  line-height: 1;
-  vertical-align: middle;
-}
-.alerts-policy-table .alerts-table-actions button svg { display: block; flex: 0 0 auto; }
-.alerts-policy-table .alerts-table-actions button + button { margin-left: 6px; }
-.alerts-policy-table .alerts-policy-expand.is-open { border-color: var(--accent); color: var(--accent); }
+/* Remove / Edit use the shared icon-only action buttons (``.activity-item-action``)
+   with the same 4px gap as Recordings, Events and Cameras. */
+.alerts-policy-table .alerts-table-actions button + button { margin-left: 4px; }
+/* Open policy: the edit button stays pressed-looking. */
+.alerts-policy-table button.activity-item-action.alerts-policy-expand.is-open { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); }
 .alerts-policy-table th:first-child, .alerts-policy-table td:first-child { width: 24%; }
 .alerts-policy-table th:nth-child(2), .alerts-policy-table td:nth-child(2) { width: 28%; }
 .alerts-policy-table th:nth-child(3), .alerts-policy-table td:nth-child(3),

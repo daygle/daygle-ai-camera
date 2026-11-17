@@ -45,3 +45,18 @@ test('camera row actions use the Recordings button style, with Edit last', () =>
   assert.doesNotMatch(css, /\.cameras-table \.cell-actions button,\s*\.cameras-table \.cell-actions a \{/);
   assert.match(css, /\.cameras-table \.cell-actions \{\s*display: flex;\s*align-items: center;\s*justify-content: flex-end;\s*gap: 4px;/);
 });
+
+test('alert policy actions use the Recordings button style, with Edit last', () => {
+  const js = read('alerts.js');
+  const start = js.indexOf('<td class="alerts-table-actions" data-label="Actions">');
+  assert.ok(start !== -1, 'alert actions are rendered');
+  const actions = js.slice(start, js.indexOf('</td>', start));
+  const remove = actions.indexOf('activity-item-action-icon activity-item-action-delete alerts-policy-remove');
+  const edit = actions.indexOf('activity-item-action-icon activity-item-action-edit alerts-policy-expand');
+  assert.ok(remove > -1 && edit > -1, 'both buttons use the shared icon style');
+  assert.ok(remove < edit, 'order: remove, edit');
+  assert.match(js, /<th class="cell-center" scope="col">Actions<\/th><\/tr><\/thead>/);
+  const css = read('styles.css');
+  assert.match(css, /\.alerts-policy-table \.alerts-table-actions button \+ button \{ margin-left: 4px; \}/);
+  assert.doesNotMatch(css, /\.alerts-policy-table \.alerts-table-actions button \{\s*display: inline-flex;/);
+});
