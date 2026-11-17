@@ -184,7 +184,7 @@ function eventPills(event) {
     null,
   );
   const motionBadge = motionDetections.length ? motionPill(strongestMotion?.confidence ?? null, motionFractionOf(motionDetections)) : '';
-  return `${motionBadge}${objectDetections.map((d) => detectionPill(d.label, d.confidence) + (d.still_alert ? stillAlertBadge(d.still_alert_minutes) : '')).join('')}`
+  return `${motionBadge}${objectDetections.map((d) => detectionPill(d.label, d.confidence) + aiDetectionMark(d) + (d.still_alert ? stillAlertBadge(d.still_alert_minutes) : '')).join('')}`
     || '<span class="muted">No detections</span>';
 }
 
@@ -314,7 +314,7 @@ function renderEventRow(event) {
   const recordingAction = actions.filter(Boolean).length ? actions.join('') : '<span class="muted">-</span>';
   return `
     <tr class="activity-table-row ${typeClass}" data-event-row="${escapeHtml(String(event.id))}">
-      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}${aiBadge}${falsePositiveBadge(falsePositive)}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
+      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}${aiBadge}${falsePositiveBadge(falsePositive)}${reclassifiedBadge(eventReclassified(event))}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
       <td class="activity-cell-camera">${escapeHtml(camera)}</td>
       <td class="activity-cell-detections"><div class="activity-item-badges">${eventPills(event)}${aiTags}${aiTip}</div></td>
       <td class="activity-cell-when">

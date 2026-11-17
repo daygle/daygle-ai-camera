@@ -85,7 +85,7 @@ function snapshotPills(event) {
     null,
   );
   const motionBadge = motionDetections.length ? motionPill(strongestMotion?.confidence ?? null, motionFractionOf(motionDetections)) : '';
-  return `${motionBadge}${objectDetections.map((d) => detectionPill(d.label, d.confidence)).join('')}`
+  return `${motionBadge}${objectDetections.map((d) => detectionPill(d.label, d.confidence) + aiDetectionMark(d)).join('')}`
     || '<span class="muted">No detections</span>';
 }
 
@@ -150,7 +150,7 @@ function snapshotRow(event) {
             </span>
           </span>
         </div>
-        <div class="activity-item-badges snapshot-row-badges">${snapshotPills(event)}${faceIdentityPills(eventFaceIdentities(event))}${alertBadge}${falsePositiveBadge(falsePositive)}${aiTags}${aiTip}</div>
+        <div class="activity-item-badges snapshot-row-badges">${snapshotPills(event)}${faceIdentityPills(eventFaceIdentities(event))}${alertBadge}${falsePositiveBadge(falsePositive)}${reclassifiedBadge(eventReclassified(event))}${aiTags}${aiTip}</div>
       </div>
       <div class="snapshot-row-actions">${actions.join('')}</div>
     </article>

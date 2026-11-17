@@ -28,6 +28,8 @@ from app.detection_status import GENERIC_TRIGGER_LABELS
 from app.utils import _normalize_iso_to_utc, parse_json_object
 
 FALSE_POSITIVE_SOURCES = ('ai', 'user')
+# A detection's AI verdict (detections.ai_status).
+DETECTION_VERDICTS = ('confirmed', 'rejected', 'reclassified', 'unsure')
 MAX_REASON_CHARS = 300
 _SQLITE_BATCH_SIZE = 400
 
@@ -152,6 +154,150 @@ def _rows_to_events(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
 class FalsePositivesMixin:
     """Mark, find and purge false positives (see the module docstring)."""
 
+    @staticmethod
+    def reopen_unasked_ai_false_positives(db: sqlite3.Connection) -> int:
+        """Return AI false positives judged without the relabel question to undecided.
+
+        Early AI checks only asked "is it really a <label>?", so a cat the
+        detector read as a dog was marked a false positive and could be
+        purged. Those verdicts (no ``asked_instead`` on their check record)
+        are cleared: an undecided object event is never purged, and recent
+        ones are checked again with the question. Users' marks are kept.
+        Idempotent; runs on every ``init()``.
+        """
+        cursor = db.execute(
+            """UPDATE events
+               SET false_positive = NULL, false_positive_by = NULL,
+                   false_positive_at = NULL, false_positive_reason = NULL
+               WHERE false_positive = 1 AND false_positive_by = 'ai'
+                 AND (CASE WHEN json_valid(metadata)
+                      THEN json_extract(metadata, '$.ai_false_positive_check.asked_instead')
+                      ELSE NULL END) IS NULL"""
+        )
+        return int(cursor.rowcount)
+
+    def ai_judged_detections(self, since: str) -> list[dict[str, Any]]:
+        """Detections the AI confirmed or rejected since ``since``, with their
+        camera, label, zone and confidence (app.ai_insights)."""
+        since = _normalize_iso_to_utc(since) or since
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT d.label, d.confidence, d.zone_name, d.ai_status,
+                          CASE WHEN json_valid(e.metadata)
+                               THEN CAST(json_extract(e.metadata, '$.camera_id') AS TEXT) END AS camera_id
+                   FROM detections d JOIN events e ON e.id = d.event_id
+                   WHERE e.created_at >= ? AND d.ai_status IN ('confirmed', 'rejected')""",
+                [since],
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def ai_tag_counts(self, since: str) -> list[dict[str, Any]]:
+        """How many events per camera the AI tagged with each tag since
+        ``since``, most frequent first (app.ai_insights)."""
+        since = _normalize_iso_to_utc(since) or since
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT CAST(json_extract(e.metadata, '$.camera_id') AS TEXT) AS camera_id,
+                          lower(tag.value) AS tag, COUNT(DISTINCT e.id) AS count
+                   FROM events e, json_each(CASE WHEN json_valid(e.metadata)
+                       THEN json_extract(e.metadata, '$.ai_description.tags') END) AS tag
+                   WHERE e.created_at >= ? AND tag.type = 'text'
+                   GROUP BY camera_id, lower(tag.value)
+                   ORDER BY count DESC""",
+                [since],
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_detection_verdicts(
+        self, event_id: int, verdicts: dict[str, dict[str, Any]], *, source: str,
+    ) -> int:
+        """Record the AI's verdict on an event's detections, per detected label.
+
+        ``verdicts`` maps a detection label to ``{'status': ..., 'reason': ...}``
+        with status ``confirmed``, ``rejected`` or ``unsure``. ``source`` is
+        which check gave it (``verification`` or ``check``). A reclassified
+        detection keeps its verdict (see reclassify_event_detections).
+        """
+        changed = 0
+        with self.write_slot(), self.connect() as db:
+            for label, verdict in (verdicts or {}).items():
+                status = str((verdict or {}).get('status') or '')
+                if status not in DETECTION_VERDICTS or status == 'reclassified':
+                    continue
+                cursor = db.execute(
+                    "UPDATE detections SET ai_status = ?, ai_reason = ?, ai_source = ? "
+                    "WHERE event_id = ? AND lower(label) = ? AND COALESCE(ai_status, '') != 'reclassified'",
+                    (status, _clean_reason((verdict or {}).get('reason')), source, int(event_id),
+                     str(label).strip().lower()),
+                )
+                changed += int(cursor.rowcount)
+        return changed
+
+    def reclassify_event_detections(self, event_id: int, mapping: dict[str, str],
+                                    reason: str | None = None) -> int:
+        """Relabel an event's detections, e.g. ``{'dog': 'cat'}`` for a cat the
+        detector called a dog, and keep its recordings' labels in step.
+
+        Each recording linked to the event gains the new label (as a detection,
+        with the best confidence the event had for the old one). The old label
+        is dropped from a recording only when no other event in it still has
+        it, and a trigger label naming it is rewritten. Returns how many
+        detection rows changed.
+        """
+        pairs = {
+            str(old).strip().lower(): str(new).strip().lower()
+            for old, new in (mapping or {}).items()
+            if str(old).strip() and str(new).strip() and str(old).strip().lower() != str(new).strip().lower()
+        }
+        if not pairs:
+            return 0
+        with self.write_slot(), self.connect() as db:
+            changed = 0
+            confidences: dict[str, float] = {}
+            for old, new in pairs.items():
+                best = db.execute(
+                    'SELECT MAX(confidence) AS best FROM detections WHERE event_id = ? AND lower(label) = ?',
+                    (int(event_id), old),
+                ).fetchone()['best']
+                cursor = db.execute(
+                    "UPDATE detections SET label = ?, original_label = COALESCE(original_label, label), "
+                    "ai_status = 'reclassified', ai_reason = ?, ai_source = 'check' "
+                    'WHERE event_id = ? AND lower(label) = ?',
+                    (new, _clean_reason(reason), int(event_id), old),
+                )
+                if cursor.rowcount:
+                    changed += cursor.rowcount
+                    if best is not None:
+                        confidences[new] = max(float(best), confidences.get(new, 0.0))
+            if not changed:
+                return 0
+            recording_ids = [int(row['id']) for row in db.execute(
+                'SELECT r.id FROM recordings r JOIN events e ON e.id = ? WHERE r.id = e.recording_id OR r.event_id = e.id',
+                (int(event_id),),
+            ).fetchall()]
+            for recording_id in recording_ids:
+                for old, new in pairs.items():
+                    still_there = db.execute(
+                        """SELECT 1 FROM detections d JOIN events e ON e.id = d.event_id
+                           WHERE (e.recording_id = ? OR e.id = (SELECT event_id FROM recordings WHERE id = ?))
+                             AND lower(d.label) = ? LIMIT 1""",
+                        (recording_id, recording_id, old),
+                    ).fetchone()
+                    if not still_there:
+                        db.execute(
+                            "DELETE FROM recording_labels WHERE recording_id = ? AND label = ? AND source != 'ai'",
+                            (recording_id, old),
+                        )
+                    db.execute(
+                        'UPDATE recordings SET trigger_label = ? WHERE id = ? AND lower(trigger_label) = ?'
+                        ' AND NOT EXISTS (SELECT 1 FROM detections d JOIN events e ON e.id = d.event_id'
+                        ' WHERE (e.recording_id = ? OR e.id = recordings.event_id) AND lower(d.label) = ?)',
+                        (new, recording_id, old, recording_id, old),
+                    )
+                self._insert_recording_labels(db, recording_id, sorted(set(pairs.values())),
+                                              source='detection', confidences=confidences)
+            return changed
+
     def set_event_false_positive(
         self,
         event_id: int,
@@ -220,9 +366,11 @@ class FalsePositivesMixin:
         camera_ids: list[str] | None = None,
         before_id: int | None = None,
         limit: int = 20,
+        flagged_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Unjudged live-camera events with a snapshot and an object to check,
-        newest first, created between ``since`` and ``until``."""
+        newest first, created between ``since`` and ``until``. ``flagged_only``
+        keeps those whose AI tags contradict a detection (``ai_tag_evidence``)."""
         excluded = [str(label).strip().lower() for label in labels_excluded if str(label).strip()]
         conditions = [
             'e.false_positive IS NULL',
@@ -243,6 +391,11 @@ class FalsePositivesMixin:
                 f"ELSE NULL END) IN ({','.join('?' * len(camera_ids))})"
             )
             params.extend(str(camera_id) for camera_id in camera_ids)
+        if flagged_only:
+            conditions.append(
+                "(CASE WHEN json_valid(e.metadata) THEN json_type(e.metadata, '$.ai_tag_evidence.contradicts') "
+                "ELSE NULL END) = 'object'"
+            )
         if before_id is not None:
             conditions.append('e.id < ?')
             params.append(int(before_id))

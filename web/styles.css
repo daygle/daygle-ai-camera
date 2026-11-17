@@ -237,6 +237,16 @@
 :root.light .detection.detection-ai-tag { background: transparent; color: var(--muted); border: 1px dashed var(--border); font-weight: 600; }
 :root.light .detection.detection-ai-verified { background: rgba(22,163,74,.10); color: #15803d; border-color: rgba(22,163,74,.35); }
 :root.light .detection.detection-ai-unverified { background: rgba(217,119,6,.08); color: #92400e; border: 1px dashed rgba(217,119,6,.45); }
+:root.light .detection-ai-mark { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: -2px; margin-right: 4px; border-radius: 999px; font-size: 11px; font-weight: 800; line-height: 1; cursor: help; }
+.detection-ai-mark-confirmed { background: rgba(34, 197, 94, 0.16); color: #4ade80; }
+.detection-ai-mark-reclassified { background: rgba(34, 211, 238, 0.14); color: #67e8f9; }
+.detection-ai-mark-rejected { background: rgba(248, 113, 113, 0.16); color: #f87171; }
+.detection-ai-mark-unsure { background: rgba(251, 191, 36, 0.14); color: #fcd34d; }
+:root.light .detection-ai-mark-confirmed { background: rgba(22,163,74,.12); color: #15803d; }
+:root.light .detection-ai-mark-reclassified { background: rgba(14,116,144,.10); color: #0e7490; }
+:root.light .detection-ai-mark-rejected { background: rgba(220,38,38,.10); color: #b91c1c; }
+:root.light .detection-ai-mark-unsure { background: rgba(217,119,6,.10); color: #92400e; }
+.detection.detection-reclassified { background: rgba(14,116,144,.08); color: #0e7490; border: 1px dashed rgba(14,116,144,.45); }
 :root.light .detection.detection-false-positive { background: rgba(190,24,93,.08); color: #9d174d; border: 1px dashed rgba(190,24,93,.45); }
 :root.light .detection.detection-face { background: rgba(217,119,6,.14); color: #b45309; border-color: rgba(217,119,6,.35); font-weight: 800; }
 :root.light .detection.detection-face-unknown { background: rgba(219,39,119,.12); color: #be185d; border-color: rgba(219,39,119,.35); font-weight: 800; }
@@ -540,6 +550,7 @@ textarea {
 .detection.detection-ai-filtered { background: rgba(148, 163, 184, 0.14); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.4); }
 .detection.detection-ai-verified { background: rgba(34, 197, 94, 0.12); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.35); }
 .detection.detection-ai-unverified { background: rgba(251, 191, 36, 0.08); color: #fcd34d; border: 1px dashed rgba(251, 191, 36, 0.45); }
+.detection.detection-reclassified { background: rgba(34, 211, 238, 0.08); color: #67e8f9; border: 1px dashed rgba(34, 211, 238, 0.45); }
 .detection.detection-false-positive { background: rgba(244, 114, 182, 0.10); color: #f9a8d4; border: 1px dashed rgba(244, 114, 182, 0.5); }
 .activity-item-type-row .ai-verdict-tip { align-self: center; }
 .detection.detection-face { background: rgba(251, 191, 36, 0.14); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4); }
@@ -8036,3 +8047,10 @@ main:has(#liveCameraEmpty:not([hidden])) .live-controls-card { display: none; }
 .storage-usage-item strong { display: block; font-size: 16px; }
 .storage-usage-item span { color: var(--muted); font-size: 12px; }
 .system-note { margin: 0; padding: 12px 16px; border: 1px dashed var(--border); border-radius: 12px; font-size: 13px; background: var(--panel); }
+
+/* AI Insights card (ai.html, web/ai_insights.js). */
+.ai-insights-heading { margin: 18px 0 8px; font-size: 0.95rem; }
+.ai-insights-list { display: flex; flex-direction: column; gap: 10px; }
+.ai-insight-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.ai-insight-row p { margin: 4px 0 0; }
+.ai-insight-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }

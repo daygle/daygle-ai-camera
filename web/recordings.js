@@ -501,7 +501,8 @@ function recordingRowHtml(recording) {
     badges = `${continuousPill()}${motionBadge}`;
   } else {
     const summaryBadges = recordingDetectionSummary(recording)
-      .map((d) => detectionPill(d.label, d.confidence, isSound, d.count)).join('');
+      .map((d) => detectionPill(d.label, d.confidence, isSound, d.count)
+        + (isSound ? '' : aiDetectionMark(recordingLabelVerdict(recording, d.label)))).join('');
     // A clip can contain both frame motion and a recognised object. Keep it
     // as an Object Recording, but show the motion intensity separately so
     // the list does not lose one of the event types.
@@ -528,7 +529,7 @@ function recordingRowHtml(recording) {
   ];
   return `
     <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
-      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${typeLabel}</span>${falsePositiveBadge(falsePositive)}</div><span class="activity-cell-ref">Recording #${recording.id}</span></td>
+      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${typeLabel}</span>${falsePositiveBadge(falsePositive)}${falsePositive ? '' : reclassifiedBadge(recordingReclassified(recording))}</div><span class="activity-cell-ref">Recording #${recording.id}</span></td>
       <td class="activity-cell-camera">${escapeHtml(recordingCameraName(recording))}</td>
       <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}${aiTagPills(recording.ai_labels)}${recordingDescriptionTip(recording)}</div></td>
       <td class="activity-cell-zone">${zoneCell}</td>

@@ -98,6 +98,10 @@ const LIBRARY_AI_CHECKS = [
   { value: 'filtered', label: 'AI Filtered' },
   { value: 'confirmed', label: 'AI Verified' },
   { value: 'unverified', label: 'AI Unverified' },
+  // The per-detection verdict, from any AI check (alert verification or
+  // the false-positive check): see app/db/library_filters.py.
+  { value: 'object_confirmed', label: 'AI Confirmed Object' },
+  { value: 'object_rejected', label: 'AI Rejected Object' },
 ];
 
 // The False Positives filter (app/false_positives.py): hide the detections

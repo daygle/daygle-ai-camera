@@ -152,6 +152,8 @@ def confirm_borderline_detections(
     is_relevant: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
     max_candidates: int = MAX_CANDIDATES,
     rejected: list[dict[str, Any]] | None = None,
+    ai_confirmed: Callable[[dict[str, Any]], bool] | None = None,
+    ai_submit: Callable[[dict[str, Any]], Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Re-check detections scoring below ``threshold`` and keep the confirmed.
 
@@ -164,6 +166,12 @@ def confirm_borderline_detections(
 
     ``rejected``, when given, receives every dropped sub-threshold detection
     with a ``reason`` (diagnostics for the recording's detection log).
+
+    With the AI near-miss check (app.ai_near_miss): ``ai_confirmed`` lets a
+    candidate the vision model recently confirmed at that place pass without
+    the re-check (scored at ``threshold``, its detector score kept as
+    ``detector_confidence``), and ``ai_submit`` receives each candidate the
+    re-check still rejects, for the model to look at in the background.
     """
     threshold = float(threshold)
     kept: list[dict[str, Any]] = []
@@ -220,6 +228,19 @@ def confirm_borderline_detections(
             # miss instead of leaving an unexplained gap.
             _reject(det, 'no usable box or label to re-check')
             continue
+        if ai_confirmed is not None:
+            try:
+                confirmed_by_ai = ai_confirmed(det)
+            except Exception:  # noqa: BLE001 - an optional hint; fall back to the re-check
+                confirmed_by_ai = False
+            if confirmed_by_ai:
+                kept.append({
+                    **det,
+                    'detector_confidence': float(det.get('confidence') or 0),
+                    'confidence': round(max(float(det.get('confidence') or 0), threshold), 4),
+                    'ai_near_miss': True,
+                })
+                continue
         region = _crop_region(candidate_box)
         rx, ry, rw, rh = region
         x1, y1 = int(rx * frame_w), int(ry * frame_h)
@@ -250,6 +271,11 @@ def confirm_borderline_detections(
         )
         if combined < threshold or crop_box is None:
             _reject(det, f'Second Look zoomed in and scored {combined:.2f}')
+            if ai_submit is not None:
+                try:
+                    ai_submit(det)
+                except Exception:  # noqa: BLE001 - an optional background check
+                    logger.debug('AI near-miss submit failed', exc_info=True)
             continue
         kept.append({
             **det,

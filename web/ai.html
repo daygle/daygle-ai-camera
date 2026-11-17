@@ -203,6 +203,22 @@
       <button type="submit">Save AI Settings</button>
     </div>
     </form>
+    <!-- AI Insights (app/ai_insights.py): what the AI verdicts say about the
+         detection settings. Filled by ai_insights.js. -->
+    <section class="card" id="aiInsights">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">💡</div>
+        <div>
+          <h2>AI Insights</h2>
+          <p class="settings-section-subtitle">Suggestions from what the AI model said about your detections. A minimum confidence the model keeps disagreeing with can be raised here; objects the model keeps naming can become an AI tag alert on the <a href="/zones">Zones</a> page.</p>
+        </div>
+      </div>
+      <h3 class="ai-insights-heading">Minimum Confidence</h3>
+      <div id="aiTuning" class="ai-insights-list"><span class="muted">Loading…</span></div>
+      <h3 class="ai-insights-heading">Frequent AI Tags</h3>
+      <div id="aiFrequentTags" class="ai-insights-list"><span class="muted">Loading…</span></div>
+    </section>
+
     <!-- False positives (app/false_positives.py): its own settings key and
          Save button, filled by false_positives.js. -->
     <form id="fpSettingsForm" class="page-stack ai-settings-form" autocomplete="off">
@@ -255,5 +271,6 @@
   <script src="/static/ai.js"></script>
   <script src="/static/ai-ollama.js"></script>
   <script src="/static/false_positives.js"></script>
+  <script src="/static/ai_insights.js"></script>
 </body>
 </html>

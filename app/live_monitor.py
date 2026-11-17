@@ -101,6 +101,11 @@ from app.region_detection import (
     region_boost_enabled,
     tiling_grid,
 )
+from app.ai_near_miss import (
+    enabled as ai_near_miss_enabled,
+    is_confirmed as ai_near_miss_confirmed,
+    submit as submit_ai_near_miss,
+)
 from app.second_look import (
     confirm_borderline_detections,
     second_look_enabled,
@@ -1365,6 +1370,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
                         normalize_detection_boxes_for_frame(candidates, frame), settings,
                     ),
                     rejected=_early_dropped,
+                    # AI near-miss check (opt-in): what the detector still
+                    # rejects goes to the vision model in the background; a
+                    # confirmed object passes on the next cycles.
+                    **({
+                        'ai_confirmed': lambda det: ai_near_miss_confirmed(camera_id, det),
+                        'ai_submit': lambda det: submit_ai_near_miss(
+                            camera_id, str(settings.get('name') or ''), detector_frame, det),
+                    } if ai_near_miss_enabled(live_settings) else {}),
                 )
                 _cycle_timer.add(STAGE_SECOND_LOOK, (time.perf_counter() - _second_look_started) * 1000.0)
             # Motion-region high-res boost (opt-in): re-run the detector zoomed

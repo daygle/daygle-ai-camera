@@ -243,6 +243,15 @@ class EventDatabase(
             # ``false_positive_by`` says who decided ('ai' or 'user'). New
             # installs get the columns via the CREATE TABLE block below.
             for column_sql in (
+                # One AI verdict per detection (app.db.false_positives): every
+                # AI check (alert verification, the false-positive check)
+                # writes here, so a detection reads confirmed / rejected /
+                # reclassified / unsure in one place. ``original_label`` is
+                # what the detector said before a reclassification.
+                "ALTER TABLE detections ADD COLUMN ai_status TEXT",
+                "ALTER TABLE detections ADD COLUMN ai_reason TEXT",
+                "ALTER TABLE detections ADD COLUMN ai_source TEXT",
+                "ALTER TABLE detections ADD COLUMN original_label TEXT",
                 "ALTER TABLE events ADD COLUMN false_positive INTEGER",
                 "ALTER TABLE events ADD COLUMN false_positive_by TEXT",
                 "ALTER TABLE events ADD COLUMN false_positive_at TEXT",
@@ -283,6 +292,10 @@ class EventDatabase(
                     still_alert INTEGER NOT NULL DEFAULT 0,
                     still_alert_minutes INTEGER,
                     motion_fraction REAL,
+                    ai_status TEXT,
+                    ai_reason TEXT,
+                    ai_source TEXT,
+                    original_label TEXT,
                     FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
                 );
 
@@ -552,6 +565,10 @@ class EventDatabase(
             db.executescript('\n'.join(AUDIT_LOG_IMMUTABLE_TRIGGERS.values()))
             # Full-text index over AI event descriptions (app.db.descriptions).
             self.ensure_event_description_index(db)
+            # AI false positives from before the check asked what a rejected
+            # object really is may be misread animals: make them undecided
+            # (never purged) again. Resolved through MRO (FalsePositivesMixin).
+            self.reopen_unasked_ai_false_positives(db)
 
         # Run checkpoint/optimize on a fresh autocommit connection. Doing this
         # inside the schema/backfill transaction can make a passive checkpoint

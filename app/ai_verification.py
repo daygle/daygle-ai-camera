@@ -1155,15 +1155,21 @@ def _check_image(
 
 def _description_record(text: str, tags: list[str], detections: list[dict[str, Any]],
                         settings: dict[str, Any], started: float) -> dict[str, Any]:
-    # A tag that repeats a real detection label adds nothing: the detection
-    # already shows it (and is the authoritative source for that object).
+    # Tags are stored in the detector's vocabulary ("kitten" -> "cat", see
+    # app.label_vocabulary), so they merge with detections in the label
+    # filter and can confirm or contradict them. A tag that repeats a real
+    # detection label adds nothing: the detection already shows it.
+    from app.label_vocabulary import canonical_tag
+
     detected = {str(d.get('label') or '').strip().lower() for d in detections}
+    canonical = list(dict.fromkeys(canonical_tag(tag) for tag in tags))
     return {
         'text': text,
-        'tags': [tag for tag in tags if tag not in detected],
+        'tags': [tag for tag in canonical if tag not in detected],
         # Ephemeral: tags-only zone rules must still see model tags that repeat
-        # detector labels. They are hidden from redundant display chips only.
-        '_model_tags': tags,
+        # detector labels, in the model's own words and the detector's (a
+        # "kitten" rule and a "cat" rule both match). Hidden from display only.
+        '_model_tags': list(dict.fromkeys([*tags, *canonical])),
         'model': settings.get('model'),
         'created_at': datetime.now(UTC).isoformat(),
         'latency_ms': int((time.monotonic() - started) * 1000),
@@ -1303,7 +1309,47 @@ def _forward(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[st
         submit_alert_notification(deliver_alert_notifications, triggered, event_id, rules)
 
 
+def detection_verdicts(answers: dict[str, Any], detections: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Per detected label, the AI's verdict from a check's per-label ``answers``.
+
+    An answer for a group (``animal``) applies to every detection in it. A
+    confirmation is ``confirmed``, a rejection ``rejected`` (with what the
+    object is instead, if named), an unsure answer ``unsure``; errors leave
+    the detection unjudged.
+    """
+    verdicts: dict[str, dict[str, Any]] = {}
+    for asked, answer in (answers or {}).items():
+        if not isinstance(answer, dict):
+            continue
+        if answer.get('present') is True:
+            status = 'confirmed'
+        elif answer.get('present') is False:
+            status = 'rejected'
+        elif answer.get('unsure'):
+            status = 'unsure'
+        else:
+            continue
+        reason = str(answer.get('reason') or '')
+        if status == 'rejected' and answer.get('instead'):
+            reason = f"looks like {answer['instead']}" + (f': {reason}' if reason else '')
+        asked_label = str(asked).strip().lower()
+        for detection in detections or []:
+            name = str(detection.get('label') or '').strip().lower()
+            if name and name not in _UNVERIFIABLE_LABELS and _shows_label(detection, asked_label):
+                verdicts[name] = {'status': status, 'reason': reason}
+    return verdicts
+
+
 def _record(event_id: int, record: dict[str, Any], camera_id: Any = None) -> None:
+    try:
+        database = _state.database
+        if callable(getattr(database, 'set_detection_verdicts', None)):
+            event = database.get_event(event_id) or {}
+            verdicts = detection_verdicts(record.get('labels') or {}, event.get('detections') or [])
+            if verdicts:
+                database.set_detection_verdicts(event_id, verdicts, source='verification')
+    except Exception:  # noqa: BLE001 - the per-detection verdict is a detail; the event record matters
+        logger.warning('Could not store detection verdicts for event %s', event_id, exc_info=True)
     try:
         _state.database.merge_event_metadata(event_id, {'ai_verification': record})
     except Exception as exc:  # noqa: BLE001 - recording the verdict is best effort
@@ -1416,6 +1462,17 @@ def _describe_and_store_claimed(
     camera_id = (event.get('metadata') or {}).get('camera_id')
     try:
         if record is None:
+            # With the AI false-positive check on, ask it in this same
+            # request: the image is the slow part, so one request instead of
+            # two (the checker would otherwise send this snapshot again).
+            from app.false_positives import check_with_description, combined_check_applies
+
+            if combined_check_applies({**event, 'id': event_id}):
+                record = check_with_description(
+                    {**event, 'id': event_id}, settings, background=background,
+                    content=_written_content(content or event_describe_content(event, settings)),
+                )
+        if record is None:
             record = describe_event(event, settings, camera_name=camera_name, background=background,
                                     content=content)
     except VerificationError as exc:
@@ -1442,6 +1499,14 @@ def _describe_and_store_claimed(
             severity='warning', camera_id=camera_id, details={'event_id': event_id},
         )
         return None
+    # Tags that contradict a detection (a "cat" tag on a "dog" event) are
+    # evidence of a misread: the false-positive check looks at it first.
+    try:
+        from app.false_positives import note_tag_evidence
+
+        note_tag_evidence(event_id, event, model_tags)
+    except Exception:  # noqa: BLE001 - a hint; never break the description path
+        logger.warning('Could not weigh AI tags for event %s', event_id, exc_info=True)
     if evaluate_rules:
         from app.ai_tag_alerts import evaluate_event
 
