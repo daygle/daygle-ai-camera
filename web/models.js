@@ -407,7 +407,7 @@ function downloadControlsHtml(group, installedSizes = []) {
   const options = RESOLUTION_OPTIONS.map(([size, label]) => {
     const disabled = taken.has(size) ? ' disabled' : '';
     const selected = size === preferred ? ' selected' : '';
-    return `<option value="${size}"${disabled}${selected}>${label}${disabled ? ' - installed' : ''}</option>`;
+    return `<option value="${size}"${disabled}${selected}>${label}${disabled ? ' - Installed' : ''}</option>`;
   }).join('');
   const key = escapeHtml(group.downloadKey);
   return `
@@ -496,7 +496,7 @@ function renderInstalledCard(group) {
       <div class="model-variant-list">${group.variants.map(renderVariantRow).join('')}</div>
       ${cardMessageHtml(cardKey)}
       <div class="model-card-actions model-add-size">
-        <span class="model-add-size-label">Add another size</span>
+        <span class="model-add-size-label">Add Another Size</span>
         ${downloadControlsHtml(group, sizes)}
       </div>
     </div>`;
@@ -767,7 +767,7 @@ function updateCheckButton(button, isChecking) {
   button.disabled = isChecking;
   button.classList.toggle('is-checking', isChecking);
   const label = button.querySelector('.model-update-check-label');
-  if (label) label.textContent = isChecking ? 'Checking…' : 'Check for updates';
+  if (label) label.textContent = isChecking ? 'Checking…' : 'Check for Updates';
 }
 
 // Text for the library-level "updates" banner, shared by the manual check and

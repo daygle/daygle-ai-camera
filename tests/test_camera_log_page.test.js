@@ -93,7 +93,7 @@ for (const page of ['camera-log', 'ai-log']) {
   const pageHtml = readFileSync(path.resolve(here, `../web/${page}.html`), 'utf8');
 
   test(`${page}: cameras are picked by name from a dropdown`, () => {
-    assert.match(pageHtml, /<select id="filterCamera" aria-label="Camera">\s*<option value="">All cameras<\/option>/);
+    assert.match(pageHtml, /<select id="filterCamera" aria-label="Camera">\s*<option value="">All Cameras<\/option>/);
     assert.doesNotMatch(pageHtml, /Filter by camera id/);
     assert.match(pageJs, /api\('\/api\/cameras'\)/);
     assert.match(pageJs, /option\.value = camera\.id;/);

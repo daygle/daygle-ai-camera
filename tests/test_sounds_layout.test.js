@@ -40,8 +40,8 @@ test('green only when running with a usable backend', () => {
   assert.equal(detectorHealth(listening, { running: true, backend: 'yamnet_tflite' }).tone, 'ok');
   assert.equal(detectorHealth(listening, { running: false, backend: 'loading' }).tone, 'warn');
   assert.equal(detectorHealth({ ...listening, detection: { sound: { enabled: false } } }, { running: false }).tone, 'off');
-  assert.equal(detectorHealth({ ...listening, detection: { sound: { enabled: true, rules: [] } } }, {}).label, 'No sound classes');
-  assert.equal(detectorHealth({ detection: listening.detection }, {}).label, 'No RTSP stream');
+  assert.equal(detectorHealth({ ...listening, detection: { sound: { enabled: true, rules: [] } } }, {}).label, 'No Sound Classes');
+  assert.equal(detectorHealth({ detection: listening.detection }, {}).label, 'No RTSP Stream');
 });
 
 test('the editor banner and the table row use the same verdict', () => {
@@ -62,5 +62,5 @@ test('rows pick the camera; the camera dropdown is gone', () => {
 });
 
 test('the table has five readable columns', () => {
-  assert.match(source, /<th>Camera<\/th><th>Sound<\/th><th>Listening for<\/th><th>Status<\/th><th>Last heard<\/th>/);
+  assert.match(source, /<th>Camera<\/th><th>Sound<\/th><th>Listening For<\/th><th>Status<\/th><th>Last Heard<\/th>/);
 });

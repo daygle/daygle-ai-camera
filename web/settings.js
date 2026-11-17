@@ -612,26 +612,26 @@ function renderCloudflareTunnel(status) {
   const error = String(status?.error || '').trim();
   const source = String(status?.source || '');
   const tokenDescription = source === 'database'
-    ? 'Token Saved Securely.'
-    : 'Token Is Configured Outside This Page.';
+    ? 'Token saved securely.'
+    : 'Token is configured outside this page.';
   let state;
   let detail;
   let tone;
   if (running) {
     state = 'Tunnel Is Running';
-    detail = `Cloudflared Is Running${status?.pid ? ` (process ${status.pid})` : ''}.`;
+    detail = `Cloudflared is running${status?.pid ? ` (process ${status.pid})` : ''}.`;
     tone = 'status-ok';
   } else if (!configured) {
     state = 'Tunnel Is Not Configured';
-    detail = 'Add a Cloudflare Token and Save It Before Starting the Service.';
+    detail = 'Add a Cloudflare token and save it before starting the service.';
     tone = 'status-warning';
   } else if (error) {
     state = 'Tunnel Needs Attention';
-    detail = `${tokenDescription} Cloudflared Is Not Running: ${error}`;
+    detail = `${tokenDescription} Cloudflared is not running: ${error}`;
     tone = 'status-error';
   } else {
     state = 'Tunnel Is Stopped';
-    detail = `${tokenDescription} Start the Tunnel When You Are Ready to Publish Daygle.`;
+    detail = `${tokenDescription} Start the tunnel when you are ready to publish Daygle.`;
     tone = 'status-warning';
   }
 
@@ -675,7 +675,7 @@ function renderCloudflareTunnelReadError(error) {
   if (!statusEl || !stateEl || !detailEl) return;
   statusEl.className = 'status-panel cloudflare-tunnel-status status-error';
   stateEl.textContent = 'Tunnel Status Unavailable';
-  detailEl.textContent = `Could Not Read the Cloudflare Service Status: ${error?.message || 'Unknown Error'}`;
+  detailEl.textContent = `Could not read the Cloudflare service status: ${error?.message || 'Unknown error'}`;
   const tokenSummaryEl = document.getElementById('cloudflareTunnelTokenSummary');
   if (tokenSummaryEl) tokenSummaryEl.textContent = 'Token Status: Unavailable';
   setCloudflareTokenIndicator(false);

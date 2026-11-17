@@ -450,7 +450,7 @@ function renderList() {
         <div class="activity-empty-icon" aria-hidden="true">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
         </div>
-        <h2>No events match the current filters</h2>
+        <h2>No Events Match the Current Filters</h2>
         <p class="muted">Try a wider time range, clearing a filter, or wait for a new detection.</p>
       </div>${renderListFooter()}`;
     eventsRowsReady = false;

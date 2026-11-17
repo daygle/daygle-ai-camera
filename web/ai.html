@@ -20,7 +20,7 @@
   <main class="shell page-stack">
     <header class="hero ai-hero">
       <div class="ai-hero-copy">
-        <p class="eyebrow">Local vision model</p>
+        <p class="eyebrow">Local Vision Model</p>
         <h1>AI</h1>
         <p class="muted">A vision-language model on your own server looks at event snapshots. It double-checks object alerts before they notify you, describes events in plain English, tags what it sees, and makes your footage searchable. Snapshots never leave your network when the model runs locally. Works with any OpenAI-compatible server, such as Ollama.</p>
       </div>
@@ -88,7 +88,7 @@
       </div>
       <p id="ollamaCheckedText" class="muted ollama-checked" aria-live="polite"></p>
       <details id="ollamaInstallLogBox" class="ollama-install-log" hidden>
-        <summary>Install log</summary>
+        <summary>Install Log</summary>
         <pre id="ollamaInstallLog" class="update-output"></pre>
       </details>
 
@@ -105,7 +105,7 @@
         </div>
         <div class="ollama-pull-row">
           <label>
-            <span>Download a model <span class="info-tip" data-tip="Any model from ollama.com/library. It must read images (vision); gemma3:4b is a good start. Models are 2-8 GB." title="Any model from ollama.com/library. It must read images (vision); gemma3:4b is a good start. Models are 2-8 GB." tabindex="0" aria-label="Help: Any model from ollama.com/library. It must read images (vision); gemma3:4b is a good start. Models are 2-8 GB."></span></span>
+            <span>Download a Model <span class="info-tip" data-tip="Any model from ollama.com/library. It must read images (vision); gemma3:4b is a good start. Models are 2-8 GB." title="Any model from ollama.com/library. It must read images (vision); gemma3:4b is a good start. Models are 2-8 GB." tabindex="0" aria-label="Help: Any model from ollama.com/library. It must read images (vision); gemma3:4b is a good start. Models are 2-8 GB."></span></span>
             <input id="ollamaPullName" list="ollamaSuggested" placeholder="gemma3:4b" autocomplete="off" spellcheck="false" maxlength="200" />
           </label>
           <datalist id="ollamaSuggested"></datalist>
@@ -185,12 +185,12 @@
       </div>
       <div class="ai-backfill-row">
         <label class="ai-backfill-hours">
-          <span>Describe past events from the last</span>
+          <span>Describe Past Events from the Last</span>
           <select id="aiBackfillHours">
-            <option value="24">24 hours</option>
-            <option value="72">3 days</option>
-            <option value="168">7 days</option>
-            <option value="720">30 days</option>
+            <option value="24">24 Hours</option>
+            <option value="72">3 Days</option>
+            <option value="168">7 Days</option>
+            <option value="720">30 Days</option>
           </select>
         </label>
         <button id="aiBackfillBtn" class="secondary" type="button">Describe Past Events</button>
@@ -253,14 +253,14 @@
         <label>
           <span>Purge AI-Marked <span class="info-tip" data-tip="Whether the purge deletes false positives the AI marked, or only those a user marked. Default: Yes" title="Whether the purge deletes false positives the AI marked, or only those a user marked. Default: Yes" tabindex="0" aria-label="Help: Whether the purge deletes false positives the AI marked, or only those a user marked. Default: Yes"></span></span>
           <select name="purge_include_ai">
-            <option value="true">Yes, AI and user marked</option>
-            <option value="false">No, only user marked</option>
+            <option value="true">Yes, AI and User Marked</option>
+            <option value="false">No, Only User Marked</option>
           </select></label>
         <label>
           <span>Purge Viewer-Marked <span class="info-tip" data-tip="Whether the purge deletes false positives a viewer account marked, or only those an admin (or the AI) marked. Each mark shows who made it. Default: Yes" title="Whether the purge deletes false positives a viewer account marked, or only those an admin (or the AI) marked. Default: Yes" tabindex="0" aria-label="Help: Whether the purge deletes false positives a viewer account marked, or only those an admin (or the AI) marked. Default: Yes"></span></span>
           <select name="purge_include_viewers">
-            <option value="true">Yes, viewer marks too</option>
-            <option value="false">No, only admin marked</option>
+            <option value="true">Yes, Viewer Marks Too</option>
+            <option value="false">No, Only Admin Marked</option>
           </select></label>
         <fieldset class="ai-verification-cameras">
           <legend>AI Check Cameras <span class="info-tip" data-tip="Cameras whose events the AI checks. None ticked = all cameras." title="Cameras whose events the AI checks. None ticked = all cameras." tabindex="0" aria-label="Help: Cameras whose events the AI checks. None ticked = all cameras."></span></legend>

@@ -35,9 +35,9 @@ const LIBRARY_SEARCH_DEBOUNCE_MS = 450;
 const LIBRARY_RANGES = [
   { value: 'today', label: 'Today' },
   { value: '24h', label: '24h' },
-  { value: '7d', label: '7 days' },
-  { value: '30d', label: '30 days' },
-  { value: 'all', label: 'All time' },
+  { value: '7d', label: '7 Days' },
+  { value: '30d', label: '30 Days' },
+  { value: 'all', label: 'All Time' },
   { value: 'custom', label: 'Custom' },
 ];
 
@@ -107,8 +107,8 @@ const LIBRARY_AI_CHECKS = [
 // The False Positives filter (app/false_positives.py): hide the detections
 // the AI or a user marked as false positives, or list only those.
 const LIBRARY_FALSE_POSITIVES = [
-  { value: 'hide', label: 'Hide false positives' },
-  { value: 'only', label: 'Only false positives' },
+  { value: 'hide', label: 'Hide False Positives' },
+  { value: 'only', label: 'Only False Positives' },
 ];
 
 // The since/until ISO window for a state. Pure, so tests and pages share it.
@@ -294,18 +294,18 @@ function createLibraryFilters(options) {
       <label><span>To</span><span class="library-datetime"><input id="${ids.dateTo}" type="date" aria-label="To date" /><span data-library-time="to"></span></span></label>
     </div>
     <div class="library-filter-panel" id="${ids.panel}" hidden>
-      <label${controls.camera ? '' : ' hidden'}><span>Camera</span><select id="${ids.camera}"><option value="">All cameras</option></select></label>
-      <label><span>Label</span><select id="${ids.label}"><option value="">All labels</option></select></label>
-      <label data-library-face-field hidden><span>Face</span><select id="${ids.face}"><option value="">All faces</option></select></label>
+      <label${controls.camera ? '' : ' hidden'}><span>Camera</span><select id="${ids.camera}"><option value="">All Cameras</option></select></label>
+      <label><span>Label</span><select id="${ids.label}"><option value="">All Labels</option></select></label>
+      <label data-library-face-field hidden><span>Face</span><select id="${ids.face}"><option value="">All Faces</option></select></label>
       <label${controls.aiCheck ? '' : ' hidden'}><span>AI Check</span><select id="${ids.aiCheck}"><option value="">Any</option>${LIBRARY_AI_CHECKS.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}</select></label>
-      <label${controls.falsePositive ? '' : ' hidden'}><span>False Positives</span><select id="${ids.falsePositive}"><option value="">Show all</option>${LIBRARY_FALSE_POSITIVES.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}</select></label>
-      <label${controls.sort ? '' : ' hidden'}><span>Sort</span><select id="${ids.sort}"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+      <label${controls.falsePositive ? '' : ' hidden'}><span>False Positives</span><select id="${ids.falsePositive}"><option value="">Show All</option>${LIBRARY_FALSE_POSITIVES.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}</select></label>
+      <label${controls.sort ? '' : ' hidden'}><span>Sort</span><select id="${ids.sort}"><option value="newest">Newest First</option><option value="oldest">Oldest First</option></select></label>
       <label class="library-check"><input id="${ids.alerted}" type="checkbox" /><span>Alert Only</span></label>
     </div>
     <div class="library-filter-summary">
       <span class="library-result-count" data-library-count aria-live="polite"></span>
       <div class="library-chips" data-library-chips></div>
-      <button type="button" class="library-clear-all" data-library-clear hidden>Clear all</button>
+      <button type="button" class="library-clear-all" data-library-clear hidden>Clear All</button>
     </div>
     <p class="muted library-search-note" data-library-note hidden></p>`;
 
@@ -372,7 +372,7 @@ function createLibraryFilters(options) {
   }
 
   function faceText(value) {
-    if (value === 'any') return 'Any face';
+    if (value === 'any') return 'Any Face';
     if (value === 'unknown') return 'Unknown';
     return optionText(els.face, value).replace(/^name:/, '');
   }
@@ -400,7 +400,7 @@ function createLibraryFilters(options) {
     if (state.alerted) chips.push({ key: 'alerted', text: 'Alert Only' });
     if (state.aiCheck) chips.push({ key: 'aiCheck', text: (LIBRARY_AI_CHECKS.find((item) => item.value === state.aiCheck) || {}).label || state.aiCheck });
     if (state.falsePositive) chips.push({ key: 'falsePositive', text: (LIBRARY_FALSE_POSITIVES.find((item) => item.value === state.falsePositive) || {}).label || state.falsePositive });
-    if (state.sort === 'oldest') chips.push({ key: 'sort', text: 'Oldest first' });
+    if (state.sort === 'oldest') chips.push({ key: 'sort', text: 'Oldest First' });
     return chips;
   }
 
@@ -479,7 +479,7 @@ function createLibraryFilters(options) {
     // Keep a deep-linked or previously picked value selectable even when the
     // new window holds none of it, so the dropdown never silently drops it.
     if (current && !values.has(current)) {
-      html.push(`<option value="${escapeHtml(current)}">${escapeHtml(titleCase(current.replace(/^(id|name):/, '')))} (none in range)</option>`);
+      html.push(`<option value="${escapeHtml(current)}">${escapeHtml(titleCase(current.replace(/^(id|name):/, '')))} (None in Range)</option>`);
     }
     select.innerHTML = html.join('');
     select.value = current || '';
@@ -496,18 +496,18 @@ function createLibraryFilters(options) {
       const value = String(item.value || '').trim().toLowerCase();
       if (!value || seen.has(value)) return;
       seen.add(value);
-      labelItems.push({ value, label: `${titleCase(value)}${item.ai ? ' (AI tag)' : ''} (${item.count})`, sortKey: titleCase(value) });
+      labelItems.push({ value, label: `${titleCase(value)}${item.ai ? ' (AI Tag)' : ''} (${item.count})`, sortKey: titleCase(value) });
     });
     const head = labelItems.filter((item) => !item.sortKey);
     const rest = labelItems.filter((item) => item.sortKey).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-    fillSelect(els.label, [...head, ...rest], 'All labels', state.label);
+    fillSelect(els.label, [...head, ...rest], 'All Labels', state.label);
     const faces = facets.faces || { people: [], unknown: 0 };
     const people = faces.people || [];
     const hasFaces = people.length > 0 || faces.unknown > 0 || Boolean(state.face);
     els.faceField.hidden = !hasFaces;
-    const faceItems = [{ value: 'any', label: 'Any face' }, ...people.map((person) => ({ value: person.value, label: `${person.name} (${person.count})` }))];
+    const faceItems = [{ value: 'any', label: 'Any Face' }, ...people.map((person) => ({ value: person.value, label: `${person.name} (${person.count})` }))];
     if (faces.unknown > 0) faceItems.push({ value: 'unknown', label: `Unknown (${faces.unknown})` });
-    fillSelect(els.face, faceItems, 'All faces', state.face);
+    fillSelect(els.face, faceItems, 'All Faces', state.face);
     syncControls();
   }
 
@@ -549,7 +549,7 @@ function createLibraryFilters(options) {
       });
     } catch (_err) { /* camera names are cosmetic; ids still filter */ }
     const items = Array.from(cameraNames.entries()).map(([value, label]) => ({ value, label }));
-    fillSelect(els.camera, items, 'All cameras', state.camera);
+    fillSelect(els.camera, items, 'All Cameras', state.camera);
     syncControls();
   }
 

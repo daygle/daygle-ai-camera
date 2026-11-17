@@ -113,7 +113,7 @@ function renderEntries(entries) {
     tr.appendChild(makeCell(entry.resource || '-', { label: 'Resource', code: true }));
     tr.appendChild(makeCell(entry.resource_id != null ? String(entry.resource_id) : '-', { label: 'ID' }));
     tr.appendChild(makeCell(entry.status || 'success', { label: 'Status', badge: statusClass }));
-    tr.appendChild(makeCell(entry.ip_address || '-', { label: 'IP address', noWrap: true }));
+    tr.appendChild(makeCell(entry.ip_address || '-', { label: 'IP Address', noWrap: true }));
     tr.appendChild(makeCell(formatDetails(entry.details), { label: 'Details', className: 'details-cell' }));
     tbody.appendChild(tr);
   }

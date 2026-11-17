@@ -150,8 +150,8 @@ function renderOverall() {
   const lastHeard = lastLabel ? (lastConfidence ? `${lastLabel} · ${lastConfidence}` : lastLabel) : 'Nothing yet';
   statusPanel.innerHTML = `
     <div><span>Status</span><strong class="ai-mode ${escapeHtml(state.tone)}">${escapeHtml(state.label)}</strong></div>
-    <div><span>Sound cameras</span><strong><a href="/detection/sounds">${escapeHtml(enabledCameras.length)} →</a></strong></div>
-    <div><span>Last heard</span><strong>${escapeHtml(lastHeard)}</strong></div>
+    <div><span>Sound Cameras</span><strong><a href="/detection/sounds">${escapeHtml(enabledCameras.length)} →</a></strong></div>
+    <div><span>Last Heard</span><strong>${escapeHtml(lastHeard)}</strong></div>
   `;
   renderNotice(state.notice);
 }
@@ -161,8 +161,8 @@ function renderModel() {
   const model = modelState(info);
   const badges = {
     active: '<span class="model-status model-status-active">● Active</span>',
-    installed: '<span class="model-status model-status-installed">○ Installed · not loaded</span>',
-    missing: '<span class="model-status model-status-installed">Not downloaded</span>',
+    installed: '<span class="model-status model-status-installed">○ Installed · Not Loaded</span>',
+    missing: '<span class="model-status model-status-installed">Not Downloaded</span>',
     unknown: '',
   };
   yamnetModelBadges.innerHTML = badges[model];
@@ -253,7 +253,7 @@ async function checkYamnetUpdate() {
   } finally {
     checkYamnetUpdateBtn.disabled = false;
     checkYamnetUpdateBtn.classList.remove('is-checking');
-    if (label) label.textContent = 'Check for updates';
+    if (label) label.textContent = 'Check for Updates';
   }
 }
 
