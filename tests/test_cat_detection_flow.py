@@ -57,7 +57,7 @@ def _seen(label: str, x: float) -> dict:
     return {'label': label, 'confidence': 0.8, 'box': {'x': x, 'y': 0.5, 'width': 0.1, 'height': 0.1}}
 
 
-def _drive(tmp_path, monkeypatch, positions, *, rule_label='cat', record=True, live=None):
+def _drive(tmp_path, monkeypatch, positions, *, rule_label='cat', record=True, live=None, rules=None, setup=None):
     """Run one cycle per entry of ``positions``: the cat's box x, None when it
     is out of view, or a list of ``_seen`` detections. Returns per-cycle
     results and the AI-routed alerts."""
@@ -65,6 +65,8 @@ def _drive(tmp_path, monkeypatch, positions, *, rule_label='cat', record=True, l
     import app.live_monitor as lm
 
     settings = _camera(rule_label, record=record)
+    if rules is not None:
+        settings['detection']['zones'][0]['object_rules'] = rules
     if live:
         main.database.set_setting('live', live, main.utc_now())
     in_view: dict = {'value': []}
@@ -83,8 +85,9 @@ def _drive(tmp_path, monkeypatch, positions, *, rule_label='cat', record=True, l
     def cat_motion(*_args, **_kwargs):
         mask = np.zeros((MASK_H, MASK_W), dtype=bool)
         for seen in in_view['value']:
-            left = int(seen['box']['x'] * MASK_W)
-            mask[45:54, left:left + 16] = True
+            box = seen['box']
+            mask[int(box['y'] * MASK_H):int((box['y'] + box['height']) * MASK_H) + 1,
+                 int(box['x'] * MASK_W):int((box['x'] + box['width']) * MASK_W) + 1] = True
         return True, 0.5, mask, 0.02
 
     monkeypatch.setattr(lm, 'detect_frame_motion', cat_motion)
@@ -101,6 +104,8 @@ def _drive(tmp_path, monkeypatch, positions, *, rule_label='cat', record=True, l
         return real_status(camera_id, **kwargs)
 
     monkeypatch.setattr(lm, 'update_live_detection_status', capture_status)
+    if setup is not None:
+        setup(lm)
 
     start = time.time()
     results = []
@@ -200,3 +205,56 @@ def test_status_names_the_confirmation_wait(tmp_path, monkeypatch):
     _main, _settings, results, _routed = _drive(tmp_path, monkeypatch, [0.10, 0.13], live=live)
     assert results[0]['reason'] == 'Cat: Not confirmed yet (needs 2 of 3 cycles)'
     assert results[1]['event_id'] is not None
+
+
+def _rule(label: str, *, verify: bool = True) -> dict:
+    return {'label': label, 'enabled': True, 'min_confidence': 0.4, 'ai_verify': verify,
+            'alert_schedules': [{'push_enabled': True}]}
+
+
+def test_cat_the_detector_calls_a_person_alerts_as_a_cat_after_ai_check(tmp_path, monkeypatch):
+    """ONNX misreads the cat as a person; the person rule asks the model,
+    which rejects it and names a cat, so the cat rule alerts instead - once,
+    including after the detector starts reading it correctly."""
+    asked, delivered = [], []
+
+    def real_verification(lm):
+        import app.ai_verification as av
+
+        def model(event, labels, _settings, **kwargs):
+            asked.append((labels, kwargs.get('candidates')))
+            return {'status': 'verified', 'labels': {
+                label: {'present': False, 'reason': 'it is a cat', 'instead': 'cat'} for label in labels
+            }}, None
+
+        monkeypatch.setattr(av, 'verify_and_describe_event', model)
+        monkeypatch.setattr(av, '_forward', lambda alerts, event_id, _rules: delivered.append(
+            [(alert['label'], alert.get('ai_relabel_from')) for alert in alerts]))
+        monkeypatch.setattr(lm, 'submit_alert_notification_with_verification', lambda alerts, event_id, rules, **kw: (
+            av._verify_and_forward(alerts, event_id, rules, 'Garden', None, kw.get('camera_id'))))
+
+    frames = [[_seen('person', 0.10 + 0.03 * index)] for index in range(3)] + [
+        [_seen('cat', 0.19 + 0.03 * index)] for index in range(3)
+    ]
+    _main, _settings, results, _routed = _drive(
+        tmp_path, monkeypatch, frames, rules=[_rule('person'), _rule('cat', verify=False)], setup=real_verification,
+    )
+    assert [index for index, result in enumerate(results) if result['event_id'] is not None] == [0]
+    assert asked == [(['person'], {'person': ['cat']})]
+    assert delivered == [[('cat', 'person')]]
+
+
+def test_distant_cat_the_detector_catches_every_other_cycle(tmp_path, monkeypatch):
+    def distant(index: int) -> list:
+        if index % 2:
+            return []
+        seen = _seen('cat', 0.60 + 0.006 * index)
+        seen['confidence'] = 0.45
+        seen['box'].update(y=0.3, width=0.025, height=0.02)
+        return [seen]
+
+    live = {'detection_confirm_frames': 2, 'detection_confirm_window': 3}
+    _main, _settings, results, routed = _drive(tmp_path, monkeypatch, [distant(index) for index in range(12)], live=live)
+    assert [index for index, result in enumerate(results) if result['event_id'] is not None] == [2]
+    assert len(routed) == 1
+    assert {result['cats'][0]['track_id'] for result in results if result['cats']} == {1}
