@@ -81,7 +81,7 @@ from app.label_groups import cached_label_groups
 # Shared rather than copied: the tuning constants above are duplicated per
 # module on purpose, but this is logic with real branches and two copies of it
 # would drift. app.box_geometry is deliberately free of app dependencies.
-from app.box_geometry import extent_unstable as _extent_unstable
+from app.box_geometry import EXTENT_CONTAINMENT, extent_unstable as _extent_unstable
 from app.runtime_config import cached_snapshot
 from app.zone_schema import canonical_label
 
@@ -144,6 +144,22 @@ _TRACK_DISPLACEMENT_STILL = 0.01
 # available.
 _TRACK_STEP_MOVING = 0.03
 _TRACK_DISPLACEMENT_MIN_AGE = 3
+# A young track's one-cycle step below this is detector jitter on a
+# stationary box (that wobble is well under 1% of the frame, see
+# ``_TRACK_STEP_MOVING``); at or above it the box really moved, and the mask
+# says whether the subject did.
+_TRACK_STEP_MIN_MOVE = _TRACK_DISPLACEMENT_STILL
+# ...but never more than this share of the box's own larger side. A distant
+# cat 1.2% of the frame wide walking 0.9% per cycle moves three quarters of its
+# own width - plainly not jitter, which is a few source pixels and so a small
+# share of any box. Boxes 2% of the frame or larger keep the plain floor.
+_TRACK_STEP_MIN_MOVE_BOX_SHARE = 0.5
+# A subject stepping out from behind something (see ``_emerging``): its box
+# must have grown by this factor, and this share of the newly covered area must
+# be changed pixels. A real subject changes most of what it uncovers; a parked
+# car's box redrawn larger over its unchanged body changes next to none.
+_EMERGING_MIN_GROWTH = 1.2
+_EMERGING_CHANGED_SHARE = 0.25
 # Detector box-size jitter as a fraction of the box's own larger side. Edge
 # jitter grows with the box, so a fixed threshold on an absolute size change is
 # size-dependent: a large parked box (a car close to the lens) crosses it while
@@ -600,6 +616,72 @@ def _step_components(detection: dict[str, Any]) -> tuple[float, float] | None:
     return center_step, (size_change / mean_size) * _TRACK_SIZE_REFERENCE
 
 
+def _step_floor(detection: dict[str, Any]) -> float:
+    """The one-cycle step below which a young track has not moved (see
+    ``_TRACK_STEP_MIN_MOVE``), scaled down for a small box."""
+    box = detection.get('track_box')
+    try:
+        size = max(float(box[2]), float(box[3]))
+    except (TypeError, ValueError, IndexError):
+        return _TRACK_STEP_MIN_MOVE
+    return min(_TRACK_STEP_MIN_MOVE, max(0.0, size) * _TRACK_STEP_MIN_MOVE_BOX_SHARE) if size > 0 else _TRACK_STEP_MIN_MOVE
+
+
+def _emerging(detection: dict[str, Any], diff_mask: Any) -> bool:
+    """Whether a tracked box grew out of its previous outline into changed pixels.
+
+    A subject stepping out from behind a bush or a car is drawn as a growing
+    box anchored to the occluder's edge: the old box nested inside the new
+    one, which is exactly the "same object at another extent" shape that
+    reads still (a parked car redrawn roof-only, then whole). What separates
+    them is the newly covered area: the emerging subject has just changed
+    those pixels, while a redrawn parked car's extra body is background. So
+    a box that grew within an extent pair is moving when that new area alone
+    holds enough changed pixels.
+    """
+    current, previous = detection.get('track_box'), detection.get('track_prev_box')
+    if diff_mask is None or current is None or previous is None:
+        return False
+    try:
+        cx, cy, cw, ch = (float(value) for value in current[:4])
+        px, py, pw, ph = (float(value) for value in previous[:4])
+    except (TypeError, ValueError, IndexError):
+        return False
+    if pw <= 0 or ph <= 0 or cw * ch <= pw * ph * _EMERGING_MIN_GROWTH:
+        return False
+    # The old box must sit (almost) inside the new one: it grew out of its
+    # outline rather than moving somewhere else.
+    overlap = (max(0.0, min(cx + cw, px + pw) - max(cx, px))
+               * max(0.0, min(cy + ch, py + ph) - max(cy, py)))
+    if overlap < pw * ph * EXTENT_CONTAINMENT:
+        return False
+    try:
+        import numpy as np
+        mask = np.asarray(diff_mask)
+        if mask.ndim != 2 or mask.size == 0:
+            return False
+        height, width = mask.shape
+
+        def cells(x: float, y: float, w: float, h: float) -> tuple[int, int, int, int]:
+            return (int(round(max(0.0, min(1.0, x)) * width)), int(round(max(0.0, min(1.0, y)) * height)),
+                    int(round(max(0.0, min(1.0, x + w)) * width)), int(round(max(0.0, min(1.0, y + h)) * height)))
+
+        x1, y1, x2, y2 = cells(cx, cy, cw, ch)
+        if x2 <= x1 or y2 <= y1:
+            return False
+        grown = np.ones((y2 - y1, x2 - x1), dtype=bool)
+        ox1, oy1, ox2, oy2 = cells(px, py, pw, ph)
+        grown[max(0, oy1 - y1):max(0, oy2 - y1), max(0, ox1 - x1):max(0, ox2 - x1)] = False
+        new_cells = int(grown.sum())
+        if new_cells == 0:
+            return False
+        changed = int((mask[y1:y2, x1:x2] & grown).sum())
+        return changed >= max(_moving_pixels_required(new_cells), math.ceil(new_cells * _EMERGING_CHANGED_SHARE))
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - unexpected mask/box shapes
+        logger.debug('Unexpected error checking an emerging box: %s', exc)
+        return False
+
+
 def classify_motion_state(
     detection: dict[str, Any],
     diff_mask: Any,
@@ -609,8 +691,9 @@ def classify_motion_state(
 
     Returns ``(state, basis)``; ``basis`` names the evidence that decided it:
     ``displacement`` (the tracker's box history), ``track_step`` (a young
-    track's last step), ``mask`` (changed pixels in the box) or ``no_mask``
-    (no pixel change measured). It is stamped on detections as
+    track's last step), ``mask`` (changed pixels in the box), ``emerging`` (a
+    box that grew out of its last outline into changed pixels, see
+    ``_emerging``) or ``no_mask`` (no pixel change measured). It is stamped on detections as
     ``motion_basis`` so a wrong verdict can be traced afterwards.
 
     ``diff_mask`` is the boolean (HxW) changed-pixel thumbnail from
@@ -629,6 +712,8 @@ def classify_motion_state(
     signal for young tracks, so first-seen detections behave exactly as
     before.
     """
+    if detection.get('track_id') is not None and _emerging(detection, diff_mask):
+        return MODE_MOVING, 'emerging'
     if track_displacement is not None:
         try:
             if float(track_displacement) <= _TRACK_DISPLACEMENT_STILL:
@@ -663,8 +748,17 @@ def classify_motion_state(
             # previous one, so without this the second sighting of every walker
             # would be dropped under Moving Only.
             components = _step_components(detection)
-            if components is None or max(components) < _TRACK_STEP_MOVING:
+            # Below the jitter floor the box has not moved: still, whatever
+            # the mask says (the parked-car flap). Between the floor and the
+            # step threshold it has plainly moved, just slowly - a cat walking
+            # at 2% of the frame per cycle - so the mask decides, as it did on
+            # the first sighting. Holding it still dropped a slow subject on
+            # its second sighting under Moving Only: its box blinked off the
+            # live view and a confirmation window had to wait for age 3.
+            if components is None or max(components) < _step_floor(detection):
                 return MODE_STILL, 'track_step'
+            if max(components) < _TRACK_STEP_MOVING:
+                return _mask_motion_state(detection, diff_mask)
             # A box that GREW or shrank (a subject approaching or receding) is
             # moving, whether or not it also translated. A box that only
             # TRANSLATED is not proof on its own: an id swapped between two
@@ -673,6 +767,12 @@ def classify_motion_state(
             # of changed pixels, a parked car's is not.
             if components[1] >= _TRACK_STEP_MOVING:
                 return MODE_MOVING, 'track_step'
+    return _mask_motion_state(detection, diff_mask)
+
+
+def _mask_motion_state(detection: dict[str, Any], diff_mask: Any) -> tuple[str, str]:
+    """Moving or still from the changed pixels inside the box (see
+    ``classify_motion_state``); ``no_mask`` when no change was measured."""
     if diff_mask is None:
         return MODE_STILL, 'no_mask'
     box = detection.get('box')
@@ -709,6 +809,7 @@ def classify_motion_state(
     except Exception as exc:  # noqa: BLE001  # pragma: no cover - unexpected mask/box shapes
         logger.debug('Unexpected error classifying detection motion state: %s', exc)
         return MODE_STILL, 'mask'
+
 
 def detection_motion_state(
     detection: dict[str, Any],

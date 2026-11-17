@@ -568,12 +568,41 @@ def _instead_clause(candidates: list[str] | None) -> str:
             'otherwise "none". ')
 
 
+def _kinds(label: str) -> list[str]:
+    """The members of ``label`` when it is a label group a rule verifies.
+
+    A group rule (``animal``) asks whether an animal is there, so a yes alone
+    left the alert reading as the detector's guess ("bird detected" for a
+    cat). The question also asks which member it is (``kind``).
+    """
+    from app.label_groups import cached_label_groups
+
+    return sorted(cached_label_groups().get(str(label or '').strip().lower()) or ())
+
+
+def _kind_clause(kinds: list[str]) -> str:
+    if not kinds:
+        return ''
+    names = ', '.join(f'"{name}"' for name in kinds)
+    return f'"kind": when it is real and clearly one of {names}, that name exactly; otherwise "none". '
+
+
+def _kind_of(answer: Any, kinds: list[str]) -> str | None:
+    """The member a confirming answer names, when it is one of ``kinds``."""
+    if not kinds or not isinstance(answer, dict) or _present_value(answer.get('present')) is not True:
+        return None
+    name = ' '.join(str(answer.get('kind') or '').strip().lower().split())
+    return next((kind for kind in kinds if kind.lower() == name), None)
+
+
 def build_prompt(label: str, camera_name: str = '', source: str = 'An object detector',
                  candidates: list[str] | None = None) -> str:
     where = f' from the camera "{camera_name}"' if camera_name else ''
+    kinds = _kinds(label)
     label = _spoken(label)
     article = _article(label)
-    example = '{"reason": "short reason", "present": true' + (', "instead": "none"}' if candidates else '}')
+    example = ('{"reason": "short reason", "present": true' + (', "instead": "none"' if candidates else '')
+               + (', "kind": "none"' if kinds else '') + '}')
     return (
         f'{source} reported {article} "{label}" in this security camera image{where}. '
         f'Is a real {label} actually visible? It is NOT a real {label} if it is only a shadow, '
@@ -583,6 +612,7 @@ def build_prompt(label: str, camera_name: str = '', source: str = 'An object det
         'with a reason of at most 15 words first, then "present". '
         f'{_VERDICT_RULES.format(thing=label, article=article)}'
         f'{_instead_clause(candidates)}'
+        f'{_kind_clause(kinds)}'
     ).strip()
 
 
@@ -608,7 +638,16 @@ def build_check_prompt(labels: list[str], camera_name: str = '', *, content: str
     where = f' from the camera "{camera_name}"' if camera_name else ''
     reported = ', '.join(f'"{_spoken(label)}"' for label in labels)
     instead = ', "instead": "none"' if candidates else ''
-    checks = ', '.join(f'"{_spoken(label)}": {{"reason": "short reason", "present": true{instead}}}' for label in labels)
+    kinds = {label: _kinds(label) for label in labels}
+    kind_field = ', "kind": "none"'
+    checks = ', '.join(
+        f'"{_spoken(label)}": {{"reason": "short reason", "present": true{instead}'
+        f'{kind_field if kinds[label] else ""}}}'
+        for label in labels
+    )
+    kind_clause = ''.join(
+        f'For "{_spoken(label)}", {_kind_clause(members)}' for label, members in kinds.items() if members
+    )
     example = [f'"checks": {{{checks}}}']
     describe = ''
     if content:
@@ -633,6 +672,7 @@ def build_check_prompt(labels: list[str], camera_name: str = '', *, content: str
         'scene) or is clearly something else; "unsure" only when something that could be it is there but too '
         'dark, blurry or small to tell. '
         f'{_instead_clause(candidates)}'
+        f'{kind_clause}'
         f'{_describe_fields(content) if content else ""}'
     ).strip()
 
@@ -859,14 +899,19 @@ class VisionVerifier:
     def ask(self, image_bytes: bytes, label: str, camera_name: str = '',
             source: str = 'An object detector', candidates: list[str] | None = None) -> tuple[Any, ...]:
         """``(present, reason)``; with ``candidates`` also what it is instead."""
+        kinds = _kinds(label)
         reply = self.chat([
             {'role': 'system', 'content': SYSTEM_PROMPT},
             {'role': 'user', 'content': [
                 {'type': 'text', 'text': build_prompt(label, camera_name, source, candidates)},
                 self._image_part(image_bytes),
             ]},
-        ], max_tokens=100 if candidates else 80)
-        return parse_verdict(reply, candidates)
+        ], max_tokens=(100 if candidates else 80) + (20 if kinds else 0))
+        verdict = parse_verdict(reply, candidates)
+        kind = _kind_of(_reply_object(reply), kinds)
+        # Read back by verify_and_describe_event (see _kinds).
+        self.last_kinds = {label: kind} if kind else {}
+        return verdict
 
     def describe(self, image_bytes: bytes, camera_name: str = '', *, detected: list[str] | None = None,
                  close_up: bool = False, content: str = 'both') -> tuple[str, list[str]]:
@@ -901,7 +946,16 @@ class VisionVerifier:
                 )},
                 self._image_part(image_bytes),
             ]},
-        ], max_tokens=(75 if candidates else 60) * len(labels) + (200 if content else 0))
+        ], max_tokens=(75 if candidates else 60) * len(labels) + (200 if content else 0)
+           + 20 * sum(1 for label in labels if _kinds(label)))
+        self.last_kinds = {}
+        checks = (_reply_object(reply) or {}).get('checks')
+        if isinstance(checks, dict):
+            by_name = {str(key).strip().lower(): value for key, value in checks.items()}
+            for label in labels:
+                kind = _kind_of(by_name.get(label.lower(), by_name.get(_spoken(label).lower())), _kinds(label))
+                if kind:
+                    self.last_kinds[label] = kind
         return parse_check_reply(reply, labels, content, candidates)
 
 
@@ -1254,6 +1308,7 @@ def verify_and_describe_event(
                 record['labels'][label] = {'present': None, 'error': f'unexpected error: {exc}'[:200]}
         for label, verdict in verdicts.items():
             record['labels'][label] = _label_result(*verdict)
+        _note_kinds(record, verifier)
         record['combined'] = True
         if described is not None:
             description = _description_record(*described, detections, settings, started)
@@ -1269,6 +1324,7 @@ def verify_and_describe_event(
             verdict = verifier.ask(focused, label, camera_name,
                                    **({'candidates': label_candidates} if label_candidates else {}))
             record['labels'][label] = _label_result(*verdict)
+            _note_kinds(record, verifier)
         except VerificationError as exc:
             record['labels'][label] = {'present': None, 'error': str(exc)[:200]}
             if isinstance(exc, ModelUnavailableError):
@@ -1292,6 +1348,14 @@ def verify_and_describe_event(
     return record, description
 
 
+def _note_kinds(record: dict[str, Any], verifier: Any) -> None:
+    """Store which group member a confirmed group label is (see _kinds)."""
+    for label, kind in (getattr(verifier, 'last_kinds', None) or {}).items():
+        result = record['labels'].get(label)
+        if isinstance(result, dict) and result.get('present') is True and kind:
+            result['kind'] = kind
+
+
 def _label_result(present: bool | str, reason: str, instead: str | None = None) -> dict[str, Any]:
     if present == UNSURE:
         # Not a rejection: the alert is delivered, marked as unverified.
@@ -1300,6 +1364,17 @@ def _label_result(present: bool | str, reason: str, instead: str | None = None) 
     if instead:
         result['instead'] = instead
     return result
+
+
+def _unverified_ok(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The alerts that may go out without the model's answer.
+
+    An ``ai_required`` alert exists only because the model was to confirm it
+    (the detector read the object as another label, see
+    ``app.zone_detection.ai_check_rule_label``), so every fail-open path drops
+    it instead of delivering it unverified.
+    """
+    return [alert for alert in alerts if not alert.get('ai_required')]
 
 
 def _forward(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None) -> None:
@@ -1525,7 +1600,7 @@ def verify_and_forward(
         # Settings/database/model exceptions must not silently discard a job
         # in PostProcessPool. Verification is an optional, fail-open filter.
         logger.exception('AI alert processing failed for event %s; forwarding unverified', event_id)
-        _forward(triggered, event_id, rules)
+        _forward(_unverified_ok(triggered), event_id, rules)
 
 
 def _verify_and_forward(
@@ -1555,9 +1630,15 @@ def _verify_and_forward(
     # only turn its delay into a false alarm.
     max_wait = max(60.0, 3.0 * float(settings.get('timeout_seconds') or 20))
     if submitted_at is not None and _queue_wait(submitted_at, background_clock) > max_wait:
+        unverified = _unverified_ok(triggered)
         if labels:
-            _record(event_id, {'status': 'skipped', 'reason': 'Verification queue backlog; delivered unverified.'}, camera_id=camera_id)
-        _forward(triggered, event_id, rules)
+            _record(event_id, {
+                'status': 'skipped',
+                'reason': ('Verification queue backlog; delivered unverified.' if len(unverified) == len(triggered)
+                           else 'Verification queue backlog; alerts that need the AI to confirm them were not sent.'),
+                'delivered': bool(unverified),
+            }, camera_id=camera_id)
+        _forward(unverified, event_id, rules)
         if mode != 'off':
             # Not described now; the catch-up captions it once the model is idle.
             start_description_catch_up()
@@ -1598,12 +1679,27 @@ def _verify_and_forward(
         kept = [
             alert for alert in triggered
             if not (_is_verifiable(alert) and _verify_label(alert) in rejected)
+            # Only the model's yes delivers an alert that needs it: unsure or
+            # unanswered is not a confirmation.
+            and not (alert.get('ai_required')
+                     and (record['labels'].get(_verify_label(alert)) or {}).get('present') is not True)
         ]
         if rejected and candidates:
             kept += relabel_alerts(triggered, record, rules, event, event_id, camera_id)
         # 'filtered' means some label was rejected; whether any alert still
         # went out decides whether the event is described as an alert or as
         # any other event.
+        # A group the model confirmed and named (an ``animal`` that is a cat)
+        # alerts as what it is, not as the detector's guess ("bird").
+        kept = [
+            {**alert, 'label': kind, 'detector_label': alert.get('label'),
+             'message': str(alert.get('message') or '').replace(str(alert.get('label')), kind, 1)}
+            if _is_verifiable(alert) and alert.get('rule_label')
+            and (kind := (record['labels'].get(_verify_label(alert)) or {}).get('kind'))
+            and kind != alert.get('label')
+            else alert
+            for alert in kept
+        ]
         record['delivered'] = bool(kept)
         _record(event_id, record, camera_id=camera_id)
         if rejected:
@@ -1620,6 +1716,8 @@ def _verify_and_forward(
             )
         if rejected and camera_id is not None:
             _reopen_rejected(camera_id, triggered, kept, event)
+        if camera_id is not None:
+            _remember_answers(camera_id, triggered, record)
         unsure = sorted(label for label, result in record['labels'].items() if result.get('unsure'))
         if unsure:
             log_ai_diagnostic(
@@ -1658,6 +1756,36 @@ def _verify_and_forward(
             # now and the catch-up tags the event once the model is idle.
             start_description_catch_up()
     _forward(kept, event_id, rules)
+
+
+def _remember_answers(camera_id: Any, triggered: list[dict[str, Any]], record: dict[str, Any]) -> None:
+    """Keep what the model said each checked object is on its track.
+
+    The live view and recording track then show the model's label for the
+    rest of the visit (a "person" it called a cat is drawn as a cat; an
+    ``animal`` it confirmed as a cat is drawn as a cat), and an object it
+    already answered for is not checked again. See note_ai_label.
+    """
+    from app.object_tracking import note_ai_label
+
+    for label, result in (record.get('labels') or {}).items():
+        sources = [alert for alert in triggered if _is_verifiable(alert) and _verify_label(alert) == label]
+        track_ids = sorted({
+            track_id for alert in sources for track_id in alert.get('track_ids') or ()
+            if isinstance(track_id, int)
+        })
+        if not track_ids:
+            continue
+        answer = None
+        if result.get('present') is False:
+            answer = result.get('instead') or ('' if any(alert.get('ai_required') for alert in sources) else None)
+        elif result.get('present') is True:
+            answer = result.get('kind') or (label if any(alert.get('ai_required') for alert in sources) else None)
+        if answer is not None:
+            try:
+                note_ai_label(str(camera_id), track_ids, answer)
+            except Exception:  # noqa: BLE001 - display memory only; the verdict is recorded
+                logger.debug('Could not remember the AI answer for %s', label, exc_info=True)
 
 
 def _reopen_rejected(camera_id: Any, triggered: list[dict[str, Any]], kept: list[dict[str, Any]],
@@ -1864,7 +1992,8 @@ def submit_alert_notification_with_verification(
                         or camera_describe_content(camera_id, settings, alerted=True, event=event) != 'off')
     except Exception:
         logger.exception('AI settings unavailable; forwarding event %s unverified', event_id)
-        return submit_alert_notification(deliver_alert_notifications, triggered, event_id, rules)
+        unverified = _unverified_ok(triggered)
+        return bool(unverified) and submit_alert_notification(deliver_alert_notifications, unverified, event_id, rules)
     if needs_ai:
         from app.postprocess_pool import PRIORITY_CLIP, verification_pool
 
@@ -1887,6 +2016,15 @@ def submit_alert_notification_with_verification(
         )
         if describes_camera(camera_id, settings):
             start_description_catch_up()
+        unverified = _unverified_ok(triggered)
+        if len(unverified) < len(triggered):
+            _record(event_id, {
+                'status': 'skipped', 'delivered': bool(unverified),
+                'reason': 'Verification queue full; alerts that need the AI to confirm them were not sent.',
+            }, camera_id=camera_id)
+        triggered = unverified
+        if not triggered:
+            return False
     return submit_alert_notification(deliver_alert_notifications, triggered, event_id, rules)
 
 

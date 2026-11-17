@@ -403,6 +403,20 @@ def test_persistent_immature_track_that_stepped_across_the_frame_uses_mask():
     assert os.detection_motion_state(jitter, _mask_all_changed(), None) == 'still'
 
 
+def test_slow_age_two_step_uses_the_mask():
+    """A cat walking 2% of the frame per cycle steps past detector jitter but
+    under the one-cycle step threshold. Its second sighting must not be held
+    still regardless of the mask (it blinked off the live view under Moving
+    Only): the mask decides, as on the first sighting. Below the jitter floor
+    the parked-car still bias is unchanged."""
+    slow_cat = {**_det('cat'), 'track_id': 9, 'track_age': 2,
+                'track_prev_center': (0.40, 0.40), 'track_center': (0.42, 0.40)}
+    assert os.classify_motion_state(slow_cat, _mask_changed_inside_box(), None) == ('moving', 'mask')
+    assert os.classify_motion_state(slow_cat, _mask_none_changed(), None) == ('still', 'mask')
+    jitter = {**slow_cat, 'track_center': (0.405, 0.40)}
+    assert os.classify_motion_state(jitter, _mask_all_changed(), None) == ('still', 'track_step')
+
+
 def test_step_without_changed_pixels_is_still():
     """Event 47935: an id swapped between two adjacent parked cars steps across
     the frame too, but nothing in its box changed. The step alone must not
@@ -935,3 +949,50 @@ def test_overlay_box_colors_group_ties_break_alphabetically():
     groups = {'alpha': frozenset({'cat', 'dog'}), 'beta': frozenset({'cat', 'bird'})}
     settings = {'group_box_colors': {'alpha': '#aaaaaa', 'beta': '#bbbbbb'}}
     assert os.overlay_box_colors(settings, groups=groups)['cat'] == '#aaaaaa'
+
+
+def _emerging_det(age, displacement=None):
+    # Grew from a sliver at the bush edge (x=0.50) to a whole cat.
+    return {'label': 'cat', 'confidence': 0.8, 'box': {'x': 0.50, 'y': 0.50, 'width': 0.09, 'height': 0.10},
+            'track_id': 4, 'track_age': age, 'track_displacement': displacement,
+            'track_prev_center': (0.515, 0.55), 'track_center': (0.545, 0.55),
+            'track_prev_box': (0.50, 0.50, 0.03, 0.10), 'track_box': (0.50, 0.50, 0.09, 0.10)}
+
+
+def _mask_in(x1, x2, y1=0.50, y2=0.60):
+    mask = np.zeros((240, 320), dtype=bool)
+    mask[int(y1 * 240):int(y2 * 240), int(x1 * 320):int(x2 * 320)] = True
+    return mask
+
+
+def test_subject_stepping_out_from_cover_is_moving():
+    """A box growing out of its last outline into changed pixels is a subject
+    stepping out from behind something, not a redrawn parked car: it reads
+    moving even when the step and the windowed displacement read still."""
+    uncovered = _mask_in(0.53, 0.59)
+    assert os.classify_motion_state(_emerging_det(2), uncovered, None) == ('moving', 'emerging')
+    assert os.classify_motion_state(_emerging_det(5, 0.0), uncovered, 0.0) == ('moving', 'emerging')
+
+
+def test_redrawn_parked_box_is_not_emerging():
+    """The same grown box over an unchanged area (a parked car redrawn roof
+    then whole), or with change only inside the old outline (a passing
+    car's pixels), stays still."""
+    assert os.classify_motion_state(_emerging_det(5, 0.0), _mask_none_changed(), 0.0) == ('still', 'displacement')
+    assert os.classify_motion_state(_emerging_det(5, 0.0), _mask_in(0.50, 0.53), 0.0) == ('still', 'displacement')
+    shrunk = {**_emerging_det(5, 0.0), 'track_prev_box': (0.50, 0.50, 0.09, 0.10), 'track_box': (0.50, 0.50, 0.03, 0.10)}
+    assert os.classify_motion_state(shrunk, _mask_all_changed(), 0.0) == ('still', 'displacement')
+
+
+def test_young_track_step_floor_scales_with_a_small_box():
+    """Jitter is a few source pixels, so for a distant cat 1.2% of the frame
+    wide a 0.9% step (three quarters of its width) is motion, not jitter;
+    a box 2% of the frame or larger keeps the plain 1% floor."""
+    distant = {'label': 'cat', 'confidence': 0.8, 'box': {'x': 0.309, 'y': 0.4, 'width': 0.012, 'height': 0.016},
+               'track_id': 3, 'track_age': 2, 'track_prev_center': (0.306, 0.408), 'track_center': (0.315, 0.408),
+               'track_prev_box': (0.300, 0.4, 0.012, 0.016), 'track_box': (0.309, 0.4, 0.012, 0.016)}
+    mask = np.zeros((240, 320), dtype=bool)
+    mask[96:100, 98:102] = True
+    assert os.classify_motion_state(distant, mask, None) == ('moving', 'mask')
+    larger = {**distant, 'track_prev_box': (0.300, 0.4, 0.05, 0.05), 'track_box': (0.309, 0.4, 0.05, 0.05)}
+    assert os.classify_motion_state(larger, mask, None) == ('still', 'track_step')

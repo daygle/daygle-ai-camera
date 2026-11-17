@@ -1161,3 +1161,60 @@ def test_candidates_follow_the_rules_active_now_and_name_group_members(av, monke
     ]
     triggered = [_alert('person', 0.6, rule_name='Drive / person')]
     assert relabel_candidates(triggered, ['person'], rules) == {'person': expected}
+
+
+
+def test_ai_required_alert_needs_the_models_yes(av, flow):
+    """A cat the detector read as a dog is checked as a cat only on the
+    model's word (``ai_required``): unsure or unanswered does not deliver it,
+    while an ordinary alert still fails open."""
+    from app.ai_verification import UNSURE, VerificationError
+
+    configure, forwarded = flow
+    required = _alert('cat', 0.8, rule_name='C', ai_required=True, detector_label='dog')
+    for answer in ((UNSURE, 'too dark'), VerificationError('timed out')):
+        forwarded.clear()
+        configure({'cat': answer})
+        av.verify_and_forward([required], 9, [], '')
+        assert forwarded == []
+    forwarded.clear()
+    configure({'cat': VerificationError('timed out')})
+    av.verify_and_forward([_alert('cat', 0.8, rule_name='C')], 10, [], '')
+    assert len(forwarded) == 1
+    forwarded.clear()
+    configure({'cat': (True, 'a cat')})
+    av.verify_and_forward([required], 11, [], '')
+    assert [alert['label'] for alert in forwarded[0]] == ['cat']
+
+
+def test_unverified_fallbacks_drop_ai_required_alerts(av):
+    alerts = [{'label': 'cat', 'ai_required': True}, {'label': 'person'}]
+    assert av._unverified_ok(alerts) == [{'label': 'person'}]
+
+
+def test_group_check_asks_which_member_it_is(av, monkeypatch):
+    from app.label_groups import DEFAULT_LABEL_GROUPS
+    import app.label_groups as label_groups
+
+    monkeypatch.setattr(label_groups, 'cached_label_groups', lambda: dict(DEFAULT_LABEL_GROUPS))
+    assert '"kind": when it is real and clearly one of' in av.build_prompt('animal')
+    assert '"kind"' not in av.build_prompt('person')
+    combined = av.build_check_prompt(['animal', 'person'])
+    assert '"animal": {"reason": "short reason", "present": true, "kind": "none"}' in combined
+    assert '"person": {"reason": "short reason", "present": true}' in combined
+    assert av._kind_of({'present': True, 'kind': 'Cat'}, ['cat', 'dog']) == 'cat'
+    assert av._kind_of({'present': True, 'kind': 'fox'}, ['cat', 'dog']) is None
+    assert av._kind_of({'present': False, 'kind': 'cat'}, ['cat', 'dog']) is None
+
+
+def test_backlogged_job_holds_back_alerts_that_need_the_model(av, flow):
+    configure, forwarded = flow
+    db = configure({'cat': (True, 'never asked')})
+    plain = _alert('person', 0.6)
+    av.verify_and_forward([plain, _alert('cat', 0.8, ai_required=True)], 13, [], '', submitted_at=-1e9)
+    assert forwarded == [[plain]]
+    record = db.metadata[13]['ai_verification']
+    assert record['status'] == 'skipped' and record['delivered'] is True
+    assert 'need the AI to confirm' in record['reason']
+    av.verify_and_forward([_alert('cat', 0.8, ai_required=True)], 14, [], '', submitted_at=-1e9)
+    assert db.metadata[14]['ai_verification']['delivered'] is False

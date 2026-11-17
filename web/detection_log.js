@@ -35,7 +35,8 @@ function detectionLogRows(track) {
   const rows = [];
   let gap = null;
   for (const sample of Array.isArray(track) ? track : []) {
-    const kept = Array.isArray(sample?.detections) ? sample.detections : [];
+    // Display-only boxes are already listed under dropped, with their reason.
+    const kept = Array.isArray(sample?.detections) ? sample.detections.filter((d) => !d?.display_only) : [];
     const dropped = Array.isArray(sample?.dropped) ? sample.dropped : [];
     const ptz = sample?.ptz && typeof sample.ptz === 'object' ? sample.ptz : null;
     const t = Number(sample?.t) || 0;
@@ -61,7 +62,7 @@ function detectionLogSummary(track) {
   let kept = 0;
   let dropped = 0;
   for (const sample of samples) {
-    kept += Array.isArray(sample?.detections) ? sample.detections.length : 0;
+    kept += Array.isArray(sample?.detections) ? sample.detections.filter((d) => !d?.display_only).length : 0;
     dropped += Array.isArray(sample?.dropped) ? sample.dropped.length : 0;
   }
   return { checks: samples.length, kept, dropped };

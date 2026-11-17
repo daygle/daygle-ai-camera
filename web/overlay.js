@@ -301,6 +301,7 @@ function matchDetectionPairs(previous, current) {
 // actually on screen right now, not where it was when the detector last ran.
 // `maxLead` caps how far past the latest sample we extrapolate so a stale box
 // (object gone, video paused/seeked) does not drift away.
+// A `targetTime` between the two samples interpolates between them instead.
 function projectDetections(prevDetections, curDetections, prevTime, curTime, targetTime, maxLead) {
   if (!Array.isArray(curDetections) || !curDetections.length) return curDetections;
   if (!Array.isArray(prevDetections) || !prevDetections.length) return curDetections;
@@ -308,7 +309,10 @@ function projectDetections(prevDetections, curDetections, prevTime, curTime, tar
   const interval = curTime - prevTime;
   if (!(interval > 0)) return curDetections;
   let lead = targetTime - curTime;
-  if (lead <= 0) return curDetections;
+  // A target between the two samples (the frame on screen is older than the
+  // newest detection, e.g. a live snapshot that has not refreshed yet) is
+  // interpolated back along the same pair; one before both is not projected.
+  if (lead === 0 || lead < -interval) return curDetections;
   const cap = Number.isFinite(maxLead) ? Math.max(0, maxLead) : interval;
   if (lead > cap) lead = cap;
   const factor = lead / interval;

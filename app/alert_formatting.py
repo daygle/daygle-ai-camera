@@ -144,15 +144,22 @@ def build_alert_content(
     # An AI relabel (app.ai_relabel): the model named this object, which the
     # detector had reported as something else.
     relabel_from = str(alert.get('ai_relabel_from') or '').strip().replace('_', ' ')
+    # The model confirmed what the detector read as another label (a cat it
+    # called a dog, or the cat an ``animal`` rule's "bird" really is).
+    detector_label = str(alert.get('detector_label') or '').strip().replace('_', ' ')
+    if detector_label.lower() == primary_label.replace('_', ' ').lower():
+        detector_label = ''
     if ai_description:
         alert_message = ai_description
     elif relabel_from:
         alert_message = f'{display_primary} Detected (AI relabel of a {relabel_from} detection)'
+    elif detector_label:
+        alert_message = f'{display_primary} Detected (AI confirmed; the detector reported a {detector_label})'
     else:
         alert_message = str(alert.get('message') or 'Alert triggered.').title()
     # An AI tag alert has no detector score, and a relabel's score was for the
     # detector's label: omit the line rather than print a misleading figure.
-    confidence = None if ai_tag_alert or relabel_from else float(alert.get('confidence') or 0)
+    confidence = None if ai_tag_alert or relabel_from or detector_label else float(alert.get('confidence') or 0)
 
     plain_lines = [alert_message, '', f"Camera: {camera_display}"]
     if zone_name:

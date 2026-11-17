@@ -124,6 +124,9 @@ def _history_entry(detection: dict[str, Any]) -> dict[str, Any]:
         **({'track_age': detection['track_age']} if isinstance(detection.get('track_age'), int) else {}),
         **({'track_displacement': round(float(detection['track_displacement']), 4)} if isinstance(detection.get('track_displacement'), (int, float)) else {}),
         **({'confirmed_by': detection['confirmed_by']} if detection.get('confirmed_by') in ('confidence', 'group') else {}),
+        # Drawn on playback only (a still object Moving Only dropped): never
+        # counted as a kept detection, a clip label or the event's span.
+        **({'display_only': True} if detection.get('display_only') else {}),
     }
 
 

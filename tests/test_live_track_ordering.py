@@ -106,7 +106,10 @@ def _run_still_cat(main, monkeypatch, camera_settings):
     monkeypatch.setattr(_lm, 'update_live_detection_status', capturing_status)
     _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720, 'timestamp': time.time()},
                                    camera_settings, enforce_interval=False)
-    return [d for d in (captured.get('detections') or []) if d.get('label') == 'cat']
+    # A cat the filter dropped stays on the live view tagged ``still`` (display
+    # only); what passed the filter is everything else.
+    return [d for d in (captured.get('detections') or [])
+            if d.get('label') == 'cat' and d.get('motion_state') != 'still']
 
 
 def test_camera_profile_does_not_override_object_mode(tmp_path, monkeypatch):
@@ -289,7 +292,9 @@ def test_paused_cat_is_dropped_without_track_displacement(tmp_path, monkeypatch)
     _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720, 'timestamp': time.time()},
                                    _cat_camera_settings(), enforce_interval=False)
 
-    status_cats = [d for d in (captured_status.get('detections') or []) if d.get('label') == 'cat']
+    # Dropped by Moving Only: at most shown on the live view, tagged still.
+    status_cats = [d for d in (captured_status.get('detections') or [])
+                   if d.get('label') == 'cat' and d.get('motion_state') != 'still']
     assert not status_cats, (
         'without a displacement annotation a still-mask cat is Moving-Only dropped '
         '(this is exactly why tracking must run before the filter)'

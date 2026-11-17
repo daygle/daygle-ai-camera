@@ -25,7 +25,9 @@ function clipEventBounds(track) {
   let first = null;
   let last = null;
   for (const sample of track) {
-    if (!sample || !Array.isArray(sample.detections) || !sample.detections.length) continue;
+    // Display-only boxes (a still object Moving Only dropped) are drawn on
+    // playback but are not the event: they do not stretch its span.
+    if (!sample || !Array.isArray(sample.detections) || !sample.detections.some((d) => !d?.display_only)) continue;
     const t = Number(sample.t);
     if (!Number.isFinite(t) || t < 0) continue;
     if (first === null) first = t;

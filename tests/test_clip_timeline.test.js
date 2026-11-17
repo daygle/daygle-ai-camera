@@ -183,3 +183,16 @@ test('clips without extensions draw no markers', () => {
   assert.ok(!bar.some((el) => el.className.startsWith('clip-extension') || el.className === 'clip-original-end'));
   assert.ok(!legend.some((item) => item.text.startsWith('Extended')));
 });
+
+test('display-only boxes do not stretch the event span', () => {
+  const sandbox = { els: {}, activeRecording: null };
+  vm.createContext(sandbox);
+  vm.runInContext(source, sandbox);
+  const cat = { label: 'cat', box: { x: 0.2, y: 0.5, width: 0.1, height: 0.1 } };
+  const bounds = vm.runInContext('clipEventBounds', sandbox)([
+    { t: 2, detections: [cat] },
+    { t: 4, detections: [cat] },
+    { t: 9, detections: [{ ...cat, display_only: true }] },
+  ]);
+  assert.deepEqual({ ...bounds }, { first: 2, last: 4 });
+});
