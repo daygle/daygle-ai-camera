@@ -982,3 +982,17 @@ def test_redrawn_parked_box_is_not_emerging():
     assert os.classify_motion_state(_emerging_det(5, 0.0), _mask_in(0.50, 0.53), 0.0) == ('still', 'displacement')
     shrunk = {**_emerging_det(5, 0.0), 'track_prev_box': (0.50, 0.50, 0.09, 0.10), 'track_box': (0.50, 0.50, 0.03, 0.10)}
     assert os.classify_motion_state(shrunk, _mask_all_changed(), 0.0) == ('still', 'displacement')
+
+
+def test_young_track_step_floor_scales_with_a_small_box():
+    """Jitter is a few source pixels, so for a distant cat 1.2% of the frame
+    wide a 0.9% step (three quarters of its width) is motion, not jitter;
+    a box 2% of the frame or larger keeps the plain 1% floor."""
+    distant = {'label': 'cat', 'confidence': 0.8, 'box': {'x': 0.309, 'y': 0.4, 'width': 0.012, 'height': 0.016},
+               'track_id': 3, 'track_age': 2, 'track_prev_center': (0.306, 0.408), 'track_center': (0.315, 0.408),
+               'track_prev_box': (0.300, 0.4, 0.012, 0.016), 'track_box': (0.309, 0.4, 0.012, 0.016)}
+    mask = np.zeros((240, 320), dtype=bool)
+    mask[96:100, 98:102] = True
+    assert os.classify_motion_state(distant, mask, None) == ('moving', 'mask')
+    larger = {**distant, 'track_prev_box': (0.300, 0.4, 0.05, 0.05), 'track_box': (0.309, 0.4, 0.05, 0.05)}
+    assert os.classify_motion_state(larger, mask, None) == ('still', 'track_step')

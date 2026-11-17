@@ -25,6 +25,19 @@ from app.detector import CONTAINMENT_THRESHOLD, is_column_part, is_stacked_split
 
 logger = logging.getLogger('daygle.ai.detection')
 
+# Smallest moving area worth a zoomed-in look: this share of the motion mask,
+# and never fewer than ``_MIN_REGION_CELLS`` mask cells (a stray pixel or two
+# of noise is not a subject). The boost exists for subjects too small for the
+# full-frame pass; the old 0.2% floor (about 48x36 px on a 1280x720 camera)
+# skipped exactly those, so it never ran for a distant cat.
+_MIN_REGION_AREA_FRAC = 0.0002
+_MIN_REGION_CELLS = 6
+# A crop is never narrower or shorter than this share of the frame, centred on
+# its region. A tight crop around a 15-pixel subject, blown up to the model
+# input, has no context left to recognise it by (the same floor Second Look
+# uses for its re-check crops).
+_MIN_CROP_FRACTION = 0.15
+
 
 def _motion_region_boxes(
     diff_mask: Any,
@@ -57,7 +70,7 @@ def _motion_region_boxes(
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
         area_frac = (w * h) / float(mask_w * mask_h)
-        if area_frac < min_area_frac or area_frac > 0.5:
+        if area_frac < min_area_frac or w * h < _MIN_REGION_CELLS or area_frac > 0.5:
             continue
         scored.append((area_frac, x / mask_w, y / mask_h, w / mask_w, h / mask_h))
     scored.sort(reverse=True)
@@ -132,6 +145,18 @@ def _dedup_by_iou(
     return kept
 
 
+def _with_min_size(x: float, y: float, w: float, h: float, minimum: float) -> tuple[float, float, float, float]:
+    """Grow a normalized box to at least ``minimum`` per axis, around its
+    centre, shifted (not shrunk) to stay inside the frame."""
+    if w < minimum:
+        x = max(0.0, min(1.0 - minimum, x + w / 2.0 - minimum / 2.0))
+        w = minimum
+    if h < minimum:
+        y = max(0.0, min(1.0 - minimum, y + h / 2.0 - minimum / 2.0))
+        h = minimum
+    return x, y, w, h
+
+
 def detect_with_region_boost(
     detector: Any,
     frame: Any,
@@ -140,7 +165,7 @@ def detect_with_region_boost(
     *,
     confidence: float | None = None,
     max_regions: int = 3,
-    min_area_frac: float = 0.002,
+    min_area_frac: float = _MIN_REGION_AREA_FRAC,
     pad_frac: float = 0.25,
     iou_dedup: float = 0.5,
 ) -> list[dict[str, Any]]:
@@ -164,6 +189,7 @@ def detect_with_region_boost(
     frame_h, frame_w = frame.shape[:2]
     merged = list(base_detections)
     for rx, ry, rw, rh in regions:
+        rx, ry, rw, rh = _with_min_size(rx, ry, rw, rh, _MIN_CROP_FRACTION)
         x1 = int(rx * frame_w)
         y1 = int(ry * frame_h)
         x2 = int((rx + rw) * frame_w)

@@ -365,7 +365,8 @@ def test_live_stream_moving_only_setting_drops_still_person(tmp_path, monkeypatc
         [{'label': 'person', 'confidence': 0.91, 'box': {'x': 64, 'y': 72, 'width': 320, 'height': 360}}],
     )
     assert event_id is None
-    assert [detection['label'] for detection in status['detections']] == []
+    # Dropped from every rule; only shown on the live view, tagged still.
+    assert [(d['label'], d['motion_state']) for d in status['detections']] == [('person', 'still')]
     assert 'person' not in status.get('detected_labels', [])
 
 
@@ -843,7 +844,8 @@ def test_live_stream_default_moving_mode_applies_to_all_labels(tmp_path, monkeyp
         [{'label': 'car', 'confidence': 0.91, 'box': {'x': 64, 'y': 72, 'width': 320, 'height': 360}}],
     )
     assert event_id is None
-    assert [detection['label'] for detection in status['detections']] == []
+    # Dropped from every rule; only shown on the live view, tagged still.
+    assert [(d['label'], d['motion_state']) for d in status['detections']] == [('car', 'still')]
 
 
 def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, monkeypatch):

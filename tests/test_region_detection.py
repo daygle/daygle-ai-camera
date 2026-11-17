@@ -248,3 +248,25 @@ def test_dedup_keeps_side_by_side_people():
         {'label': 'person', 'confidence': 0.8, 'box': {'x': 0.24, 'y': 0.12, 'width': 0.2, 'height': 0.6}},
     ]
     assert len(rd._dedup_by_iou(dets, 0.5)) == 2
+
+
+def test_boost_looks_at_small_moving_subjects_with_context():
+    """A distant subject moves a few mask cells: the boost exists for it, so
+    the area floor must not skip it, and its crop keeps enough surroundings
+    (at least 15% of the frame per axis) to be recognisable."""
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    mask = _mask_with_blob(region=(0.30, 0.40, 0.015, 0.02))  # ~4 x 4 cells of 320 x 240
+    detector = _StubDetector()
+    rd.detect_with_region_boost(detector, frame, mask, [], confidence=0.3)
+    assert detector.crop_shapes, 'a small moving subject gets a zoomed-in look'
+    crop_h, crop_w = detector.crop_shapes[0]
+    assert crop_w >= int(0.15 * 1280) - 1 and crop_h >= int(0.15 * 720) - 1
+    # A couple of stray noise cells are still not worth a crop.
+    noise = np.zeros((240, 320), dtype=bool)
+    noise[10:12, 10:12] = True
+    assert rd._motion_region_boxes(noise, max_regions=3, min_area_frac=rd._MIN_REGION_AREA_FRAC, pad_frac=0.25) == []
+
+
+def test_min_size_grows_around_the_centre_inside_the_frame():
+    assert rd._with_min_size(0.5, 0.5, 0.02, 0.4, 0.15) == pytest.approx((0.435, 0.5, 0.15, 0.4))
+    assert rd._with_min_size(0.0, 0.95, 0.02, 0.02, 0.15) == pytest.approx((0.0, 0.85, 0.15, 0.15))

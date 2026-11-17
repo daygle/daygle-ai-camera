@@ -149,6 +149,11 @@ _TRACK_DISPLACEMENT_MIN_AGE = 3
 # ``_TRACK_STEP_MOVING``); at or above it the box really moved, and the mask
 # says whether the subject did.
 _TRACK_STEP_MIN_MOVE = _TRACK_DISPLACEMENT_STILL
+# ...but never more than this share of the box's own larger side. A distant
+# cat 1.2% of the frame wide walking 0.9% per cycle moves three quarters of its
+# own width - plainly not jitter, which is a few source pixels and so a small
+# share of any box. Boxes 2% of the frame or larger keep the plain floor.
+_TRACK_STEP_MIN_MOVE_BOX_SHARE = 0.5
 # A subject stepping out from behind something (see ``_emerging``): its box
 # must have grown by this factor, and this share of the newly covered area must
 # be changed pixels. A real subject changes most of what it uncovers; a parked
@@ -611,6 +616,17 @@ def _step_components(detection: dict[str, Any]) -> tuple[float, float] | None:
     return center_step, (size_change / mean_size) * _TRACK_SIZE_REFERENCE
 
 
+def _step_floor(detection: dict[str, Any]) -> float:
+    """The one-cycle step below which a young track has not moved (see
+    ``_TRACK_STEP_MIN_MOVE``), scaled down for a small box."""
+    box = detection.get('track_box')
+    try:
+        size = max(float(box[2]), float(box[3]))
+    except (TypeError, ValueError, IndexError):
+        return _TRACK_STEP_MIN_MOVE
+    return min(_TRACK_STEP_MIN_MOVE, max(0.0, size) * _TRACK_STEP_MIN_MOVE_BOX_SHARE) if size > 0 else _TRACK_STEP_MIN_MOVE
+
+
 def _emerging(detection: dict[str, Any], diff_mask: Any) -> bool:
     """Whether a tracked box grew out of its previous outline into changed pixels.
 
@@ -739,7 +755,7 @@ def classify_motion_state(
             # the first sighting. Holding it still dropped a slow subject on
             # its second sighting under Moving Only: its box blinked off the
             # live view and a confirmation window had to wait for age 3.
-            if components is None or max(components) < _TRACK_STEP_MIN_MOVE:
+            if components is None or max(components) < _step_floor(detection):
                 return MODE_STILL, 'track_step'
             if max(components) < _TRACK_STEP_MOVING:
                 return _mask_motion_state(detection, diff_mask)
