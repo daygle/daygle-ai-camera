@@ -53,14 +53,21 @@ def _camera(rule_label: str = 'cat', *, record: bool = True) -> dict:
     }
 
 
-def _drive(tmp_path, monkeypatch, positions, *, rule_label='cat', record=True):
-    """Run one cycle per entry of ``positions`` (the cat's box x, or None when
-    it is out of view). Returns per-cycle results and the AI-routed alerts."""
+def _seen(label: str, x: float) -> dict:
+    return {'label': label, 'confidence': 0.8, 'box': {'x': x, 'y': 0.5, 'width': 0.1, 'height': 0.1}}
+
+
+def _drive(tmp_path, monkeypatch, positions, *, rule_label='cat', record=True, live=None):
+    """Run one cycle per entry of ``positions``: the cat's box x, None when it
+    is out of view, or a list of ``_seen`` detections. Returns per-cycle
+    results and the AI-routed alerts."""
     main = _load_app(tmp_path, monkeypatch)
     import app.live_monitor as lm
 
     settings = _camera(rule_label, record=record)
-    cat_x = {'value': None}
+    if live:
+        main.database.set_setting('live', live, main.utc_now())
+    in_view: dict = {'value': []}
 
     class CatDetector:
         backend = 'onnx'
@@ -68,18 +75,15 @@ def _drive(tmp_path, monkeypatch, positions, *, rule_label='cat', record=True):
         unavailable_reason = None
 
         def detect_image(self, _image, confidence=None):
-            if cat_x['value'] is None:
-                return []
-            return [{'label': 'cat', 'confidence': 0.8,
-                     'box': {'x': cat_x['value'], 'y': 0.5, 'width': 0.1, 'height': 0.1}}]
+            return [dict(seen, box=dict(seen['box'])) for seen in in_view['value']]
 
     monkeypatch.setattr(main._state, 'detector', CatDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
 
     def cat_motion(*_args, **_kwargs):
         mask = np.zeros((MASK_H, MASK_W), dtype=bool)
-        if cat_x['value'] is not None:
-            left = int(cat_x['value'] * MASK_W)
+        for seen in in_view['value']:
+            left = int(seen['box']['x'] * MASK_W)
             mask[45:54, left:left + 16] = True
         return True, 0.5, mask, 0.02
 
@@ -101,7 +105,9 @@ def _drive(tmp_path, monkeypatch, positions, *, rule_label='cat', record=True):
     start = time.time()
     results = []
     for index, position in enumerate(positions):
-        cat_x['value'] = position
+        in_view['value'] = (
+            position if isinstance(position, list) else [] if position is None else [_seen('cat', position)]
+        )
         statuses.clear()
         now = start + index * CYCLE_SECONDS
         monkeypatch.setattr(time, 'time', lambda now=now: now)
@@ -111,7 +117,8 @@ def _drive(tmp_path, monkeypatch, positions, *, rule_label='cat', record=True):
         )
         final = statuses[-1]
         cats = [d for d in final.get('detections') or [] if d.get('label') == 'cat']
-        results.append({'event_id': event_id, 'state': final.get('state'), 'cats': cats})
+        results.append({'event_id': event_id, 'state': final.get('state'), 'cats': cats,
+                         'reason': final.get('reason')})
     return main, settings, results, routed
 
 
@@ -167,3 +174,29 @@ def test_cat_out_of_view_briefly_does_not_alert_again(tmp_path, monkeypatch):
     _main, _settings, results, routed = _drive(tmp_path, monkeypatch, positions)
     assert [result['event_id'] is not None for result in results].count(True) == 1
     assert len(routed) == 1
+
+
+def test_one_cat_read_as_other_animals_at_night_alerts_once(tmp_path, monkeypatch):
+    # IR lighting: the same walking cat reads cat, dog, bird on successive
+    # cycles. Counted by label, an ``animal`` rule alerted once per flip.
+    labels = ['cat', 'dog', 'bird', 'cat', 'dog', 'cat']
+    frames = [[_seen(label, 0.10 + 0.03 * index)] for index, label in enumerate(labels)]
+    _main, _settings, results, routed = _drive(tmp_path, monkeypatch, frames, rule_label='animal')
+    assert [index for index, result in enumerate(results) if result['event_id'] is not None] == [0]
+    assert [[alert['label'] for alert in alerts] for _event, alerts in routed] == [['cat']]
+
+
+def test_a_real_second_animal_elsewhere_still_alerts(tmp_path, monkeypatch):
+    frames = [[_seen('cat', 0.10 + 0.03 * index)] for index in range(3)] + [
+        [_seen('cat', 0.19 + 0.03 * index), _seen('dog', 0.80 - 0.03 * index)] for index in range(3)
+    ]
+    _main, _settings, results, routed = _drive(tmp_path, monkeypatch, frames, rule_label='animal')
+    assert [index for index, result in enumerate(results) if result['event_id'] is not None] == [0, 3]
+    assert [[alert['label'] for alert in alerts] for _event, alerts in routed] == [['cat'], ['dog']]
+
+
+def test_status_names_the_confirmation_wait(tmp_path, monkeypatch):
+    live = {'detection_confirm_frames': 2, 'detection_confirm_window': 3}
+    _main, _settings, results, _routed = _drive(tmp_path, monkeypatch, [0.10, 0.13], live=live)
+    assert results[0]['reason'] == 'Cat: Not confirmed yet (needs 2 of 3 cycles)'
+    assert results[1]['event_id'] is not None

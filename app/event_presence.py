@@ -41,6 +41,10 @@ from typing import Any
 import app.state as _state
 
 SECOND_OBJECT_CONFIRM_CYCLES = 2
+# How recently an object on record must have been seen for an overlapping
+# sighting under another label of its group to count as that same object (see
+# ``presence_keys``). A few detection cycles: the label flips cycle to cycle.
+GROUP_MATE_WINDOW_SECONDS = 3.0
 # Floor for the absence window, so a 0s extension step does not forget an
 # object between two detection passes.
 MIN_ABSENCE_SECONDS = 5.0
@@ -71,6 +75,52 @@ def _expire(scope: dict[str, dict[str, Any]], now: float, absence: float) -> Non
         del scope[key]
 
 
+def presence_keys(
+    camera_id: str,
+    detections: list[dict[str, Any]],
+    *,
+    now: float | None = None,
+) -> list[str]:
+    """The presence key each detection counts under.
+
+    Normally its own label. At night an IR-lit cat can read ``cat``, then
+    ``dog``, then ``bird`` on successive cycles; counted by label, each flip
+    was a new type of object, so one cat behind an ``animal`` rule raised three
+    events (and three notifications) in as many cycles. A label not on record
+    whose box overlaps where a label-group mate on record was just seen is that
+    mate, the same evidence the confirmation gate uses for such sightings. An
+    animal away from it, or a label in no group with the one on record, still
+    counts as its own.
+    """
+    from app.box_geometry import box_tuple, extent_unstable
+    from app.detection_state import GROUP_MATE_MIN_IOU, _box_iou, _group_mates
+
+    now = time.time() if now is None else now
+    with _state.live_event_presence_lock:
+        scope = dict(_state.live_event_presence.get(camera_id) or {})
+    keys: list[str] = []
+    for detection in detections:
+        label = str(detection.get('label') or '').strip().lower()
+        box = detection.get('box')
+        key = label
+        if label and label not in scope and isinstance(box, dict):
+            current = box_tuple(box)
+            for mate in sorted(_group_mates(label)):
+                entry = scope.get(mate)
+                if not entry or now - float(entry.get('boxes_seen') or float('-inf')) > GROUP_MATE_WINDOW_SECONDS:
+                    continue
+                if any(
+                    _box_iou(box, seen) >= GROUP_MATE_MIN_IOU
+                    or (current is not None and (previous := box_tuple(seen)) is not None
+                        and extent_unstable(current, previous))
+                    for seen in entry.get('boxes') or ()
+                ):
+                    key = mate
+                    break
+        keys.append(key)
+    return keys
+
+
 def observe_presence(
     camera_id: str,
     counts: dict[str, int],
@@ -78,6 +128,7 @@ def observe_presence(
     absence: float,
     recording_id: int | None = None,
     now: float | None = None,
+    boxes: dict[str, list[dict[str, Any]]] | None = None,
 ) -> set[str]:
     """Record this cycle's per-key object counts; return the keys that are new.
 
@@ -85,6 +136,9 @@ def observe_presence(
     each entry (``reopen_rejected`` compares it) but does not extend coverage: a
     key unseen past ``absence`` is forgotten even mid-clip, so its return opens
     a new event in the same footage.
+
+    ``boxes`` (per key, this cycle's boxes) are kept with each entry so
+    ``presence_keys`` can tell a relabelled sighting of the same object.
     """
     now = time.time() if now is None else now
     new: set[str] = set()
@@ -96,6 +150,9 @@ def observe_presence(
                 continue
             entry = scope.setdefault(key, {'high': 0, 'pending_cycles': 0})
             entry['last_seen'] = now
+            if boxes and boxes.get(key):
+                entry['boxes'] = list(boxes[key])
+                entry['boxes_seen'] = now
             if recording_id is not None:
                 entry['recording_id'] = recording_id
             if count <= entry['high']:

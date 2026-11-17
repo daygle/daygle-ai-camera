@@ -119,7 +119,7 @@ from app.event_debounce import (
     clear_live_camera_backoff,
     schedule_live_camera_backoff,
 )
-from app.event_presence import absence_seconds, bind_presence_recording, drop_covered_motion, observe_presence
+from app.event_presence import absence_seconds, bind_presence_recording, drop_covered_motion, observe_presence, presence_keys
 from app.overlap_suppression import drop_people_boxed_as_animals, overlap_reason
 from app.recording_extension import (
     _make_continuous_chunk_callback,
@@ -1618,11 +1618,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         _confirm_spatial = float(_confirm_iou or 0) > 0
     except (TypeError, ValueError):
         _confirm_spatial = False
-    _note_dropped(
-        _before_confirmation, object_detections,
+    _confirm_reason = (
         f'Not confirmed yet (needs {_confirm_frames} of {_confirm_window} cycles'
-        + (', in the same place or as the same tracked object)' if _confirm_spatial else ')'),
+        + (', in the same place or as the same tracked object)' if _confirm_spatial else ')')
     )
+    _note_dropped(_before_confirmation, object_detections, _confirm_reason)
     _cycle_timer.add(STAGE_CONFIRMATION, (time.perf_counter() - _confirm_started) * 1000.0)
     _telemetry_candidates['after_confirmation'] = len(object_detections)
     _telemetry_rejected[REJECT_CONFIRMATION] = max(
@@ -1810,10 +1810,8 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             0, len(alertable_object_detections) - len(object_alert_detections),
         )
     record_only_detections = [d for d in alertable_object_detections if zone_record_on_detect(d, settings) and (not zone_object_rule_matches(settings, d, action='alert'))] if _zone_match_needed else []
-    _note_dropped(
-        object_detections, alertable_object_detections,
-        'Camera moving: only objects set to Moving & Still count',
-    )
+    _camera_moving_reason = 'Camera moving: only objects set to Moving & Still count'
+    _note_dropped(object_detections, alertable_object_detections, _camera_moving_reason)
     if _zone_match_needed:
         _note_dropped(
             alertable_object_detections, list(object_alert_detections) + record_only_detections,
@@ -1910,7 +1908,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     ]
     object_reason = _below_threshold_object_reason(detections, _monitored_zones)
     if not alert_detections and not _unknown_face_alerts and not _known_face_rule_alerts:
-        reason = _motion_hold_reason or _no_object_match_reason(detections, raw_labels, _monitored_zones)
+        # An object held back by confirmation or a moving camera is named with
+        # that reason: the generic explanation below would say no rule
+        # matched it, sending the operator to rules that are fine.
+        _held_reason = next((
+            f"{str(det.get('label') or 'Object').capitalize()}: {det['reason']}"
+            for det in _dropped.values()
+            if det.get('reason') in (_confirm_reason, _camera_moving_reason)
+        ), None)
+        reason = _motion_hold_reason or _held_reason or _no_object_match_reason(detections, raw_labels, _monitored_zones)
         update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         _telemetry_finish(_telemetry_mode)
         return None
@@ -2013,16 +2019,26 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # returns to the same footage alerts (and is AI-verified) again.
     # This gates EVENT creation for alert-only cameras too, which would
     # otherwise create an event + snapshot every detection cycle.
+    # An overlapping sighting under another label of an object's group (an
+    # IR-lit cat read as ``dog``) counts as that object (see presence_keys).
     _presence_counts: dict[str, int] = {}
-    for _det in _confident_object_detections:
+    _presence_boxes: dict[str, list[dict[str, Any]]] = {}
+    _presence_key_of: dict[str, str] = {}
+    for _det, _key in zip(
+        _confident_object_detections,
+        presence_keys(camera_id, _confident_object_detections, now=_presence_cycle_start),
+    ):
         _lbl = str(_det.get('label') or '').strip().lower()
         if _lbl:
-            _presence_counts[_lbl] = _presence_counts.get(_lbl, 0) + 1
+            _presence_key_of.setdefault(_lbl, _key)
+            _presence_counts[_key] = _presence_counts.get(_key, 0) + 1
+            if isinstance(_det.get('box'), dict):
+                _presence_boxes.setdefault(_key, []).append(_det['box'])
     if motion_detections:
         _presence_counts['motion'] = 1
     _presence_new = observe_presence(
         camera_id, _presence_counts, absence=_presence_absence,
-        recording_id=active_recording_id(camera_id),
+        recording_id=active_recording_id(camera_id), boxes=_presence_boxes,
     )
     _presence_new = drop_covered_motion(camera_id, _presence_new)
     # Zone-rule alerts only for the objects that are new this cycle: a person
@@ -2037,7 +2053,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _zone_alerts: dict[tuple[str, str], dict[str, Any]] = {}
     for _zone_alert in triggered[:_zone_alert_count]:
         _zone_label = str(_zone_alert.get('label') or '').strip().lower()
-        if _zone_label not in _alertable_labels:
+        if _zone_label not in _alertable_labels and _presence_key_of.get(_zone_label) not in _alertable_labels:
             continue
         _zone_key = (str(_zone_alert.get('rule_name') or ''), _zone_label)
         _kept_alert = _zone_alerts.get(_zone_key)
