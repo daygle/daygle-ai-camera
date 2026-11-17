@@ -72,7 +72,7 @@ test('an outdated model gets an Update button and badge', () => {
   context.state = { openai_url: 'http://127.0.0.1:11434/v1' };
   const row = vm.runInContext("ollamaModelRow(state, { name: 'gemma3:4b', size: 1, vision: true, update_available: true }, false)", context);
   assert.match(row, /data-ollama-update="gemma3:4b"/);
-  assert.match(row, /Update available/);
+  assert.match(row, /Update Available/);
   const current = vm.runInContext("ollamaModelRow(state, { name: 'gemma3:4b', size: 1, vision: true, update_available: false }, false)", context);
   assert.doesNotMatch(current, /data-ollama-update/);
 });

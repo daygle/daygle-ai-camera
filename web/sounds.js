@@ -98,9 +98,9 @@ function detectorCameraLabel(camera) {
 function detectorHealth(camera, status = {}) {
   const backend = String(status.backend || '').toLowerCase();
   const detail = status.backend_reason || status.status_detail || '';
-  if (!detectorSoundConfigured(camera)) return { tone: 'off', label: 'Sound off', detail: '' };
-  if (!detectorEnabledRules(camera).length) return { tone: 'off', label: 'No sound classes', detail: 'Add a sound class so this camera starts listening.' };
-  if (!detectorHasRtspConfig(camera)) return { tone: 'error', label: 'No RTSP stream', detail: 'Sound detection needs the camera\'s RTSP stream.' };
+  if (!detectorSoundConfigured(camera)) return { tone: 'off', label: 'Sound Off', detail: '' };
+  if (!detectorEnabledRules(camera).length) return { tone: 'off', label: 'No Sound Classes', detail: 'Add a sound class so this camera starts listening.' };
+  if (!detectorHasRtspConfig(camera)) return { tone: 'error', label: 'No RTSP Stream', detail: 'Sound detection needs the camera\'s RTSP stream.' };
   if (backend === 'unavailable') return { tone: 'error', label: 'Unavailable', detail: detail || 'The sound model backend is unavailable.' };
   if (backend === 'loading' || /loading/i.test(String(status.detector_status || ''))) return { tone: 'warn', label: 'Loading', detail };
   if (status.running) return { tone: 'ok', label: 'Listening', detail };
@@ -150,7 +150,7 @@ function renderDetectorStatuses(rows) {
   }).join('');
   soundCameraStatusList.innerHTML = '<div class="stack-table-wrap" style="overflow-x:auto">'
     + '<table class="rule-table stack-table">'
-    + '<thead><tr><th>Camera</th><th>Sound</th><th>Listening for</th><th>Status</th><th>Last heard</th></tr></thead>'
+    + '<thead><tr><th>Camera</th><th>Sound</th><th>Listening For</th><th>Status</th><th>Last Heard</th></tr></thead>'
     + '<tbody>' + rowsHtml + '</tbody></table></div>';
 }
 
@@ -181,11 +181,11 @@ function renderClassPicker(camera) {
   soundClassSelect.disabled = disabled;
   if (addSoundClassBtn) addSoundClassBtn.disabled = disabled;
   if (!soundClasses.length) {
-    soundClassSelect.innerHTML = '<option value="">No sound classes available</option>';
+    soundClassSelect.innerHTML = '<option value="">No Sound Classes Available</option>';
     return;
   }
   if (!available.length) {
-    soundClassSelect.innerHTML = '<option value="">All classes already added</option>';
+    soundClassSelect.innerHTML = '<option value="">All Classes Already Added</option>';
     return;
   }
   soundClassSelect.innerHTML = available
@@ -225,7 +225,7 @@ function renderClassEditor(camera) {
   const tableHtml = `
     <div class="cameras-table-wrap">
       <table class="rule-table zone-rule-table stack-table">
-        <thead><tr><th scope="col">Sound</th><th scope="col">Detect</th><th scope="col">Min confidence</th><th scope="col">Record</th><th scope="col" class="cell-actions">Actions</th></tr></thead>
+        <thead><tr><th scope="col">Sound</th><th scope="col">Detect</th><th scope="col">Min Confidence</th><th scope="col">Record</th><th scope="col" class="cell-actions">Actions</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -389,7 +389,7 @@ async function saveSoundDetection() {
     cameras = result.cameras || updatedCameras;
     selectedStatus = null;
     soundDirty = false;
-    setMessage('Sound Detection Settings Saved.');
+    setMessage('Sound detection settings saved.');
     await refreshStatus();
     await refreshDetectorStatuses();
   } catch (err) {

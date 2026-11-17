@@ -111,9 +111,9 @@
               <span>Tiled Inference <span class="info-tip" data-tip="Also run object detection on a grid of overlapping tiles covering the whole frame every cycle, so small subjects anywhere - including stationary ones - are detected at higher resolution. Costs one inference per tile (e.g. 3x3 = 9x). Best on cameras covering a large or deep area (driveways, yards, lots). Off for tight/doorway views. Default: Off" title="Run object detection on a grid of overlapping tiles to catch small/stationary subjects anywhere. Costs one inference per tile. Default: Off" tabindex="0" aria-label="Help: Tiled inference runs detection on a grid of tiles to catch small subjects anywhere. Higher CPU. Default: Off"></span></span>
               <select name="object_detection_tiling">
                 <option value="off">Off</option>
-                <option value="2x2">2 × 2 (4 tiles)</option>
-                <option value="3x3">3 × 3 (9 tiles)</option>
-                <option value="4x4">4 × 4 (16 tiles)</option>
+                <option value="2x2">2 × 2 (4 Tiles)</option>
+                <option value="3x3">3 × 3 (9 Tiles)</option>
+                <option value="4x4">4 × 4 (16 Tiles)</option>
               </select></label>
             <label>
               <span>Low-Light Enhancement <span class="info-tip" data-tip="Boost local contrast (CLAHE) on the copy of the frame the object detector sees, so a dim subject at night or at the edge of the IR light stands out. Snapshots and recordings are not changed. Automatic only enhances dark frames. Can also lift sensor noise - check the result on your own night footage. Default: Off" title="Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off" tabindex="0" aria-label="Help: Boost contrast on dark frames before object detection. Snapshots and recordings are unchanged. Default: Off"></span></span>
@@ -164,7 +164,7 @@
             <label>
               <span>Video Decoding <span class="info-tip" data-tip="Where camera video is decoded for motion, object and face detection. Automatic uses an NVIDIA GPU's video decoder (NVDEC) when one is present and ffmpeg supports it, which takes the heaviest work off the CPU; a camera whose GPU decoding fails falls back to the CPU on its own. Recording and sound are unaffected. Cameras reconnect once when this changes. Default: Automatic" title="Where camera video is decoded for motion, object and face detection. Automatic uses an NVIDIA GPU's video decoder (NVDEC) when one is present and ffmpeg supports it, which takes the heaviest work off the CPU; a camera whose GPU decoding fails falls back to the CPU on its own. Recording and sound are unaffected. Cameras reconnect once when this changes. Default: Automatic" tabindex="0" aria-label="Help: Where camera video is decoded for motion, object and face detection. Automatic uses a..."></span></span>
               <select name="video_decode">
-                <option value="auto">Automatic (GPU if available)</option>
+                <option value="auto">Automatic (GPU If Available)</option>
                 <option value="gpu">GPU (NVIDIA)</option>
                 <option value="cpu">CPU</option>
               </select></label>

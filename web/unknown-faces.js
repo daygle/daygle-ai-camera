@@ -113,7 +113,7 @@
     // "Create new" option
     const newOpt = document.createElement('option');
     newOpt.value = '__new__';
-    newOpt.textContent = '+ Create new person';
+    newOpt.textContent = '+ Create New Person';
     select.appendChild(newOpt);
 
     persons.forEach((p) => {

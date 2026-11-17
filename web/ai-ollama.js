@@ -156,13 +156,13 @@ function ollamaModelRow(state, model, pulling) {
   const details = [model.parameter_size, model.quantization].filter(Boolean).join(' · ');
   const inUse = ollamaInUse(state, name);
   const useBtn = inUse
-    ? '<span class="ollama-in-use">In use</span>'
+    ? '<span class="ollama-in-use">In Use</span>'
     : `<button class="secondary" type="button" data-ollama-use="${escapeHtml(name)}"${model.vision === false ? ' disabled title="This model cannot read images."' : ''}>Use</button>`;
   const updateBtn = model.update_available
     ? `<button class="btn-info" type="button" data-ollama-update="${escapeHtml(name)}"${pulling ? ' disabled' : ''}>Update</button>`
     : '';
   const badge = model.update_available
-    ? '<br><span class="ollama-update-badge">Update available</span>'
+    ? '<br><span class="ollama-update-badge">Update Available</span>'
     : model.update_error ? `<br><small class="muted" title="${escapeHtml(model.update_error)}">Updates not checked</small>` : '';
   return `<tr>
     <td><strong>${escapeHtml(name)}</strong>${details ? `<br><small class="muted">${escapeHtml(details)}</small>` : ''}${badge}</td>

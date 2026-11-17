@@ -35,11 +35,11 @@ function defaultModelLabel() {
 function renderDefaultModel() {
   const modelPath = assignmentPayload?.default_model?.model_path;
   if (!modelPath) {
-    defaultModelInfo.innerHTML = '<span>Default model</span><strong>None installed</strong> - install one on Object Models first.';
+    defaultModelInfo.innerHTML = '<span>Default Model</span><strong>None Installed</strong> - install one on Object Models first.';
     return;
   }
-  const missing = modelInstalled(modelPath) ? '' : ' <span class="camera-model-status is-missing">⚠ File missing</span>';
-  defaultModelInfo.innerHTML = `<span>Default model</span><strong title="${escapeHtml(modelPath)}">${escapeHtml(defaultModelLabel())}</strong>${missing}`;
+  const missing = modelInstalled(modelPath) ? '' : ' <span class="camera-model-status is-missing">⚠ File Missing</span>';
+  defaultModelInfo.innerHTML = `<span>Default Model</span><strong title="${escapeHtml(modelPath)}">${escapeHtml(defaultModelLabel())}</strong>${missing}`;
 }
 
 // One picker per camera. The camera's current assignment is always the

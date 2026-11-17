@@ -215,7 +215,7 @@ function setUpdateCheckButtonState(isChecking) {
   checkArcfaceModelUpdatesBtn.disabled = isChecking;
   checkArcfaceModelUpdatesBtn.classList.toggle('is-checking', isChecking);
   const label = checkArcfaceModelUpdatesBtn.querySelector('.model-update-check-label');
-  if (label) label.textContent = isChecking ? 'Checking…' : 'Check for updates';
+  if (label) label.textContent = isChecking ? 'Checking…' : 'Check for Updates';
 }
 
 async function checkForModelUpdates() {

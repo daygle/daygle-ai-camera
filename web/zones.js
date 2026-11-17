@@ -759,7 +759,7 @@ function renderIgnoreAreaList(zone, index) {
     const name = escapeHtml(ignoreAreaName(area));
     return `<span class="chip zone-ignore-chip${stale ? ' is-stale' : ''}" title="${stale ? 'This spot is now outside the area, so it has no effect' : `${name} is not detected inside this spot`}">${name}${stale ? ' · outside area' : ''}<button type="button" data-remove-ignore-area="${index}:${areaIndex}" aria-label="Stop ignoring ${name} in this spot" title="Stop ignoring">×</button></span>`;
   }).join('');
-  return `<div class="zone-ignore-areas"><span class="zone-ignore-title">Ignored spots</span>${chips}</div>`;
+  return `<div class="zone-ignore-areas"><span class="zone-ignore-title">Ignored Spots</span>${chips}</div>`;
 }
 
 function renderZoneBox(zone, index) {
@@ -837,7 +837,7 @@ function objectRuleOptions(selectedLabel) {
 // Detect From / Detect Until for a zone rule. Outside the window the rule
 // neither records nor alerts; "Any time" (or equal ends) means always.
 function detectWindowSelect(value, key, field) {
-  const options = ['<option value="">Any time</option>'];
+  const options = ['<option value="">Any Time</option>'];
   for (let hour = 0; hour < 24; hour += 1) for (let minute = 0; minute < 60; minute += 15) {
     const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
     options.push(`<option value="${time}"${time === value ? ' selected' : ''}>${time}</option>`);

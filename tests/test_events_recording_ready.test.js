@@ -140,6 +140,17 @@ test('an event with no recording gets neither action', () => {
   assert.doesNotMatch(html, /Preparing|activity-item-action-play/);
 });
 
+test('the false-positive button is the first action on an object event', () => {
+  const sandbox = loadPage();
+  sandbox.falsePositiveButton = () => '<button data-false-positive-value="true">FP</button>';
+  const html = renderRow(event(21425, true), sandbox);
+  const actions = html.slice(html.indexOf('class="cell-actions"'));
+  const fp = actions.indexOf('data-false-positive-value');
+  assert.ok(fp > -1, 'false-positive button rendered');
+  assert.ok(fp < actions.indexOf('/snapshot'), 'before the snapshot action');
+  assert.ok(fp < actions.indexOf('/recordings/21425'), 'before the play action');
+});
+
 test('the feed no longer schedules a re-check timer', () => {
   const sandbox = loadPage();
   sandbox.state.page = { items: [event(21425, false)] };

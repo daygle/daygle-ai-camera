@@ -417,7 +417,7 @@ function renderRecordings(recordings) {
         '<div class="recordings-empty-icon" aria-hidden="true">' +
           '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>' +
         '</div>' +
-        '<h2>No recordings match the current filters</h2>' +
+        '<h2>No Recordings Match the Current Filters</h2>' +
         '<p class="muted">Try resetting the filters, or wait for a new event to be captured.</p>' +
       '</div>' +
       renderRecordingsFooter();

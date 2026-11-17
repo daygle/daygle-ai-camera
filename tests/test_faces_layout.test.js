@@ -34,7 +34,7 @@ test('one fixed grid and one control height', () => {
 });
 
 test('the reload button says what it reloads', () => {
-  assert.match(html, /id="frReloadBtn"[^>]*>Reload recognition model<\/button>/);
+  assert.match(html, /id="frReloadBtn"[^>]*>Reload Recognition Model<\/button>/);
 });
 
 test('"recognition is off" is explained once, by the status banner', () => {

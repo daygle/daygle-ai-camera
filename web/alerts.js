@@ -201,7 +201,7 @@ function renderObjectSchedules(rule, ruleIndex, schedules) {
 }
 
 function timeSelect(value, attr) {
-  const options = ['<option value="">Any time</option>'];
+  const options = ['<option value="">Any Time</option>'];
   for (let hour = 0; hour < 24; hour += 1) for (let minute = 0; minute < 60; minute += 15) {
     const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
     options.push(`<option value="${time}" ${time === value ? 'selected' : ''}>${time}</option>`);
@@ -210,11 +210,11 @@ function timeSelect(value, attr) {
 }
 
 function renderSelectors() {
-  $('cameraSelect').innerHTML = cameras.map((camera, index) => `<option value="${index}">${escapeHtml(camera.name || camera.id)}</option>`).join('') || '<option>No cameras</option>';
+  $('cameraSelect').innerHTML = cameras.map((camera, index) => `<option value="${index}">${escapeHtml(camera.name || camera.id)}</option>`).join('') || '<option>No Cameras</option>';
   $('cameraSelect').value = String(cameraIndex);
   const zones = currentCamera()?.detection?.zones || [];
   zoneIndex = Math.min(zoneIndex, Math.max(0, zones.length - 1));
-  $('zoneSelect').innerHTML = zones.map((zone, index) => `<option value="${index}">${escapeHtml(zone.name || `Zone ${index + 1}`)}</option>`).join('') || '<option>No zones</option>';
+  $('zoneSelect').innerHTML = zones.map((zone, index) => `<option value="${index}">${escapeHtml(zone.name || `Zone ${index + 1}`)}</option>`).join('') || '<option>No Zones</option>';
   $('zoneSelect').value = String(zoneIndex);
   $('zoneSelect').disabled = alertType === 'sound' || !zones.length;
   // Objects and sounds are assigned on the Zones/Sounds pages and appear here

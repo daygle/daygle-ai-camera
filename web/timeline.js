@@ -921,7 +921,7 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
     if (reason === 'no-data') {
       return {
         chipKind: 'empty',
-        chipLabel: 'No recordings',
+        chipLabel: 'No Recordings',
         statusText: `No ${kindWord} recordings found for ${escapeHtml(cameraName)} on ${escapeHtml(formattedDay)}.`,
         rowHtml: `<div class="empty timeline-empty">No ${kindWord} recordings for ${escapeHtml(cameraName)} on ${escapeHtml(formattedDay)}.</div>`,
       };
@@ -1213,7 +1213,7 @@ async function loadTimeline({ preserveSelection = true } = {}) {
       const msg = 'No cameras configured. Add a camera on the Cameras page to use the timeline.';
       TIMELINE_CARDS.forEach((card) => {
         if (card.status) card.status.textContent = msg;
-        setTimelineStatusChip(card, { kind: 'empty', label: 'No cameras' });
+        setTimelineStatusChip(card, { kind: 'empty', label: 'No Cameras' });
       });
       return;
     }
