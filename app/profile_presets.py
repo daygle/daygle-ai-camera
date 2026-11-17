@@ -19,6 +19,14 @@ LEGACY_MOTION_OVERRIDE_KEYS: frozenset[str] = frozenset({
 # Shipped presets provide reusable defaults for either Day or Night. The
 # source groups below are expanded into separate, mode-specific records below
 # so a preset can never contain settings for the other mode.
+#
+# Every built-in sets Second Look, Low-Light Mode and the AI Near-Miss Check
+# explicitly, so a preset behaves the same whatever the global Live
+# Performance values are. The AI check only runs with Second Look on (and an
+# AI model server), so it is on only where a preset chases borderline small
+# subjects. Presets that confirm over several frames let a confident
+# detection count at once (Skip Confirmation Above 0.8); borderline ones still
+# need confirming.
 _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
     {
         'id': 'cat-small-animal',
@@ -50,6 +58,9 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_denoise': True,
             'motion_shadow_suppression': 'auto',
             'object_detection_second_look': True,
+            'object_detection_low_light': 'off',
+            'object_detection_ai_near_miss': True,
+            'detection_confirm_skip_confidence': 0.8,
         },
         'night': {
             'background_detection_enabled': True,
@@ -75,9 +86,11 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_pixel_threshold': 45,
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
+            'adaptive_detection_enabled': False,
             'object_detection_second_look': True,
             'object_detection_low_light': 'auto',
-            'adaptive_detection_enabled': False,
+            'object_detection_ai_near_miss': True,
+            'detection_confirm_skip_confidence': 0.8,
         },
     },
     {
@@ -98,6 +111,9 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_pixel_threshold': 30,
             'motion_denoise': True,
             'motion_shadow_suppression': 'auto',
+            'object_detection_second_look': False,
+            'object_detection_low_light': 'off',
+            'object_detection_ai_near_miss': False,
         },
         'night': {
             'background_detection_enabled': True,
@@ -113,6 +129,9 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_pixel_threshold': 45,
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
+            'object_detection_second_look': False,
+            'object_detection_low_light': 'auto',
+            'object_detection_ai_near_miss': False,
         },
     },
     {
@@ -133,8 +152,10 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_pixel_threshold': 20,
             'motion_denoise': True,
             'motion_shadow_suppression': 'auto',
-            'object_detection_second_look': True,
             'adaptive_detection_enabled': False,
+            'object_detection_second_look': True,
+            'object_detection_low_light': 'off',
+            'object_detection_ai_near_miss': True,
         },
         'night': {
             'background_detection_enabled': True,
@@ -150,9 +171,10 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_pixel_threshold': 35,
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
+            'adaptive_detection_enabled': False,
             'object_detection_second_look': True,
             'object_detection_low_light': 'auto',
-            'adaptive_detection_enabled': False,
+            'object_detection_ai_near_miss': True,
         },
     },
     {
@@ -175,6 +197,8 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_shadow_suppression': 'auto',
             'object_detection_second_look': False,
             'object_detection_low_light': 'off',
+            'object_detection_ai_near_miss': False,
+            'detection_confirm_skip_confidence': 0.8,
         },
         'night': {
             'background_detection_enabled': True,
@@ -192,6 +216,8 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_shadow_suppression': 'off',
             'object_detection_second_look': False,
             'object_detection_low_light': 'off',
+            'object_detection_ai_near_miss': False,
+            'detection_confirm_skip_confidence': 0.8,
         },
     },
     {
@@ -212,6 +238,9 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_pixel_threshold': 30,
             'motion_denoise': True,
             'motion_shadow_suppression': 'auto',
+            'object_detection_second_look': False,
+            'object_detection_low_light': 'off',
+            'object_detection_ai_near_miss': False,
         },
         'night': {
             'background_detection_enabled': True,
@@ -229,6 +258,7 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_shadow_suppression': 'off',
             'object_detection_second_look': True,
             'object_detection_low_light': 'auto',
+            'object_detection_ai_near_miss': False,
         },
     },
     {
@@ -250,6 +280,9 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_denoise': True,
             'motion_shadow_suppression': 'auto',
             'adaptive_detection_enabled': False,
+            'object_detection_second_look': False,
+            'object_detection_low_light': 'off',
+            'object_detection_ai_near_miss': False,
         },
         'night': {
             'background_detection_enabled': True,
@@ -266,6 +299,9 @@ _BUILTIN_PRESET_GROUPS: tuple[dict[str, Any], ...] = (
             'motion_denoise': True,
             'motion_shadow_suppression': 'off',
             'adaptive_detection_enabled': False,
+            'object_detection_second_look': False,
+            'object_detection_low_light': 'off',
+            'object_detection_ai_near_miss': False,
         },
     },
 )
