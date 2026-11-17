@@ -26,12 +26,13 @@ from app.detector import CONTAINMENT_THRESHOLD, is_column_part, is_stacked_split
 logger = logging.getLogger('daygle.ai.detection')
 
 # Smallest moving area worth a zoomed-in look: this share of the motion mask,
-# and never fewer than ``_MIN_REGION_CELLS`` mask cells (a stray pixel or two
-# of noise is not a subject). The boost exists for subjects too small for the
+# and never fewer than ``_MIN_REGION_CELLS`` mask cells, measured after the
+# 3x3 dilation (a speck of up to 2x2 cells of noise is not a subject; a distant
+# cat, ~4x4 cells of a 320x240 mask, is). The boost exists for subjects too small for the
 # full-frame pass; the old 0.2% floor (about 48x36 px on a 1280x720 camera)
 # skipped exactly those, so it never ran for a distant cat.
 _MIN_REGION_AREA_FRAC = 0.0002
-_MIN_REGION_CELLS = 6
+_MIN_REGION_CELLS = 20
 # A crop is never narrower or shorter than this share of the frame, centred on
 # its region. A tight crop around a 15-pixel subject, blown up to the model
 # input, has no context left to recognise it by (the same floor Second Look
