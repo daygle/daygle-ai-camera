@@ -1205,3 +1205,16 @@ def test_group_check_asks_which_member_it_is(av, monkeypatch):
     assert av._kind_of({'present': True, 'kind': 'Cat'}, ['cat', 'dog']) == 'cat'
     assert av._kind_of({'present': True, 'kind': 'fox'}, ['cat', 'dog']) is None
     assert av._kind_of({'present': False, 'kind': 'cat'}, ['cat', 'dog']) is None
+
+
+def test_backlogged_job_holds_back_alerts_that_need_the_model(av, flow):
+    configure, forwarded = flow
+    db = configure({'cat': (True, 'never asked')})
+    plain = _alert('person', 0.6)
+    av.verify_and_forward([plain, _alert('cat', 0.8, ai_required=True)], 13, [], '', submitted_at=-1e9)
+    assert forwarded == [[plain]]
+    record = db.metadata[13]['ai_verification']
+    assert record['status'] == 'skipped' and record['delivered'] is True
+    assert 'need the AI to confirm' in record['reason']
+    av.verify_and_forward([_alert('cat', 0.8, ai_required=True)], 14, [], '', submitted_at=-1e9)
+    assert db.metadata[14]['ai_verification']['delivered'] is False

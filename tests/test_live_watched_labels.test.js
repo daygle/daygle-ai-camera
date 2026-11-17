@@ -88,3 +88,14 @@ test('live boxes are placed at the displayed frame, not the wall clock', () => {
   assert.match(body, /const sourceNowMs = liveAiTrackUsesFrameTimestamp && liveAiTrackFrameTimestamp > 0\s*\? liveAiTrackFrameTimestamp \* 1000/);
   assert.doesNotMatch(liveSource, /liveAiTrackFramePerformanceMs/);
 });
+
+test('the events page says a held-back candidate alert was not sent', () => {
+  const eventsSource = readFileSync(path.resolve(here, '../web/events.js'), 'utf8');
+  const start = eventsSource.indexOf('function aiVerificationInfo(');
+  const body = eventsSource.slice(start, eventsSource.indexOf('\n}\n', start) + 2);
+  const aiVerificationInfo = new Function(`${body}; return aiVerificationInfo;`)();
+  const held = aiVerificationInfo({ status: 'error', delivered: false, labels: {} });
+  assert.match(held.summary, /^Notification not sent/);
+  const sent = aiVerificationInfo({ status: 'error', delivered: true, labels: {} });
+  assert.match(sent.summary, /sent unverified/);
+});

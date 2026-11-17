@@ -1630,9 +1630,15 @@ def _verify_and_forward(
     # only turn its delay into a false alarm.
     max_wait = max(60.0, 3.0 * float(settings.get('timeout_seconds') or 20))
     if submitted_at is not None and _queue_wait(submitted_at, background_clock) > max_wait:
+        unverified = _unverified_ok(triggered)
         if labels:
-            _record(event_id, {'status': 'skipped', 'reason': 'Verification queue backlog; delivered unverified.'}, camera_id=camera_id)
-        _forward(_unverified_ok(triggered), event_id, rules)
+            _record(event_id, {
+                'status': 'skipped',
+                'reason': ('Verification queue backlog; delivered unverified.' if len(unverified) == len(triggered)
+                           else 'Verification queue backlog; alerts that need the AI to confirm them were not sent.'),
+                'delivered': bool(unverified),
+            }, camera_id=camera_id)
+        _forward(unverified, event_id, rules)
         if mode != 'off':
             # Not described now; the catch-up captions it once the model is idle.
             start_description_catch_up()
@@ -2010,7 +2016,13 @@ def submit_alert_notification_with_verification(
         )
         if describes_camera(camera_id, settings):
             start_description_catch_up()
-        triggered = _unverified_ok(triggered)
+        unverified = _unverified_ok(triggered)
+        if len(unverified) < len(triggered):
+            _record(event_id, {
+                'status': 'skipped', 'delivered': bool(unverified),
+                'reason': 'Verification queue full; alerts that need the AI to confirm them were not sent.',
+            }, camera_id=camera_id)
+        triggered = unverified
         if not triggered:
             return False
     return submit_alert_notification(deliver_alert_notifications, triggered, event_id, rules)

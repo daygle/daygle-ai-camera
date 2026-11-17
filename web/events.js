@@ -226,6 +226,15 @@ function aiVerificationInfo(record) {
     return { kind: 'filtered', text: 'Filtered', summary, details };
   }
   if (['unsure', 'error', 'skipped'].includes(record.status)) {
+    // An alert raised only for the model to confirm (an object the detector
+    // read as another label) is held back, not sent, without a yes.
+    if (record.delivered === false) {
+      return {
+        kind: 'unverified', text: 'Unverified',
+        summary: 'Notification not sent: the AI model has to confirm this object and could not.',
+        details,
+      };
+    }
     const summary = record.status === 'unsure'
       ? 'The AI model could not tell from the snapshot, so the alert was sent.'
       : record.status === 'skipped'
