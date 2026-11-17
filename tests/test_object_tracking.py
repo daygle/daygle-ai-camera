@@ -930,3 +930,26 @@ def test_a_zoom_does_not_make_a_parked_car_read_as_moving():
     readings = [ot.update_object_tracks(cam, [zoomed(1.3)])[0]['track_displacement'] for _ in range(4)]
     assert all(r is None or r <= ot.TRACK_STILL_DISPLACEMENT for r in readings), readings
     assert readings[-1] is not None
+
+
+def test_two_cats_crossing_keep_their_own_ids():
+    """At the moment two same-label subjects meet, each overlaps the OTHER's
+    previous box more than its own new one, so IoU against the last box swapped
+    their ids for a cycle. Moving tracks are scored where their velocity
+    predicts them."""
+    cam = 'cam-crossing'
+    _reset(cam)
+    owners = []
+    for step in range(12):
+        right, left = 0.10 + 0.06 * step, 0.80 - 0.06 * step
+        out = ot.update_object_tracks(cam, [_det('cat', right, 0.5), _det('cat', left, 0.52)])
+        owners.append((out[0]['track_id'], out[1]['track_id']))
+    assert set(owners) == {owners[0]}, owners
+
+
+def test_prediction_leaves_stationary_tracks_on_their_last_box():
+    track = {'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}, 'velocity': (0.004, 0.0), 'misses': 0}
+    assert ot._predicted_box(track) is track['box']
+    moving = {**track, 'velocity': (0.05, -0.02), 'misses': 1}
+    predicted = ot._predicted_box(moving)
+    assert predicted['x'] == pytest.approx(0.5) and predicted['y'] == pytest.approx(0.36)

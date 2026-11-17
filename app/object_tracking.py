@@ -301,6 +301,32 @@ def _box_area(box: dict[str, Any]) -> float:
         return 0.0
 
 
+def _predicted_box(track: dict[str, Any]) -> dict[str, Any]:
+    """Where a MOVING track's box should be this cycle; a stationary one's last box.
+
+    Two same-label subjects crossing (two cats passing each other) overlap
+    the other's previous box more than their own new one at the moment they
+    meet, so IoU against the last box swapped their ids for a cycle. Shifting
+    a moving track's box by its learned per-cycle velocity (times the cycles
+    elapsed) scores each subject against where it is heading. A track below
+    ``MOTION_MATCH_STATIONARY_SPEED`` - a parked car, a sitting cat, any
+    track without a velocity yet - is scored against its last box exactly
+    as before.
+    """
+    box = track.get("box") or {}
+    velocity = track.get("velocity")
+    if not isinstance(velocity, (list, tuple)) or len(velocity) < 2:
+        return box
+    try:
+        vx, vy = float(velocity[0]), float(velocity[1])
+        if (vx * vx + vy * vy) ** 0.5 < MOTION_MATCH_STATIONARY_SPEED:
+            return box
+        steps = int(track.get("misses") or 0) + 1
+        return {**box, "x": float(box.get("x") or 0.0) + vx * steps, "y": float(box.get("y") or 0.0) + vy * steps}
+    except (TypeError, ValueError):
+        return box
+
+
 def _motion_match_distance(box: dict[str, Any], track: dict[str, Any]) -> float | None:
     """Gated distance from ``box`` to where ``track`` should be now, or None.
 
@@ -568,7 +594,7 @@ def update_object_tracks(
             for track_index, track in enumerate(tracks):
                 if track["label"] != label:
                     continue
-                score = _iou(box, track["box"])
+                score = _iou(box, _predicted_box(track))
                 if score >= iou_threshold:
                     candidates.append((score, detection_index, track_index))
         candidates.sort(reverse=True)
