@@ -149,11 +149,12 @@ _TRACK_DISPLACEMENT_MIN_AGE = 3
 # ``_TRACK_STEP_MOVING``); at or above it the box really moved, and the mask
 # says whether the subject did.
 _TRACK_STEP_MIN_MOVE = _TRACK_DISPLACEMENT_STILL
-# ...but never more than this share of the box's own larger side. A distant
-# cat 1.2% of the frame wide walking 0.9% per cycle moves three quarters of its
-# own width - plainly not jitter, which is a few source pixels and so a small
-# share of any box. Boxes 2% of the frame or larger keep the plain floor.
-_TRACK_STEP_MIN_MOVE_BOX_SHARE = 0.5
+# ...but never more than this share of the box's own smaller side. Detector
+# jitter is a few source pixels - 5-9% of a 45 px box - while a distant cat
+# that size walking 10 px a cycle moves over a fifth of its own width (a real
+# yolo11n run: 3.5%-wide cat, 0.8% steps, read still on its second sighting
+# under the plain 1% floor). Boxes 5% of the frame or larger keep the floor.
+_TRACK_STEP_MIN_MOVE_BOX_SHARE = 0.2
 # A subject stepping out from behind something (see ``_emerging``): its box
 # must have grown by this factor, and this share of the newly covered area must
 # be changed pixels. A real subject changes most of what it uncovers; a parked
@@ -621,7 +622,10 @@ def _step_floor(detection: dict[str, Any]) -> float:
     ``_TRACK_STEP_MIN_MOVE``), scaled down for a small box."""
     box = detection.get('track_box')
     try:
-        size = max(float(box[2]), float(box[3]))
+        # The smaller side: on a 16:9 frame a 45x54 px cat is 0.035 wide but
+        # 0.075 tall in normalized units, and a sideways step is measured
+        # against the width.
+        size = min(float(box[2]), float(box[3]))
     except (TypeError, ValueError, IndexError):
         return _TRACK_STEP_MIN_MOVE
     return min(_TRACK_STEP_MIN_MOVE, max(0.0, size) * _TRACK_STEP_MIN_MOVE_BOX_SHARE) if size > 0 else _TRACK_STEP_MIN_MOVE
