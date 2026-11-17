@@ -1583,6 +1583,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _still_in_view = filter_detections_for_camera([
         det for det in _before_motion_mode
         if det.get('_diag_id') not in _kept_moving_ids and det.get('motion_state') == 'still'
+        and camera_watches_label(settings, det.get('label'))
     ], settings)
     _telemetry_rejected[REJECT_MOTION_MODE] = max(
         0, _detected_count - len(detections),

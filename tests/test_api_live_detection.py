@@ -684,7 +684,9 @@ def test_dropped_detections_are_kept_with_their_reason_for_the_detection_log(tmp
     track = mods.detection_state.build_track_from_live_history('camera-1', before, time.time() + 1)
     assert track is not None
     sample = track[-1]
-    assert sample['detections'] == []
+    # Nothing kept; the still car rides along display-only for playback (an
+    # unwatched label never does).
+    assert [(d['label'], d.get('display_only')) for d in sample['detections']] == [('car', True)]
     reasons = {item['label']: item['reason'] for item in sample['dropped']}
     assert reasons == {
         'person': 'Below the person rule minimum (0.65)',
