@@ -1882,9 +1882,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         for motion in motion_detections
         if str(motion.get('zone_id') or motion.get('zone_name') or '').strip() not in _attributed_zones
     ]
+    # A watched object the still/moving filter dropped (a cat sitting down
+    # under Moving Only) rides along display-only, so clip playback keeps
+    # drawing it like the live view does (see record_live_detection_history).
     record_live_detection_history(
         camera_id,
-        list(object_alert_detections) + record_only_detections + motion_history_detections + dwell_detections,
+        list(object_alert_detections) + record_only_detections + motion_history_detections + dwell_detections
+        + [{**det, 'display_only': True} for det in _still_in_view],
         sample_ts=frame_capture_ts,
         live_config=live_settings,
         dropped=[

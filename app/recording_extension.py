@@ -815,7 +815,9 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
                 for _sample in chunk_track:
                     for _det in _sample.get('detections') or []:
                         _lbl = str(_det.get('label') or '').strip().lower()
-                        if not _lbl:
+                        # A display-only box (a still object Moving Only
+                        # dropped) is not what this footage is labelled by.
+                        if not _lbl or _det.get('display_only'):
                             continue
                         if _lbl not in _seen:
                             _seen.add(_lbl)

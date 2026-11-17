@@ -136,3 +136,13 @@ test('kept detections confirmed through a label group say so', () => {
     'moving (mask) · #12 · seen 1x · confirmed by label group',
   );
 });
+
+test('display-only boxes are drawn on playback but are not kept detections', () => {
+  // A cat sitting down under Moving Only rides along display-only; the log
+  // already lists it under dropped, with the reason.
+  const cat = { label: 'cat', confidence: 0.8, box: { x: 0.2, y: 0.5, width: 0.1, height: 0.1 }, motion_state: 'still', track_id: 1 };
+  const track = [{ t: 1, detections: [{ ...cat, display_only: true }], dropped: [{ ...cat, reason: 'Judged still; cat is set to Moving Only' }] }];
+  const log = load();
+  assert.deepEqual({ ...log.detectionLogSummary(track) }, { checks: 1, kept: 0, dropped: 1 });
+  assert.equal(log.detectionLogRows(track)[0].kept.length, 0);
+});

@@ -348,3 +348,18 @@ def test_sitting_cat_stays_on_the_live_view_without_alerting(tmp_path, monkeypat
     assert all(result['cats'] for result in results), 'never vanishes from the live view'
     assert results[-1]['cats'][0]['motion_state'] == 'still'
     assert 'Moving Only' in results[-1]['reason']
+
+
+def test_sitting_cat_stays_on_clip_playback_display_only(tmp_path, monkeypatch):
+    positions = [0.10, 0.14, 0.18] + [0.20] * 8
+    start = time.time()
+    _main, _settings, results, _routed = _drive(tmp_path, monkeypatch, positions)
+    # Imported after _drive: the test app reloads the app modules.
+    from app.detection_state import build_track_from_live_history
+    assert results[-1]['cats'][0]['motion_state'] == 'still'
+    track = build_track_from_live_history('cam-garden', start - 5, start + 60)
+    last = track[-1]
+    assert [(d['label'], d.get('motion_state'), d.get('display_only')) for d in last['detections']] == [
+        ('cat', 'still', True)]
+    assert [d['label'] for d in last.get('dropped') or []] == ['cat'], 'the log still explains the drop'
+    assert all(not d.get('display_only') for sample in track[:3] for d in sample['detections'])
