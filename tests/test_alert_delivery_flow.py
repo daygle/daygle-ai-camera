@@ -28,6 +28,28 @@ def _rule(label, **schedule):
                                  'email_recipients': ['owner@example.com'], **schedule}]}
 
 
+def _closed_window(rule):
+    """Mark ``rule``'s schedule to get a notify window that excludes now."""
+    rule['alert_schedules'][0]['closed_window'] = True
+    return rule
+
+
+def _close_windows(rules):
+    """Give marked schedules a one-minute notify window three hours from now
+    in the app's own timezone: a fixed clock time (once 03:00-03:01) fails
+    whenever the suite happens to run inside it."""
+    from datetime import datetime, timedelta
+
+    from app.alert_dispatch import _now_hm_in_admin_tz
+
+    now = datetime.strptime(_now_hm_in_admin_tz(), '%H:%M')
+    start, end = now + timedelta(hours=3), now + timedelta(hours=3, minutes=1)
+    for rule in rules:
+        for schedule in rule['alert_schedules']:
+            if schedule.pop('closed_window', False):
+                schedule['notify_start'], schedule['notify_end'] = start.strftime('%H:%M'), end.strftime('%H:%M')
+
+
 def _deliver(tmp_path, monkeypatch, rules, frames, reply, *, push_down=False):
     mails, pushes = [], []
 
@@ -57,6 +79,7 @@ def _deliver(tmp_path, monkeypatch, rules, frames, reply, *, push_down=False):
                 raise push_notifications.PushNotificationUnavailable('ntfy unreachable')
             pushes.append((title, body))
 
+        _close_windows(rules)
         monkeypatch.setattr(av.VisionVerifier, 'chat', chat)
         monkeypatch.setattr(email_alerts.EmailAlertService, '_create_smtp_session', session)
         monkeypatch.setattr(email_alerts.EmailAlertService, '_send_via',
@@ -89,7 +112,7 @@ def test_confirmed_cat_sends_one_email_and_one_push(tmp_path, monkeypatch):
 def test_rejected_or_outside_the_window_sends_nothing(tmp_path, monkeypatch):
     for rules, reply in (
         ([_rule('cat')], lambda _p: {'reason': 'a bag', 'present': False}),
-        ([_rule('cat', notify_start='03:00', notify_end='03:01')], _yes),
+        ([_closed_window(_rule('cat'))], _yes),
     ):
         _results, mails, pushes = _deliver(tmp_path, monkeypatch, rules, _walk('cat'), reply)
         assert mails == [] and pushes == []
