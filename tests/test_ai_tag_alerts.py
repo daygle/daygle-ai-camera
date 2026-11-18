@@ -233,6 +233,33 @@ def test_no_alert_outside_zone_notify_window_or_when_disabled(ata, fire_env, mon
     assert sent == [] and db.alerts == []
 
 
+@pytest.mark.parametrize('rejected_label', ['cat', 'pet'])
+def test_no_tag_alert_for_an_object_ai_verification_rejected(ata, fire_env, rejected_label):
+    # The object alert was filtered ("no pet"), but the caption still said
+    # "cat": the tag rule must not raise the alert the verification stopped.
+    db, sent, camera = fire_env
+    camera(_zone(_rule(name='Cat', tags=['cat'])))
+    event = {**EVENT, 'detections': [{'label': 'cat', 'zone_name': 'Gate'}]}
+    db.get_event = lambda _id: {**event, 'metadata': {'camera_id': 'cam', 'ai_verification': {
+        'status': 'filtered', 'labels': {rejected_label: {'present': False, 'reason': 'a dark bag'}}}}}
+    assert ata.evaluate_event(5, event, {'text': 'A black cat sits on the mat.', 'tags': ['cat']}) == 0
+    assert sent == [] and db.alerts == []
+    # A term the AI did not reject still alerts.
+    camera(_zone(_rule(name='Mixed', tags=['cat', 'ladder'])))
+    record = {'text': 'A black cat by a ladder.', 'tags': ['cat', 'ladder']}
+    assert ata.evaluate_event(5, event, record) == 1
+    assert sent[0][0][0]['label'] == 'ladder'
+
+
+def test_a_confirmed_or_unsure_verdict_does_not_block_a_tag_alert(ata, fire_env):
+    db, sent, camera = fire_env
+    camera(_zone(_rule(name='Cat', tags=['cat'])))
+    event = {**EVENT, 'detections': [{'label': 'cat', 'zone_name': 'Gate'}]}
+    db.get_event = lambda _id: {**event, 'metadata': {'camera_id': 'cam', 'ai_verification': {'labels': {
+        'cat': {'present': None, 'unsure': True}, 'dog': {'present': False}}}}}
+    assert ata.evaluate_event(5, event, {'text': 'A cat.', 'tags': ['cat']}) == 1
+
+
 def test_evaluate_never_raises(ata, monkeypatch):
     monkeypatch.setattr(ata, '_camera_settings', lambda _cid: (_ for _ in ()).throw(RuntimeError('boom')))
     assert ata.evaluate_event(1, EVENT, RECORD) == 0
