@@ -20,7 +20,7 @@ import logging
 import math
 from typing import Any
 
-from app.detector import CONTAINMENT_THRESHOLD, is_column_part, is_stacked_split
+from app.detector import CONTAINMENT_THRESHOLD, is_column_part, is_small_part, is_stacked_split
 
 
 logger = logging.getLogger('daygle.ai.detection')
@@ -129,7 +129,9 @@ def _dedup_by_iou(
             return True
         if is_stacked_split(iw, ih, ax2 - ax1, ay2 - ay1, bx2 - bx1, by2 - by1):
             return True
-        return bool(is_column_part(iw, inter, ax2 - ax1, area_a, bx2 - bx1, area_b))
+        if is_column_part(iw, inter, ax2 - ax1, area_a, bx2 - bx1, area_b):
+            return True
+        return bool(is_small_part(inter, area_a, area_b))
 
     ordered = sorted(detections, key=lambda d: float(d.get("confidence") or 0.0), reverse=True)
     kept: list[dict[str, Any]] = []

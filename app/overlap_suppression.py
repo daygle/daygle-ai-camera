@@ -72,3 +72,62 @@ def overlap_reason(person: dict[str, Any], evidence: list[dict[str, Any]]) -> st
     if animal is None:
         return 'Same object as an animal box'
     return f"Same object as {canonical_label(animal.get('label'))} ({_confidence(animal):.0%})"
+
+
+# The reverse: an animal box drawn on a person's head. Seen from above (a
+# camera over a doorway), a head of hair reads as a cat or dog - the reported
+# frame boxed a woman's head "Cat 76%" inside her own person box. Such a box
+# sits almost wholly inside a confident person box, is a small share of it,
+# and its top is at the top of the person: the head. A cat carried in the
+# arms sits mid-body and keeps its box, as does any animal beside a person.
+HEAD_CONTAINMENT = 0.8      # animal box area inside the person box
+HEAD_AREA_RATIO = 0.35      # animal area / person area, at most
+HEAD_TOP_SHARE = 0.15       # animal top within this share of the person's height from its top
+HEAD_CENTRE_SHARE = 0.35    # animal centre within this share of the person's height from its top
+HEAD_PERSON_CONFIDENCE = 0.5
+
+
+def _xywh(box: dict[str, Any]) -> tuple[float, float, float, float] | None:
+    try:
+        x, y = float(box.get('x') or 0.0), float(box.get('y') or 0.0)
+        w, h = float(box.get('width') or 0.0), float(box.get('height') or 0.0)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return (x, y, w, h) if w > 0 and h > 0 else None
+
+
+def head_of_person(animal: dict[str, Any], evidence: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The confident person whose head ``animal`` is, if any."""
+    if canonical_label(animal.get('label')) not in ANIMAL_LABELS:
+        return None
+    a = _xywh(_box(animal))
+    if a is None:
+        return None
+    ax, ay, aw, ah = a
+    for person in evidence:
+        if canonical_label(person.get('label')) != 'person' or _confidence(person) < HEAD_PERSON_CONFIDENCE:
+            continue
+        p = _xywh(_box(person))
+        if p is None:
+            continue
+        px, py, pw, ph = p
+        inter = (max(0.0, min(ax + aw, px + pw) - max(ax, px))
+                 * max(0.0, min(ay + ah, py + ph) - max(ay, py)))
+        if (
+            inter >= HEAD_CONTAINMENT * aw * ah
+            and aw * ah <= HEAD_AREA_RATIO * pw * ph
+            and ay - py <= HEAD_TOP_SHARE * ph
+            and ay + ah / 2.0 - py <= HEAD_CENTRE_SHARE * ph
+        ):
+            return person
+    return None
+
+
+def drop_animals_on_heads(detections: list[dict[str, Any]], evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``detections`` without the animal boxes drawn on a person's head."""
+    return [detection for detection in detections if head_of_person(detection, evidence) is None]
+
+
+def head_reason(animal: dict[str, Any], evidence: list[dict[str, Any]]) -> str:
+    person = head_of_person(animal, evidence)
+    return f"A person's head ({_confidence(person):.0%} person)" if person else "A person's head"

@@ -1083,3 +1083,18 @@ def test_region_dedup_drops_legs_box_hanging_below_wide_person_box():
     legs = {"label": "person", "confidence": 0.78,
             "box": {"x": 320 / 800, "y": 180 / 448, "width": 58 / 800, "height": 172 / 448}}
     assert _dedup_by_iou([legs, wide], 0.5) == [wide]
+
+
+def test_nms_drops_a_small_part_poking_out_of_a_side():
+    """The doorway frame: hands + leaf blower boxed as a second "person"
+    (53%) mostly inside the woman's box, the blower sticking out (~0.76
+    contained, too wide a share of the column for the column-part rule)."""
+    from app.detector import non_max_suppression
+
+    boxes = np.array([[345, 88, 490, 360], [320, 222, 425, 290]], dtype=np.float32)
+    assert non_max_suppression(boxes, np.array([0.85, 0.53]), np.array([0, 0]), 0.45) == [0]
+    # Two people side by side, or a smaller one only partly overlapping, stay.
+    beside = np.array([[345, 88, 490, 360], [470, 120, 600, 380]], dtype=np.float32)
+    assert sorted(non_max_suppression(beside, np.array([0.85, 0.8]), np.array([0, 0]), 0.45)) == [0, 1]
+    child = np.array([[345, 88, 490, 360], [430, 230, 520, 360]], dtype=np.float32)
+    assert sorted(non_max_suppression(child, np.array([0.85, 0.8]), np.array([0, 0]), 0.45)) == [0, 1]

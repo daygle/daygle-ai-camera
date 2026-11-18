@@ -372,3 +372,22 @@ test('a target between two samples interpolates back along the pair', () => {
   // Forward projection is unchanged.
   assert.ok(Math.abs(sandbox.projectDetections([previous], [current], 1000, 2000, 2500, 2500)[0].box.x - 0.5) < 1e-9);
 });
+
+
+test('labels sharing a corner do not cover each other', () => {
+  // The doorway frame: the person box and a box inside it shared a top-left
+  // corner, so the person's label hid under the other one.
+  const placed = [];
+  const first = sandbox.placeLabel(placed, 345, 88, 272, 120, 20, 450);
+  const second = sandbox.placeLabel(placed, 346, 98, 67, 90, 20, 450);
+  assert.equal(first, 88 - 20 - 4);
+  assert.equal(second, 98 + 4);
+  // A third box at the same spot drops below its box.
+  assert.equal(sandbox.placeLabel(placed, 346, 98, 67, 90, 20, 450), 98 + 67 + 4);
+  // Largest box first, stable otherwise.
+  const order = sandbox.labelOrder([
+    { label: 'cat', box: { x: 0.43, y: 0.22, width: 0.1, height: 0.15 } },
+    { label: 'person', box: { x: 0.43, y: 0.2, width: 0.18, height: 0.6 } },
+  ], 800, 450);
+  assert.deepEqual(order.map((d) => d.label), ['person', 'cat']);
+});
