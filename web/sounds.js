@@ -143,9 +143,9 @@ function renderDetectorStatuses(rows) {
     <tr data-camera-row="${escapeHtml(camera.id || '')}" class="${selected ? 'is-selected' : ''}" aria-selected="${selected ? 'true' : 'false'}">
       <td class="cell-label"><button type="button" class="sound-camera-pick" data-pick-camera="${escapeHtml(camera.id || '')}">${escapeHtml(detectorCameraLabel(camera))}</button></td>
       <td data-label="Sound">${escapeHtml(detectorSoundConfigured(camera) ? 'On' : 'Off')}</td>
-      <td data-label="Listening for">${escapeHtml(classes || 'Nothing yet')}</td>
+      <td data-label="Listening For">${escapeHtml(classes || 'Nothing yet')}</td>
       <td data-label="Status" title="${escapeHtml(health.detail)}">${detectorHealthPill(health)}${health.detail && health.tone === 'error' ? `<span class="sound-health-detail">${escapeHtml(health.detail)}</span>` : ''}</td>
-      <td data-label="Last heard" title="${escapeHtml(`Recent scores: ${detectorConfidenceMap(status.last_confidences)}`)}">${escapeHtml(detectorLastHeard(status))}</td>
+      <td data-label="Last Heard" title="${escapeHtml(`Recent scores: ${detectorConfidenceMap(status.last_confidences)}`)}">${escapeHtml(detectorLastHeard(status))}</td>
     </tr>`;
   }).join('');
   soundCameraStatusList.innerHTML = '<div class="stack-table-wrap" style="overflow-x:auto">'
@@ -215,9 +215,9 @@ function renderClassEditor(camera) {
       <tr class="zone-rule-row${enabled ? ' is-enabled' : ''}" data-class-index="${index}">
         <td class="cell-label"><span class="zone-rule-icon" aria-hidden="true">🔊</span>${label}</td>
         <td data-label="Detect"><label class="toggle-control zone-rule-toggle" title="Enable or disable detection of this sound on this camera"><input type="checkbox" data-class-toggle="${index}" ${enabled ? 'checked' : ''} /><span>${enabled ? 'On' : 'Off'}</span></label></td>
-        <td data-label="Min confidence"><input class="zone-rule-conf" type="number" data-class-confidence="${index}" aria-label="Minimum confidence for ${label}" min="0.01" max="1" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" title="Only sounds detected with at least this confidence (0.01-1) count on this camera. Overrides the detector default for this class." /></td>
+        <td data-label="Min Confidence"><input class="zone-rule-conf" type="number" data-class-confidence="${index}" aria-label="Minimum confidence for ${label}" min="0.01" max="1" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" title="Only sounds detected with at least this confidence (0.01-1) count on this camera. Overrides the detector default for this class." /></td>
         <td data-label="Record"><label class="toggle-control zone-rule-toggle" title="Record a clip when this sound is detected on this camera"><input type="checkbox" data-class-record="${index}" ${record ? 'checked' : ''} /><span>${record ? 'On' : 'Off'}</span></label></td>
-        <td class="cell-actions stack-actions"><button class="delete-btn secondary zone-action-btn zone-rule-remove" type="button" data-class-remove="${index}" title="Remove ${label} from this camera" aria-label="Remove ${label} from this camera">${ICONS.remove}</button></td>
+        <td class="cell-actions stack-actions"><button class="secondary activity-item-action activity-item-action-icon activity-item-action-delete zone-rule-remove" type="button" data-class-remove="${index}" title="Remove ${label} from this camera" aria-label="Remove ${label} from this camera"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg></button></td>
       </tr>`;
   }).join('');
   // Build the markup in a local first (rows are already escapeHtml'd); the XSS

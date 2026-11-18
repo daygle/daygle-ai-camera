@@ -81,12 +81,13 @@
         grid-column: 1 / -1;
         display: flex;
         justify-content: flex-end;
-        gap: 8px;
+        gap: 4px;
         border-bottom: 0;
         padding-bottom: 0;
       }
       #alertsList .alerts-policy-table tbody td.alerts-table-actions::before { display: none; }
       #alertsList .alerts-table-actions button { width: 40px; height: 40px; }
+      #alertsList .alerts-table-actions button + button { margin-left: 0; }
       /* The expanded settings row is a single full-width cell (no label). The
          shared sheet already gives it its accent underline and panel chrome. */
       #alertsList .alerts-policy-table tbody tr.alerts-policy-details-row:not([hidden]) {

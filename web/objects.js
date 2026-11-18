@@ -3,6 +3,11 @@
 // Loaded on objects.html only. Uses api() / escapeHtml / titleCase /
 // showToast from web/utils.js.
 
+// Icon-only row buttons, as on Recordings / Events (name in title and aria-label).
+const OBJECT_ICON_RESET = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>';
+const OBJECT_ICON_EDIT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
+const OBJECT_ICON_TRASH = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>';
+
 const defaultSelect = document.querySelector('select[name="default_mode"]');
 const tableBody = document.getElementById('objectsTableBody');
 const tableWrap = document.getElementById('objectsTableWrap');
@@ -210,13 +215,13 @@ function renderTable() {
           </select>
         </td>
         <td><span class="model-status ${effective === 'any' ? 'model-status-installed' : 'model-status-active'}">${escapeHtml(modeLabel(effective))}</span></td>
-        <td data-label="Still alert after (min)">
+        <td data-label="Still Alert After (min)">
           <input type="number" min="0" step="1" inputmode="numeric" class="still-alert-input" value="${stillMinutes}" data-still-alert="${escapeHtml(label)}" aria-label="Still alert after minutes for ${title}" title="Alert after this object has been detected continuously still for this many minutes (0 = off)">
         </td>
         <td data-label="Box Colour">
           <span class="box-color-cell">
             <input type="color" class="box-color-input" value="${escapeHtml(boxColor || groupFallbackColor(label))}" data-box-color="${escapeHtml(label)}" aria-label="Box colour for ${title}" title="Colour of the ${title} box and label on Live, playback and snapshots">
-            <button type="button" class="secondary box-color-reset" data-box-color-reset="${escapeHtml(label)}" ${boxColor ? '' : 'hidden'} title="Return ${title} to its group's box colour, or the default">Reset</button>
+            <button type="button" class="secondary activity-item-action activity-item-action-icon box-color-reset" data-box-color-reset="${escapeHtml(label)}" ${boxColor ? '' : 'hidden'} title="Reset: return ${title} to its group's box colour, or the default" aria-label="Reset box colour for ${title}">${OBJECT_ICON_RESET}</button>
           </span>
         </td>
       </tr>`;
@@ -361,13 +366,13 @@ function renderGroupModes() {
         <td data-label="Box Colour">
           <span class="box-color-cell">
             <input type="color" class="box-color-input" value="${escapeHtml(groupColor || DEFAULT_BOX_COLOR)}" data-group-box-color="${escapeHtml(name)}" aria-label="Box colour for ${title}" title="Colour of the box and label for every ${title} member without its own colour">
-            <button type="button" class="secondary box-color-reset" data-group-box-color-reset="${escapeHtml(name)}" ${groupColor ? '' : 'hidden'} title="Return ${title} to the default box colour">Reset</button>
+            <button type="button" class="secondary activity-item-action activity-item-action-icon box-color-reset" data-group-box-color-reset="${escapeHtml(name)}" ${groupColor ? '' : 'hidden'} title="Reset: return ${title} to the default box colour" aria-label="Reset box colour for ${title}">${OBJECT_ICON_RESET}</button>
           </span>
         </td>
         <td class="group-actions-cell">
           <span class="group-row-actions">
-            <button type="button" class="secondary" data-group-edit="${escapeHtml(name)}">Edit</button>
-            <button type="button" class="secondary" data-group-remove="${escapeHtml(name)}" aria-label="Remove ${title}">Remove</button>
+            <button type="button" class="secondary activity-item-action activity-item-action-icon activity-item-action-delete" data-group-remove="${escapeHtml(name)}" title="Remove group" aria-label="Remove ${title}">${OBJECT_ICON_TRASH}</button>
+            <button type="button" class="secondary activity-item-action activity-item-action-icon activity-item-action-edit" data-group-edit="${escapeHtml(name)}" title="Edit group" aria-label="Edit ${title}">${OBJECT_ICON_EDIT}</button>
           </span>
         </td>
       </tr>`;

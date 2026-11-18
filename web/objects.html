@@ -18,8 +18,7 @@
     /* Groups: one table (members, mode, colour, edit/remove) + the add form. */
     .groups-note { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
     #groupModesBody td.group-actions-cell { width: 1%; white-space: nowrap; }
-    #groupModesBody .group-row-actions { display: flex; gap: 6px; justify-content: flex-end; }
-    #groupModesBody .group-row-actions button { min-height: 34px; padding: 6px 12px; }
+    #groupModesBody .group-row-actions { display: flex; gap: 4px; justify-content: flex-end; }
     .group-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
     .group-form .group-form-fields { align-items: start; }
     .group-form-fields label { display: grid; gap: 8px; align-content: start; }
@@ -90,7 +89,7 @@
           <span>Motion Box Colour <span class="info-tip" data-tip="Colour of generic motion boxes (changed pixels with no recognised object) and their label on Live, playback and snapshots. Reset returns to the default teal." title="Colour of generic motion boxes (changed pixels with no recognised object) and their label on Live, playback and snapshots. Reset returns to the default teal." tabindex="0" aria-label="Help: Motion box colour"></span></span>
           <span class="box-color-cell">
             <input type="color" class="box-color-input" id="motionBoxColorInput" value="#49e6a3" aria-label="Box colour for motion" title="Colour of the motion box and label on Live, playback and snapshots">
-            <button type="button" class="secondary box-color-reset" id="motionBoxColorReset" hidden title="Return motion boxes to the default teal">Reset</button>
+            <button type="button" class="secondary activity-item-action activity-item-action-icon box-color-reset" id="motionBoxColorReset" hidden title="Reset: return motion boxes to the default teal" aria-label="Reset motion box colour"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg></button>
           </span>
         </div>
       </form>
@@ -114,7 +113,7 @@
               <th>Members</th>
               <th>Detection Mode</th>
               <th>Box Colour</th>
-              <th class="group-actions-cell" aria-label="Actions"></th>
+              <th class="group-actions-cell cell-center">Actions</th>
             </tr>
           </thead>
           <tbody id="groupModesBody"></tbody>
@@ -156,7 +155,7 @@
         <div class="settings-section-icon" aria-hidden="true">🏷️</div>
         <div>
           <h2>Per-Object Overrides</h2>
-          <p class="settings-section-subtitle">One row per class the current detector can identify, loaded from <code>models/coco.names</code> - the 80 standard COCO categories. <strong>Inherit</strong> uses the default above; the Effective column shows what actually applies. Assign objects and set recording per area on <strong>Zones</strong>; configure email, push, schedules, and thresholds as alert policies on <strong>Alerts</strong>. <strong>Still Alert After</strong> fires an event and in-app alert the first time this object has been detected continuously still for that many minutes - 0 turns it off. <strong>Box Colour</strong> sets the colour of this object's box and label on Live, playback and snapshots; <strong>Reset</strong> returns it to its group's colour, or the default.</p>
+          <p class="settings-section-subtitle">One row per class the current detector can identify, loaded from <code>models/coco.names</code> - the 80 standard COCO categories. <strong>Inherit</strong> uses the default above; the Effective column shows what actually applies. Assign objects and set recording per area on <strong>Zones</strong>; configure email, push, schedules, and thresholds as alert policies on <strong>Alerts</strong>. <strong>Still Alert After</strong> fires an event and in-app alert the first time this object has been detected continuously still for that many minutes - 0 turns it off. <strong>Box Colour</strong> sets the colour of this object's box and label on Live, playback and snapshots; the reset button (↺) returns it to its group's colour, or the default.</p>
         </div>
       </div>
       <div id="objectsMessage" class="muted" style="margin-bottom:8px"></div>

@@ -72,20 +72,11 @@
 .alerts-policy-row.is-disabled .alerts-policy-state { color: var(--muted); }
 .alerts-policy-table .alerts-policy-row td { border-bottom: 1px solid var(--border); }
 .alerts-policy-table .alerts-policy-row td.alerts-table-actions { display: table-cell; text-align: right; white-space: nowrap; }
-.alerts-policy-table .alerts-table-actions button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border-radius: 8px;
-  line-height: 1;
-  vertical-align: middle;
-}
-.alerts-policy-table .alerts-table-actions button svg { display: block; flex: 0 0 auto; }
-.alerts-policy-table .alerts-table-actions button + button { margin-left: 6px; }
-.alerts-policy-table .alerts-policy-expand.is-open { border-color: var(--accent); color: var(--accent); }
+/* Remove / Edit use the shared icon-only action buttons (``.activity-item-action``)
+   with the same 4px gap as Recordings, Events and Cameras. */
+.alerts-policy-table .alerts-table-actions button + button { margin-left: 4px; }
+/* Open policy: the edit button stays pressed-looking. */
+.alerts-policy-table button.activity-item-action.alerts-policy-expand.is-open { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); }
 .alerts-policy-table th:first-child, .alerts-policy-table td:first-child { width: 24%; }
 .alerts-policy-table th:nth-child(2), .alerts-policy-table td:nth-child(2) { width: 28%; }
 .alerts-policy-table th:nth-child(3), .alerts-policy-table td:nth-child(3),
@@ -567,7 +558,6 @@ textarea {
 /* Per-object overlay box colour (Objects page): swatch + optional Reset. */
 .box-color-cell { display: inline-flex; align-items: center; gap: 8px; }
 .box-color-input { width: 44px; height: 32px; padding: 2px; border-radius: 6px; cursor: pointer; }
-.box-color-reset { padding: 4px 10px; font-size: 0.85rem; }
 /* Motion box colour (Objects page, Detection Behavior card): laid out like a form-stack label. */
 .motion-color-field { display: grid; gap: 8px; justify-items: start; color: var(--muted); font-weight: 800; }
 @media (pointer: coarse), (max-width: 600px) { .box-color-input { height: 40px; } }
@@ -2495,7 +2485,7 @@ input[type="file"] { padding: 10px; }
   font-size: 10px;
   letter-spacing: .02em;
 }
-.cameras-table .cell-connection { min-width: 165px; }
+.cameras-table .cell-connection { min-width: 155px; }
 .cameras-table .cell-video { min-width: 140px; }
 .cameras-table .cell-state { min-width: 140px; }
 .cameras-table .cell-profiles { min-width: 140px; }
@@ -2575,51 +2565,15 @@ input[type="file"] { padding: 10px; }
   width: 1%;
   white-space: nowrap;
 }
+/* Same 4px gap and right alignment as the Recordings / Events actions. */
 .cameras-table .cell-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-.cameras-table .cell-actions button,
-.cameras-table .cell-actions a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
+  justify-content: flex-end;
   gap: 4px;
-  padding: 0;
-  border-radius: 8px;
-  font-size: 12px;
-  line-height: 1;
-  vertical-align: middle;
 }
-.cameras-table .cell-actions a {
-  color: var(--accent);
-  text-decoration: none;
-  font-weight: 700;
-}
-.cameras-table .cell-actions .cam-toggle-btn {
-  color: var(--muted);
-  transition: color .15s, border-color .15s, background .15s;
-}
-.cameras-table .cell-actions .cam-toggle-btn.is-enabled {
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 30%, transparent);
-}
-.cameras-table .cell-actions .cam-toggle-btn.is-disabled {
-  color: var(--danger);
-  border-color: rgba(248, 113, 113, 0.3);
-}
-.cameras-table .cell-actions .cam-toggle-btn:hover {
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-.cameras-table .cell-actions a:hover {
-  text-decoration: underline;
-}
+/* The row buttons use the shared icon-only action style (styles below,
+   ``.activity-item-action``) so they match Recordings and Events. */
 .cameras-table .health-dot {
   display: inline-block;
   width: 8px;
@@ -3617,6 +3571,38 @@ button.activity-item-action.activity-item-action-delete:hover {
   background: rgba(220, 38, 38, 0.18);
   border-color: #dc2626;
 }
+/* Edit (accent): open a row's settings - same tint as Play. */
+button.activity-item-action.activity-item-action-edit {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+button.activity-item-action.activity-item-action-edit:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: var(--accent);
+}
+:root.light button.activity-item-action.activity-item-action-edit {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: #0369a1;
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* Power: green while the camera runs; neutral (the default secondary look)
+   while it is disabled, so the tint always says "on". */
+button.activity-item-action.activity-item-action-power.is-enabled {
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
+}
+button.activity-item-action.activity-item-action-power.is-enabled:hover {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  border-color: var(--success);
+}
+:root.light button.activity-item-action.activity-item-action-power.is-enabled {
+  background: rgba(5, 150, 105, 0.10);
+  color: #047857;
+  border-color: rgba(5, 150, 105, 0.35);
+}
+button.activity-item-action.activity-item-action-power.is-disabled { color: var(--muted); }
 /* False positive (amber): mark or un-mark a detection (app/false_positives.py). */
 button.activity-item-action.activity-item-action-false-positive {
   background: rgba(251, 191, 36, 0.08);
@@ -6920,7 +6906,6 @@ button.secondary:disabled, a.secondary:disabled {
   text-align: right;
   white-space: nowrap;
 }
-.zone-rule-remove { padding: 7px 10px; }
 .zone-rule-advanced-toggle {
   display: inline-flex;
   align-items: center;
@@ -8087,6 +8072,7 @@ main:has(#liveCameraEmpty:not([hidden])) .live-controls-card { display: none; }
 .activity-item-action.activity-item-action-icon,
 a.activity-item-action.activity-item-action-icon,
 button.activity-item-action.activity-item-action-icon,
+.cameras-table-wrap .rule-table .cell-actions .activity-item-action-icon,
 .cameras-table-wrap .rule-table.activity-table .activity-cell-actions .cell-actions .activity-item-action-icon {
   box-sizing: border-box;
   border-radius: 8px;
