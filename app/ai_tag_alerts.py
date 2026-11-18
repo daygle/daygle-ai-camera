@@ -277,6 +277,39 @@ def _confirm_terms(event: dict[str, Any], terms: list[str], camera_name: str,
             {term for term in terms if cache[keys[term]][1]})
 
 
+def _ai_rejections(event_id: int, event: dict[str, Any]) -> list[tuple[str, str]]:
+    """``(label asked about, reason)`` for each object the AI already said is
+    not there on this event: alert verification's answers, then the
+    false-positive check's. Read fresh, because verification stores its
+    verdict after the event was loaded for describing."""
+    metadata = event.get('metadata') or {}
+    try:
+        stored = _state.database.get_event(int(event_id)) if callable(
+            getattr(_state.database, 'get_event', None)) else None
+        if isinstance(stored, dict) and isinstance(stored.get('metadata'), dict):
+            metadata = stored['metadata']
+    except Exception:  # noqa: BLE001 - fall back to what the caller loaded
+        logger.debug('Could not re-read event %s for AI verdicts', event_id, exc_info=True)
+    rejections = []
+    for key in ('ai_verification', 'ai_false_positive_check'):
+        answers = (metadata.get(key) or {}).get('labels') if isinstance(metadata.get(key), dict) else None
+        for label, answer in (answers or {}).items():
+            if isinstance(answer, dict) and answer.get('present') is False:
+                rejections.append((str(label).strip().lower(), str(answer.get('reason') or 'not present')))
+    return rejections
+
+
+def _rejected_term(term: str, rejections: list[tuple[str, str]]) -> tuple[str, str] | None:
+    """The AI's earlier "no" that covers ``term``: the same object, or a group
+    it belongs to ("pet" not there rules out a cat)."""
+    from app.zone_schema import label_matches
+
+    for label, reason in rejections:
+        if label_matches(_normalise(term), label):
+            return label, reason
+    return None
+
+
 def evaluate_event(event_id: int, event: dict[str, Any], record: dict[str, Any]) -> int:
     """Fire every matching AI tag rule for a freshly described event.
 
@@ -287,10 +320,32 @@ def evaluate_event(event_id: int, event: dict[str, Any], record: dict[str, Any])
         camera = _camera_settings(metadata.get('camera_id'))
         fired = 0
         confirmed: dict[Any, tuple[bool, bool]] = {}
+        rejections: list[tuple[str, str]] | None = None
         for zone, rule in zone_rules(camera):
             if not event_in_zone(event, zone):
                 continue
             hits = matched_terms(rule, record.get('tags') or [], record.get('text') or '')
+            if not hits:
+                continue
+            # An object the AI already said is not there (it filtered the
+            # object alert) cannot alert again because the caption named it.
+            if rejections is None:
+                rejections = _ai_rejections(event_id, event)
+            kept = []
+            for term in hits:
+                rejected = _rejected_term(term, rejections)
+                if rejected is None:
+                    kept.append(term)
+                    continue
+                log_ai_diagnostic(
+                    'ai_tag_alert_suppressed',
+                    f'AI tag alert suppressed for event #{event_id}: {term} was already rejected by the AI '
+                    f'({rejected[0]}: {rejected[1]})',
+                    camera_id=metadata.get('camera_id'),
+                    details={'event_id': event_id, 'term': term, 'rejected_label': rejected[0],
+                             'reason': rejected[1]},
+                )
+            hits = kept
             if not hits:
                 continue
             try:
