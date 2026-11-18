@@ -270,6 +270,46 @@ def test_check_reuses_settled_alert_verification_answers(fp, db):
     assert record['status'] == 'real' and record['labels']['person']['reused']
 
 
+def test_a_group_rules_verdict_covers_its_member(fp, db):
+    # An "animal" rule verifies the group: its "no" settles the cat it saw,
+    # and a confirmation that named another member reads as that member.
+    cat = {**PERSON, 'label': 'cat'}
+    metadata = {'camera_id': 'cam-1', 'ai_verification': {'asked_instead': True, 'labels': {
+        'animal': {'present': False, 'reason': 'a bag on the mat'},
+    }}}
+    event = db.get_event(_event(db, [cat], hours_ago=1, metadata=metadata))
+    verifier = FakeVerifier({})
+    record = fp.check_event(event, _settings(), verifier=verifier)
+    assert verifier.asked == []
+    assert record['status'] == 'false_positive' and record['labels']['cat']['reused']
+    metadata['ai_verification']['labels'] = {'animal': {'present': True, 'reason': 'a dog', 'kind': 'dog'}}
+    event = db.get_event(_event(db, [cat], hours_ago=1, metadata=metadata))
+    record = fp.check_event(event, _settings(), verifier=verifier)
+    assert verifier.asked == []
+    assert record['status'] == 'reclassified' and record['reclassified'] == {'cat': 'dog'}
+
+
+def test_a_recheck_yes_against_alert_verifications_no_is_unsure(fp, db):
+    # Verification filtered the alert ("no cat"); a later "yes" from the
+    # same model on the same snapshot must not put a ✓ beside the Filtered
+    # badge: the two answers disagree, so the cat is marked unsure.
+    cat = {**PERSON, 'label': 'cat'}
+    metadata = {'camera_id': 'cam-1', 'ai_verification': {'status': 'filtered', 'labels': {
+        'cat': {'present': False, 'reason': 'a dark bag'},
+    }}}
+    event_id = _event(db, [cat], hours_ago=1, metadata=metadata)
+    verifier = FakeVerifier({'cat': (True, 'a cat by the door')})
+    record = fp.check_event(db.get_event(event_id), _settings(), verifier=verifier)
+    assert verifier.asked == ['cat']
+    assert record['status'] == 'unsure'
+    assert record['labels']['cat']['unsure'] and record['labels']['cat']['conflict']
+    assert 'a dark bag' in record['labels']['cat']['reason']
+    fp.store_check(event_id, record)
+    stored = db.get_event(event_id)
+    assert stored['detections'][0]['ai_status'] == 'unsure'
+    assert stored['false_positive'] == 0
+
+
 def test_alert_verifications_relabel_is_reused(fp, db):
     metadata = {'camera_id': 'cam-1', 'ai_verification': {'labels': {
         'dog': {'present': False, 'reason': 'a cat', 'instead': 'cat'},
