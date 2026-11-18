@@ -132,6 +132,29 @@ def is_column_part(
     )
 
 
+# Small-part duplicates: a box a fraction of the size of a stronger same-class
+# box, mostly inside it but poking out of its side - a person's hands and the
+# leaf blower they hold, boxed as a second "person" (the blower sticks out past
+# the body, so containment is ~0.76 and the box is too wide a share of the
+# column for the column-part rule). Two real people that overlap this much,
+# with one this much smaller, means one is mostly hidden behind the other.
+# A second box like that also raised a "second person" alert.
+SMALL_PART_CONTAINMENT_THRESHOLD = 0.6   # intersection / smaller box's area
+SMALL_PART_AREA_RATIO = 0.25             # smaller area / larger area
+
+
+def is_small_part(intersection: Any, area_a: Any, area_b: Any) -> Any:
+    """True where the smaller of two same-class boxes is a small part of the
+    larger (see ``SMALL_PART_*``). Works on scalars or numpy arrays."""
+    small_area = np.minimum(area_a, area_b)
+    large_area = np.maximum(area_a, area_b)
+    return (
+        (small_area > 0)
+        & (small_area <= SMALL_PART_AREA_RATIO * large_area)
+        & (intersection >= SMALL_PART_CONTAINMENT_THRESHOLD * small_area)
+    )
+
+
 def non_max_suppression(
     boxes: np.ndarray,
     scores: np.ndarray,
@@ -149,9 +172,10 @@ def non_max_suppression(
     smaller of the two areas >= ``containment_threshold`` -- or is the other
     half of a top/bottom split of the same object (see ``is_stacked_split``),
     or is a narrow part of it poking out of its top or bottom (see
-    ``is_column_part``). Pass a ``containment_threshold`` above 1 to disable
+    ``is_column_part``), or a small part of it poking out of a side (see
+    ``is_small_part``). Pass a ``containment_threshold`` above 1 to disable
     the containment rule, ``suppress_stacked=False`` to disable the stacked
-    rule and ``suppress_column_parts=False`` to disable the column-part rule.
+    rule and ``suppress_column_parts=False`` to disable both part rules.
     """
     if boxes.size == 0:
         return []
@@ -199,6 +223,7 @@ def non_max_suppression(
                     inter_w, intersection,
                     widths[current], current_area, widths[rest], rest_areas,
                 )
+                survivors &= ~is_small_part(intersection, current_area, rest_areas)
             ordered = rest[survivors]
             class_areas = rest_areas[survivors]
     return keep

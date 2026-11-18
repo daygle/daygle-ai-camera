@@ -487,6 +487,34 @@ function _readElementDims(canvas, referenceEl) {
   };
 }
 
+// Draw order for labels: the largest box first, so the outer object (a person)
+// keeps the usual spot above its box and a box drawn inside it (a bag, a
+// misread head) is the one that moves. Drawing order is otherwise unchanged.
+function labelOrder(detections, srcW, srcH) {
+  const area = (detection) => {
+    const box = normalizeDetectionBox(detection?.box || detection || {}, srcW, srcH);
+    return box ? box.width * box.height : 0;
+  };
+  return detections.map((detection, index) => ({ detection, index, area: area(detection) }))
+    .sort((a, b) => b.area - a.area || a.index - b.index)
+    .map((entry) => entry.detection);
+}
+
+// Where a box's label pills go: above the box when there is room, otherwise
+// just inside its top. When that spot would cover a label already drawn (two
+// boxes sharing a top-left corner hid one label under the other), the next of
+// inside-top and below-the-box that is free is used instead.
+function placeLabel(placed, x, boxTop, boxHeight, width, height, canvasHeight) {
+  const usual = boxTop > height + 4 ? boxTop - height - 4 : boxTop + 4;
+  const candidates = [usual, boxTop + 4, boxTop + boxHeight + 4]
+    .filter((y) => y >= 0 && y + height <= canvasHeight);
+  const clear = (y) => !placed.some((rect) => x < rect.x + rect.width && rect.x < x + width
+    && y < rect.y + rect.height && rect.y < y + height);
+  const y = candidates.find(clear) ?? usual;
+  placed.push({ x, y, width, height });
+  return y;
+}
+
 // Draws detection bounding boxes onto canvas. referenceEl is the <video> or <img>
 // whose display size and intrinsic dimensions are used for coordinate mapping.
 // Assumes the canvas has already been cleared by the caller.
@@ -512,7 +540,9 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
   const offsetX = (cssWidth - renderWidth) / 2;
   const offsetY = (cssHeight - renderHeight) / 2;
 
-  for (const detection of detections) {
+  // Labels already drawn this frame, so a later one can move off them.
+  const placedLabels = [];
+  for (const detection of labelOrder(detections, srcW, srcH)) {
     const box = normalizeDetectionBox(detection?.box || detection || {}, srcW, srcH);
     if (!box) continue;
     const x = Math.min(Math.max(Number(box.x ?? 0), 0), 1);
@@ -553,7 +583,12 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
     const textWidth = _measureTextWidth(ctx, label);
     const labelHeight = 20;
     const labelWidth = textWidth + 12;
-    const labelY = dy > labelHeight + 4 ? dy - labelHeight - 4 : dy + 4;
+    const stateTagPreview = overlayMotionStateTag(detection);
+    const trackTagPreview = overlayTrackIdTag(detection);
+    const groupWidth = labelWidth
+      + (stateTagPreview ? _measureTextWidth(ctx, stateTagPreview.text) + 16 : 0)
+      + (trackTagPreview ? _measureTextWidth(ctx, trackTagPreview.text) + 16 : 0);
+    const labelY = placeLabel(placedLabels, dx, dy, dh, groupWidth, labelHeight, cssHeight);
     ctx.fillStyle = OVERLAY_LABEL_BACKGROUND;
     ctx.fillRect(dx, labelY, labelWidth, labelHeight);
     ctx.fillStyle = overlayColor;

@@ -95,3 +95,39 @@ def test_live_cycle_drops_the_person_box_and_logs_why(tmp_path, monkeypatch):
     history = main._state.live_detection_history.get('camera-drive')
     assert history and not [d for d in history[-1][1] if d.get('label') == 'person']
     assert ('person', 'Same object as cat (85%)') in [(d['label'], d['reason']) for d in history[-1][2]]
+
+
+# The reported doorway frame (800x450): an overhead camera boxed a woman's
+# head "Cat 76%" inside her own person box.
+def _px(label, confidence, x1, y1, x2, y2):
+    return _det(label, confidence, x1 / 800, y1 / 450, (x2 - x1) / 800, (y2 - y1) / 450)
+
+
+DOORWAY_PERSON = _px('person', 0.85, 345, 88, 490, 360)
+DOORWAY_HEAD_CAT = _px('cat', 0.76, 346, 98, 428, 165)
+
+
+def test_animal_box_on_a_persons_head_is_dropped():
+    from app.overlap_suppression import drop_animals_on_heads, head_reason
+
+    seen = [DOORWAY_PERSON, DOORWAY_HEAD_CAT]
+    assert drop_animals_on_heads(seen, seen) == [DOORWAY_PERSON]
+    assert head_reason(DOORWAY_HEAD_CAT, seen) == "A person's head (85% person)"
+
+
+@pytest.mark.parametrize('animal', [
+    _px('cat', 0.8, 360, 190, 450, 260),   # carried at the chest
+    _px('cat', 0.8, 500, 300, 580, 360),   # at her feet, beside her
+    _px('dog', 0.8, 330, 80, 520, 300),    # a large box: not a head
+])
+def test_animals_held_or_beside_a_person_are_kept(animal):
+    from app.overlap_suppression import drop_animals_on_heads
+
+    assert drop_animals_on_heads([DOORWAY_PERSON, animal], [DOORWAY_PERSON, animal]) == [DOORWAY_PERSON, animal]
+
+
+def test_a_weak_person_box_does_not_hide_an_animal():
+    from app.overlap_suppression import drop_animals_on_heads
+
+    weak = {**DOORWAY_PERSON, 'confidence': 0.4}
+    assert drop_animals_on_heads([weak, DOORWAY_HEAD_CAT], [weak, DOORWAY_HEAD_CAT]) == [weak, DOORWAY_HEAD_CAT]

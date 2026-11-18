@@ -120,7 +120,7 @@ from app.event_debounce import (
     schedule_live_camera_backoff,
 )
 from app.event_presence import absence_seconds, bind_presence_recording, drop_covered_motion, observe_presence, presence_keys
-from app.overlap_suppression import drop_people_boxed_as_animals, overlap_reason
+from app.overlap_suppression import drop_animals_on_heads, drop_people_boxed_as_animals, head_reason, overlap_reason
 from app.recording_extension import (
     _make_continuous_chunk_callback,
     active_recording_id,
@@ -1491,6 +1491,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             if diag_id is None or diag_id in kept or diag_id in _dropped:
                 continue
             _dropped[diag_id] = {**det, 'reason': reason(det) if callable(reason) else reason}
+    # An animal box drawn on a person's head (hair seen from above read as a
+    # cat) is that person: drop it before anything shows, tracks or alerts on it.
+    _before_heads = detections
+    detections = drop_animals_on_heads(detections, _before_heads)
+    _note_dropped(_before_heads, detections, lambda det: head_reason(det, _before_heads))
     _cycle_timer.add(STAGE_TRACKING, (time.perf_counter() - _tracking_started) * 1000.0)
     _behaviour_started = time.perf_counter()
     # Behavioural engines consume tracked geometry, so pause them while the

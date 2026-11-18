@@ -363,3 +363,21 @@ def test_sitting_cat_stays_on_clip_playback_display_only(tmp_path, monkeypatch):
         ('cat', 'still', True)]
     assert [d['label'] for d in last.get('dropped') or []] == ['cat'], 'the log still explains the drop'
     assert all(not d.get('display_only') for sample in track[:3] for d in sample['detections'])
+
+
+def test_a_persons_head_read_as_a_cat_never_shows_or_alerts(tmp_path, monkeypatch):
+    """The doorway frame: seen from above, a woman's head was boxed "Cat 76%"
+    inside her own person box. Only the person shows, and only she alerts."""
+    def frame(dx):
+        person = {'label': 'person', 'confidence': 0.85,
+                  'box': {'x': 0.431 + dx, 'y': 0.196, 'width': 0.181, 'height': 0.604}}
+        head = {'label': 'cat', 'confidence': 0.76,
+                'box': {'x': 0.433 + dx, 'y': 0.218, 'width': 0.102, 'height': 0.149}}
+        return [person, head]
+
+    _main, _settings, results, routed = _drive(
+        tmp_path, monkeypatch, [frame(0.02 * index) for index in range(4)],
+        rules=[_rule('cat', verify=False), _rule('person', verify=False)],
+    )
+    assert all(result['cats'] == [] for result in results)
+    assert [[alert['label'] for alert in alerts] for _event, alerts in routed] == [['person']]
