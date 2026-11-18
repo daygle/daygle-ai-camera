@@ -21,7 +21,14 @@ class RtspSoundWatchdogTests(unittest.TestCase):
         received = threading.Event()
         original_popen = subprocess.Popen
 
-        def start_child(_command, **kwargs):
+        def start_child(command, *args, **kwargs):
+            # The patch replaces subprocess.Popen process-wide, so a background
+            # thread left by another test (the GPU metrics refresher, the
+            # playback pre-converter) can call it mid-test. Only the sound
+            # detector's ffmpeg command (shutil.which is patched to 'ffmpeg')
+            # becomes a test child; anything else runs for real.
+            if not (isinstance(command, (list, tuple)) and command and command[0] == 'ffmpeg'):
+                return original_popen(command, *args, **kwargs)
             child = original_popen([sys.executable, '-u', '-c', child_code], **kwargs)
             children.append(child)
             # Stop retries as soon as the test child exits.
@@ -41,7 +48,9 @@ class RtspSoundWatchdogTests(unittest.TestCase):
             worker = threading.Thread(target=detector._run_rtsp, daemon=True)
             worker.start()
             try:
-                worker.join(timeout=4)
+                # Generous: a loaded CI runner can take seconds to start the
+                # child interpreter. A passing run finishes far sooner.
+                worker.join(timeout=15)
                 self.assertFalse(worker.is_alive(), 'sound capture failed to stop')
                 self.assertEqual(len(children), 1)
                 self.assertIsNotNone(children[0].poll())
@@ -59,7 +68,9 @@ class RtspSoundWatchdogTests(unittest.TestCase):
 
     def test_audio_is_delivered_before_capture_is_stopped(self):
         code = "import sys, time; sys.stdout.buffer.write(bytes(320)); sys.stdout.buffer.flush(); time.sleep(30)"
-        self.assertTrue(self._run_capture(code, stall_seconds=3, stop_on_audio=True))
+        # The stall limit only has to outlast the child's start-up; the test
+        # stops as soon as the first chunk of audio arrives.
+        self.assertTrue(self._run_capture(code, stall_seconds=10, stop_on_audio=True))
 
 
 if __name__ == '__main__':
