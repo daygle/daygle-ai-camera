@@ -100,6 +100,8 @@ You configure it on the **Zones** page: each area has a **Motion** row with a si
 
 A motion rule without a stored trigger runs at **Normal (2%)**.
 
+**The motion box follows its subject after the rule fires.** For 10 seconds after an area's motion last fired, its motion box is also saved to the recording's playback track on checks where the area still moves at a quarter or more of its trigger. So a subject the motion mask only half sees, such as a plain white truck panel or a car passing behind a bush, keeps its box on playback instead of showing it for one check only. These boxes only draw the subject: they never raise an event or alert, start or extend a recording, or restart the 10 seconds.
+
 Use this when you want to be notified any time *anything* moves in an area, regardless of what it is.
 
 **Objects take priority over motion.** Motion is the fallback signal: when an object explains it, you get the object's event, not a separate *Motion* one. Three rules enforce that:

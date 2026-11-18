@@ -589,6 +589,54 @@ def zone_motion_detections(
     return result
 
 
+def zone_motion_follow_detections(
+    settings: dict[str, Any],
+    diff_mask: Any,
+    levels: list[dict[str, Any]],
+    zone_ids: set[str],
+    *,
+    min_trigger_ratio: float,
+    min_fraction: float = 0.0,
+) -> list[dict[str, Any]]:
+    """Motion boxes for ``zone_ids`` that still move but are under their trigger.
+
+    ``levels`` is the list ``zone_motion_detections`` filled this cycle. A zone
+    qualifies when its moving share is at least ``min_trigger_ratio`` of its
+    trigger (and ``min_fraction``) but below the trigger itself: a zone over
+    its trigger already produced its own detection. Each result carries
+    ``motion_follow: True`` and is meant for the playback track only.
+    """
+    if diff_mask is None or not zone_ids or not levels:
+        return []
+    zones = {
+        str(zone.get('id') or zone.get('name') or id(zone)): zone
+        for zone in (settings.get('detection') or {}).get('zones', [])
+        if zone.get('enabled', True) and zone.get('monitor_motion', True)
+    }
+    result: list[dict[str, Any]] = []
+    for level in levels:
+        zone_id = str(level.get('zone_id') or '')
+        zone = zones.get(zone_id)
+        fraction = level.get('fraction')
+        trigger = level.get('trigger')
+        if zone is None or zone_id not in zone_ids or fraction is None or not trigger:
+            continue
+        if fraction >= trigger or fraction < max(min_fraction, trigger * min_trigger_ratio):
+            continue
+        box = _zone_motion_pixel_box(diff_mask, zone)
+        if box is None:
+            continue
+        result.append({
+            'confidence': round(min(1.0, fraction / trigger), 3),
+            'motion_fraction': round(float(fraction), 6),
+            'zone_id': zone_id,
+            'zone_name': zone.get('name') or zone_id,
+            'box': box,
+            'motion_follow': True,
+        })
+    return result
+
+
 def motion_zone_confirm_cycles(settings: dict[str, Any]) -> dict[str, int]:
     """Each enabled motion zone's "Must last: N checks", keyed the same way
     ``zone_motion_detections`` keys its detections."""

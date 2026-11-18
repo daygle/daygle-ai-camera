@@ -138,6 +138,13 @@ from app.motion_object_priority import (
     object_zone_keys as motion_object_zone_keys,
 )
 from app.motion_levels import forget_camera as forget_motion_levels, motion_zone_levels
+from app.motion_follow import (
+    FOLLOW_MIN_TRIGGER_RATIO as MOTION_FOLLOW_MIN_TRIGGER_RATIO,
+    following_zones as motion_following_zones,
+    forget_camera as forget_motion_follow,
+    note_fired as note_motion_fired,
+)
+from app.motion_levels import QUIET_FRACTION as MOTION_QUIET_FRACTION
 from app.zone_detection import (
     ai_check_rule_label,
     detection_matches_zone,
@@ -151,6 +158,7 @@ from app.zone_detection import (
     zone_alert_detections,
     zone_detection_alert_rule_names,
     zone_motion_detections,
+    zone_motion_follow_detections,
     zone_motion_record_on_detect,
     zone_name_for_detection,
     zone_object_alert_rules,
@@ -644,6 +652,7 @@ def _prune_frame_motion_state() -> None:
         with _state._motion_confirm_lock:
             _state._motion_confirm_streaks.pop(cid, None)
         forget_motion_levels(cid)
+        forget_motion_follow(cid)
         _state.motion_object_arbiter.clear_camera(cid)
         with _state._object_tracks_lock:
             _state._object_tracks.pop(cid, None)
@@ -1223,6 +1232,23 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # allow camera motion to create a motion-only event or recording.
     if camera_motion['active']:
         motion_detections = []
+    # Keep a fired zone's box on its subject while it still moves under the
+    # trigger (a truck panel the mask half sees), for the playback track only
+    # (see app.motion_follow). Never an event, alert or recording.
+    follow_motion_detections: list[dict[str, Any]] = []
+    if not camera_motion['active']:
+        note_motion_fired(
+            camera_id,
+            (str(d.get('zone_id') or d.get('zone_name') or '') for d in motion_detections),
+            frame_capture_ts,
+        )
+        _fired_now = {str(d.get('zone_id') or d.get('zone_name') or '').strip() for d in motion_detections}
+        follow_motion_detections = zone_motion_follow_detections(
+            settings, diff_mask, _motion_levels,
+            motion_following_zones(camera_id, frame_capture_ts) - _fired_now,
+            min_trigger_ratio=MOTION_FOLLOW_MIN_TRIGGER_RATIO,
+            min_fraction=MOTION_QUIET_FRACTION,
+        )
     # Shadow suppression also drops a dark subject over a lighter background (a
     # dark car on grey concrete), so the motion mask can lose a car while it is
     # still driving off. While a clip is recording, the shadow-inclusive mask
@@ -1262,7 +1288,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Motion held for object priority must still be resolved this cycle (an
     # object may now be visible, or the hold may expire), so it keeps the
     # cycle running even on a quiet frame.
-    if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections) and (not shadow_motion_detections) and (not always_run_object_detection) and (not _state.motion_object_arbiter.has_held(camera_id)):
+    if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections) and (not shadow_motion_detections) and (not follow_motion_detections) and (not always_run_object_detection) and (not _state.motion_object_arbiter.has_held(camera_id)):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], frame_timestamp=frame_capture_ts, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         _telemetry_finish(MODE_SKIPPED_NO_MOTION)
         return None
@@ -1294,7 +1320,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     detector_ready = bool(detector_loaded and detector_method_available)
     # Held motion must still reach the arbiter so the hold can expire and
     # release: motion-only rules keep working without an object detector.
-    if not detector_ready and not motion_detections and not shadow_motion_detections and not _state.motion_object_arbiter.has_held(camera_id):
+    if not detector_ready and not motion_detections and not shadow_motion_detections and not follow_motion_detections and not _state.motion_object_arbiter.has_held(camera_id):
         detector_reason = (
             ai_state['last_detector_error']
             or 'Live object detector is not loaded; motion-only rules can still run.'
@@ -1851,6 +1877,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # suppress motion. A rejected object must not hide a valid motion event.
     motion_detections = filter_motion_detections_by_objects(motion_detections, _priority_objects)
     shadow_motion_detections = filter_motion_detections_by_objects(shadow_motion_detections, _priority_objects)
+    follow_motion_detections = filter_motion_detections_by_objects(follow_motion_detections, _priority_objects)
     _motion_zones = [
         zone for zone in (settings.get('detection') or {}).get('zones', [])
         if zone.get('enabled', True) and zone.get('monitor_motion', True)
@@ -1880,7 +1907,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _attributed_zones = set(_arbitration.attributed_zones)
     motion_history_detections = [
         {**motion, 'label': 'motion', 'motion_event': True}
-        for motion in motion_detections
+        for motion in motion_detections + follow_motion_detections
         if str(motion.get('zone_id') or motion.get('zone_name') or '').strip() not in _attributed_zones
     ]
     # A watched object the still/moving filter dropped (a cat sitting down
