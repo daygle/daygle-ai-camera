@@ -174,6 +174,33 @@ def _object_labels(event: dict[str, Any]) -> tuple[list[str], int]:
     return labels[:MAX_LABELS_PER_EVENT], len(labels)
 
 
+def _verification_answer(event: dict[str, Any], label: str) -> dict[str, Any] | None:
+    """Alert verification's answer that covers detected ``label``.
+
+    Verification stores its answer under what it asked about: the detected
+    label itself, or the group a group rule verifies (``animal`` for a cat).
+    A group answer that named a different member (``kind``) reads as that
+    member instead, the way alert verification itself treated it.
+    """
+    from app.zone_schema import label_matches
+
+    verification = (event.get('metadata') or {}).get('ai_verification') or {}
+    answers = verification.get('labels') if isinstance(verification, dict) else None
+    if not isinstance(answers, dict):
+        return None
+    answer = answers.get(label)
+    if isinstance(answer, dict):
+        return answer
+    for asked, group_answer in answers.items():
+        if not isinstance(group_answer, dict) or not label_matches(label, asked):
+            continue
+        kind = str(group_answer.get('kind') or '').strip().lower()
+        if group_answer.get('present') is True and kind and kind != label:
+            return {'present': False, 'reason': str(group_answer.get('reason') or ''), 'instead': kind}
+        return group_answer
+    return None
+
+
 def _reused_verdicts(event: dict[str, Any], labels: list[str]) -> dict[str, dict[str, Any]]:
     """Answers alert verification already got for these labels that settle them.
 
@@ -182,14 +209,14 @@ def _reused_verdicts(event: dict[str, Any], labels: list[str]) -> dict[str, dict
     offered every detector class (``asked_instead``, see
     widen_relabel_candidates); otherwise it may have offered no choices (a
     zone with no other rules), so its "no" cannot tell a misread animal from
-    an empty scene and is asked again.
+    an empty scene and is asked again. An answer for a group (``animal``)
+    covers its members (``cat``).
     """
     verification = (event.get('metadata') or {}).get('ai_verification') or {}
-    answers = verification.get('labels') if isinstance(verification, dict) else None
     asked_instead = isinstance(verification, dict) and verification.get('asked_instead') is True
     reused: dict[str, dict[str, Any]] = {}
     for label in labels:
-        answer = (answers or {}).get(label) if isinstance(answers, dict) else None
+        answer = _verification_answer(event, label)
         if not isinstance(answer, dict) or not isinstance(answer.get('present'), bool):
             continue
         instead = str(answer.get('instead') or '').strip().lower()
@@ -198,6 +225,27 @@ def _reused_verdicts(event: dict[str, Any], labels: list[str]) -> dict[str, dict
         reused[label] = {'present': answer['present'], 'reason': str(answer.get('reason') or ''),
                          'reused': True, **({'instead': instead} if instead else {})}
     return reused
+
+
+def _conflicting_answer(event: dict[str, Any], label: str, answer: dict[str, Any]) -> dict[str, Any] | None:
+    """An unsure answer when the check's yes contradicts alert verification's no.
+
+    The same model judging the same snapshot both ways cannot tell: the
+    label is neither confirmed (which would show a ✓ beside a Filtered
+    alert) nor a false positive, so it is kept but marked unsure.
+    """
+    if answer.get('present') is not True:
+        return None
+    earlier = _verification_answer(event, label)
+    if not isinstance(earlier, dict) or earlier.get('present') is not False or earlier.get('instead'):
+        return None
+    before = str(earlier.get('reason') or '').strip().rstrip('.')
+    return {
+        'present': None, 'unsure': True, 'conflict': True,
+        'reason': 'Alert verification said it is not there'
+                  + (f' ({before})' if before else '')
+                  + ' but the re-check said it is',
+    }
 
 
 def widen_relabel_candidates(
@@ -343,8 +391,9 @@ def check_and_describe_event(
             record.update(status='error', reason=str(result.get('reason') or 'No snapshot to check.'))
             return record, None
         for label, answer in (result.get('labels') or {}).items():
-            record['labels'][label] = {key: value for key, value in answer.items()
-                                       if key in ('present', 'reason', 'unsure', 'error', 'instead')}
+            record['labels'][label] = _conflicting_answer(event, label, answer) or {
+                key: value for key, value in answer.items()
+                if key in ('present', 'reason', 'unsure', 'error', 'instead')}
     record['latency_ms'] = int((time.monotonic() - started) * 1000)
     answers = [record['labels'].get(label) or {} for label in labels]
     relabels = _relabels(labels, answers)
