@@ -59,7 +59,9 @@ jobs:
       # Cache hit: offline dpkg install (~seconds). Cache miss (first run on a
       # new runner image): download once from the mirror, with per-attempt
       # timeouts and retries, then keep the .debs for the cache to save.
-      timeout-minutes: 10
+      # A trickling mirror is slow but not an error (retries do not help), so
+      # allow well past the usual ~1-2 minutes before calling it a failure.
+      timeout-minutes: 20
       run: |
         if [ "${{ steps.ffmpeg-cache.outputs.cache-hit }}" = "true" ]; then
           sudo dpkg -i ~/ffmpeg-debs/*.deb
