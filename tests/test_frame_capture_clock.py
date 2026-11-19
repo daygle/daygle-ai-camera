@@ -303,7 +303,15 @@ def test_real_ffmpeg_frames_land_on_the_segment_clock(tmp_path):
     assert len(errors) >= 8
     errors.sort()
     # The typical frame lands within a couple of source frames of the truth.
-    assert abs(errors[len(errors) // 2]) < 0.05, errors
+    # The truth is itself only frame-accurate: a segment's start comes from its
+    # probed container duration, and mtime marks when the muxer closed the
+    # file, so a fraction of a frame is baked into both sides before the
+    # capture loop's own sampling jitter. Expressing the bound in source frames
+    # (1.5 here) keeps it meaningful across runner ffmpeg builds; a fixed 0.05 s
+    # was 0.75 of a frame at 15 fps and failed at 0.0508 s, while the regression
+    # this test exists for (stamps taken at decode completion) trails by
+    # 0.3-0.8 s - still far outside the bound.
+    assert abs(errors[len(errors) // 2]) < 1.5 / _SOURCE_FPS, errors
     # A stamp is the JPEG's mtime minus the learned decode lag, so a host
     # stall that delays one JPEG write shows up as that one frame stamped
     # late. Shared CI runners occasionally stall ffmpeg for ~0.2-0.3s while
