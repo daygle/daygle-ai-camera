@@ -562,7 +562,7 @@ async function loadSettings() {
   fillForm(forms.retention, settings.recording, FORM_DEFAULTS.recording);
   fillForm(forms.storage, settings.storage, FORM_DEFAULTS.storage);
   fillForm(forms.auth, settings.auth, FORM_DEFAULTS.auth);
-  fillForm(forms.gpu, settings.system, FORM_DEFAULTS.gpu);
+  renderGpuHealth(settings.system);
   api('/api/system/resources').then(syncGpuHealthVisibility).catch(() => {});
   fillForm(forms.network, {
     tunnel_loopback_only: settings.cloudflare_tunnel?.tunnel_loopback_only,
@@ -732,18 +732,25 @@ document.getElementById('startCloudflareTunnelBtn')?.addEventListener('click', g
 document.getElementById('stopCloudflareTunnelBtn')?.addEventListener('click', guard(() => tunnelAction('stop')));
 document.getElementById('restartCloudflareTunnelBtn')?.addEventListener('click', guard(() => tunnelAction('restart')));
 
-function bindForm(name, label, endpointName = name) {
+function bindForm(name, label, endpointName = name, payloadBuilder = null, renderer = null) {
   forms[name].addEventListener('submit', guard(async (event) => {
     event.preventDefault();
     const btn = forms[name].querySelector('[type="submit"]');
     if (btn) btn.disabled = true;
     try {
-      const updated = await api(`/api/settings/system/${endpointName}`, { method: 'PUT', body: JSON.stringify(payloadFor(forms[name])) });
-      const defaults = name === 'retention' ? FORM_DEFAULTS.recording : FORM_DEFAULTS[name];
-      fillForm(forms[name], updated, defaults);
-      if (name === 'live') {
-        syncPixelThresholdPresets(forms.live);
-        syncLiveFieldDependencies();
+      const body = payloadBuilder ? payloadBuilder() : payloadFor(forms[name]);
+      const updated = await api(`/api/settings/system/${endpointName}`, { method: 'PUT', body: JSON.stringify(body) });
+      if (renderer) {
+        // The GPU Health form edits Celsius values in the account's
+        // temperature unit, so its renderer also rewrites the labels/bounds.
+        renderer(updated);
+      } else {
+        const defaults = name === 'retention' ? FORM_DEFAULTS.recording : FORM_DEFAULTS[name];
+        fillForm(forms[name], updated, defaults);
+        if (name === 'live') {
+          syncPixelThresholdPresets(forms.live);
+          syncLiveFieldDependencies();
+        }
       }
       setMessage(`${label} settings saved.`);
     } finally {
@@ -752,13 +759,86 @@ function bindForm(name, label, endpointName = name) {
   }));
 }
 
+// GPU Health thresholds are stored in Celsius (nvidia-smi, the payload
+// validators and the Admin > System card all use Celsius) but edited in the
+// account's temperature unit. renderGpuHealth() shows the saved values in that
+// unit and rewrites the labels, min/max bounds, placeholders and help text to
+// match; gpuPayload() converts the submitted values back to Celsius.
+const GPU_TEMP_FIELDS = [
+  { name: 'gpu_temp_warn_c', defaultC: 85, minC: 30, maxC: 120 },
+  { name: 'gpu_temp_critical_c', defaultC: 90, minC: 40, maxC: 150 },
+];
+
+// Whole degrees in the display unit ('' when the stored value is unusable).
+function gpuUnitText(celsius, unit) {
+  const value = daygleTemperatureInUnit(celsius, unit);
+  return value === null ? '' : String(Math.round(value));
+}
+
+function renderGpuHealth(system = {}) {
+  const form = forms.gpu;
+  if (!form) return;
+  const unit = getDaygleTempUnit();
+  const symbol = daygleTemperatureSymbol(unit);
+  const values = system || {};
+  for (const field of GPU_TEMP_FIELDS) {
+    const input = form.elements[field.name];
+    if (!input) continue;
+    const celsius = values[field.name] ?? FORM_DEFAULTS.gpu[field.name] ?? field.defaultC;
+    input.value = gpuUnitText(celsius, unit);
+    input.min = gpuUnitText(field.minC, unit);
+    input.max = gpuUnitText(field.maxC, unit);
+    input.placeholder = gpuUnitText(field.defaultC, unit);
+  }
+  const warnDefault = formatTemperature(85, { unit });
+  const criticalDefault = formatTemperature(90, { unit });
+  const labels = {
+    gpuWarnLabel: `Warn Temperature (${symbol})`,
+    gpuCriticalLabel: `Critical Temperature (${symbol})`,
+  };
+  for (const [id, text] of Object.entries(labels)) {
+    const label = document.getElementById(id);
+    if (label) label.textContent = text;
+  }
+  const tips = {
+    gpuWarnTip: `The dashboard GPU card turns amber at this temperature. Default: ${warnDefault}`,
+    gpuCriticalTip: `The dashboard GPU card turns red at this temperature - treat it as the card's throttle limit (the Tesla P4 throttles at ~${criticalDefault}). Default: ${criticalDefault}`,
+  };
+  for (const [id, text] of Object.entries(tips)) {
+    const tip = document.getElementById(id);
+    if (!tip) continue;
+    tip.dataset.tip = text;
+    tip.title = text;
+    tip.setAttribute('aria-label', `Help: ${text}`);
+  }
+  const help = document.getElementById('gpuHealthHelp');
+  if (help) {
+    help.textContent = `These values apply to the GPU card on Admin → System. The defaults match the Tesla P4's ~${criticalDefault} throttle ceiling; tune them to your own card's limit.`;
+    help.title = help.textContent;
+  }
+}
+
+// payloadFor() parses the inputs as integers in the display unit; the API
+// stores Celsius, so convert the thresholds back before sending them.
+function gpuPayload() {
+  const data = payloadFor(forms.gpu);
+  const unit = getDaygleTempUnit();
+  for (const field of GPU_TEMP_FIELDS) {
+    const value = data[field.name];
+    if (value === undefined) continue;
+    const celsius = daygleTemperatureFromUnit(value, unit);
+    data[field.name] = celsius === null ? value : Math.round(celsius);
+  }
+  return data;
+}
+
 bindForm('live', 'Live');
 bindForm('recording', 'Recording');
 bindForm('retention', 'Retention', 'recording');
 bindForm('storage', 'Storage');
 bindForm('auth', 'Login security');
 bindForm('network', 'LAN & proxy');
-bindForm('gpu', 'GPU health');
+bindForm('gpu', 'GPU health', 'gpu', gpuPayload, renderGpuHealth);
 
 // Refill the Live Performance form from FORM_DEFAULTS.live (the same source
 // loadSettings() falls back to when the API omits a key). The change only

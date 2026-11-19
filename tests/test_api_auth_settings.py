@@ -360,6 +360,43 @@ def test_profile_update_and_password_change(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_profile_temperature_unit_preference(tmp_path, monkeypatch):
+    """The Celsius/Fahrenheit display choice is stored per account and returned
+    by both the profile update and /api/auth/me, so every page can render
+    temperature readouts in the user's chosen unit."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        status, _headers, profile = client.request(
+            "/api/profile",
+            method="PUT",
+            json_body={"temp_unit": "f"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert profile["temp_unit"] == "f"
+
+        status, _headers, me = client.request("/api/auth/me")
+        assert status == 200
+        assert me["user"]["temp_unit"] == "f"
+
+        status, _headers, body = client.request(
+            "/api/profile",
+            method="PUT",
+            json_body={"temp_unit": "kelvin"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 400
+        assert "Temperature unit must be c or f." in body["detail"]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)

@@ -99,7 +99,9 @@ function renderVideoDecode(status) {
 // the host has no NVIDIA GPU (or nvidia-smi is unavailable) the backend
 // returns null and the card is hidden entirely. Thermal status comes from
 // the backend (warn >= 85 C, critical >= 90 C - the Tesla P4 throttle
-// ceiling), driving the card's warning styling and message.
+// ceiling), driving the card's warning styling and message. Temperatures are
+// rendered in the user's Profile temperature unit (Celsius/Fahrenheit) via
+// formatTemperature() from utils.js; the backend always reports Celsius.
 function renderGpuStatus(gpu) {
   if (!els.gpuValue) return;
   const primary = gpu?.primary;
@@ -114,7 +116,7 @@ function renderGpuStatus(gpu) {
   els.gpuCard?.classList.toggle('stat-card-danger', status === 'critical');
 
   const temp = primary.temperature_c;
-  els.gpuValue.textContent = Number.isFinite(temp) ? `${Math.round(temp)}°C` : ' - ';
+  els.gpuValue.textContent = Number.isFinite(temp) ? formatTemperature(temp) : ' - ';
 
   const detail = [];
   if (Number.isFinite(primary.utilization_percent)) detail.push(`${Math.round(primary.utilization_percent)}% util`);
@@ -131,9 +133,9 @@ function renderGpuStatus(gpu) {
   const criticalTemp = Number.isFinite(gpu?.critical_temp_c) ? gpu.critical_temp_c : 90;
   if (els.gpuSub) {
     if (status === 'critical') {
-      els.gpuSub.textContent = `At ${criticalTemp}°C throttle limit - reduce load or improve airflow`;
+      els.gpuSub.textContent = `At ${formatTemperature(criticalTemp)} throttle limit - reduce load or improve airflow`;
     } else if (status === 'warn') {
-      els.gpuSub.textContent = `Approaching ${criticalTemp}°C throttle limit - check airflow`;
+      els.gpuSub.textContent = `Approaching ${formatTemperature(criticalTemp)} throttle limit - check airflow`;
     } else {
       els.gpuSub.textContent = detail.length ? detail.join(' · ') : 'Graphics card';
     }

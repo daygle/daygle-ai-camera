@@ -201,11 +201,13 @@ window.daygleAuthReady = (async () => {
     // Propagate display preferences so utils.formatDate honours the
     // user's chosen date_format / time_format on every page (dashboard,
     // events, alerts, recordings, etc.) - not just the ones that already
-    // implemented their own local formatters.
+    // implemented their own local formatters - and so temperature readouts
+    // (the GPU card on Admin > System) use the chosen Celsius/Fahrenheit unit.
     if (typeof window.setDaygleDatePrefs === 'function') {
       window.setDaygleDatePrefs({
         date_format: user?.date_format || 'locale',
         time_format: user?.time_format || '24h',
+        temp_unit: user?.temp_unit || 'c',
       });
     }
     // scheduleNextAuthRefresh is idempotent and respects the cached token -

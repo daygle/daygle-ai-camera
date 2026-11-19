@@ -58,6 +58,7 @@ async def update_profile(request: Request, auth=Depends(get_auth)):
             date_format=payload.get('date_format'),
             time_format=payload.get('time_format'),
             theme=payload.get('theme'),
+            temp_unit=payload.get('temp_unit'),
             # H4 fix: forward the optional ``current_password`` field so
             # ``auth.update_profile`` can verify it when the request
             # actually changes email or username. Non-sensitive updates

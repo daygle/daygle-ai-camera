@@ -1963,12 +1963,76 @@ function setDaygleDatePrefs(prefs) {
   else if (prefs.dateFormat) window.daygleDatePrefs.dateFormat = prefs.dateFormat;
   if (prefs.time_format) window.daygleDatePrefs.timeFormat = prefs.time_format;
   else if (prefs.timeFormat) window.daygleDatePrefs.timeFormat = prefs.timeFormat;
+  if (prefs.temp_unit || prefs.tempUnit) {
+    setDaygleTempUnit(prefs.temp_unit || prefs.tempUnit);
+  }
   // Pages that already render can opt-in to a refresh hook (e.g. to redraw
   // timestamps after the user changes their profile). The hook is no-op by
   // default; pages override it on demand.
   if (typeof window.daygleDatePrefsChanged === 'function') {
     try { window.daygleDatePrefsChanged(window.daygleDatePrefs); } catch (_err) { /* ignore */ }
   }
+}
+
+// ─── Temperature display unit (Celsius / Fahrenheit) ──────────────────────
+// The per-account choice saved on the Profile page (users.temp_unit) decides
+// how temperatures are shown - the GPU card on Admin > System and the GPU
+// Health thresholds on Settings > Maintenance. Everything stored or
+// configured in the app stays in Celsius (nvidia-smi reports Celsius and the
+// GPU Health thresholds are stored in Celsius), so this layer only converts
+// for display and back when a form is submitted. Seeded on every page by
+// nav.js alongside the date/time preferences and carried on the same
+// cross-tab broadcast below.
+window.daygleTempUnit = 'c';
+
+function normalizeDaygleTempUnit(unit) {
+  return String(unit || '').trim().toLowerCase() === 'f' ? 'f' : 'c';
+}
+
+function setDaygleTempUnit(unit) {
+  window.daygleTempUnit = normalizeDaygleTempUnit(unit);
+}
+
+function getDaygleTempUnit() {
+  return window.daygleTempUnit;
+}
+
+function daygleTemperatureSymbol(unit = window.daygleTempUnit) {
+  return normalizeDaygleTempUnit(unit) === 'f' ? '°F' : '°C';
+}
+
+// Celsius → the user's unit, or null for a missing/non-numeric reading so
+// callers can render their own placeholder.
+function daygleTemperatureInUnit(celsius, unit = window.daygleTempUnit) {
+  // ``Number(null)`` and ``Number('')`` are both 0, which would render a
+  // missing reading as a real 0 °C - treat those (and booleans) as absent.
+  if (celsius === null || celsius === undefined || typeof celsius === 'boolean') return null;
+  if (typeof celsius === 'string' && celsius.trim() === '') return null;
+  const value = Number(celsius);
+  if (!Number.isFinite(value)) return null;
+  return normalizeDaygleTempUnit(unit) === 'f' ? ((value * 9) / 5) + 32 : value;
+}
+
+// The user's unit → Celsius, or null for a missing/non-numeric value. Forms
+// that edit a stored Celsius setting (GPU Health thresholds) use this on
+// submit so the API keeps receiving Celsius. Unrounded: callers decide the
+// precision (the integer settings round).
+function daygleTemperatureFromUnit(value, unit = window.daygleTempUnit) {
+  if (value === null || value === undefined || typeof value === 'boolean') return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return normalizeDaygleTempUnit(unit) === 'f' ? ((numeric - 32) * 5) / 9 : numeric;
+}
+
+// Display-ready temperature, e.g. "85°C" / "185°F". ``decimals`` defaults to
+// 0 because GPU readings are whole degrees.
+function formatTemperature(celsius, options = {}) {
+  const unit = options.unit ?? window.daygleTempUnit;
+  const decimals = Number.isInteger(options.decimals) ? options.decimals : 0;
+  const value = daygleTemperatureInUnit(celsius, unit);
+  if (value === null) return '-';
+  return `${value.toFixed(decimals)}${daygleTemperatureSymbol(unit)}`;
 }
 
 // ─── Cross-tab broadcast (Profile page → every other open Daygle tab) ──────
@@ -2000,6 +2064,7 @@ function broadcastDaygleDatePrefs(prefs) {
     type: DAYGLE_PREFS_MESSAGE_TYPE,
     dateFormat: prefs.dateFormat || prefs.date_format || window.daygleDatePrefs.dateFormat,
     timeFormat: prefs.timeFormat || prefs.time_format || window.daygleDatePrefs.timeFormat,
+    tempUnit: prefs.tempUnit || prefs.temp_unit || window.daygleTempUnit,
   });
   if (typeof BroadcastChannel === 'function') {
     try {
@@ -2021,6 +2086,7 @@ function subscribeDaygleDatePrefs() {
     setDaygleDatePrefs({
       date_format: data.dateFormat,
       time_format: data.timeFormat,
+      temp_unit: data.tempUnit,
     });
   }
   if (typeof BroadcastChannel === 'function') {
@@ -2380,6 +2446,8 @@ window.daygleUi = {
   // User-facing date/time renderers (honour daygleDatePrefs)
   formatUserDate, formatUserTime, formatDate, formatDateTime, formatUserClock,
   setDaygleDatePrefs, getDaygleDatePrefs,
+  // Temperature display unit (Profile preference; GPU card on Admin > System)
+  formatTemperature, daygleTemperatureSymbol, daygleTemperatureInUnit, daygleTemperatureFromUnit, setDaygleTempUnit, getDaygleTempUnit,
   // Date-range "since" bounds (alerts page + dashboard share these)
   daygleSinceParamForRange, daygleLocalDayStartIso,
   // Behavioural tripwire geometry + normalisation (Zones canvas ↔ backend)

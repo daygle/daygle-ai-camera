@@ -28,7 +28,7 @@
         <div class="settings-section-icon">👤</div>
         <div>
           <h2>Profile Details</h2>
-          <p class="settings-section-subtitle">Update your name, email, timezone, and date/time display preferences.</p>
+          <p class="settings-section-subtitle">Update your name, email, timezone, and date, time and temperature display preferences.</p>
         </div>
       </div>
       <div id="profileMessage" class="muted"></div>
@@ -81,6 +81,12 @@
             <option value="system">System</option>
             <option value="light">Light</option>
             <option value="dark">Dark</option>
+          </select></label>
+        <label>
+          <span>Temperature Unit <span class="info-tip" data-tip="Celsius (°C) or Fahrenheit (°F) for temperature readouts such as the GPU card on Admin → System. Default: Celsius" title="Celsius (°C) or Fahrenheit (°F) for temperature readouts such as the GPU card on Admin → System. Default: Celsius" tabindex="0" aria-label="Help: Celsius or Fahrenheit for temperature readouts such as the GPU card on Admin → System. Default: Celsius"></span></span>
+          <select name="temp_unit">
+            <option value="c">Celsius (°C)</option>
+            <option value="f">Fahrenheit (°F)</option>
           </select></label>
       </form>
       <div class="button-row">

@@ -210,6 +210,7 @@ class AuthService:
                     date_format TEXT NOT NULL DEFAULT 'locale',
                     time_format TEXT NOT NULL DEFAULT '24h',
                     theme TEXT NOT NULL DEFAULT 'light',
+                    temp_unit TEXT NOT NULL DEFAULT 'c',
                     ntfy_topic TEXT NOT NULL DEFAULT '',
                     failed_attempts INTEGER NOT NULL DEFAULT 0,
                     locked_until TEXT,
@@ -270,6 +271,14 @@ class AuthService:
             # The CREATE TABLE above already includes it for fresh installs.
             try:
                 db.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'light'")
+            except sqlite3.OperationalError as exc:
+                if 'duplicate column name' not in str(exc).lower():
+                    raise
+            # Migration: per-account temperature display unit ('c' or 'f')
+            # for temperature readouts such as the GPU card on Admin > System.
+            # Like theme, it follows the user across devices.
+            try:
+                db.execute("ALTER TABLE users ADD COLUMN temp_unit TEXT NOT NULL DEFAULT 'c'")
             except sqlite3.OperationalError as exc:
                 if 'duplicate column name' not in str(exc).lower():
                     raise
@@ -428,7 +437,7 @@ class AuthService:
     def get_user(self, user_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute(
-                "SELECT id, username, first_name, last_name, email, ntfy_topic, role, is_active, timezone, date_format, time_format, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users WHERE id = ?",
+                "SELECT id, username, first_name, last_name, email, ntfy_topic, role, is_active, timezone, date_format, time_format, temp_unit, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users WHERE id = ?",
                 (user_id,),
             ).fetchone()
             return dict(row) if row else None
@@ -565,6 +574,7 @@ class AuthService:
         date_format: str | None = None,
         time_format: str | None = None,
         theme: str | None = None,
+        temp_unit: str | None = None,
         current_password: str | None = None,
         ntfy_topic: str | None = None,
     ) -> dict[str, Any]:
@@ -588,6 +598,7 @@ class AuthService:
             ('date format', date_format),
             ('time format', time_format),
             ('theme', theme),
+            ('temperature unit', temp_unit),
             ('current password', current_password),
             ('ntfy topic', ntfy_topic),
         ):
@@ -661,6 +672,11 @@ class AuthService:
                 raise AuthError("Theme must be system, light, or dark.")
             updates.append("theme = ?")
             params.append(theme)
+        if temp_unit is not None:
+            if temp_unit not in {"c", "f"}:
+                raise AuthError("Temperature unit must be c or f.")
+            updates.append("temp_unit = ?")
+            params.append(temp_unit)
         if not updates:
             # ``existing`` was already loaded at the top of the method
             # for the H4 current-password gate; reuse it here so we
@@ -930,7 +946,7 @@ class AuthService:
             row = db.execute(
                 """
                 SELECT s.session_token, s.csrf_token, s.expires_at, s.absolute_expires_at, s.last_seen_at, s.created_at AS session_created_at, u.id, u.username, u.role, u.is_active,
-                       u.first_name, u.last_name, u.email, u.ntfy_topic, u.timezone, u.date_format, u.time_format, u.theme
+                       u.first_name, u.last_name, u.email, u.ntfy_topic, u.timezone, u.date_format, u.time_format, u.theme, u.temp_unit
                 FROM user_sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.session_token = ?
@@ -1079,4 +1095,5 @@ class AuthService:
             "date_format": row["date_format"],
             "time_format": row["time_format"],
             "theme": row["theme"],
+            "temp_unit": row["temp_unit"] if "temp_unit" in row.keys() else "c",
         }

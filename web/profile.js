@@ -29,6 +29,7 @@ function renderProfile(user) {
   profileForm.elements.date_format.value = u.date_format || 'locale';
   profileForm.elements.time_format.value = u.time_format || '24h';
   profileForm.elements.theme.value = u.theme || 'light';
+  profileForm.elements.temp_unit.value = u.temp_unit === 'f' ? 'f' : 'c';
   const fullName = [u.first_name, u.last_name].filter(Boolean).join(' ');
   // Each row is built via ``safeHtml`` (web/utils.js) so server-supplied
   // fields (username, role, timezone, etc.) can't smuggle HTML into the
@@ -44,6 +45,7 @@ function renderProfile(user) {
     safeHtml`<div><span>Role</span><strong>${u.role || ''}</strong></div>`,
     safeHtml`<div><span>Timezone</span><strong>${u.timezone || 'Australia/Sydney'}</strong></div>`,
     safeHtml`<div><span>Date/Time</span><strong>${titleCase(u.date_format || 'locale')} / ${u.time_format || '24h'}</strong></div>`,
+    safeHtml`<div><span>Temperature</span><strong>${u.temp_unit === 'f' ? 'Fahrenheit' : 'Celsius'}</strong></div>`,
   );
   summaryEl.innerHTML = rows.join('');
 }
@@ -70,18 +72,20 @@ profileForm.addEventListener('submit', async (event) => {
     // Clear the current-password field on success so the typed secret does
     // not linger in the form (renderProfile does not touch this field).
     if (profileForm.elements.current_password) profileForm.elements.current_password.value = '';
-    // Apply the new display preferences locally so this tab's timestamps
-    // refresh immediately, then broadcast so every other open Daygle tab
-    // re-renders without a manual refresh.
+    // Apply the new display preferences locally so this tab's timestamps and
+    // temperature readouts refresh immediately, then broadcast so every other
+    // open Daygle tab re-renders without a manual refresh.
     // utils.js is loaded by profile.html before this script, so
     // setDaygleDatePrefs + broadcastDaygleDatePrefs are reliably available.
     window.setDaygleDatePrefs({
       date_format: updated.date_format,
       time_format: updated.time_format,
+      temp_unit: updated.temp_unit,
     });
     window.broadcastDaygleDatePrefs({
       dateFormat: updated.date_format,
       timeFormat: updated.time_format,
+      tempUnit: updated.temp_unit,
     });
     // Apply theme preference immediately and broadcast to other tabs.
     if (updated.theme && typeof window.setDaygleThemePref === 'function') {
