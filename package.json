@@ -10,13 +10,13 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.14.0",
+    "eslint": "^10.15.0",
     "globals": "^17.14.0"
   },
   "engines": {
     "node": ">=22"
   },
   "overrides": {
-    "minimatch": "^11.0.1"
+    "minimatch": "^11.0.9"
   }
 }

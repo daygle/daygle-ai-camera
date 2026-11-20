@@ -1,4 +1,4 @@
-fastapi>=0.162.5,<1.0
+fastapi>=0.165.0,<1.0
 uvicorn[standard]>=0.54.0,<1.0
 PyYAML>=6.0.3,<7.0
 bcrypt>=5.0.0,<6.0  # 5.0+ raises ValueError for passwords > 72 bytes (guard in auth.py)
@@ -21,7 +21,7 @@ numpy>=2.2.6,<2.3
 # in scripts/install_python_deps.sh -- bump both together, and only after
 # confirming the target GPUs are still supported by the newer release.
 onnxruntime>=1.20.1,<1.21
-onnx>=1.23.1,<2.0
+onnx>=1.23.2,<2.0
 # torch.onnx._internal.exporter (used by Ultralytics YOLO.export)
 # imports onnxscript at module load; not pulled in by ``onnx`` itself.
 onnxscript>=0.7.2,<1.0
@@ -69,16 +69,31 @@ onnxscript>=0.7.2,<1.0
 # byte-identical graph once the date/version metadata is stripped, equal
 # initializer hashes, and byte-identical ORT 1.20.1 CPU output on fixed inputs.
 # The fp16 (quantize=16) export path needs a CUDA host and was not A/B-checked.
-ultralytics==8.4.211
+# Bumped to 8.4.216 on 2026-11-20 after reviewing the upstream release notes
+# (8.4.212-8.4.216: OCR language packs, a Models tab, EXIF orientation on
+# image reads, box-local segmentation masks, STM32/stedgeai export, ROCm
+# training layout, TorchScript-on-torch-2.16 fixes - none of them on our ONNX
+# export path and no export-kwarg renames or minimum Python/torch bump) and
+# validating an A/B export: yolo11n exported with this repo's exact kwargs
+# (format='onnx', nms=None, opset=13, simplify=False, imgsz=640) under 8.4.211
+# vs 8.4.216 on torch 2.15.0+cpu / numpy 2.2.6 / onnx 1.23.2 produces a
+# byte-identical graph (sha256 96cc3cfa..., the date/version metadata
+# stripped), equal initializer hashes (175 tensors), and bit-identical ORT
+# 1.20.1 CPU output on a fixed random input.
+ultralytics==8.4.216
 # Bumped to the 5.x line on 2026-07-27. Audited every cv2 symbol this repo
 # uses (imdecode/imencode, cvtColor, resize INTER_NEAREST/LINEAR, rectangle,
 # putText/getTextSize, VideoWriter[_fourcc], VideoCapture + CAP_PROP_BUFFERSIZE,
 # IMWRITE_JPEG_QUALITY, LINE_AA) against 5.0.0 -- all present and behavior-
 # compatible. The 5.x text-rendering / nearest-neighbor changes only alter
 # exact pixel values; no test here asserts pixel-exact output, so they are a
-# no-op for us. Cap below 6.0 so a future major bump gets the same review.
-opencv-python-headless>=5.0.0.93,<6.0
-python-multipart>=0.0.33,<1.0
+# no-op for us. Re-audited the same symbol list against 5.1.0.95 on 2026-11-20
+# (attribute sweep plus a JPEG encode/decode, gray/CLAHE/merge, MOG2,
+# connected-components, VideoWriter/VideoCapture and putText/getTextSize
+# smoke run): all present, same shapes and behavior. Cap below 6.0 so a future
+# major bump gets the same review.
+opencv-python-headless>=5.1.0.95,<6.0
+python-multipart>=0.0.34,<1.0
 sounddevice>=0.5.6,<1.0
 # CPU-only YAMNet sound classifier runtime.
 ai-edge-litert>=2.3.0,<3.0

@@ -9,13 +9,13 @@
 #
 # Used by scripts/install_test_deps.sh and the web-auth job in
 # .github/workflows/python-app.yml, so a local run and CI resolve the same set.
-fastapi>=0.162.5,<1.0
+fastapi>=0.165.0,<1.0
 uvicorn>=0.54.0,<1.0
 PyYAML>=6.0.3,<7.0
 bcrypt>=5.0.0,<6.0
-python-multipart>=0.0.33,<1.0
+python-multipart>=0.0.34,<1.0
 numpy>=2.2.6,<2.3
-opencv-python-headless>=5.0.0.93,<6.0
+opencv-python-headless>=5.1.0.95,<6.0
 Pillow>=13.0.0,<14.0
 pytest
 pytest-cov
