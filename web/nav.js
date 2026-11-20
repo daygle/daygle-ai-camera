@@ -373,6 +373,7 @@ window.daygleAuthReady = (async () => {
 
   /* ── Build HTML ── */
   let html = `
+    <a class="skip-link" href="#daygle-main">Skip to main content</a>
     <div class="app-topbar">
       <button class="app-nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
@@ -441,6 +442,10 @@ window.daygleAuthReady = (async () => {
   /* ── Page tab strip for the current section ── */
   const tabGroup = PAGE_TABS.find((tabs) => tabs.some((tab) => (tab.match ? tab.match(currentPath) : pathMatchesNav(currentPath, tab.href))));
   const main = document.querySelector('main');
+  if (main) {
+    main.id ||= 'daygle-main';
+    main.tabIndex = -1;
+  }
   if (tabGroup && main) {
     const strip = document.createElement('nav');
     strip.className = 'page-tabs';
