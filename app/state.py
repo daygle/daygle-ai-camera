@@ -5,8 +5,12 @@ or compile-time constants without pulling in ``app.main`` import this module
 directly.
 
 Rules:
-- No imports from other ``app.*`` modules (only stdlib + TYPE_CHECKING).
-- Module-level declarations only; no functions.
+- No imports from other ``app.*`` modules, with one deliberate exception: the
+  leaf module ``app.motion_object_priority`` at the bottom of this file. It
+  imports only the standard library (no ``app.*``), so it cannot close an
+  import cycle back into this registry. Everything else stays stdlib-only.
+- Module-level declarations only; no functions, apart from the small
+  runtime-delete token helpers at the end.
 - Singletons are set to ``None`` here and populated by ``app.main`` after
   each object is constructed.
 """

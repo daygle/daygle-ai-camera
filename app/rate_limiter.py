@@ -278,10 +278,9 @@ class SlidingWindowRateLimiter:
     but that matches Daygle's single-writer deployment shape.
     """
 
-    def __init__(self, *, max_requests: int, window_seconds: float, name: str = 'sw', global_evict_interval: float = _GLOBAL_EVICT_INTERVAL_SECONDS) -> None:
+    def __init__(self, *, max_requests: int, window_seconds: float, global_evict_interval: float = _GLOBAL_EVICT_INTERVAL_SECONDS) -> None:
         self._max = int(max_requests)
         self._window = float(window_seconds)
-        self._name = name
         self._lock = threading.Lock()
         self._hits: dict[str, deque[float]] = {}
         self._global_evict_interval = max(0.0, float(global_evict_interval))
@@ -337,14 +336,14 @@ class SlidingWindowRateLimiter:
 # per-IP. ``SlidingWindowRateLimiter`` has no runtime ``apply_config`` (unlike
 # the login ``IPRateLimiter``); adjust the constructor arguments here to retune.
 admin_limiter = SlidingWindowRateLimiter(
-    max_requests=60, window_seconds=60, name='admin',
+    max_requests=60, window_seconds=60,
 )
 
 # Round-5 / M3: setup-endpoint brute-force throttle, 10 POSTs per 5
 # minutes per IP. Reasonable for LAN first-admin bootstrap (typos,
 # password recalculation) while still bounding the brute-force window.
 setup_limiter = SlidingWindowRateLimiter(
-    max_requests=10, window_seconds=300, name='setup',
+    max_requests=10, window_seconds=300,
 )
 
 

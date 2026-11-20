@@ -83,8 +83,8 @@ test('dropped boxes show only around the check that dropped them', () => {
 
 test('log times read as minutes:seconds', () => {
   const log = load();
-  assert.equal(log.formatLogTime(0), '0:00.0');
-  assert.equal(log.formatLogTime(75.25), '1:15.3');
+  assert.equal(log.formatDetectionLogTime(0), '0:00.0');
+  assert.equal(log.formatDetectionLogTime(75.25), '1:15.3');
 });
 
 test('dropped entries lead with their tracker id so a parked car reads as itself', () => {

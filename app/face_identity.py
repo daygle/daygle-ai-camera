@@ -117,7 +117,7 @@ def _maybe_enrich_person(
         _store_enriched_embedding,
         # Copy the crop: a view would pin the whole frame in memory while the
         # job waits and read whatever the frame buffer holds when it runs.
-        person_id, camera_id, track_id, dict(detection), _detached(crop_bgr), service,
+        person_id, camera_id, track_id, _detached(crop_bgr), service,
         priority=PRIORITY_BACKGROUND,
         label=f'enriched-embedding-{camera_id}',
         block=False,
@@ -138,7 +138,6 @@ def _store_enriched_embedding(
     person_id: int,
     camera_id: str,
     track_id: Any,
-    detection: dict[str, Any],
     crop_bgr: Any,
     service: Any,
 ) -> None:

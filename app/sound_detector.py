@@ -894,7 +894,7 @@ class SoundDetector:
         buffer = np.zeros(chunk_samples, dtype=np.float32)
         buffer_lock = threading.Lock()
 
-        def _callback(indata: np.ndarray, frames: int, time_info: Any, status: Any) -> None:
+        def _callback(indata: np.ndarray, frames: int, _time_info: Any, status: Any) -> None:
             if status:
                 logger.debug('sounddevice status: %s', status)
             flat = indata[:, 0] if indata.ndim > 1 else indata.flatten()

@@ -405,8 +405,9 @@ class OpenCvStreamCamera:
             or now - self._last_capture_failure_log_at >= CAPTURE_FAILURE_LOG_INTERVAL_SECONDS
         ):
             logger.warning(
-                'RTSP capture returned no usable frame (%s consecutive failure%s); '
+                'RTSP capture returned no usable frame (%s; %s consecutive failure%s); '
                 'reconnecting capture.',
+                reason,
                 self._consecutive_read_failures,
                 '' if self._consecutive_read_failures == 1 else 's',
             )
