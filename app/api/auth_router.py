@@ -157,6 +157,12 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
 
 @router.post('/setup')
 async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(get_auth_enabled)):
+    # Once an administrator exists, setup is permanently closed. Answer that
+    # before touching the rate limiter so ordinary POSTs from an already-set-up
+    # install (stale links, scanners, browsers retrying a cached form) never
+    # spend the bootstrap budget and cannot push a real operator into 429.
+    if await run_in_threadpool(auth.users_exist):
+        return RedirectResponse('/login', status_code=303)
     # round-5 / M3: per-IP setup brute-force throttle. 10 POSTs per 5
     # minutes per IP. The first-admin bootstrap is a one-time event; a
     # legitimate operator on a stable LAN typically issues <3 attempts;
@@ -192,8 +198,6 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
         )
     if setup_ip:
         setup_limiter.record(setup_ip)
-    if await run_in_threadpool(auth.users_exist):
-        return RedirectResponse('/login', status_code=303)
     data = await form_data(request)
     if not _csrf_double_submit_ok(data, request):
         return setup_page(request, 'Security token expired. Try again.', auth=auth, auth_enabled=auth_enabled)

@@ -145,3 +145,49 @@ def test_setup_rate_limited_writes_audit_row_without_spurious_warning(
     assert "Setup audit-log write failed" not in caplog.text
     rows = EventDatabase(db_path).list_audit_logs(limit=10)
     assert any(r["action"] == "setup_rate_limited" for r in rows)
+
+
+def test_setup_post_after_admin_exists_does_not_spend_rate_limit_budget(
+    monkeypatch, tmp_path
+):
+    """Setup POSTs on an already-configured install must not touch the limiter.
+
+    The bootstrap budget is 10 POSTs per 5 minutes per IP. Checking it before
+    the ``users_exist()`` short-circuit meant every stale link, scanner or
+    cached-form retry against a completed install consumed a slot, so a real
+    operator could be locked out of setup (or, later, login) for five minutes
+    by traffic that could never have created an account.
+    """
+    from starlette.requests import Request
+
+    import app.api.auth_router as auth_router
+    from app.auth import AuthService
+
+    auth = AuthService(str(tmp_path / "auth.sqlite3"), {})
+    auth.create_initial_admin("admin", "CorrectHorse1!", email="admin@example.test")
+
+    recorded: list[str] = []
+    monkeypatch.setattr(
+        auth_router.setup_limiter, "record", lambda key: recorded.append(key) or 1
+    )
+    # Even an IP already over budget must get the redirect, not a 429: the
+    # endpoint has nothing left to protect once an administrator exists.
+    monkeypatch.setattr(
+        auth_router.setup_limiter, "is_rate_limited", lambda key: True
+    )
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/setup",
+        "headers": [],
+        "client": ("203.0.113.7", 12345),
+        "query_string": b"",
+    }
+    response = asyncio.run(
+        auth_router.setup(Request(scope), auth=auth, auth_enabled=True)
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+    assert recorded == []
