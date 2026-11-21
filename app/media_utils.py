@@ -550,7 +550,8 @@ def newest_video_file(directory: Path | None) -> Path | None:
 # copy right after it is saved, one clip at a time and at low priority, so
 # opening it later is instant instead of waiting (possibly past a reverse
 # proxy's request timeout) for the conversion.
-_preconvert_queue: queue.Queue[Path] = queue.Queue()
+_PRECONVERT_MAX_PENDING = 64
+_preconvert_queue: queue.Queue[Path] = queue.Queue(maxsize=_PRECONVERT_MAX_PENDING)
 _preconvert_pending: set[str] = set()
 _preconvert_guard = threading.Lock()
 _preconvert_thread: threading.Thread | None = None
@@ -564,13 +565,17 @@ def schedule_playback_conversion(file_path: Path | str | None) -> bool:
     path = Path(file_path)
     key = str(path)
     with _preconvert_guard:
-        if key in _preconvert_pending:
+        if key in _preconvert_pending or len(_preconvert_pending) >= _PRECONVERT_MAX_PENDING:
             return False
         _preconvert_pending.add(key)
-        if _preconvert_thread is None or not _preconvert_thread.is_alive():
-            _preconvert_thread = threading.Thread(target=_preconvert_worker, name='playback-preconvert', daemon=True)
-            _preconvert_thread.start()
-    _preconvert_queue.put(path)
+        try:
+            if _preconvert_thread is None or not _preconvert_thread.is_alive():
+                _preconvert_thread = threading.Thread(target=_preconvert_worker, name='playback-preconvert', daemon=True)
+                _preconvert_thread.start()
+            _preconvert_queue.put_nowait(path)
+        except queue.Full:
+            _preconvert_pending.discard(key)
+            return False
     return True
 
 
