@@ -35,6 +35,21 @@ def test_resolve_email_recipients_uses_current_active_user_addresses():
     assert resolve_email_recipients([], users) == []
 
 
+def test_resolve_email_recipients_drops_a_literal_address_of_a_disabled_user():
+    from app.alert_dispatch import resolve_email_recipients
+
+    users = [
+        {'id': 1, 'email': 'one@example.com', 'is_active': 1},
+        {'id': 2, 'email': 'Two@Example.com', 'is_active': 0},
+    ]
+    # An address typed into a rule for an account that has since been disabled
+    # stops receiving, exactly like its ``user:<id>`` reference.
+    assert resolve_email_recipients(
+        ['TWO@example.com', 'ops@example.com'], users,
+    ) == ['ops@example.com']
+    assert resolve_email_recipients(['one@example.com', 'user:1'], users) == ['one@example.com']
+
+
 def test_deliver_email_alerts_follows_user_email_changes(tmp_path, monkeypatch):
     _app, _ = _load_app(tmp_path, monkeypatch)
     import app.alert_dispatch as _ad
@@ -140,6 +155,19 @@ def test_resolve_push_topics_uses_current_active_user_topics():
     ]
     assert resolve_push_topics(['user:1', 'user:2', 'user:3', 'user:4', 'user:99'], users) == ['alice-phone']
     assert resolve_push_topics([], users) == []
+
+
+def test_filter_inactive_push_topics_drops_a_disabled_users_topic():
+    from app.alert_recipients import filter_inactive_push_topics
+
+    users = [
+        {'id': 1, 'ntfy_topic': 'alice-phone', 'is_active': 1},
+        {'id': 2, 'ntfy_topic': 'bob-phone', 'is_active': 0},
+    ]
+    assert filter_inactive_push_topics(
+        ['bob-phone', 'alice-phone', 'alice-phone', 'ops'], users,
+    ) == ['alice-phone', 'ops']
+    assert filter_inactive_push_topics([], users) == []
 
 
 def test_ntfy_topic_is_validated_and_listed(tmp_path, monkeypatch):

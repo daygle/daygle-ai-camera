@@ -499,7 +499,8 @@ def deliver_email_alerts(
 
     def _send_rule_email(recipients: list[str], alert: dict[str, Any], kind: str) -> None:
         """Send one rule's email; per-recipient failures log and continue."""
-        recipients = resolve_email_recipients(recipients)
+        recipient_entries = recipients
+        recipients = resolve_email_recipients(recipient_entries)
         if not recipients:
             logger.debug(
                 'No email sent for event %s rule %r: none of its recipients has an active address',
@@ -525,6 +526,9 @@ def deliver_email_alerts(
             # retried later without duplicating an alert.
             alert_outbox.enqueue(
                 'email', event_id, alert, recipients=recipients,
+                # The rule's own entries: the retry resolves them again so a
+                # user disabled while the row waited is skipped.
+                recipient_entries=recipient_entries,
                 camera_name=camera_name, triggered_labels=all_triggered_labels,
                 detected_at=detected_at, error=str(exc),
             )
@@ -711,6 +715,9 @@ def deliver_push_notifications(
             # No topic accepted the push, so a later retry cannot duplicate it.
             alert_outbox.enqueue(
                 'push', event_id, alert, topics=topics,
+                # The rule's own ``user:<id>`` recipients: the retry resolves
+                # them again so a user disabled while the row waited is skipped.
+                push_entries=push_recipients,
                 camera_name=camera_name, camera_id=camera_id,
                 triggered_labels=all_triggered_labels, detected_at=detected_at,
                 error=str(exc),

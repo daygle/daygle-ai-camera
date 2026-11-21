@@ -51,6 +51,10 @@ class _ChannelDisabled(Exception):
     """The channel was switched off or unconfigured while the row waited."""
 
 
+class _RecipientsGone(Exception):
+    """Every chosen recipient is now deactivated or has no address / topic."""
+
+
 def _begin_delivery(row_ids: list[int]) -> set[int]:
     """Mark rows as being delivered; returns the ids this caller now owns."""
     with _in_flight_lock:
@@ -70,7 +74,9 @@ def enqueue(
     alert: dict[str, Any],
     *,
     recipients: list[str] | None = None,
+    recipient_entries: list[str] | None = None,
     topics: list[str] | None = None,
+    push_entries: list[str] | None = None,
     camera_name: str | None = None,
     camera_id: str | None = None,
     triggered_labels: list[str] | None = None,
@@ -83,6 +89,12 @@ def enqueue(
     or the same event/rule/label is already queued for this channel (a
     re-dispatch then adds nothing). A push with no ``topics`` is queued: that
     is the shared Settings topic, which the retry resolves when it runs.
+
+    ``recipients`` are the addresses resolved now (shown in the queue);
+    ``recipient_entries`` are the rule's own entries, kept so the retry can
+    resolve them again and skip a user disabled while the row waited. The same
+    pair applies to push: ``topics`` are the topics resolved now,
+    ``push_entries`` the rule's ``user:<id>`` recipients.
     """
     db = getattr(_state, 'database', None)
     if db is None:
@@ -94,7 +106,9 @@ def enqueue(
     payload = {
         'alert': alert,
         'recipients': list(recipients or []),
+        'recipient_entries': list(recipient_entries or []),
         'topics': list(topics or []),
+        'push_entries': list(push_entries or []),
         'camera_name': camera_name,
         'camera_id': camera_id,
         'triggered_labels': list(triggered_labels or []),
@@ -135,12 +149,23 @@ def _deliver_row(row: dict[str, Any]) -> None:
             raise _ChannelDisabled('email alerts are disabled or not configured')
         # Imported lazily: app.alert_dispatch imports this module.
         from app.alert_dispatch import _email_snapshot_bytes
+        from app.alert_recipients import resolve_email_recipients
         database = getattr(_state, 'database', None)
         event = (database.get_event(event_id) or {}) if database is not None else {}
+        # Resolve again instead of reusing the addresses frozen at enqueue
+        # time: a user disabled (or deleted, or whose address changed) while
+        # the row waited must not get the email. Rows queued before
+        # ``recipient_entries`` existed fall back to their resolved addresses,
+        # which is still filtered against deactivated accounts.
+        recipients = resolve_email_recipients(
+            payload.get('recipient_entries') or payload.get('recipients') or [],
+        )
+        if not recipients:
+            raise _RecipientsGone('every chosen recipient is deactivated or has no address')
         service.send_alert(
             alert,
             event_id=event_id,
-            recipients=list(payload.get('recipients') or []),
+            recipients=recipients,
             camera_name=payload.get('camera_name'),
             snapshot_bytes=_email_snapshot_bytes(event, event_id),
             triggered_labels=payload.get('triggered_labels'),
@@ -149,10 +174,27 @@ def _deliver_row(row: dict[str, Any]) -> None:
         return
     from app.config_facades import effective_push_notification_settings
     from app.push_notifications import PushNotificationService
+    from app.alert_recipients import filter_inactive_push_topics, resolve_push_topics
     settings = effective_push_notification_settings()
     service = PushNotificationService(settings)
     if not settings.get('enabled') or not service.configured():
         raise _ChannelDisabled('push notifications are disabled or not configured')
+    # Resolve again, as for email: a user disabled (or whose topic changed, or
+    # who was deleted) while the row waited must not be pushed to.
+    push_entries = list(payload.get('push_entries') or [])
+    if push_entries:
+        topics = resolve_push_topics(push_entries)
+        if not topics:
+            raise _RecipientsGone('every chosen user is deactivated or has no push topic')
+    elif payload.get('topics'):
+        # Rows queued before the rule's entries were kept carry only the topics
+        # resolved then; a deactivated user's topic still identifies them. An
+        # empty topic list means the shared Settings topic and is left alone.
+        topics = filter_inactive_push_topics(payload.get('topics'))
+        if not topics:
+            raise _RecipientsGone('every chosen user is deactivated or has no push topic')
+    else:
+        topics = []
     service.send_alert(
         alert,
         event_id=event_id,
@@ -160,7 +202,7 @@ def _deliver_row(row: dict[str, Any]) -> None:
         camera_id=payload.get('camera_id'),
         triggered_labels=payload.get('triggered_labels'),
         detected_at=payload.get('detected_at'),
-        topics=list(payload.get('topics') or []),
+        topics=topics,
     )
 
 
@@ -173,9 +215,10 @@ def _retry_row(row: dict[str, Any], now: float | None = None) -> dict[str, Any]:
     attempts = int(row.get('attempts') or 0) + 1
     try:
         _deliver_row(row)
-    except _ChannelDisabled as exc:
-        # The operator turned the channel off (or left it unconfigured) while
-        # the row waited: dropping is the honest outcome, not a week of rows.
+    except (_ChannelDisabled, _RecipientsGone) as exc:
+        # The operator turned the channel off (or left it unconfigured) or
+        # disabled every chosen recipient while the row waited: dropping is the
+        # honest outcome, not a week of rows.
         db.delete_alert_delivery(row_id)
         logger.info(
             'Dropping the queued %s alert for event %s: %s', channel, event_id, exc,

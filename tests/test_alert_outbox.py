@@ -184,6 +184,131 @@ def test_retry_drops_a_row_when_the_channel_was_disabled(db, monkeypatch):
     assert db.due_alert_deliveries(time.time() + 10 ** 9) == []
 
 
+def test_email_retry_skips_a_user_disabled_while_the_row_waited(db, monkeypatch):
+    """The queued row is re-resolved at send time, so disabling a user during
+    a relay outage does not deliver their queued alerts afterwards."""
+    outbox = _outbox()
+    state = importlib.import_module('app.state')
+    users = [{'id': 1, 'email': 'alice@example.com', 'is_active': 1}]
+    monkeypatch.setattr(state, 'auth', type('FakeAuth', (), {'list_users': staticmethod(lambda: users)})())
+    monkeypatch.setattr(db, 'get_event', lambda _event_id: {})
+
+    sent: list[list[str]] = []
+
+    class FakeEmailAlertService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def configured(self):
+            return True
+
+        def send_alert(self, _alert, *, recipients, **_kwargs):
+            sent.append(list(recipients))
+
+    email_alerts = importlib.import_module('app.email_alerts')
+    facades = importlib.import_module('app.config_facades')
+    monkeypatch.setattr(email_alerts, 'EmailAlertService', FakeEmailAlertService)
+    monkeypatch.setattr(
+        facades, 'effective_email_alert_settings',
+        lambda: {'enabled': True, 'host': 'smtp.example', 'from_address': 'alerts@example.com'},
+    )
+
+    outbox.enqueue(
+        'email', 41, _alert(),
+        recipients=['alice@example.com', 'ops@example.com'],
+        recipient_entries=['user:1', 'ops@example.com'],
+    )
+    users[0]['is_active'] = 0
+    assert outbox.retry_due(now=time.time() + 1) == 1
+    assert sent == [['ops@example.com']]
+
+    # Only the disabled user was chosen: the row is dropped, nothing is sent.
+    outbox.enqueue(
+        'email', 42, _alert(),
+        recipients=['alice@example.com'], recipient_entries=['user:1'],
+    )
+    assert outbox.retry_due(now=time.time() + 2) == 1
+    assert sent == [['ops@example.com']]
+    assert db.count_alert_deliveries() == 0
+
+
+def _fake_push_service(monkeypatch, sent):
+    class FakePushNotificationService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def configured(self):
+            return True
+
+        def send_alert(self, _alert, *, topics=None, **_kwargs):
+            sent.append(list(topics or []))
+
+    push = importlib.import_module('app.push_notifications')
+    facades = importlib.import_module('app.config_facades')
+    monkeypatch.setattr(push, 'PushNotificationService', FakePushNotificationService)
+    monkeypatch.setattr(
+        facades, 'effective_push_notification_settings',
+        lambda: {'enabled': True, 'server_url': 'https://ntfy.example', 'topic': 'shared'},
+    )
+
+
+def test_push_retry_skips_a_user_disabled_while_the_row_waited(db, monkeypatch):
+    """The queued push is re-resolved at send time, so disabling a user during
+    an ntfy outage does not push to them afterwards."""
+    outbox = _outbox()
+    state = importlib.import_module('app.state')
+    users = [
+        {'id': 1, 'ntfy_topic': 'alice-phone', 'is_active': 1},
+        {'id': 2, 'ntfy_topic': 'bob-phone', 'is_active': 1},
+    ]
+    monkeypatch.setattr(state, 'auth', type('FakeAuth', (), {'list_users': staticmethod(lambda: users)})())
+    sent: list[list[str]] = []
+    _fake_push_service(monkeypatch, sent)
+
+    outbox.enqueue(
+        'push', 51, _alert(), topics=['alice-phone', 'bob-phone'],
+        push_entries=['user:1', 'user:2'],
+    )
+    users[0]['is_active'] = 0
+    assert outbox.retry_due(now=time.time() + 1) == 1
+    assert sent == [['bob-phone']]
+
+    # Only the disabled user was chosen: the row is dropped, nothing is sent.
+    outbox.enqueue('push', 52, _alert(), topics=['alice-phone'], push_entries=['user:1'])
+    assert outbox.retry_due(now=time.time() + 2) == 1
+    assert sent == [['bob-phone']]
+    assert db.count_alert_deliveries() == 0
+
+
+def test_push_retry_filters_a_row_queued_with_only_its_topics(db, monkeypatch):
+    """Rows written before ``push_entries`` existed carry resolved topics; a
+    disabled user's topic is still dropped, while the shared topic is not."""
+    outbox = _outbox()
+    state = importlib.import_module('app.state')
+    users = [
+        {'id': 1, 'ntfy_topic': 'alice-phone', 'is_active': 0},
+        {'id': 2, 'ntfy_topic': 'bob-phone', 'is_active': 1},
+    ]
+    monkeypatch.setattr(state, 'auth', type('FakeAuth', (), {'list_users': staticmethod(lambda: users)})())
+    sent: list[list[str]] = []
+    _fake_push_service(monkeypatch, sent)
+
+    outbox.enqueue('push', 53, _alert(), topics=['alice-phone', 'bob-phone'])
+    assert outbox.retry_due(now=time.time() + 1) == 1
+    assert sent == [['bob-phone']]
+
+    # A row on the shared Settings topic (no chosen users) still goes out.
+    outbox.enqueue('push', 54, _alert())
+    assert outbox.retry_due(now=time.time() + 2) == 1
+    assert sent == [['bob-phone'], []]
+
+    # Every stored topic belonged to a disabled user: dropped.
+    outbox.enqueue('push', 55, _alert(), topics=['alice-phone'])
+    assert outbox.retry_due(now=time.time() + 3) == 1
+    assert sent == [['bob-phone'], []]
+    assert db.count_alert_deliveries() == 0
+
+
 def test_prune_drops_rows_past_the_retention_window(db):
     outbox = _outbox()
     outbox.enqueue('push', 13, _alert(), topics=['daygle-ops'])

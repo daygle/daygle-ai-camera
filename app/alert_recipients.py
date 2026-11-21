@@ -19,19 +19,30 @@ from app.utils import user_recipient_id
 logger = logging.getLogger('daygle.ai.alerts')
 
 
-def _users_by_id(
+def _user_list(
     entries: list[str], users: list[dict[str, Any]] | None,
-) -> dict[int, dict[str, Any]]:
-    """Index ``users`` by id, loading them from the auth store when not given
-    and some entry is a ``user:<id>`` reference."""
-    if users is None and any(user_recipient_id(entry) is not None for entry in entries):
+) -> list[dict[str, Any]]:
+    """The users to resolve against, loaded from the auth store when not given.
+
+    The list is needed for any send with recipients: a ``user:<id>`` reference
+    resolves through it, and a literal address or topic is checked against it
+    so a deactivated account stops receiving there.
+    """
+    if users is None and entries:
         auth = getattr(_state, 'auth', None)
         try:
             users = auth.list_users() if auth is not None else []
         except Exception as exc:  # noqa: BLE001 - the auth store is down: still send to literal addresses
             logger.warning('Could not load users to resolve alert recipients: %s', exc)
             users = []
-    return {int(user['id']): user for user in users or [] if user.get('id') is not None}
+    return list(users or [])
+
+
+def _users_by_id(
+    entries: list[str], users: list[dict[str, Any]] | None,
+) -> dict[int, dict[str, Any]]:
+    """Index ``users`` by id (see ``_user_list``)."""
+    return {int(user['id']): user for user in _user_list(entries, users) if user.get('id') is not None}
 
 
 def _active_user(users_by_id: dict[int, dict[str, Any]], entry: str) -> dict[str, Any] | None:
@@ -48,12 +59,22 @@ def resolve_email_recipients(
 
     ``user:<id>`` entries resolve to that user's CURRENT email, so a changed
     address is picked up straight away and a deactivated or deleted user, or
-    one without an address, is skipped. Literal addresses pass through.
-    Duplicates (case-insensitive) are dropped, keeping the first.
+    one without an address, is skipped. A literal address passes through
+    unless it is the address of a deactivated account (that account is
+    disabled, however its address was stored). Duplicates (case-insensitive)
+    are dropped, keeping the first.
     ``users`` defaults to the auth store's user list.
     """
     entries = [str(entry or '').strip() for entry in recipients or []]
     users_by_id = _users_by_id(entries, users)
+    # An address typed straight into a rule (rather than picked as
+    # ``user:<id>``) still belongs to that account: once it is deactivated the
+    # address must not keep receiving alerts.
+    inactive_addresses = {
+        str(user.get('email') or '').strip().lower()
+        for user in users_by_id.values()
+        if not user.get('is_active', 1) and '@' in str(user.get('email') or '')
+    }
     resolved: list[str] = []
     seen: set[str] = set()
     for entry in entries:
@@ -62,7 +83,7 @@ def resolve_email_recipients(
             if user is None:
                 continue
             entry = str(user.get('email') or '').strip()
-        if '@' not in entry or entry.lower() in seen:
+        if '@' not in entry or entry.lower() in seen or entry.lower() in inactive_addresses:
             continue
         seen.add(entry.lower())
         resolved.append(entry)
@@ -90,3 +111,28 @@ def resolve_push_topics(
         if topic and topic not in topics:
             topics.append(topic)
     return topics
+
+
+def filter_inactive_push_topics(
+    topics: list[str] | None,
+    users: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    """Drop stored ntfy topics that belong to a deactivated user.
+
+    A queued push row written before the rule's own entries were kept carries
+    only the topics resolved at enqueue time (see ``app.alert_outbox``), so a
+    user disabled while the row waited can only be recognised by their topic.
+    Topics of active users and topics that match no account pass through.
+    """
+    entries = [str(topic or '').strip() for topic in topics or []]
+    inactive_topics = {
+        str(user.get('ntfy_topic') or '').strip()
+        for user in _user_list(entries, users)
+        if not user.get('is_active', 1) and str(user.get('ntfy_topic') or '').strip()
+    }
+    kept: list[str] = []
+    for topic in entries:
+        if not topic or topic in inactive_topics or topic in kept:
+            continue
+        kept.append(topic)
+    return kept
