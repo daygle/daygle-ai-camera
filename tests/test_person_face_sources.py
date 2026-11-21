@@ -82,7 +82,7 @@ def test_auto_enrichment_stores_the_crop_it_learned_from(monkeypatch):
     monkeypatch.setattr('app.face_recognition_service.refresh_face_recognition_matcher', lambda: None)
     service = SimpleNamespace(model_id='m', embed_face=lambda _crop: np.ones(4, dtype=np.float32))
     crop = np.full((40, 40, 3), 128, dtype=np.uint8)
-    face_identity._store_enriched_embedding(7, 'cam', 3, {}, crop, service)
+    face_identity._store_enriched_embedding(7, 'cam', 3, crop, service)
     assert added['person_id'] == 7
     assert added['source_snapshot'].startswith('auto-enrich:')
     assert added['thumbnail'], 'the learned crop is kept as the face picture'

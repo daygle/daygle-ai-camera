@@ -546,9 +546,10 @@ function migrateLegacyFilterParam() {
   window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
 }
 
-// Kept page-local (not hoisted to utils.js): app.js and yamnet-tflite.js
-// define their own cameraLabel() with different signatures, and a shared
-// global would collide on the dashboard / yamnet pages.
+// Kept page-local (not hoisted to utils.js): utils.js exports a shared
+// cameraLabel() with a different signature, and timeline.js loads after it, so
+// this definition overrides the shared one on this page only. Everything else
+// on the page keeps calling the shared helper through utils' export object.
 function cameraLabel(recording) {
   const metadata = recording?.event?.metadata || {};
   return metadata.camera_name || recording.camera_id || recording.source || 'unknown';

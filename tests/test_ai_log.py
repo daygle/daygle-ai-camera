@@ -664,9 +664,25 @@ def _replacer(monkeypatch, module):
 
 def test_face_embedder_load_failure_reaches_the_ai_log(tmp_path, monkeypatch, caplog):
     import pathlib
+    import sys
+    from types import SimpleNamespace
 
     import app.face_recognition as fr
 
+    def _reject_model(*_args, **_kwargs):
+        raise RuntimeError('invalid ONNX model')
+
+    # Exercise the session-load failure regardless of whether the optional
+    # onnxruntime package is installed in this test environment.
+    monkeypatch.setitem(
+        sys.modules,
+        'onnxruntime',
+        SimpleNamespace(
+            SessionOptions=lambda: SimpleNamespace(),
+            get_available_providers=lambda: [],
+            InferenceSession=_reject_model,
+        ),
+    )
     events = _replacer(monkeypatch, fr)
     corrupt = tmp_path / 'arcface.onnx'
     corrupt.write_bytes(b'not an onnx model')

@@ -17,5 +17,11 @@ python-multipart>=0.0.34,<1.0
 numpy>=2.2.6,<2.3
 opencv-python-headless>=5.1.0.95,<6.0
 Pillow>=13.0.0,<14.0
+# Starlette's TestClient imports ``httpx2`` (falling back to ``httpx`` with a
+# deprecation warning). Neither is a runtime dependency of this app, and
+# ``requirements-test.txt`` is installed without ``requirements.txt``, so
+# without this pin ``fastapi.testclient`` raises at import time and every
+# suite that collects it fails before running a single test.
+httpx2>=2.0.0,<3.0
 pytest
 pytest-cov

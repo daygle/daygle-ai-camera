@@ -178,6 +178,17 @@ def test_gpu_conversion_falls_back_to_the_cpu(tmp_path, monkeypatch):
     assert output.exists()
 
 
+def test_background_conversion_rejects_work_when_backlog_is_full(tmp_path, monkeypatch):
+    clip = tmp_path / 'event_5.mp4'
+    clip.write_bytes(b'hevc')
+    monkeypatch.setattr(mu, '_PRECONVERT_MAX_PENDING', 1)
+    monkeypatch.setattr(mu, '_preconvert_pending', {'already-pending.mp4'})
+
+    assert mu.schedule_playback_conversion(clip) is False
+    assert mu._preconvert_pending == {'already-pending.mp4'}
+    assert mu._preconvert_queue.empty()
+
+
 def test_background_conversion_runs_once_per_clip(tmp_path, monkeypatch):
     done = threading.Event()
     converted = []

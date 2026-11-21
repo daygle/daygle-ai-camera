@@ -9,6 +9,11 @@ The rate limiter is purely in-memory - no persistent state, no database
 writes, no inter-process coordination. On restart the slate is clean,
 which is fine: an attacker cannot pre-seed state from a previous run.
 
+All bookkeeping uses ``time.monotonic()``, never the wall clock: a system
+clock step (NTP correction, manual change, VM resume) must not shorten or
+reset an in-progress login backoff. Wall-clock timestamps are reconstructed
+only in :meth:`IPRateLimiter.state` for diagnostics.
+
 Thread safety
 -------------
 All public methods acquire ``_lock``.  The lock is *not* re-entrant so no
@@ -95,6 +100,9 @@ class IPRateLimiter:
 
     The caller must wait *delay* seconds since their **last** attempt.
     If that time has already passed the remaining wait is 0.
+
+    Attempt timestamps are monotonic, so wall-clock adjustments cannot
+    expire a backoff early or make a fresh failure look old.
     """
 
     def __init__(
@@ -115,7 +123,10 @@ class IPRateLimiter:
         self._attempts: dict[str, list[float]] = {}
         self._lock = threading.Lock()
         self._global_evict_interval = max(0.0, float(global_evict_interval))
-        self._last_global_evict = 0.0
+        # ``time.monotonic()`` has an arbitrary epoch (often system uptime), so
+        # start below every possible reading to guarantee a sweep on the first
+        # call instead of waiting for the origin to exceed the interval.
+        self._last_global_evict = -math.inf
 
     # ------------------------------------------------------------------
     # Public API
@@ -139,7 +150,7 @@ class IPRateLimiter:
                 delay = self.max_delay
             else:
                 delay = math.ldexp(self.base_delay, excess)
-            elapsed = time.time() - attempts[-1]
+            elapsed = time.monotonic() - attempts[-1]
             return max(0.0, delay - elapsed)
 
     def is_rate_limited(self, ip: str) -> bool:
@@ -152,7 +163,7 @@ class IPRateLimiter:
         Returns the total number of failed attempts for *ip* within the
         sliding window (useful for logging / diagnostics).
         """
-        now = time.time()
+        now = time.monotonic()
         with self._lock:
             self._maybe_evict_all()
             self._evict_stale(ip)
@@ -172,12 +183,14 @@ class IPRateLimiter:
         """
         with self._lock:
             self._evict_stale(None)
+            now_mono = time.monotonic()
+            wall_now = time.time()
             snapshot: dict[str, Any] = {}
             for ip, timestamps in self._attempts.items():
                 snapshot[ip] = {
                     'attempts': len(timestamps),
-                    'oldest': _ts_to_iso(timestamps[0]) if timestamps else None,
-                    'newest': _ts_to_iso(timestamps[-1]) if timestamps else None,
+                    'oldest': _monotonic_to_iso(timestamps[0], now_mono, wall_now) if timestamps else None,
+                    'newest': _monotonic_to_iso(timestamps[-1], now_mono, wall_now) if timestamps else None,
                 }
             return snapshot
 
@@ -227,7 +240,7 @@ class IPRateLimiter:
         iteration per minute is negligible even with tens of thousands of
         entries, and is what bounds long-running memory).
         """
-        now = time.time()
+        now = time.monotonic()
         if now - self._last_global_evict < self._global_evict_interval:
             return
         self._last_global_evict = now
@@ -236,7 +249,7 @@ class IPRateLimiter:
     def _evict_stale(self, ip: str | None) -> None:
         """Remove attempts outside the sliding window for *ip* (or all IPs
         when *ip* is ``None``).  Caller must hold ``_lock``."""
-        cutoff = time.time() - self.window_seconds
+        cutoff = time.monotonic() - self.window_seconds
         if ip is not None:
             timestamps = self._attempts.get(ip)
             if timestamps is None:
@@ -278,10 +291,9 @@ class SlidingWindowRateLimiter:
     but that matches Daygle's single-writer deployment shape.
     """
 
-    def __init__(self, *, max_requests: int, window_seconds: float, name: str = 'sw', global_evict_interval: float = _GLOBAL_EVICT_INTERVAL_SECONDS) -> None:
+    def __init__(self, *, max_requests: int, window_seconds: float, global_evict_interval: float = _GLOBAL_EVICT_INTERVAL_SECONDS) -> None:
         self._max = int(max_requests)
         self._window = float(window_seconds)
-        self._name = name
         self._lock = threading.Lock()
         self._hits: dict[str, deque[float]] = {}
         self._global_evict_interval = max(0.0, float(global_evict_interval))
@@ -337,17 +349,22 @@ class SlidingWindowRateLimiter:
 # per-IP. ``SlidingWindowRateLimiter`` has no runtime ``apply_config`` (unlike
 # the login ``IPRateLimiter``); adjust the constructor arguments here to retune.
 admin_limiter = SlidingWindowRateLimiter(
-    max_requests=60, window_seconds=60, name='admin',
+    max_requests=60, window_seconds=60,
 )
 
 # Round-5 / M3: setup-endpoint brute-force throttle, 10 POSTs per 5
 # minutes per IP. Reasonable for LAN first-admin bootstrap (typos,
 # password recalculation) while still bounding the brute-force window.
 setup_limiter = SlidingWindowRateLimiter(
-    max_requests=10, window_seconds=300, name='setup',
+    max_requests=10, window_seconds=300,
 )
 
 
-def _ts_to_iso(ts: float) -> str:
-    """Format a Unix timestamp as an ISO-8601 string for diagnostics."""
-    return datetime.fromtimestamp(ts, tz=UTC).isoformat()
+def _monotonic_to_iso(ts: float, now_mono: float, wall_now: float) -> str:
+    """Format a stored monotonic timestamp as a wall-clock ISO-8601 string.
+
+    Only diagnostics use this: ``_attempts`` keeps monotonic readings so the
+    backoff is immune to clock steps, and the corresponding wall-clock instant
+    is reconstructed from how long ago the attempt happened.
+    """
+    return datetime.fromtimestamp(wall_now - (now_mono - ts), tz=UTC).isoformat()

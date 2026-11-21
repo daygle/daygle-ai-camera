@@ -31,11 +31,38 @@ def test_global_rate_limit_sweep_keeps_recent_hits(monkeypatch):
 def test_exponential_backoff_is_safe_after_large_failure_burst(monkeypatch):
     module = importlib.import_module('app.rate_limiter')
     limiter = module.IPRateLimiter(max_attempts=1, base_delay=2, max_delay=300)
-    monkeypatch.setattr(module.time, 'time', lambda: 100.0)
+    monkeypatch.setattr(module.time, 'monotonic', lambda: 100.0)
     limiter._attempts['burst'] = [100.0] * 2000
     assert limiter.get_wait_seconds('burst') == 300
     limiter.base_delay = 0
     assert limiter.get_wait_seconds('burst') == 0
+
+
+def test_login_backoff_ignores_wall_clock_steps(monkeypatch):
+    """A wall-clock step must neither shorten nor reset login backoff.
+
+    ``IPRateLimiter`` used ``time.time()`` for its bookkeeping, so an NTP
+    correction (or a manual clock change) that moved the wall clock forward
+    expired the backoff early, and one that moved it backward could keep an
+    IP locked out for an arbitrarily long time after the window had elapsed.
+    """
+    from datetime import UTC, datetime
+
+    module = importlib.import_module('app.rate_limiter')
+    limiter = module.IPRateLimiter(max_attempts=1, base_delay=30, max_delay=300)
+    monkeypatch.setattr(module.time, 'monotonic', lambda: 5000.0)
+    monkeypatch.setattr(module.time, 'time', lambda: 1_700_000_000.0)
+    limiter.record_failure('ntp')
+    assert limiter.get_wait_seconds('ntp') == 30
+
+    # Step the wall clock one hour forward while no monotonic time passes
+    # (an NTP correction): the full backoff must remain.
+    monkeypatch.setattr(module.time, 'time', lambda: 1_700_003_600.0)
+    assert limiter.get_wait_seconds('ntp') == 30
+
+    # ``state()`` is diagnostics-only and must still render wall-clock times.
+    expected = datetime.fromtimestamp(1_700_003_600.0, tz=UTC).isoformat()
+    assert limiter.state()['ntp']['newest'] == expected
 
 
 @pytest.mark.parametrize('value', [float('nan'), float('inf'), float('-inf')])

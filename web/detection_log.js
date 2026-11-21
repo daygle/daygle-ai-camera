@@ -21,7 +21,11 @@ function _logTitle(value) {
   return typeof titleCase === 'function' ? titleCase(text) : text;
 }
 
-function formatLogTime(seconds) {
+// Page-local on purpose: utils.js already exports a global ``formatLogTime``
+// that formats an ISO timestamp. This one formats a clip offset in seconds, and
+// as ``formatLogTime`` it silently overrode the shared helper on the pages that
+// load both scripts (/recordings). The distinct name keeps one binding per job.
+function formatDetectionLogTime(seconds) {
   const t = Math.max(0, Number(seconds) || 0);
   const minutes = Math.floor(t / 60);
   const rest = (t - minutes * 60).toFixed(1).padStart(4, '0');
@@ -182,14 +186,14 @@ function detectionLogHtml(track) {
   return rows.map((row) => {
     if (row.kind === 'gap') {
       const span = row.count > 1
-        ? `${formatLogTime(row.from)} - ${formatLogTime(row.to)} (${row.count} checks)`
-        : `${formatLogTime(row.from)}`;
-      return `<div class="detection-log-row is-gap"><button type="button" class="detection-log-time" data-seek="${row.from}">${_logEscape(formatLogTime(row.from))}</button>`
+        ? `${formatDetectionLogTime(row.from)} - ${formatDetectionLogTime(row.to)} (${row.count} checks)`
+        : `${formatDetectionLogTime(row.from)}`;
+      return `<div class="detection-log-row is-gap"><button type="button" class="detection-log-time" data-seek="${row.from}">${_logEscape(formatDetectionLogTime(row.from))}</button>`
         + `<span class="muted">Nothing seen · ${_logEscape(span)}</span></div>`;
     }
     const entries = row.kept.map((d) => _logEntryHtml(d, false)).concat(row.dropped.map((d) => _logEntryHtml(d, true)));
     if (row.ptz) entries.push(_ptzEntryHtml(row.ptz));
-    return `<div class="detection-log-row"><button type="button" class="detection-log-time" data-seek="${row.t}">${_logEscape(formatLogTime(row.t))}</button>`
+    return `<div class="detection-log-row"><button type="button" class="detection-log-time" data-seek="${row.t}">${_logEscape(formatDetectionLogTime(row.t))}</button>`
       + `<ul class="detection-log-entries">${entries.join('')}</ul></div>`;
   }).join('');
 }
