@@ -86,6 +86,7 @@ from app.behaviour_monitor import (
     clear_behavioural_state,
     emit_activity_spike_anomalies,
     emit_co_presence_alerts,
+    suppress_co_presence_object_detections,
     emit_loiter_anomalies,
     emit_time_of_day_anomalies,
     emit_tripwire_crossings,
@@ -1992,7 +1993,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         _telemetry_finish(_telemetry_mode)
         return None
     _alerts_started = time.perf_counter()
-    triggered = _state.alerts.process(alert_detections, rules=zone_rules)
+    # An opt-in co-presence rule can cover the ordinary single-object alerts
+    # for the same labels/zone it just alerted for, so one cat-and-person scene
+    # does not send two alerts. Only the AlertEngine's copy is filtered: the
+    # same detections still count for presence (no delayed re-alert while the
+    # object stays in view) and for recording.
+    triggered = _state.alerts.process(
+        suppress_co_presence_object_detections(camera_id, alert_detections),
+        rules=zone_rules,
+    )
     # Zone-rule alerts lead ``triggered``; only those of NEW objects survive
     # the presence gate below (dwell and face alerts carry their own gating).
     _zone_alert_count = len(triggered)

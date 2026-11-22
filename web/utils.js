@@ -1991,6 +1991,7 @@ function normalizeCoPresence(raw) {
     push_recipients: pushRecipients,
     notify_start: tripwireHhmm(raw.notify_start),
     notify_end: tripwireHhmm(raw.notify_end),
+    suppress_object_alerts: normalizeRuleBoolean(raw.suppress_object_alerts, false),
   };
 }
 

@@ -678,6 +678,7 @@ def normalize_zone_co_presence(zone: dict[str, Any]) -> dict[str, Any] | None:
             "push_enabled": bool,
             "notify_start": str | None,    # HH:MM quiet-hours (notify only)
             "notify_end": str | None,
+            "suppress_object_alerts": bool,  # skip ordinary single-object alerts
         }
     """
     raw = zone.get('co_presence')
@@ -720,6 +721,7 @@ def normalize_zone_co_presence(zone: dict[str, Any]) -> dict[str, Any] | None:
         'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
         'notify_start': normalize_hhmm(raw.get('notify_start')),
         'notify_end': normalize_hhmm(raw.get('notify_end')),
+        'suppress_object_alerts': normalize_bool_setting(raw.get('suppress_object_alerts'), False),
     }
 
 

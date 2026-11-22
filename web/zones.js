@@ -331,6 +331,7 @@ function ensureCoPresence(zone) {
     push_recipients: [],
     notify_start: null,
     notify_end: null,
+    suppress_object_alerts: false,
   };
   return zone.co_presence;
 }

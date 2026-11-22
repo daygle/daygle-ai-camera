@@ -36,6 +36,14 @@ _tripwire_lock = threading.Lock()
 _co_presence_state: dict[str, dict[str, Any]] = {}
 _co_presence_lock = threading.Lock()
 
+# Short-lived cover for ordinary per-object alerts after a co-presence episode
+# alerts (opt-in per rule): keyed ``camera|zone``, label -> expiry time. The
+# object alerts are evaluated later in the same detection cycle and object
+# confirmation can delay them a frame or two, so the cover outlives one frame
+# but stays brief. Presence tracking and recording still see every detection.
+_co_presence_object_suppression: dict[str, dict[str, float]] = {}
+CO_PRESENCE_OBJECT_SUPPRESS_SECONDS = 5.0
+
 # ---------------------------------------------------------------------------
 # Camera-motion pause token (Item 10, P2 follow-up)
 # ---------------------------------------------------------------------------
@@ -143,6 +151,8 @@ def reset_behavioural_state(camera_id: str) -> None:
                 entry['active'] = False
                 if entry.get('last_fired') is None:
                     _co_presence_state.pop(stale, None)
+            for stale in [k for k in _co_presence_object_suppression if k.startswith(prefix)]:
+                _co_presence_object_suppression.pop(stale, None)
     except Exception as exc:  # noqa: BLE001
         logger.debug('Co-presence state reset failed for %s: %s', key, exc)
     try:
@@ -294,6 +304,57 @@ def _co_presence_phrase(labels: list[str]) -> str:
     return ' + '.join(names)
 
 
+def _record_co_presence_object_suppression(
+    camera_id: str, zone_id: Any, labels: list[str],
+) -> None:
+    """Cover ordinary object alerts for *labels* in *zone_id* for a few seconds."""
+    zone = str(zone_id or '').strip()
+    if not zone:
+        return
+    deadline = time.time() + CO_PRESENCE_OBJECT_SUPPRESS_SECONDS
+    with _co_presence_lock:
+        bucket = _co_presence_object_suppression.setdefault(f'{camera_id}|{zone}', {})
+        for label in labels:
+            name = str(label or '').strip().lower()
+            if name:
+                bucket[name] = deadline
+
+
+def suppress_co_presence_object_detections(
+    camera_id: str, detections: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drop object detections whose ordinary alert a co-presence episode covers.
+
+    Applied only to the copy handed to the object AlertEngine: the same
+    detections still count for presence (so the object is not alerted again
+    later in the visit) and for recording. Expired covers are pruned here.
+    """
+    now = time.time()
+    prefix = f'{camera_id}|'
+    active: dict[str, set[str]] = {}
+    with _co_presence_lock:
+        for key in [k for k in _co_presence_object_suppression if k.startswith(prefix)]:
+            bucket = _co_presence_object_suppression[key]
+            for label, expires in list(bucket.items()):
+                if expires <= now:
+                    bucket.pop(label, None)
+            if bucket:
+                active[key[len(prefix):]] = set(bucket)
+            else:
+                _co_presence_object_suppression.pop(key, None)
+    if not active:
+        return list(detections or [])
+    kept: list[dict[str, Any]] = []
+    for det in detections or []:
+        if isinstance(det, dict):
+            label = str(det.get('label') or '').strip().lower()
+            zone_id = str(det.get('zone_id') or '').strip()
+            if label and zone_id and label in active.get(zone_id, ()):
+                continue
+        kept.append(det)
+    return kept
+
+
 def emit_co_presence_alerts(camera_id: str, settings: dict[str, Any], detections: list[dict[str, Any]]) -> int:
     """Emit one alert per co-presence episode for each enabled zone rule.
 
@@ -434,6 +495,9 @@ def _emit_co_presence(
             'any_of': list(rule.get('any_of') or []),
             'window_seconds': rule.get('window_seconds'),
         },
+        suppress_object_labels=(
+            list(present) if rule.get('suppress_object_alerts') else None
+        ),
     )
     logger.info(
         'Co-presence on %s: %s in %s (event %s)',
@@ -996,6 +1060,7 @@ def _emit_behaviour_event(
     message: str,
     details: dict[str, Any],
     alert_label: str | None = None,
+    suppress_object_labels: list[str] | None = None,
 ) -> int:
     """Store one behaviour event, then record and notify per *rule*.
 
@@ -1005,6 +1070,8 @@ def _emit_behaviour_event(
     *alert_label* (when given) is the text the alert-history row and the
     notification name the subject by -- a co-presence alert uses it to name
     every object that is together (``cat + person``) rather than one of them.
+    *suppress_object_labels* covers the ordinary alerts for those labels in the
+    same zone, but only when this behaviour alert is actually active.
     """
     from app.alert_dispatch import _rule_notify_active_now, deliver_alert_notifications
     from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_push_recipients
@@ -1041,6 +1108,12 @@ def _emit_behaviour_event(
         detections=[], alerts=alerts, alert_triggered=alert_active,
         metadata=metadata,
     )
+    # Only after the co-presence event is stored: a failed write must not leave
+    # ordinary object alerts covered by an alert that never happened.
+    if alert_active and suppress_object_labels:
+        _record_co_presence_object_suppression(
+            camera_id, fire.get('zone_id'), suppress_object_labels,
+        )
 
     if normalize_bool_setting(rule.get('record_on_detect'), True):
         _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)

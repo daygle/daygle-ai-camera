@@ -154,6 +154,12 @@ class TestCoPresenceSchema:
         assert rule['all_of'] == ['cat']
         assert rule['any_of'] == []
 
+    def test_suppress_option_defaults_off_and_is_preserved(self) -> None:
+        assert normalize_zone_co_presence({'co_presence': {}})['suppress_object_alerts'] is False
+        assert normalize_zone_co_presence({
+            'co_presence': {'suppress_object_alerts': True},
+        })['suppress_object_alerts'] is True
+
     def test_attached_through_normalize_monitoring_zones(self) -> None:
         zones = normalize_monitoring_zones([{
             'id': 'z1',
@@ -442,6 +448,81 @@ class TestCoPresenceMonitor:
         assert bm.emit_co_presence_alerts('cam1', settings, [_det('cat'), _det('person', x=0.6)]) == 0
         assert not [key for key in bm._co_presence_state if key.startswith('cam1|')]
         assert 'cam2|z1' in bm._co_presence_state
+
+    def test_suppress_option_covers_single_object_alerts_in_its_zone(self, monkeypatch) -> None:
+        database = _FakeDatabase()
+        monkeypatch.setattr(state, 'database', database)
+        monkeypatch.setattr(bm.time, 'time', lambda: 12000.0)
+        monkeypatch.setattr(bm, 'submit_alert_notification', lambda *args: True)
+        settings = _settings(_zone({
+            'email_enabled': True,
+            'email_recipients': ['ops@example.com'],
+            'suppress_object_alerts': True,
+        }))
+
+        assert bm.emit_co_presence_alerts('cam1', settings, [_det('cat'), _det('person', x=0.6)]) == 1
+
+        detections = [
+            {**_det('cat'), 'zone_id': 'z1'},
+            {**_det('person', x=0.6), 'zone_id': 'z1'},
+            {**_det('dog'), 'zone_id': 'z1'},
+            {**_det('cat'), 'zone_id': 'z2'},
+        ]
+        # Only the covered labels in the covered zone are hidden from the
+        # ordinary object-alert engine.
+        assert [det['label'] for det in bm.suppress_co_presence_object_detections('cam1', detections)] == ['dog', 'cat']
+        assert len(bm.suppress_co_presence_object_detections('cam2', detections)) == 4
+
+    def test_suppression_needs_the_option_and_an_active_alert(self, monkeypatch) -> None:
+        database = _FakeDatabase()
+        monkeypatch.setattr(state, 'database', database)
+        monkeypatch.setattr(bm.time, 'time', lambda: 12100.0)
+        monkeypatch.setattr(bm, 'submit_alert_notification', lambda *args: True)
+        detections = [
+            {**_det('cat'), 'zone_id': 'z1'},
+            {**_det('person', x=0.6), 'zone_id': 'z1'},
+        ]
+
+        for overrides in (
+            {'email_enabled': True, 'email_recipients': ['ops@example.com']},  # option off
+            {'suppress_object_alerts': True},  # no channel: no co-presence alert to replace
+        ):
+            bm._co_presence_state.clear()
+            bm._co_presence_object_suppression.clear()
+            settings = _settings(_zone(overrides))
+            assert bm.emit_co_presence_alerts('cam1', settings, detections) == 1
+            assert len(bm.suppress_co_presence_object_detections('cam1', detections)) == 2
+
+    def test_suppression_expires_and_a_pause_clears_it(self, monkeypatch) -> None:
+        database = _FakeDatabase()
+        monkeypatch.setattr(state, 'database', database)
+        clock = [12200.0]
+        monkeypatch.setattr(bm.time, 'time', lambda: clock[0])
+        monkeypatch.setattr(bm, 'submit_alert_notification', lambda *args: True)
+        settings = _settings(_zone({
+            'email_enabled': True,
+            'email_recipients': ['ops@example.com'],
+            'suppress_object_alerts': True,
+        }))
+        detections = [
+            {**_det('cat'), 'zone_id': 'z1'},
+            {**_det('person', x=0.6), 'zone_id': 'z1'},
+        ]
+
+        assert bm.emit_co_presence_alerts('cam1', settings, detections) == 1
+        assert len(bm.suppress_co_presence_object_detections('cam1', detections)) == 0
+
+        clock[0] += bm.CO_PRESENCE_OBJECT_SUPPRESS_SECONDS + 0.1
+        assert len(bm.suppress_co_presence_object_detections('cam1', detections)) == 2
+
+        # A camera pause drops a cover that is still pending. End the previous
+        # episode first so this is a fresh alert.
+        clock[0] = 12300.0
+        bm.reset_behavioural_state('cam1')
+        assert bm.emit_co_presence_alerts('cam1', settings, detections) == 1
+        assert len(bm.suppress_co_presence_object_detections('cam1', detections)) == 0
+        bm.reset_behavioural_state('cam1')
+        assert len(bm.suppress_co_presence_object_detections('cam1', detections)) == 2
 
     def test_camera_motion_reset_rearms_the_episode(self, monkeypatch) -> None:
         database = _FakeDatabase()

@@ -373,7 +373,7 @@ Alert on a *combination* of objects rather than one label at a time - a cat **an
 - Open `/zones`, select a camera and area, and turn on **Co-presence**.
 - Under **All of these**, add the objects that must all be present (e.g. *Person* and *Pet*). Under **At least one of**, optionally add alternatives (e.g. *Cat* and *Dog*) when any one of them is enough.
 - Set **Seen within (s)** - how recently each object must have been seen to count as together. It is a recent-sighting window, not a strict same-frame test, so a sitting cat that drops out of a Moving Only cycle (or a box that flickers for a frame) still counts. Choose whether it records, then click **Save Zones**.
-- Configure notifications on the **Alerts** page under the **Co-presence** type - email/push, recipients, a cooldown, and an optional **Alert From/Until** quiet-hours window, like the other behaviour alerts.
+- Configure notifications on the **Alerts** page under the **Co-presence** type - email/push, recipients, a cooldown, and an optional **Alert From/Until** quiet-hours window, like the other behaviour alerts. Optionally tick **Suppress single-object alerts for these objects** so the same cat-and-person moment sends only the combined alert instead of also sending the separate Cat and Person alerts. It only takes effect while the co-presence alert is active (a channel on and inside its notify window).
 
 One alert goes out per co-presence episode: while the objects stay together it stays quiet, and it re-arms once any required object has not been seen inside the window. Group labels (the **Pet** / **Animal** umbrella labels) work here too. Pure logic over the object tracker - no extra model or GPU load.
 

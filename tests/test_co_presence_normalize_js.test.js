@@ -49,6 +49,7 @@ test('defaults are filled in for a bare co-presence rule', () => {
   assert.deepEqual(rehome(rule.push_recipients), []);
   assert.equal(rule.notify_start, null);
   assert.equal(rule.notify_end, null);
+  assert.equal(rule.suppress_object_alerts, false);
 });
 
 test('absent rule is dropped', () => {
@@ -86,6 +87,7 @@ test('delivery settings made on the Alerts page survive a Zones save', () => {
     push_recipients: ['user:2'],
     notify_start: '21:00',
     notify_end: '06:00',
+    suppress_object_alerts: true,
   });
   assert.equal(rule.enabled, false);
   assert.equal(rule.name, 'Cat and visitor');
@@ -98,4 +100,5 @@ test('delivery settings made on the Alerts page survive a Zones save', () => {
   assert.deepEqual(rehome(rule.push_recipients), ['user:2']);
   assert.equal(rule.notify_start, '21:00');
   assert.equal(rule.notify_end, '06:00');
+  assert.equal(rule.suppress_object_alerts, true);
 });
