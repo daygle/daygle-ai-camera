@@ -92,11 +92,26 @@ function clockInTimezone(date, timezone) {
   return `${hour}:${minute}`;
 }
 
+// Behaviour rules (tripwire, co-presence, loiter, unusual time, activity and
+// AI tags) always detect while enabled; only their notify window gates
+// delivery, so their badge reports whether an alert would go out now instead
+// of a static "Enabled". People rules have no notify window and keep the
+// simple Enabled/Disabled state.
+const BEHAVIOUR_POLICY_TYPES = new Set(['tripwire', 'co_presence', 'loiter', 'time', 'activity', 'ai_tags']);
+
 function policyStatus(rule, type, now = new Date(), timezone = window.daygleAuth?.user?.timezone || 'UTC') {
   if (rule.enabled === false) return { className: 'is-disabled', label: 'Disabled', title: 'This policy is disabled.' };
+  const nowHm = clockInTimezone(now, timezone);
+  if (BEHAVIOUR_POLICY_TYPES.has(type)) {
+    if (!(rule.email_enabled || rule.push_enabled)) {
+      return { className: 'is-enabled', label: 'Enabled', title: 'Enabled, but no email or push is on, so no alerts will be sent now.' };
+    }
+    return isWithinDetectWindow(rule.notify_start, rule.notify_end, nowHm)
+      ? { className: 'is-in-schedule-alert', label: 'In Schedule (Alert)', title: 'Enabled, within its notify window, and alerts will be sent now.' }
+      : { className: 'is-out-of-schedule', label: 'Outside Schedule', title: 'Enabled, but outside its notify window, so no alerts will be sent now.' };
+  }
   if (type !== 'object' && type !== 'sound') return { className: 'is-enabled', label: 'Enabled', title: 'This policy is enabled.' };
   const schedules = type === 'object' ? ensureAlertSchedules(rule) : [rule];
-  const nowHm = clockInTimezone(now, timezone);
   // Equal start/end windows mean "any time" on every backend gate
   // (AlertEngine._is_active_now, alert_dispatch._rule_notify_active_now),
   // including sound rules - so the badge must not show "Outside schedule"
@@ -263,10 +278,12 @@ function ruleLabel(rule) {
   if (alertType === 'people') return rule.name || 'Unknown Person';
   if (alertType === 'tripwire') return titleCase(rule.name || 'Tripwire');
   if (alertType === 'co_presence') {
-    const allOf = (rule.all_of || []).map(titleCase);
-    const anyOf = (rule.any_of || []).map(titleCase);
-    const subject = [allOf.join(' + '), anyOf.length ? `any of ${anyOf.join(', ')}` : ''].filter(Boolean).join(' + ');
-    return `${rule.name || 'Co-presence'}${subject ? ` (${subject})` : ''}`;
+    // Use the same "<zone> · <rule name>" text the monitor writes into the alert
+    // history, so one rule cannot look like two different policies. The object
+    // set is shown in coPresenceSummary() in the policy details instead.
+    const name = String(rule.name || 'Co-presence').trim() || 'Co-presence';
+    const zoneName = String(currentZone()?.name || currentZone()?.id || '').trim() || 'zone';
+    return `${zoneName} · ${name}`;
   }
   if (alertType === 'loiter') return titleCase(rule.name || 'Loitering');
   if (alertType === 'time') return titleCase(rule.name || 'Unusual Time');
