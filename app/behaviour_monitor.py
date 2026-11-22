@@ -28,6 +28,14 @@ logger = logging.getLogger('daygle.ai.detection')
 _tripwire_last_fired: dict[str, float] = {}
 _tripwire_lock = threading.Lock()
 
+# Co-presence state, keyed ``camera|zone``: the labels seen recently in that
+# area, whether the current "together" streak has already alerted, and when it
+# last did. One alert goes out per co-presence episode instead of once per
+# detection cycle; the streak re-arms once a required label has not been seen
+# inside the rule's recent-sighting window.
+_co_presence_state: dict[str, dict[str, Any]] = {}
+_co_presence_lock = threading.Lock()
+
 # ---------------------------------------------------------------------------
 # Camera-motion pause token (Item 10, P2 follow-up)
 # ---------------------------------------------------------------------------
@@ -121,6 +129,22 @@ def reset_behavioural_state(camera_id: str) -> None:
                 _tripwire_last_fired.pop(stale, None)
     except Exception as exc:  # noqa: BLE001
         logger.debug('Tripwire cooldown reset failed for %s: %s', key, exc)
+    try:
+        prefix = f'{key}|'
+        with _co_presence_lock:
+            for stale in [k for k in _co_presence_state if k.startswith(prefix)]:
+                entry = _co_presence_state[stale]
+                # What this camera saw before it moved is not evidence of who is
+                # together after it settles, so the sightings and the in-progress
+                # streak are dropped. The cooldown is preserved (like the
+                # tripwire/loiter cooldowns); an entry that never fired is
+                # forgotten entirely so the map cannot grow without bound.
+                entry['labels'] = {}
+                entry['active'] = False
+                if entry.get('last_fired') is None:
+                    _co_presence_state.pop(stale, None)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug('Co-presence state reset failed for %s: %s', key, exc)
     try:
         # ``_activity_today`` is keyed ``camera|zone|label``; drop this camera's
         # in-progress hour buckets so a burst isn't falsely continued after a pause.
@@ -224,6 +248,197 @@ def _emit_one(camera_id: str, settings: dict[str, Any], crossing: dict[str, Any]
         },
     )
     logger.info('Tripwire crossing on %s: %s %s -> %s (event %s)', camera_id, label, wire_name, direction, event_id)
+
+
+# ─── Multi-object co-presence (cat + person, dog + person, ...) ─────────────
+# Unlike the per-label object rules, this fires only when several kinds of
+# object are in the same area at once. It costs no extra detection work: it
+# reads the tracked detections of the cycle that already have a label and a box.
+
+def _enabled_zones_with_co_presence(settings: Any) -> list[dict[str, Any]]:
+    zones = (settings.get('detection') or {}).get('zones', []) if isinstance(settings, dict) else []
+    out: list[dict[str, Any]] = []
+    for zone in zones or []:
+        if not isinstance(zone, dict) or zone.get('enabled') is False:
+            continue
+        rule = zone.get('co_presence')
+        if isinstance(rule, dict) and rule.get('enabled') is not False:
+            out.append(zone)
+    return out
+
+
+def _co_presence_group(label: Any) -> set[str]:
+    """A configured label plus every concrete label its group covers."""
+    from app.label_groups import cached_label_groups
+    from app.zone_schema import canonical_label
+
+    configured = canonical_label(label)
+    if not configured:
+        return set()
+    return {configured} | set(cached_label_groups().get(configured) or ())
+
+
+def _co_presence_rule_groups(rule: dict[str, Any]) -> tuple[list[set[str]], list[set[str]]]:
+    """``all_of`` / ``any_of`` as lists of concrete-label sets."""
+    all_of = [_co_presence_group(label) for label in (rule.get('all_of') or [])]
+    any_of = [_co_presence_group(label) for label in (rule.get('any_of') or [])]
+    return [group for group in all_of if group], [group for group in any_of if group]
+
+
+def _co_presence_phrase(labels: list[str]) -> str:
+    names = [str(label).replace('_', ' ').title() for label in labels if label]
+    if not names:
+        return 'Objects'
+    if len(names) == 1:
+        return names[0]
+    return ' + '.join(names)
+
+
+def emit_co_presence_alerts(camera_id: str, settings: dict[str, Any], detections: list[dict[str, Any]]) -> int:
+    """Emit one alert per co-presence episode for each enabled zone rule.
+
+    A sighting is remembered per (camera, zone) instead of being read only from
+    the current frame, so an object that was seen a few seconds ago still counts
+    as present -- a sitting cat under Moving Only is not detected every cycle.
+    Returns how many episodes were emitted. Best-effort and isolated: a failure
+    is logged and never raised out of the detection loop.
+    """
+    zones = _enabled_zones_with_co_presence(settings)
+    from app.zone_detection import detection_matches_zone
+    from app.zone_schema import canonical_label
+
+    now = time.time()
+    to_fire: list[tuple[dict[str, Any], dict[str, Any], list[str], float]] = []
+    with _co_presence_lock:
+        live_keys: set[str] = set()
+        for zone in zones:
+            rule = zone.get('co_presence') or {}
+            all_of, any_of = _co_presence_rule_groups(rule)
+            if not all_of and not any_of:
+                continue
+            zone_id = str(zone.get('id') or zone.get('name') or '')
+            key = f'{camera_id}|{zone_id}'
+            live_keys.add(key)
+            entry = _co_presence_state.setdefault(
+                key,
+                {'labels': {}, 'active': False, 'last_fired': None},
+            )
+            labels: dict[str, float] = entry.setdefault('labels', {})
+            try:
+                window = max(1.0, float(rule.get('window_seconds') or 15))
+            except (TypeError, ValueError):
+                window = 15.0
+            # The episode belongs to the rule that was in force when it began.
+            # A different label set or recent-sighting window is a different
+            # condition: sightings gathered for the old one are not evidence for
+            # the new one, and the episode must re-arm so the edited rule can
+            # alert. The cooldown is cleared too: the flag above is set before
+            # the cooldown test, so a preserved cooldown would swallow the rest
+            # of this episode entirely instead of merely delaying its first
+            # alert.
+            signature = (
+                tuple(sorted(str(label) for label in (rule.get('all_of') or []))),
+                tuple(sorted(str(label) for label in (rule.get('any_of') or []))),
+                window,
+            )
+            if entry.get('signature') != signature:
+                labels.clear()
+                entry['active'] = False
+                entry['last_fired'] = None
+                entry['signature'] = signature
+            confidences: list[float] = []
+            for det in detections or []:
+                if not isinstance(det, dict) or det.get('motion_event'):
+                    continue
+                label = canonical_label(det.get('label'))
+                if not label or label in ('motion', 'face'):
+                    continue
+                if not detection_matches_zone(det, zone):
+                    continue
+                labels[label] = now
+                try:
+                    confidences.append(float(det.get('confidence') or 0.0))
+                except (TypeError, ValueError):
+                    confidences.append(0.0)
+            # Bound the map: a sighting older than the window (with a generous
+            # margin for a group's label flips) can never satisfy the rule.
+            cutoff = now - max(window, 60.0)
+            for stale in [label for label, ts in labels.items() if ts < cutoff]:
+                labels.pop(stale, None)
+            if not behaviour.co_presence_met(all_of, any_of, labels, now, window):
+                entry['active'] = False
+                continue
+            if entry.get('active'):
+                continue  # already alerted for this episode
+            entry['active'] = True
+            try:
+                cooldown = max(0.0, float(rule.get('cooldown_seconds') or 0))
+            except (TypeError, ValueError):
+                cooldown = 0.0
+            if not behaviour.cooldown_passed(entry.get('last_fired'), now, cooldown):
+                # Still the same episode: the streak stays marked active, so it
+                # does not fire the moment the cooldown lapses.
+                continue
+            entry['last_fired'] = now
+            recent = behaviour.labels_seen_recently(labels, now, window)
+            present = sorted(
+                label for label in recent
+                if any(label in group for group in all_of + any_of)
+            ) or sorted(recent)
+            to_fire.append((zone, rule, present, max(confidences, default=0.0)))
+        # A zone or rule that was deleted or disabled (or whose label lists
+        # were emptied) is not visited by the loop above, so its episode would
+        # otherwise live on forever. Drop this camera's orphaned entries.
+        prefix = f'{camera_id}|'
+        for stale in [key for key in _co_presence_state if key.startswith(prefix) and key not in live_keys]:
+            _co_presence_state.pop(stale, None)
+
+    fired = 0
+    now_iso = datetime.now(UTC).isoformat()
+    for zone, rule, present, confidence in to_fire:
+        try:
+            _emit_co_presence(camera_id, settings, zone, rule, present, confidence, now_iso)
+            fired += 1
+        except Exception as exc:  # noqa: BLE001 - one episode must not break the loop
+            logger.warning('Co-presence emit failed on %s: %s', camera_id, exc)
+    return fired
+
+
+def _emit_co_presence(
+    camera_id: str,
+    settings: dict[str, Any],
+    zone: dict[str, Any],
+    rule: dict[str, Any],
+    present: list[str],
+    confidence: float,
+    now_iso: str,
+) -> None:
+    zone_id = str(zone.get('id') or zone.get('name') or '')
+    zone_name = str(zone.get('name') or zone.get('id') or '').strip() or 'zone'
+    primary = present[0] if present else 'object'
+    # Name every object that is together in the alert-history row and in the
+    # email/push text, while the event still records the concrete detection.
+    combined = ' + '.join(label for label in present if label) or 'object'
+    event_id = _emit_behaviour_event(
+        camera_id, settings, rule, now_iso,
+        source='co_presence',
+        fire={'zone_id': zone_id, 'zone_name': zone_name},
+        label=primary,
+        alert_label=combined,
+        confidence=confidence,
+        rule_name=f'{zone_name} · {_rule_display(rule, "Co-presence")}',
+        message=f'{_co_presence_phrase(present)} together in {zone_name}',
+        details={
+            'labels': present,
+            'all_of': list(rule.get('all_of') or []),
+            'any_of': list(rule.get('any_of') or []),
+            'window_seconds': rule.get('window_seconds'),
+        },
+    )
+    logger.info(
+        'Co-presence on %s: %s in %s (event %s)',
+        camera_id, ', '.join(present) or 'objects', zone_name, event_id,
+    )
 
 
 # ─── Tier-2 behavioural intelligence: statistical loitering / long-dwell ─────
@@ -780,11 +995,16 @@ def _emit_behaviour_event(
     rule_name: str,
     message: str,
     details: dict[str, Any],
+    alert_label: str | None = None,
 ) -> int:
     """Store one behaviour event, then record and notify per *rule*.
 
-    Shared by the tripwire, loiter, time-of-day and activity-spike monitors.
-    *details* is the monitor-specific metadata; *fire* supplies the zone.
+    Shared by the tripwire, co-presence, loiter, time-of-day and
+    activity-spike monitors. *details* is the monitor-specific metadata; *fire*
+    supplies the zone. *label* is the concrete detection the event records;
+    *alert_label* (when given) is the text the alert-history row and the
+    notification name the subject by -- a co-presence alert uses it to name
+    every object that is together (``cat + person``) rather than one of them.
     """
     from app.alert_dispatch import _rule_notify_active_now, deliver_alert_notifications
     from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_push_recipients
@@ -810,9 +1030,10 @@ def _emit_behaviour_event(
         'notify_start': str(rule.get('notify_start') or '').strip() or None,
         'notify_end': str(rule.get('notify_end') or '').strip() or None,
     }
+    alert_label = str(alert_label or label)
     alert_active = (email_enabled or push_enabled) and _rule_notify_active_now(notify_rule)
     alerts = [{
-        'created_at': now_iso, 'rule_name': rule_name, 'label': label,
+        'created_at': now_iso, 'rule_name': rule_name, 'label': alert_label,
         'confidence': confidence, 'message': message,
     }] if alert_active else []
     event_id = _state.database.add_event_with_alerts(
@@ -825,7 +1046,7 @@ def _emit_behaviour_event(
         _attach_recording(camera_id, settings, event_id, now_iso, label, confidence)
 
     if alert_active:
-        alert_payload = {'rule_name': rule_name, 'label': label, 'confidence': confidence, 'message': message}
+        alert_payload = {'rule_name': rule_name, 'label': alert_label, 'confidence': confidence, 'message': message}
         submit_alert_notification(deliver_alert_notifications, [alert_payload], event_id, [notify_rule])
     return event_id
 

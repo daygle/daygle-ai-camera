@@ -140,6 +140,7 @@ const WEB_SHARED_GLOBALS = {
   // web/utils.js - behavioural tripwire geometry/normalisation (Zones canvas).
   tripwireDefaultLine: 'readonly',
   normalizeTripwire: 'readonly',
+  normalizeCoPresence: 'readonly',
   tripwirePoint: 'readonly',
   tripwireForwardNormal: 'readonly',
   tripwireMidpoint: 'readonly',

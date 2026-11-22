@@ -117,7 +117,11 @@ def _camera(**zone_extra):
 
 
 def test_rename_follows_the_group_into_zone_rules():
-    camera = _camera(tripwire={'labels': ['pet'], 'name': 'Gate'}, loiter={'labels': ['person']})
+    camera = _camera(
+        tripwire={'labels': ['pet'], 'name': 'Gate'},
+        loiter={'labels': ['person']},
+        co_presence={'all_of': ['pet'], 'any_of': ['person', 'dog']},
+    )
     cameras, changed = lg.rename_group_references([camera], {'Pet': 'pets'})
     assert changed
     detection = cameras[0]['detection']
@@ -127,6 +131,7 @@ def test_rename_follows_the_group_into_zone_rules():
     assert zone['object_labels'] == ['pets', 'person']
     assert zone['tripwire'] == {'labels': ['pets'], 'name': 'Gate'}
     assert zone['loiter'] == {'labels': ['person']}
+    assert zone['co_presence'] == {'all_of': ['pets'], 'any_of': ['person', 'dog']}
     # The input is left untouched.
     assert camera['detection']['zones'][0]['object_rules'][0]['label'] == 'pet'
 

@@ -152,6 +152,9 @@ def refresh_label_groups() -> None:
 
 # Zone sub-rules that carry their own ``labels`` allow-list.
 _ZONE_LABEL_RULES: tuple[str, ...] = ('tripwire', 'loiter', 'time_of_day', 'activity_spike')
+# Zone sub-rules whose labels live in more than one list (co-presence keeps its
+# required labels apart from its alternatives).
+_ZONE_LABEL_RULE_FIELDS: dict[str, tuple[str, ...]] = {'co_presence': ('all_of', 'any_of')}
 
 
 def _rename_labels(labels: Any, renames: dict[str, str]) -> tuple[Any, bool]:
@@ -218,6 +221,22 @@ def rename_group_references(cameras: list[dict[str, Any]], renames: dict[str, st
                     if hit:
                         zone[key] = {**sub, 'labels': labels}
                         camera_changed = True
+            for key, fields in _ZONE_LABEL_RULE_FIELDS.items():
+                sub = zone.get(key)
+                if not isinstance(sub, dict):
+                    continue
+                updated = dict(sub)
+                field_changed = False
+                for field in fields:
+                    if field not in sub:
+                        continue
+                    labels, hit = _rename_labels(sub[field], renames)
+                    if hit:
+                        updated[field] = labels
+                        field_changed = True
+                if field_changed:
+                    zone[key] = updated
+                    camera_changed = True
             zones.append(zone)
         if 'zones' in detection:
             detection['zones'] = zones

@@ -191,6 +191,68 @@ def cooldown_passed(last_fired: float | None, now: float, cooldown_seconds: floa
     return (now - last_fired) >= cooldown_seconds
 
 
+# ─── Co-presence (multi-object) matching ────────────────────────────────────
+# A co-presence rule fires when several kinds of object are in view *together*.
+# "Together" is a recent-sighting window rather than the exact same frame: a
+# cat that sits down under a Moving Only rule drops out of some cycles, and a
+# person's box can flicker for a frame, without either leaving. ``seen`` maps a
+# concrete detector label to the last epoch second it was seen. The caller
+# expands configured group labels (``pet``) into the concrete label sets this
+# module compares, so the decision stays dependency-free and unit-testable.
+
+def _label_group(value: Any) -> set[str]:
+    """One requirement as a set of concrete labels (a bare str is a single one)."""
+    if isinstance(value, str):
+        return {value} if value else set()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return {str(label) for label in value if label}
+    return set()
+
+
+def labels_seen_recently(seen: Any, now: float, window_seconds: float) -> set[str]:
+    """Concrete labels with a sighting no older than ``window_seconds``."""
+    if not isinstance(seen, dict):
+        return set()
+    try:
+        cutoff = float(now) - max(0.0, float(window_seconds))
+    except (TypeError, ValueError):
+        return set()
+    recent: set[str] = set()
+    for label, last_seen in seen.items():
+        try:
+            if float(last_seen) >= cutoff:
+                recent.add(str(label))
+        except (TypeError, ValueError):
+            continue
+    return recent
+
+
+def co_presence_met(
+    all_of: Any,
+    any_of: Any,
+    seen: Any,
+    now: float,
+    window_seconds: float,
+) -> bool:
+    """True when every required group and at least one optional group is in view.
+
+    ``all_of`` and ``any_of`` are lists of concrete-label sets (a configured
+    label plus its group members); ``seen`` is ``{label: last_seen}``. An empty
+    ``any_of`` means "no extra requirement"; with both lists empty the rule can
+    never fire.
+    """
+    recent = labels_seen_recently(seen, now, window_seconds)
+    required = [group for group in (_label_group(value) for value in (all_of or [])) if group]
+    optional = [group for group in (_label_group(value) for value in (any_of or [])) if group]
+    if not required and not optional:
+        return False
+    if any(not (group & recent) for group in required):
+        return False
+    if optional and not any(group & recent for group in optional):
+        return False
+    return True
+
+
 def tripwire_crossing(prev: Any, curr: Any, tripwire: Any) -> str | None:
     """Convenience wrapper: read ``a``/``b`` off a normalized ``tripwire``
     dict (as produced by ``zone_schema.normalize_zone_tripwire``) and return

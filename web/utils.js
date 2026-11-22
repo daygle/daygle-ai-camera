@@ -1949,6 +1949,51 @@ function normalizeActivity(raw) {
   };
 }
 
+// ─── Behavioural co-presence rule (multi-object alerts) ─────────────────────
+// Client mirror of app/zone_schema.py::normalize_zone_co_presence, used by the
+// Zones save path. Same contract as the other behaviour normalizers: null when
+// absent (field dropped), else the normalized policy with delivery and
+// quiet-hours preserved so a Zones save cannot erase settings made on Alerts.
+const CO_PRESENCE_DEFAULT_WINDOW_SECONDS = 15;
+const CO_PRESENCE_MAX_WINDOW_SECONDS = 300;
+
+function coPresenceLabels(value) {
+  const source = Array.isArray(value) ? value : (typeof value === 'string' ? value.split(',') : []);
+  return [...new Set(source.map((label) => String(label).trim().toLowerCase()).filter(Boolean))]
+    .filter((label) => label !== 'motion' && label !== 'face');
+}
+
+function normalizeCoPresence(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const allOf = coPresenceLabels(raw.all_of);
+  // A label is either required or an alternative, never both.
+  const anyOf = coPresenceLabels(raw.any_of).filter((label) => !allOf.includes(label));
+  let windowSeconds = Number.parseInt(raw.window_seconds, 10);
+  if (raw.window_seconds == null || !Number.isFinite(windowSeconds)) windowSeconds = CO_PRESENCE_DEFAULT_WINDOW_SECONDS;
+  windowSeconds = Math.max(1, Math.min(CO_PRESENCE_MAX_WINDOW_SECONDS, windowSeconds));
+  let cooldown = Number.parseInt(raw.cooldown_seconds, 10);
+  if (raw.cooldown_seconds == null || !Number.isFinite(cooldown)) cooldown = 60;
+  cooldown = Math.max(0, cooldown);
+  const pushRecipients = Array.isArray(raw.push_recipients)
+    ? [...new Set(raw.push_recipients.map((entry) => String(entry).trim()).filter(Boolean))]
+    : [];
+  return {
+    enabled: normalizeRuleBoolean(raw.enabled, true),
+    name: String(raw.name || 'Co-presence').trim() || 'Co-presence',
+    all_of: allOf,
+    any_of: anyOf,
+    window_seconds: windowSeconds,
+    cooldown_seconds: cooldown,
+    record_on_detect: normalizeRuleBoolean(raw.record_on_detect, true),
+    email_enabled: normalizeRuleBoolean(raw.email_enabled, false),
+    email_recipients: normalizeEmailList(raw.email_recipients),
+    push_enabled: normalizeRuleBoolean(raw.push_enabled, false),
+    push_recipients: pushRecipients,
+    notify_start: tripwireHhmm(raw.notify_start),
+    notify_end: tripwireHhmm(raw.notify_end),
+  };
+}
+
 // ─── User display preferences (date_format / time_format) ──────────────────
 // Populated by nav.js after /api/auth/me resolves, but exposed as early as
 // possible so every page (dashboard, events, alerts, recordings, etc.) renders
@@ -2453,7 +2498,8 @@ window.daygleUi = {
   // Behavioural tripwire geometry + normalisation (Zones canvas ↔ backend)
   TRIPWIRE_DIRECTIONS, roundTripwireCoord, tripwirePoint, tripwireZoneBounds,
   tripwireDefaultLine, tripwireOrientation, tripwireForwardNormal, tripwireMidpoint,
-  normalizeTripwire, normalizeLoiter, normalizeTime, normalizeActivity,
+  normalizeTripwire, normalizeLoiter, normalizeTime, normalizeActivity, normalizeCoPresence,
+  CO_PRESENCE_DEFAULT_WINDOW_SECONDS, CO_PRESENCE_MAX_WINDOW_SECONDS,
   // Theme management
   setDaygleThemePref, getDaygleThemePref, applyDaygleTheme,
   watchDaygleSystemTheme, unwatchDaygleSystemTheme,

@@ -28,6 +28,10 @@ const currentRules = () => {
     const wire = currentZone()?.tripwire;
     return wire ? [wire] : [];
   }
+  if (alertType === 'co_presence') {
+    const rule = currentZone()?.co_presence;
+    return rule ? [rule] : [];
+  }
   if (alertType === 'loiter') {
     const rule = currentZone()?.loiter;
     return rule ? [rule] : [];
@@ -163,7 +167,7 @@ function migrateRecipients() {
     (camera.detection?.sound?.rules || []).forEach(convert);
     (camera.detection?.zones || []).forEach((zone) => {
       (zone.object_rules || []).forEach((rule) => { (rule.alert_schedules || []).forEach(convert); ensureAlertSchedules(rule); });
-      ['tripwire', 'loiter', 'time_of_day', 'activity_spike', 'ai_tags'].forEach((key) => convert(zone[key]));
+      ['tripwire', 'co_presence', 'loiter', 'time_of_day', 'activity_spike', 'ai_tags'].forEach((key) => convert(zone[key]));
     });
   });
   (faceRulesPayload.rules || []).forEach(convert);
@@ -228,7 +232,9 @@ function renderSelectors() {
         ? 'Sound classes are assigned - and set to record - per camera on the Sounds page. Here you choose how each one notifies you.'
         : alertType === 'tripwire'
           ? 'Line crossings are drawn - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
-          : alertType === 'loiter'
+          : alertType === 'co_presence'
+            ? 'Co-presence rules are enabled - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
+            : alertType === 'loiter'
             ? 'Loitering is enabled - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
             : alertType === 'time'
               ? 'Unusual time-of-day is enabled - and set to record - per area on the Zones page. Here you choose how each one notifies you.'
@@ -240,10 +246,28 @@ function renderSelectors() {
   }
 }
 
+// Human summary of a co-presence rule's condition, shown above its delivery
+// settings (the condition itself is edited on the Zones page).
+function coPresenceSummary(rule) {
+  const allOf = (rule.all_of || []).map(titleCase);
+  const anyOf = (rule.any_of || []).map(titleCase);
+  if (!allOf.length && !anyOf.length) return 'No objects chosen yet - add them on the Zones page.';
+  const parts = [];
+  if (allOf.length) parts.push(allOf.join(' + '));
+  if (anyOf.length) parts.push(`at least one of ${anyOf.join(', ')}`);
+  return `Alerts when ${parts.join(' and ')} are seen together within ${rule.window_seconds ?? 15}s.`;
+}
+
 function ruleLabel(rule) {
   if (alertType === 'sound') return titleCase(rule.name || soundClasses.find((item) => item.id === rule.class)?.label || rule.class);
   if (alertType === 'people') return rule.name || 'Unknown Person';
   if (alertType === 'tripwire') return titleCase(rule.name || 'Tripwire');
+  if (alertType === 'co_presence') {
+    const allOf = (rule.all_of || []).map(titleCase);
+    const anyOf = (rule.any_of || []).map(titleCase);
+    const subject = [allOf.join(' + '), anyOf.length ? `any of ${anyOf.join(', ')}` : ''].filter(Boolean).join(' + ');
+    return `${rule.name || 'Co-presence'}${subject ? ` (${subject})` : ''}`;
+  }
   if (alertType === 'loiter') return titleCase(rule.name || 'Loitering');
   if (alertType === 'time') return titleCase(rule.name || 'Unusual Time');
   if (alertType === 'activity') return titleCase(rule.name || 'Activity Spike');
@@ -303,7 +327,9 @@ function renderPolicies() {
         ? 'No sound classes are assigned to this camera yet. Open the <a href="/detection/sounds">Sounds</a> page to enable classes, then configure alerts here.'
         : alertType === 'tripwire'
           ? 'No line crossing is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Line crossing and draw a line, then set its alerts here.'
-          : alertType === 'loiter'
+          : alertType === 'co_presence'
+            ? 'No co-presence rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Co-presence and pick the objects that must be seen together, then set its alerts here.'
+            : alertType === 'loiter'
             ? 'No loitering rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Loitering, then set its alerts here.'
             : alertType === 'time'
               ? 'No unusual time-of-day rule is configured for this area yet. Open the <a href="/zones">Zones</a> page, turn on Unusual Time, then set its alerts here.'
@@ -324,6 +350,7 @@ function renderPolicies() {
     const people = alertType === 'people';
     const sound = alertType === 'sound';
     const tripwire = alertType === 'tripwire';
+    const coPresence = alertType === 'co_presence';
     const loiter = alertType === 'loiter';
     const time = alertType === 'time';
     const activity = alertType === 'activity';
@@ -332,7 +359,7 @@ function renderPolicies() {
     // behaviour rules: no confidence axis, and detection runs whenever enabled,
     // so they show only a Notify window (no Detect-from/until) - just how each
     // one notifies you.
-    const behaviour = tripwire || loiter || time || activity || aiTags;
+    const behaviour = tripwire || coPresence || loiter || time || activity || aiTags;
     // A motion policy fires on its area's trigger ("trigger when X% of this
     // area moves"), set on the Zones page; it has no confidence window to edit.
     const motionPolicy = alertType === 'object' && String(rule.label || '').trim().toLowerCase() === 'motion';
@@ -346,7 +373,9 @@ function renderPolicies() {
         ? 'Assigned on the Sounds page. Removing here unassigns this sound class from the camera.'
         : tripwire
           ? 'Drawn on the Zones page. Removing here deletes the line from the area.'
-          : loiter
+          : coPresence
+            ? 'Set up on the Zones page. Removing here turns co-presence alerts off for the area.'
+            : loiter
             ? 'Enabled on the Zones page. Removing here turns loitering off for the area.'
             : time
               ? 'Enabled on the Zones page. Removing here turns unusual-time off for the area.'
@@ -371,6 +400,7 @@ function renderPolicies() {
       <div class="alerts-policy-grid">
         ${people ? `<label><span>Person</span><select data-field="person_id">${ruleOptions(rule)}</select></label>` : ''}
         ${motionPolicy ? '<p class="form-help muted alerts-motion-trigger-note">Motion fires when its area passes the trigger set on the Zones page (&ldquo;Trigger when X% of this area moves&rdquo;).</p>' : ''}
+        ${coPresence ? `<p class="form-help muted alerts-copresence-note">${escapeHtml(coPresenceSummary(rule))} Set on the <a href="/zones">Zones</a> page.</p>` : ''}
         ${!people && !sound && !behaviour && !motionPolicy ? '<label><span>Maximum Confidence</span><input data-field="max_confidence" type="number" min="0" max="1" step="0.01" value="' + escapeHtml(String(rule.max_confidence ?? 1)) + '"></label>' : ''}
         ${aiVerifiable(rule) ? `<label><span>AI Verify Skip Above <span class="info-tip" data-tip="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" title="With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1" tabindex="0" aria-label="Help: With AI Verify on, alerts at or above this confidence are sent without asking the model, so it only checks borderline ones. 1 = check every alert. Default: 1"></span></span><input data-field="ai_verify_skip_above" type="number" min="0" max="1" step="0.01" value="${escapeHtml(String(rule.ai_verify_skip_above ?? 1))}"></label>` : ''}
         ${aiVerifiable(rule) && (currentCamera()?.detection?.zones || []).length > 1 ? `<div class="alerts-ai-apply"><button type="button" class="secondary" data-apply-ai-verify="${index}" title="Copy this policy's AI Verify setting and Skip Above value to the ${escapeHtml(String(rule.label || ''))} policies in every other zone on this camera">Apply AI Verify to All Zones</button></div>` : ''}
@@ -515,6 +545,9 @@ function renderPolicies() {
         // policy here deletes the line.
         const zone = currentZone();
         if (zone) delete zone.tripwire;
+      } else if (alertType === 'co_presence') {
+        const zone = currentZone();
+        if (zone) delete zone.co_presence;
       } else if (alertType === 'loiter') {
         const zone = currentZone();
         if (zone) delete zone.loiter;

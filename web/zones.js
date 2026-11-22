@@ -301,6 +301,40 @@ function ensureTripwire(zone) {
   return zone.tripwire;
 }
 
+// ─── Multi-object co-presence (cat AND person, dog AND person, ...) ────────
+// A zone's optional co-presence rule, stored on ``zone.co_presence``: fires
+// when every label in ``all_of`` (and at least one in ``any_of``, when that
+// list is used) has been seen in the area inside ``window_seconds``. Detection
+// config lives on the Zones card; email/push/quiet-hours on the Alerts page,
+// like the other behaviour rules.
+function coPresenceOf(zone) {
+  return zone && zone.co_presence && typeof zone.co_presence === 'object' ? zone.co_presence : null;
+}
+
+function ensureCoPresence(zone) {
+  const existing = coPresenceOf(zone);
+  if (existing) {
+    existing.enabled = true;
+    return existing;
+  }
+  zone.co_presence = {
+    enabled: true,
+    name: 'Co-presence',
+    all_of: [],
+    any_of: [],
+    window_seconds: 15,
+    cooldown_seconds: 60,
+    record_on_detect: true,
+    email_enabled: false,
+    email_recipients: [],
+    push_enabled: false,
+    push_recipients: [],
+    notify_start: null,
+    notify_end: null,
+  };
+  return zone.co_presence;
+}
+
 // ─── Behavioural loiter rule (Tier 2: statistical long-dwell) ───────────────
 // A zone's optional loitering detector, stored on ``zone.loiter``. Detection
 // config (min dwell, sensitivity, which objects, record) lives on the Zones
@@ -594,6 +628,10 @@ function normalizeZone(zone) {
   const tripwire = normalizeTripwire(zone.tripwire);
   if (tripwire) zone.tripwire = tripwire;
   else if ('tripwire' in zone) delete zone.tripwire;
+  // Same for the optional multi-object co-presence rule.
+  const coPresence = normalizeCoPresence(zone.co_presence);
+  if (coPresence) zone.co_presence = coPresence;
+  else if ('co_presence' in zone) delete zone.co_presence;
   // Same for the optional loiter rule (Tier 2): normalise when present, drop
   // otherwise so a zone without one keeps its canonical shape.
   const loiter = normalizeLoiter(zone.loiter);
@@ -1096,6 +1134,64 @@ function renderTripwireCard(zone, zoneIndex) {
     </div>`;
 }
 
+function coPresenceChips(rule, zoneIndex, field) {
+  const labels = rule && Array.isArray(rule[field]) ? rule[field] : [];
+  if (!labels.length) {
+    return `<span class="tripwire-any">${field === 'all_of' ? 'No objects yet' : 'None (optional)'}</span>`;
+  }
+  return labels.map((label, labelIndex) => (
+    `<span class="zone-object-chip tripwire-chip">${escapeHtml(titleCase(label))}<button type="button" class="tripwire-chip-remove" data-co-presence-remove="${zoneIndex}:${field}:${labelIndex}" title="Stop requiring ${escapeHtml(titleCase(label))}" aria-label="Stop requiring ${escapeHtml(titleCase(label))}">×</button></span>`
+  )).join('');
+}
+
+// The editable body of an enabled co-presence card. Detection only (which
+// objects, how recent a sighting counts, record); delivery on the Alerts page.
+function coPresenceBody(rule, zoneIndex) {
+  const allOf = Array.isArray(rule.all_of) ? rule.all_of : [];
+  const anyOf = Array.isArray(rule.any_of) ? rule.any_of : [];
+  return `
+    <div class="zone-tripwire-body">
+      <div class="zone-rule-grid">
+        <label class="sound-rule-field">
+          <span>Name</span>
+          <input type="text" data-co-presence-name="${zoneIndex}" value="${escapeHtml(rule.name || 'Co-presence')}" maxlength="60" placeholder="Co-presence" />
+        </label>
+        <label class="sound-rule-field">
+          <span>Seen Within (s)</span>
+          <input type="number" data-co-presence-window="${zoneIndex}" min="1" max="300" step="1" value="${escapeHtml(rule.window_seconds ?? 15)}" title="How recently each object must have been seen to count as together. A few seconds rides out a cat sitting down or a box flickering for a frame." />
+        </label>
+        ${tripwireToggleField('Record', `data-co-presence-record="${zoneIndex}"`, rule.record_on_detect !== false, 'Record a clip when the objects are seen together')}
+      </div>
+      <div class="sound-rule-field tripwire-labels-field">
+        <span>All Of These</span>
+        <div class="tripwire-labels" data-co-presence-all="${zoneIndex}">${coPresenceChips(rule, zoneIndex, 'all_of')}</div>
+        <select class="rule-add-select tripwire-label-add" data-co-presence-add="${zoneIndex}:all_of" aria-label="Add an object that must be present">${tripwireLabelAddOptions(allOf)}</select>
+      </div>
+      <div class="sound-rule-field tripwire-labels-field">
+        <span>At Least One Of</span>
+        <div class="tripwire-labels" data-co-presence-any="${zoneIndex}">${coPresenceChips(rule, zoneIndex, 'any_of')}</div>
+        <select class="rule-add-select tripwire-label-add" data-co-presence-add="${zoneIndex}:any_of" aria-label="Add an alternative object">${tripwireLabelAddOptions([...allOf, ...anyOf])}</select>
+      </div>
+      <p class="muted tripwire-hint">Alerts when every object in <strong>All of these</strong> - and at least one from <strong>At least one of</strong>, when that list is used - has been seen in this area within the window. One alert per episode; it re-arms once they are no longer together.</p>
+    </div>`;
+}
+
+// Per-zone co-presence card, rendered under the line-crossing card. Off by
+// default; enabling it lets the operator pick the objects that must be seen
+// together (e.g. Person + Pet for "a person and a cat or dog").
+function renderCoPresenceCard(zone, zoneIndex) {
+  const rule = coPresenceOf(zone);
+  const enabled = Boolean(rule && rule.enabled !== false);
+  return `
+    <div class="zone-tripwire-card zone-card--cyan${enabled ? ' is-enabled' : ''}" data-zone-co-presence-for="${zoneIndex}">
+      <div class="zone-tripwire-head">
+        <div class="zone-tripwire-title"><span class="zone-rule-icon" aria-hidden="true">🐾</span><strong>Co-presence</strong><span class="muted zone-tripwire-sub">Alert only when several kinds of object are there together</span></div>
+        ${ruleToggleCell(`data-co-presence-enabled="${zoneIndex}"`, enabled, 'Enable co-presence alerts for this area', false)}
+      </div>
+      ${enabled ? coPresenceBody(rule, zoneIndex) : '<p class="muted tripwire-hint tripwire-hint-off">Turn this on to alert only when objects are together - a cat and a person, a dog and a person - instead of on either one alone.</p>'}
+    </div>`;
+}
+
 // Removable chips for the object labels a loiter rule counts ([] = any object).
 function loiterLabelChips(rule, zoneIndex) {
   const labels = rule && Array.isArray(rule.labels) ? rule.labels : [];
@@ -1343,6 +1439,7 @@ function renderObjectDetectionRules() {
         ${renderMotionCard(zone, zoneIndex)}
         ${renderFaceCard(zone, zoneIndex)}
         ${renderTripwireCard(zone, zoneIndex)}
+        ${renderCoPresenceCard(zone, zoneIndex)}
         ${renderLoiterCard(zone, zoneIndex)}
         ${renderTimeCard(zone, zoneIndex)}
         ${renderActivityCard(zone, zoneIndex)}
@@ -1369,6 +1466,7 @@ function bindObjectRuleControls() {
   bindMotionControls();
   bindFaceControls();
   bindTripwireControls();
+  bindCoPresenceControls();
   bindLoiterControls();
   bindTimeControls();
   bindActivityControls();
@@ -1611,6 +1709,88 @@ function bindTripwireControls() {
       if (!wire) return;
       wire.record_on_detect = cb.checked;
       // Flip the pill's On/Off label live without a full re-render.
+      const pill = cb.parentElement?.querySelector('span');
+      if (pill) pill.textContent = cb.checked ? 'On' : 'Off';
+      markZoneUnsaved();
+    });
+  });
+}
+
+// Co-presence card bindings. Enable and label edits re-render (so both lists
+// and their pickers update) while text/number inputs mutate in place to keep
+// focus; delivery lives on the Alerts page.
+function bindCoPresenceControls() {
+  const zoneAt = (index) => cameraDetection().zones[Number(index)];
+
+  document.querySelectorAll('[data-co-presence-enabled]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const zone = zoneAt(cb.dataset.coPresenceEnabled);
+      if (!zone) return;
+      selectedZoneIndex = Number(cb.dataset.coPresenceEnabled);
+      if (cb.checked) {
+        ensureCoPresence(zone);
+        liveEls.status.textContent = 'Co-presence enabled - pick the objects that must be seen together, then Save Zones and set email / push on the Alerts page.';
+      } else if (coPresenceOf(zone)) {
+        zone.co_presence.enabled = false;
+      }
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-co-presence-add]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const label = String(select.value || '').trim().toLowerCase();
+      if (!label) return;
+      const [zoneIndex, field] = String(select.dataset.coPresenceAdd).split(':');
+      const rule = coPresenceOf(zoneAt(zoneIndex));
+      if (!rule || (field !== 'all_of' && field !== 'any_of')) return;
+      rule[field] = Array.isArray(rule[field]) ? rule[field] : [];
+      if (!rule[field].includes(label)) rule[field].push(label);
+      // A label is either required or an alternative, never both.
+      const other = field === 'all_of' ? 'any_of' : 'all_of';
+      rule[other] = (Array.isArray(rule[other]) ? rule[other] : []).filter((entry) => entry !== label);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-co-presence-remove]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [zoneIndex, field, labelIndex] = String(button.dataset.coPresenceRemove).split(':');
+      const rule = coPresenceOf(zoneAt(zoneIndex));
+      if (!rule || (field !== 'all_of' && field !== 'any_of') || !Array.isArray(rule[field])) return;
+      rule[field].splice(Number(labelIndex), 1);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-co-presence-name]').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const rule = coPresenceOf(zoneAt(inp.dataset.coPresenceName));
+      if (!rule) return;
+      rule.name = inp.value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-co-presence-window]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const rule = coPresenceOf(zoneAt(inp.dataset.coPresenceWindow));
+      if (!rule) return;
+      const value = Math.max(1, Math.min(300, Number.parseInt(inp.value, 10) || 15));
+      rule.window_seconds = value;
+      inp.value = value;
+      markZoneUnsaved();
+    });
+  });
+
+  document.querySelectorAll('[data-co-presence-record]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const rule = coPresenceOf(zoneAt(cb.dataset.coPresenceRecord));
+      if (!rule) return;
+      rule.record_on_detect = cb.checked;
       const pill = cb.parentElement?.querySelector('span');
       if (pill) pill.textContent = cb.checked ? 'On' : 'Off';
       markZoneUnsaved();

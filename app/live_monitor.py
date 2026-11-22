@@ -85,6 +85,7 @@ from app.object_tracking import apply_ai_labels, rebase_object_tracks, recent_tr
 from app.behaviour_monitor import (
     clear_behavioural_state,
     emit_activity_spike_anomalies,
+    emit_co_presence_alerts,
     emit_loiter_anomalies,
     emit_time_of_day_anomalies,
     emit_tripwire_crossings,
@@ -1538,6 +1539,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             emit_tripwire_crossings(camera_id, settings, detections)
         except Exception as exc:  # noqa: BLE001
             logger.warning('Tripwire crossing check failed on %s: %s', camera_id, exc)
+        # Multi-object co-presence: alert only when the configured kinds of
+        # object are in the same area together (e.g. a cat and a person), not on
+        # either one alone. Runs on the same tracked detections; isolated and
+        # best-effort like the other behavioural engines.
+        try:
+            emit_co_presence_alerts(camera_id, settings, detections)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('Co-presence check failed on %s: %s', camera_id, exc)
         # Tier-2 behavioural intelligence: statistical loitering / long-dwell. Runs
         # on the same freshly-tracked detections (each carries its track id + box),
         # learns each zone's normal dwell, and flags an unusually long visit. Also

@@ -640,6 +640,89 @@ def normalize_zone_tripwire(zone: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+# Co-presence: how recent a sighting still counts as "there at the same time".
+# Wide enough to ride out a still object dropping out of a Moving Only cycle (a
+# sitting cat) or a box flickering for a frame, and narrow enough that an animal
+# which left minutes ago is not still "with" the person walking past.
+CO_PRESENCE_DEFAULT_WINDOW_SECONDS = 15
+CO_PRESENCE_MAX_WINDOW_SECONDS = 300
+CO_PRESENCE_DEFAULT_COOLDOWN_SECONDS = 60
+
+
+def normalize_zone_co_presence(zone: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize an optional per-zone **co-presence** rule (multi-object alert).
+
+    Fires when every label in ``all_of`` AND at least one label in ``any_of``
+    (when that list is non-empty) has been seen inside the zone within
+    ``window_seconds``. Labels may be group names (``pet``), which the monitor
+    expands to their concrete members. Motion and face are separate detection
+    axes, not object classes, so they never appear here.
+
+    Both label lists may be empty: the Zones card seeds an empty rule so an
+    operator can turn it on before choosing the objects, and a rule with no
+    requirements simply never fires.
+
+    Shape::
+
+        {
+            "enabled": bool,
+            "name": str,
+            "all_of": [str, ...],          # every one must be present
+            "any_of": [str, ...],          # at least one ([] = no extra need)
+            "window_seconds": int,         # recent-sighting window
+            "cooldown_seconds": int,
+            "record_on_detect": bool,
+            "email_enabled": bool,
+            "email_recipients": [str, ...],
+            "push_recipients": ["user:<id>", ...],
+            "push_enabled": bool,
+            "notify_start": str | None,    # HH:MM quiet-hours (notify only)
+            "notify_end": str | None,
+        }
+    """
+    raw = zone.get('co_presence')
+    if not isinstance(raw, dict):
+        return None
+    excluded = {'motion', 'face'}
+    all_of = [label for label in normalize_label_list(raw.get('all_of')) if label not in excluded]
+    any_of = [
+        label for label in normalize_label_list(raw.get('any_of'))
+        if label not in excluded and label not in all_of
+    ]
+    try:
+        window = int(
+            raw.get('window_seconds')
+            if raw.get('window_seconds') is not None
+            else CO_PRESENCE_DEFAULT_WINDOW_SECONDS
+        )
+    except (TypeError, ValueError):
+        window = CO_PRESENCE_DEFAULT_WINDOW_SECONDS
+    window = max(1, min(CO_PRESENCE_MAX_WINDOW_SECONDS, window))
+    try:
+        cooldown = max(0, int(
+            raw.get('cooldown_seconds')
+            if raw.get('cooldown_seconds') is not None
+            else CO_PRESENCE_DEFAULT_COOLDOWN_SECONDS
+        ))
+    except (TypeError, ValueError):
+        cooldown = CO_PRESENCE_DEFAULT_COOLDOWN_SECONDS
+    return {
+        'enabled': normalize_bool_setting(raw.get('enabled'), True),
+        'name': str(raw.get('name') or 'Co-presence').strip() or 'Co-presence',
+        'all_of': all_of,
+        'any_of': any_of,
+        'window_seconds': window,
+        'cooldown_seconds': cooldown,
+        'record_on_detect': normalize_bool_setting(raw.get('record_on_detect'), True),
+        'email_enabled': normalize_bool_setting(raw.get('email_enabled'), False),
+        'email_recipients': normalize_email_recipients(raw.get('email_recipients')),
+        'push_recipients': normalize_push_recipients(raw.get('push_recipients')),
+        'push_enabled': normalize_bool_setting(raw.get('push_enabled'), False),
+        'notify_start': normalize_hhmm(raw.get('notify_start')),
+        'notify_end': normalize_hhmm(raw.get('notify_end')),
+    }
+
+
 def normalize_zone_loiter(zone: dict[str, Any]) -> dict[str, Any] | None:
     """Normalize an optional per-zone behavioural **loiter** rule (Tier 2:
     statistical long-dwell / loitering detection). Returns ``None`` when no
@@ -1011,6 +1094,11 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
         tripwire = normalize_zone_tripwire(zone)
         if tripwire is not None:
             entry['tripwire'] = tripwire
+        # Optional multi-object co-presence rule (alert when, for example, a cat
+        # and a person are in the area together).
+        co_presence = normalize_zone_co_presence(zone)
+        if co_presence is not None:
+            entry['co_presence'] = co_presence
         # Optional Tier-2 behavioural loiter rule (statistical long-dwell).
         # Attached only when configured, so zones without one keep their shape.
         loiter = normalize_zone_loiter(zone)

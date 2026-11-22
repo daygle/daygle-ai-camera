@@ -366,6 +366,17 @@ If the TFLite runtime is missing, install `ai-edge-litert` or `tflite-runtime`.
 
 Crossings raise an event (and optional recording) whenever a tracked object crosses the line in the chosen direction, and notify you when email/push are enabled. A tripwire builds on the object tracker, so it works wherever objects are detected - no extra model or GPU load.
 
+### Co-presence (several objects together)
+
+Alert on a *combination* of objects rather than one label at a time - a cat **and** a person, a dog **and** a person, a person **and** any pet.
+
+- Open `/zones`, select a camera and area, and turn on **Co-presence**.
+- Under **All of these**, add the objects that must all be present (e.g. *Person* and *Pet*). Under **At least one of**, optionally add alternatives (e.g. *Cat* and *Dog*) when any one of them is enough.
+- Set **Seen within (s)** - how recently each object must have been seen to count as together. It is a recent-sighting window, not a strict same-frame test, so a sitting cat that drops out of a Moving Only cycle (or a box that flickers for a frame) still counts. Choose whether it records, then click **Save Zones**.
+- Configure notifications on the **Alerts** page under the **Co-presence** type - email/push, recipients, a cooldown, and an optional **Alert From/Until** quiet-hours window, like the other behaviour alerts.
+
+One alert goes out per co-presence episode: while the objects stay together it stays quiet, and it re-arms once any required object has not been seen inside the window. Group labels (the **Pet** / **Animal** umbrella labels) work here too. Pure logic over the object tracker - no extra model or GPU load.
+
 ### Loitering (long dwell)
 
 Loitering *learns your site*: it measures how long objects normally dwell in an area, then alerts when one stays far longer than usual - no fixed timer to guess at.
