@@ -22,6 +22,6 @@ Pillow>=13.0.0,<14.0
 # ``requirements-test.txt`` is installed without ``requirements.txt``, so
 # without this pin ``fastapi.testclient`` raises at import time and every
 # suite that collects it fails before running a single test.
-httpx2>=2.0.0,<3.0
+httpx2>=2.16.2,<3.0
 pytest
 pytest-cov
